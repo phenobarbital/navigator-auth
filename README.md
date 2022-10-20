@@ -1,6 +1,15 @@
-# Navigator_Session #
+# Navigator Auth #
 
-Navigator_Auth is an Authentication/Authorization toolkit for aiohttp or Navigator, based on Asyncio.
+Navigator Auth is an Authentication/Authorization toolkit for aiohttp or Navigator, based on Asyncio.
+
+[![pypi](https://img.shields.io/pypi/v/asyncdb?style=plastic)](https://pypi.org/project/asyncdb/)
+[![versions](https://img.shields.io/pypi/pyversions/blacksheep.svg)](https://github.com/phenobarbital/navigator-auth)
+[![Apache 2.0 licensed](https://img.shields.io/github/license/phenobarbital/navigator-auth?style=plastic)](https://raw.githubusercontent.com/phenobarbital/navigator-auth/master/LICENSE)
+
+
+---
+
+## Introduction
 
 * Quick summary
 * Version
