@@ -8,7 +8,7 @@ https://github.com/phenobarbital/navigator-session
 import ast
 from os import path
 
-# from Cython.Build import cythonize
+from Cython.Build import cythonize
 from setuptools import Extension, find_packages, setup
 
 
@@ -49,8 +49,27 @@ with open(version, 'r', encoding='utf-8') as meta:
                         if name.id == '__author_email__':
                             __author_email__ = v.s
 
+COMPILE_ARGS = ["-O2"]
+
+extensions = [
+    Extension(
+        name='navigator_auth.exceptions',
+        sources=['navigator_auth/exceptions.pyx'],
+        extra_compile_args=COMPILE_ARGS,
+        language="c"
+    ),
+    Extension(
+        name='navigator_auth.libs.json',
+        sources=['navigator_auth/libs/json.pyx'],
+        extra_compile_args=COMPILE_ARGS,
+        language="c++"
+    ),
+]
+
+
 setup(
     name="navigator-auth",
+    py_modules=['navigator_auth'],
     version=__version__,
     python_requires=">=3.9.0",
     url="https://github.com/phenobarbital/navigator-auth",
@@ -63,12 +82,15 @@ setup(
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
         "Operating System :: POSIX :: Linux",
+        "License :: OSI Approved :: Apache Software License",
         "Environment :: Web Environment",
         "Topic :: Software Development :: Build Tools",
         "Topic :: Software Development :: Libraries :: Python Modules",
-        "Topic :: Database :: Front-Ends",
+        "Topic :: System :: Systems Administration",
+        "Topic :: System :: Networking",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: Implementation :: PyPy",
         "Framework :: AsyncIO",
         "Framework :: aiohttp",
     ],
@@ -78,8 +100,8 @@ setup(
     license=__license__,
     setup_requires=[
         "wheel==0.37.1",
-        "asyncio==3.4.3",
         "Cython==0.29.32",
+        "asyncio==3.4.3"
     ],
     install_requires=[
         "wheel==0.37.1",
@@ -95,7 +117,16 @@ setup(
         'wrapt==1.14.1',
         "aioredis==2.0.1",
         "navconfig>=0.10.0"
-        "asyncdb>=2.1.18"
+        "asyncdb>=2.1.18",
+        "navigator-session>=0.1.1",
+        "PyJWT==2.4.0",
+        "pycryptodome==3.15.0",
+        "rncryptor==3.3.0",
+        "msal==1.20.0",
+        "aiogoogle==3.1.2",
+        "okta-jwt-verifier==0.2.3",
+        "python-slugify==6.1.1",
+        "platformdirs==2.5.1",
     ],
     tests_require=[
         'pytest>=6.0.0',
@@ -103,6 +134,7 @@ setup(
         'pytest-xdist==2.5.0',
         'pytest-assume==2.4.3'
     ],
+    ext_modules=cythonize(extensions),
     test_suite='tests',
     project_urls={  # Optional
         "Source": "https://github.com/phenobarbital/navigator-auth",

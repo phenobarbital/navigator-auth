@@ -1,3 +1,9 @@
+0.0.3 (2022-10-21)
+==================
+
+- NoAuth, Basic Authentication
+- DjangoAuth (getting user info using Django SessionID)
+
 0.0.1 (2022-10-20)
 ==================
 

@@ -1,5 +1,7 @@
 from aiohttp import web
 
+from navigator_auth import AuthHandler
+
 
 async def handle(request):
     name = request.match_info.get('name', "Anonymous")
@@ -7,6 +9,10 @@ async def handle(request):
     return web.Response(text=text)
 
 app = web.Application()
+
+# create a new instance of Auth System
+auth = AuthHandler()
+auth.setup(app) # configure this Auth system into App.
 
 app.add_routes([web.get('/', handle),
                 web.get('/{name}', handle)])
