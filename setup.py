@@ -8,7 +8,7 @@ https://github.com/phenobarbital/navigator-session
 import ast
 from os import path
 
-from Cython.Build import cythonize
+# from Cython.Build import cythonize
 from setuptools import Extension, find_packages, setup
 
 
@@ -95,6 +95,7 @@ setup(
         'wrapt==1.14.1',
         "aioredis==2.0.1",
         "navconfig>=0.10.0"
+        "asyncdb>=2.1.18"
     ],
     tests_require=[
         'pytest>=6.0.0',

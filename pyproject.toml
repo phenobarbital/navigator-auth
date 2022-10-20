@@ -9,16 +9,18 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.flit.metadata]
-module = "navigator_session"
+module = "navigator_auth"
 author = "Jesus Lara Gimenez"
 author-email = "jesuslarag@gmail.com"
-home-page = "https://github.com/phenobarbital/navigator-session"
+home-page = "https://github.com/phenobarbital/navigator-auth"
 classifiers=[
-  "Development Status :: 4 - Beta",
+  "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Intended Audience :: System Administrators",
   "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python",
   "Typing :: Typed",
   "Environment :: Web Environment",
