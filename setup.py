@@ -127,6 +127,7 @@ setup(
         "okta-jwt-verifier==0.2.3",
         "python-slugify==6.1.1",
         "platformdirs==2.5.1",
+        "aiohttp_cors==0.7.0",
     ],
     tests_require=[
         'pytest>=6.0.0',
