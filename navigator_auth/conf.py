@@ -144,3 +144,8 @@ DJANGO_USER_MAPPING = {
     "hierarchy": "hierarchy",
     "employee": "employee",
 }
+
+try:
+    from settings.settings import * # pylint: disable=W0614,W0401
+except ImportError as ex:
+    print(ex)

@@ -15,7 +15,7 @@ from aiohttp import web
 from navigator_session import (
     RedisStorage, SESSION_KEY
 )
-from navconfig.conf import (
+from .conf import (
     AUTHENTICATION_BACKENDS,
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,

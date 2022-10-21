@@ -10,11 +10,6 @@ from collections.abc import Callable
 import aioredis
 import orjson
 from aiohttp import web
-from navconfig.conf import (
-    DJANGO_USER_MAPPING,
-    DJANGO_SESSION_URL,
-    DJANGO_SESSION_PREFIX
-)
 from navigator_session import (
     AUTH_SESSION_OBJECT
 )
@@ -23,8 +18,13 @@ from navigator_auth.exceptions import (
     UserNotFound,
     InvalidAuth
 )
-# User Identity
 from navigator_auth.identities import AuthUser, Column
+from navigator_auth.conf import (
+    DJANGO_USER_MAPPING,
+    DJANGO_SESSION_URL,
+    DJANGO_SESSION_PREFIX
+)
+# User Identity
 from .base import BaseAuthBackend
 class DjangoUser(AuthUser):
     """DjangoUser.
