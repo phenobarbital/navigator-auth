@@ -3,7 +3,7 @@
 Authentication Backends.
 """
 from .noauth import NoAuth
-# from .basic import BasicAuth
+from .basic import BasicAuth
 # from .troc import TrocToken
 from .django import DjangoAuth
 # from .token import TokenAuth
@@ -15,7 +15,7 @@ from .django import DjangoAuth
 
 __all__ = [
     "NoAuth",
-    # "BasicAuth",
+    "BasicAuth",
     # "TrocToken",
     "DjangoAuth",
     # "TokenAuth",

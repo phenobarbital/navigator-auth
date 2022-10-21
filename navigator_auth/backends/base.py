@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import jwt
 from aiohttp import web, hdrs
 from aiohttp.web_urldispatcher import SystemRoute
+from datamodel.exceptions import ValidationError
 from asyncdb.models import Model
 from navigator_session import (
     get_session,
@@ -118,6 +119,9 @@ class BaseAuthBackend(ABC):
             async with await db.acquire() as conn:
                 self.user_model.Meta.connection = conn
                 user = await self.user_model.get(**search)
+        except ValidationError as ex:
+            logging.error(f"Invalid User Information {search!s}")
+            print(ex.payload)
         except Exception as e:
             logging.error(f"Error getting User {search!s}")
             raise UserNotFound(

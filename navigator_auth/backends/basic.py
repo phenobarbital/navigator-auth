@@ -6,23 +6,24 @@ import logging
 import hashlib
 import base64
 import secrets
-from .base import BaseAuthBackend
-from navigator.exceptions import (
-    NavException,
+from aiohttp import web
+from navigator_session import AUTH_SESSION_OBJECT
+from datamodel.exceptions import ValidationError
+from navigator_auth.exceptions import (
+    AuthException,
     FailedAuth,
     UserNotFound,
-    InvalidAuth,
-    ValidationError,
+    InvalidAuth
 )
-from navigator.conf import (
+from navigator_auth.conf import (
     AUTH_PWD_DIGEST,
     AUTH_PWD_ALGORITHM,
     AUTH_PWD_LENGTH,
     AUTH_PWD_SALT_LENGTH
 )
 # Authenticated Entity
-from navigator.auth.identities import AuthUser
-from navigator_session import AUTH_SESSION_OBJECT
+from navigator_auth.identities import AuthUser
+from .base import BaseAuthBackend
 
 
 class BasicUser(AuthUser):
@@ -42,9 +43,20 @@ class BasicAuth(BaseAuthBackend):
     pwd_atrribute: str = "password"
     _ident: AuthUser = BasicUser
 
-    def configure(self, app, router, handler):
+    def configure(self, app, router):
         """Base configuration for Auth Backends, need to be extended
         to create Session Object."""
+        super(BasicAuth, self).configure(app, router)
+
+    async def on_startup(self, app: web.Application):
+        """Used to initialize Backend requirements.
+        """
+        pass
+
+    async def on_cleanup(self, app: web.Application):
+        """Used to cleanup and shutdown any db connection.
+        """
+        pass
 
     async def validate_user(self, login: str = None, password: str = None):
         # get the user based on Model
@@ -60,10 +72,10 @@ class BasicAuth(BaseAuthBackend):
         try:
             # later, check the password
             pwd = user[self.pwd_atrribute]
-        except KeyError:
-            raise ValidationError(
+        except KeyError as ex:
+            raise InvalidAuth(
                 'NAV: Missing Password attr on User Account'
-            )
+            ) from ex
         try:
             if self.check_password(pwd, password):
                 # return the user Object
@@ -97,10 +109,10 @@ class BasicAuth(BaseAuthBackend):
     def check_password(self, current_password, password):
         try:
             algorithm, iterations, salt, hash = current_password.split("$", 3)
-        except ValueError:
+        except ValueError as ex:
             raise InvalidAuth(
-                'Basic Auth: Invalid Password Algorithm'
-            )
+                'Basic Auth: Invalid Password Algorithm: {ex}'
+            ) from ex
         assert algorithm == AUTH_PWD_ALGORITHM
         compare_hash = self.set_password(
             password,
@@ -143,11 +155,11 @@ class BasicAuth(BaseAuthBackend):
         try:
             user, pwd = await self.get_payload(request)
         except Exception as err:
-            raise NavException(err, state=400) from err
+            raise AuthException(err, status=400) from err
         if not pwd and not user:
             raise InvalidAuth(
                 "Basic Auth: Invalid Credentials",
-                state=401
+                status=401
             )
         else:
             # making validation
@@ -158,10 +170,10 @@ class BasicAuth(BaseAuthBackend):
             except UserNotFound as err:
                 raise UserNotFound(err) from err
             except (ValidationError, InvalidAuth) as err:
-                raise InvalidAuth(err, state=401) from err
+                raise InvalidAuth(err, status=401) from err
             except Exception as err:
-                raise NavException(
-                    str(err), state=500
+                raise AuthException(
+                    str(err), status=500
                 ) from err
             try:
                 userdata = self.get_userdata(user)

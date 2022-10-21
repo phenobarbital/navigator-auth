@@ -344,7 +344,7 @@ class AuthHandler:
         ## getting Database Connection:
         try:
             pool = PostgresStorage(driver='pg', dsn=default_dsn)
-            pool.configure(app) # pylint: disable=E1123
+            pool.configure(self.app) # pylint: disable=E1123
         except RuntimeError as ex:
             raise web.HTTPServerError(
                 reason=f"Error creating Database connection: {ex}"
@@ -361,7 +361,7 @@ class AuthHandler:
         # register the Auth extension into the app
         self.app[self.name] = self
         ## Configure Routes
-        router = app.router
+        router = self.app.router
         router.add_route(
             "GET",
             "/api/v1/login",
@@ -395,24 +395,24 @@ class AuthHandler:
             name="api_session"
         )
         # configuring Session Object
-        self._session.configure_session(app)
+        self._session.configure_session(self.app)
         # the backend add a middleware to the app
-        mdl = app.middlewares
+        mdl = self.app.middlewares
         # first: add the basic jwt middleware (used by basic auth and others)
         mdl.append(auth_middleware)
         # if authentication backend needs initialization
         for name, backend in self.backends.items():
             try:
-                # backend.configure(app, router, handler)
-                backend.configure(app, router)
+                # backend.configure(app, router, handler=app)
+                backend.configure(self.app, router)
                 if hasattr(backend, "auth_middleware"):
                     # add the middleware for this backend Authentication
                     mdl.append(backend.auth_middleware)
             except Exception as err:
                 logging.exception(
-                    f"Auth: Error on Backend {name} init: {err.message}"
+                    f"Auth: Error on Backend {name} init: {err!s}"
                 )
                 raise ConfigError(
-                    f"Auth: Error on Backend {name} init: {err.message}"
+                    f"Auth: Error on Backend {name} init: {err!s}"
                 ) from err
-        return app
+        return self.app
