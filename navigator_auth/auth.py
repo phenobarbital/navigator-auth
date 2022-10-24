@@ -10,8 +10,11 @@ Supporting:
 """
 from textwrap import dedent
 import importlib
+import inspect
 from collections.abc import Iterable
 from aiohttp import web
+from aiohttp.abc import AbstractView
+import aiohttp_cors
 from navigator_session import (
     RedisStorage, SESSION_KEY
 )
@@ -335,6 +338,18 @@ class AuthHandler:
                 reason="Auth: User Data is missing on Request."
             )
 
+    def setup_cors(self, cors):
+        for route in list(self.app.router.routes()):
+            try:
+                if inspect.isclass(route.handler) and issubclass(
+                    route.handler, AbstractView
+                ):
+                    cors.add(route, webview=True)
+                else:
+                    cors.add(route)
+            except (TypeError, ValueError):
+                pass
+
     def setup(self, app: web.Application) -> web.Application:
         if isinstance(app, web.Application):
             self.app = app # register the app into the Extension
@@ -415,4 +430,18 @@ class AuthHandler:
                 raise ConfigError(
                     f"Auth: Error on Backend {name} init: {err!s}"
                 ) from err
+        # at the End: configure CORS for routes:
+        cors = aiohttp_cors.setup(
+            self.app,
+            defaults={
+                "*": aiohttp_cors.ResourceOptions(
+                    allow_credentials=True,
+                    expose_headers="*",
+                    allow_methods="*",
+                    allow_headers="*",
+                    max_age=3600,
+                )
+            },
+        )
+        self.setup_cors(cors)
         return self.app

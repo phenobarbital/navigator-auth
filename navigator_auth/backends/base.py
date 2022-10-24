@@ -345,13 +345,13 @@ async def auth_middleware(
     @web.middleware
     async def middleware(request: web.Request) -> web.StreamResponse:
         logging.debug(':: AUTH MIDDLEWARE ::')
-        # avoid authorization on exclude list
-        if request.path in exclude_list:
-            return await handler(request)
         # avoid authorization backend on excluded methods:
         if request.method == hdrs.METH_OPTIONS:
             return await handler(request)
-        # aovid check system routes
+        # avoid authorization on exclude list
+        if request.path in exclude_list:
+            return await handler(request)
+        # avoid check system routes
         try:
             if isinstance(request.match_info.route, SystemRoute):  # eg. 404
                 return await handler(request)
