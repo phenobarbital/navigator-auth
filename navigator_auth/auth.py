@@ -16,7 +16,7 @@ from aiohttp import web
 from aiohttp.abc import AbstractView
 import aiohttp_cors
 from navigator_session import (
-    RedisStorage, SESSION_KEY
+    SessionHandler, SESSION_KEY
 )
 from .conf import (
     AUTHENTICATION_BACKENDS,
@@ -26,7 +26,6 @@ from .conf import (
     default_dsn,
     logging
 )
-
 from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
 from .backends.base import auth_middleware
@@ -39,7 +38,6 @@ from .exceptions import (
     Forbidden,
     ConfigError
 )
-
 
 class AuthHandler:
     """Authentication Backend for Navigator."""
@@ -95,7 +93,7 @@ class AuthHandler:
             AUTHORIZATION_MIDDLEWARES
         )
         # TODO: Session Support with parametrization (other backends):
-        self._session = RedisStorage()
+        self._session = SessionHandler(storage='redis')
 
     async def auth_startup(self, app):
         """
@@ -189,7 +187,7 @@ class AuthHandler:
         API-based Logout.
         """
         try:
-            await self._session.forgot(request)
+            await self._session.storage.forgot(request)
             return web.json_response(
                 {
                     "message": "Logout successful",
@@ -270,7 +268,7 @@ class AuthHandler:
             else:
                 # at now: create the user-session
                 try:
-                    await self._session.new_session(request, userdata)
+                    await self._session.storage.new_session(request, userdata)
                 except Exception as err:
                     raise web.HTTPUnauthorized(
                         reason=f"Error Creating User Session: {err.message}"
@@ -279,16 +277,16 @@ class AuthHandler:
 
     # Session Methods:
     async def forgot_session(self, request: web.Request):
-        await self._session.forgot(request)
+        await self._session.storage.forgot(request)
 
     async def create_session(self, request: web.Request, data: Iterable):
-        return await self._session.new_session(request, data)
+        return await self._session.storage.new_session(request, data)
 
     async def get_session(self, request: web.Request) -> web.Response:
         """ Get user data from session."""
         session = None
         try:
-            session = await self._session.get_session(request)
+            session = await self._session.storage.get_session(request)
         except AuthException as err:
             response = {
                 "message": "Session Error",
@@ -302,10 +300,10 @@ class AuthHandler:
             ) from err
         if not session:
             try:
-                session = await self._session.get_session(request)
+                session = await self._session.storage.get_session(request)
             except Exception: # pylint: disable=W0703
                 # always return a null session for user:
-                session = await self._session.new_session(request, {})
+                session = await self._session.storage.new_session(request, {})
         userdata = dict(session)
         try:
             del userdata['user']
@@ -373,6 +371,9 @@ class AuthHandler:
             self.on_cleanup
         )
         logging.debug(':::: Auth Handler Loaded ::::')
+        ## also, load the Session System
+        # configuring Session Object
+        self._session.setup(self.app)
         # register the Auth extension into the app
         self.app[self.name] = self
         ## Configure Routes
@@ -409,8 +410,6 @@ class AuthHandler:
             self.get_session,
             name="api_session"
         )
-        # configuring Session Object
-        self._session.configure_session(self.app)
         # the backend add a middleware to the app
         mdl = self.app.middlewares
         # first: add the basic jwt middleware (used by basic auth and others)
