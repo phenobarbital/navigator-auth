@@ -23,12 +23,12 @@ jobs:
     - name: Publish wheels to Test PyPI
       env:
         TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        TWINE_PASSWORD: ${{ secrets.NAVIGATORAUTH_TEST_PYPI_API_TOKEN }}
       run: |
         twine upload -r testpypi dist/*-manylinux*.whl
     - name: Publish wheels to Production PyPI
       env:
         TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.ASYNCDB_PYPI_API_TOKEN }}
+        TWINE_PASSWORD: ${{ secrets.NAVIGATORAUTH_PYPI_API_TOKEN }}
       run: |
         twine upload  dist/*-manylinux*.whl
