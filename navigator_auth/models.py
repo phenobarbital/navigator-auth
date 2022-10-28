@@ -209,6 +209,7 @@ class UserGroup(Model):
         connection = None
 
 class ProgramGroup(Model):
+    pgroup_id: int = Column(required=True, primary_key=True, db_default='auto')
     program_id: Program = Column(required=True)
     group_id: Group = Column(required=True)
 
@@ -222,6 +223,7 @@ class Permission(Model):
     permission_id: int = Column(required=True, primary_key=True, db_default='auto')
     permission: str = Column(required=False, max=254, label="Permission")
     description: str
+    program_id: Program = Column(required=True)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
 
@@ -229,3 +231,37 @@ class Permission(Model):
         super(Permission, self).__post_init__()
         if not self.permission:
             self.permission = slugify(self.description)
+
+    class Meta:
+        name = "permissions"
+        schema = "public"
+        strict = True
+        connection = None
+
+class GroupPermission(Model):
+    """Direct association between a permission and a Group (associated to a Program).
+    """
+    pgroup_id: ProgramGroup = Column(required=True)
+    permission_id: Permission = Column(required=True)
+    created_at: datetime = Column(required=False, default=datetime.now())
+    updated_at: datetime = Column(required=False, default=datetime.now())
+
+    class Meta:
+        name = "group_permissions"
+        schema = "public"
+        strict = True
+        connection = None
+
+class UserPermission(Model):
+    """Direct asssociation between an User and a Permission.
+    """
+    user_id: User = Column(required=True)
+    permission_id: Permission = Column(required=True)
+    created_at: datetime = Column(required=False, default=datetime.now())
+    updated_at: datetime = Column(required=False, default=datetime.now())
+
+    class Meta:
+        name = "user_permissions"
+        schema = "public"
+        strict = True
+        connection = None

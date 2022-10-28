@@ -5,7 +5,6 @@ from datamodel import BaseModel
 from datamodel.exceptions import ValidationError
 from asyncdb.exceptions import DriverError, ProviderError, NoDataFound
 from navigator_session import get_session
-from navigator_auth.models import Client
 from navigator_auth.exceptions import AuthException
 from .base import BaseView
 
@@ -119,6 +118,15 @@ class ModelHandler(BaseView):
                     reason=error,
                     statu=501
                 )
+            except TypeError as ex:
+                error = {
+                    "error": f"Invalid payload for {self.name}",
+                    "payload": ex,
+                }
+                return self.error(
+                    exception=error,
+                    statu=406
+                )
             except (DriverError, ProviderError, RuntimeError):
                 error = {
                     "error": "Database Error",
@@ -161,6 +169,15 @@ class ModelHandler(BaseView):
             return self.error(
                 reason=error,
                 statu=501
+            )
+        except (TypeError, AttributeError, ValueError) as ex:
+            error = {
+                "error": f"Invalid payload for {self.name}",
+                "payload": ex,
+            }
+            return self.error(
+                exception=error,
+                statu=406
             )
 
     async def patch(self):
@@ -297,6 +314,15 @@ class ModelHandler(BaseView):
                 return self.error(
                     reason=error,
                     statu=501
+                )
+            except (TypeError, AttributeError, ValueError) as ex:
+                error = {
+                    "error": f"Invalid payload for {self.name}",
+                    "payload": ex,
+                }
+                return self.error(
+                    exception=error,
+                    statu=406
                 )
 
     async def delete(self):

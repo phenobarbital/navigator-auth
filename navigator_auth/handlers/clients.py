@@ -68,7 +68,10 @@ class ClientHandler(BaseView):
         try:
             clientid = data['client_id']
         except (TypeError, KeyError):
-            clientid = args['id']
+            try:
+                clientid = args['id']
+            except KeyError:
+                clientid = None
         if clientid:
             # get data for specific client:
             async with await db.acquire() as conn:

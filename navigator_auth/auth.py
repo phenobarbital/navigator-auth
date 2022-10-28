@@ -27,7 +27,7 @@ from .conf import (
     logging
 )
 ### Table Handlers:
-from .handlers import ClientHandler
+from .handlers import ClientHandler, OrganizationHandler, PermissionHandler
 from .handlers.program import ProgramCatHandler
 from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
@@ -414,6 +414,7 @@ class AuthHandler:
             name="api_session"
         )
         ### Handler for Auth Objects:
+        ## Clients
         router.add_view(
             r'/api/v1/clients/{id:.*}',
             ClientHandler,
@@ -424,6 +425,17 @@ class AuthHandler:
             ClientHandler,
             name='api_clients'
         )
+        ## Organizations:
+        router.add_view(
+            r'/api/v1/organizations/{id:.*}',
+            OrganizationHandler,
+            name='api_organizations_id'
+        )
+        router.add_view(
+            r'/api/v1/organizations{meta:\:?.*}',
+            OrganizationHandler,
+            name='api_organizations'
+        )
         router.add_view(
             r'/api/v1/program_categories/{id:.*}',
             ProgramCatHandler,
@@ -433,6 +445,17 @@ class AuthHandler:
             r'/api/v1/program_categories{meta:\:?.*}',
             ProgramCatHandler,
             name='api_program_categories'
+        )
+        ### Model permissions:
+        router.add_view(
+            r'/api/v1/permissions/{id:.*}',
+            PermissionHandler,
+            name='api_permissions_id'
+        )
+        router.add_view(
+            r'/api/v1/permissions{meta:\:?.*}',
+            PermissionHandler,
+            name='api_permissions'
         )
         # the backend add a middleware to the app
         mdl = self.app.middlewares
