@@ -368,10 +368,12 @@ async def auth_middleware(
             if payload:
                 # load session information
                 session = await get_session(request, payload, new = False)
+                print('SESSION ', session)
                 try:
                     try:
                         request.user = session.decode('user')
-                        request.user.is_authenticated = True
+                        if request.user:
+                            request.user.is_authenticated = True
                     except RuntimeError as ex:
                         logging.error(
                             f'NAV: Unable to decode User session: {ex}'

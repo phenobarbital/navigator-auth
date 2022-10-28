@@ -34,8 +34,6 @@ class BasicUser(AuthUser):
 
 
 # "%s$%d$%s$%s" % (algorithm, iterations, salt, hash)
-
-
 class BasicAuth(BaseAuthBackend):
     """Basic User/password Authentication."""
 
@@ -51,12 +49,10 @@ class BasicAuth(BaseAuthBackend):
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements.
         """
-        pass
 
     async def on_cleanup(self, app: web.Application):
         """Used to cleanup and shutdown any db connection.
         """
-        pass
 
     async def validate_user(self, login: str = None, password: str = None):
         # get the user based on Model

@@ -63,8 +63,7 @@ class UserInfo(BaseHandler):
             }
             args = {
                 "status": 501,
-                "content_type": "application/json",
-                "text": self._json.dumps(response)
+                "reason": self._json.dumps(response)
             }
             return self.json_response(**args)
         # return a redirect to LOGIN

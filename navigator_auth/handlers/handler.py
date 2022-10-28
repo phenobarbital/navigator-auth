@@ -1,7 +1,4 @@
-from navigator_session import get_session
-from navigator_auth.conf import (
-    SESSION_KEY
-)
+from navigator_session import get_session, SESSION_KEY
 from .base import BaseView
 
 
@@ -39,7 +36,7 @@ class UserHandler(BaseView):
                 }
                 if data:
                     return self.json_response(
-                        response=data,
+                        content=data,
                         headers=headers
                     )
         except (ValueError, RuntimeError) as err:

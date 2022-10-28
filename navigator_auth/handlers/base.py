@@ -56,10 +56,8 @@ class BaseHandler(CorsViewMixin):
             headers = {}
         if not request:
             request = self.request
-        response = HTTPNoContent(content_type=content_type)
+        response = HTTPNoContent(content_type=content_type, headers=headers)
         response.headers["Pragma"] = "no-cache"
-        for header, value in headers.items():
-            response.headers[header] = value
         raise response
 
     def response(
@@ -158,7 +156,6 @@ class BaseHandler(CorsViewMixin):
         if not request:
             request = self.request
         response_obj = {
-            "status": status,
             "reason": reason if reason else str(exception),
             "content_type": content_type,
             **kwargs,
