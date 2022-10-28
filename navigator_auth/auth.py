@@ -26,7 +26,9 @@ from .conf import (
     default_dsn,
     logging
 )
+### Table Handlers:
 from .handlers import ClientHandler
+from .handlers.program import ProgramCatHandler
 from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
 from .backends.base import auth_middleware
@@ -421,6 +423,16 @@ class AuthHandler:
             r'/api/v1/clients{meta:\:?.*}',
             ClientHandler,
             name='api_clients'
+        )
+        router.add_view(
+            r'/api/v1/program_categories/{id:.*}',
+            ProgramCatHandler,
+            name='api_program_categories_id'
+        )
+        router.add_view(
+            r'/api/v1/program_categories{meta:\:?.*}',
+            ProgramCatHandler,
+            name='api_program_categories'
         )
         # the backend add a middleware to the app
         mdl = self.app.middlewares
