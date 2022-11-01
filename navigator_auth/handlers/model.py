@@ -275,7 +275,7 @@ class ModelHandler(BaseView):
                 self.model.Meta.connection = conn
                 # look for this client, after, save changes
                 error = {
-                    "error": "Client was not Found"
+                    "error": f"{self.name} was not Found"
                 }
                 try:
                     args = {
@@ -360,7 +360,7 @@ class ModelHandler(BaseView):
                 result = await self.model.get(**args)
                 if not result:
                     self.error(
-                        reason="Client was Not Found",
+                        reason=f"{self.name} was Not Found",
                         status=204
                     )
                 # Delete them this Client
