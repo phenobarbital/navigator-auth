@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any
+from typing import Any, Union
 from collections.abc import Callable
 from urllib import parse
 from orjson import JSONDecodeError
@@ -134,14 +134,13 @@ class BaseHandler(CorsViewMixin):
 
     def error(
         self,
-        reason: dict = None,
+        reason: Union[dict, str] = None,
         exception: Exception = None,
         headers: dict = None,
         content_type: str = "application/json",
         status: int = 400,
         **kwargs,
     ) -> web.Response:
-        response_obj = {"status": "Failed"}
         response_obj = {
             "reason": reason if reason else str(exception),
             "content_type": content_type,

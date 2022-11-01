@@ -29,7 +29,7 @@ class Client(Model):
     updated_at: datetime = Column(required=False, default=datetime.now())
     class Meta:
         name = 'clients'
-        schema = 'public'
+        schema = "auth"
         strict = True
         connection = None
 
@@ -50,7 +50,7 @@ class Organization(Model):
     updated_at: datetime = Column(required=False, default=datetime.now())
     class Meta:
         name = 'organizations'
-        schema = 'public'
+        schema = "auth"
         strict = True
         frozen = False
 
@@ -66,7 +66,7 @@ class OrganizationAttribute(Model):
     created_at: datetime = Column(required=False, default=datetime.now())
     class Meta:
         name = 'organization_attributes'
-        schema = 'public'
+        schema = "auth"
         strict = True
         frozen = False
 
@@ -76,7 +76,7 @@ class ProgramCategory(Model):
     category: str = Column(required=True)
     class Meta:
         name = 'program_categories'
-        schema = 'public'
+        schema = "auth"
         strict = True
         frozen = False
 
@@ -97,30 +97,31 @@ class Program(Model):
             self.program_slug = slugify(self.program_name)
     class Meta:
         name = 'programs'
-        schema = 'public'
+        schema = "auth"
         strict = True
         frozen = False
 
 class ProgramAttribute(Model):
-    program_id: Program = Column(required=True)
-    attribute: str = Column(required=True, max=254)
+    program_id: Program = Column(required=True, primary_key=True)
+    attribute: str = Column(required=True, max=254, primary_key=True)
     properties: dict = Column(required=False, default_factory=dict)
 
     class Meta:
         name = 'program_attributes'
-        schema = 'public'
+        schema = "auth"
         strict = True
         frozen = False
 
 class ProgramClient(Model):
-    program_id: Program = Column(required=True)
-    client_id: Client  = Column(required=True)
+    program_id: Program = Column(required=True, primary_key=True)
+    client_id: Client  = Column(required=True, primary_key=True)
     client_slug: str
     program_slug: str
     active: bool = Column(required=False, default=True)
+
     class Meta:
-        name = 'programs_clients'
-        schema = 'public'
+        name = 'program_clients'
+        schema = "auth"
         strict = True
         frozen = False
 
@@ -136,12 +137,12 @@ class User(Model):
     """Basic User notation."""
 
     user_id: int = Column(required=False, primary_key=True)
-    userid: UUID = Column(required=True)
+    userid: UUID = Column(required=True, db_default='auto')
     first_name: str = Column(required=True, max=254, label="First Name")
     last_name: str = Column(required=True, max=254, label="Last Name")
     email: str = Column(required=False, max=254, label="User's Email")
     password: str = Column(required=False, max=16, secret=True, repr=False)
-    last_login: datetime = Column(required=False, readonly=True)
+    last_login: datetime = Column(required=False, readonly=True, default=datetime.now())
     username: str = Column(required=False)
     user_role: UserType = Column(required=False)
     is_superuser: bool = Column(required=True, default=False)
@@ -166,7 +167,7 @@ class User(Model):
 
     class Meta:
         name = USERS_TABLE
-        schema = "public"
+        schema = "auth"
         strict = True
         connection = None
 
@@ -180,7 +181,20 @@ class UserIdentity(Model):
 
     class Meta:
         name = "user_identities"
-        schema = "public"
+        schema = "auth"
+        strict = True
+        connection = None
+
+class UserProgram(Model):
+    user_id: User = Column(required=True, primary_key=True)
+    program_id: Program = Column(required=True, primary_key=True)
+    enabled: bool = Column(required=True, default=True)
+    created_at: datetime = Column(required=False, default=datetime.now())
+    updated_at: datetime = Column(required=False, default=datetime.now())
+
+    class Meta:
+        name = "user_programs"
+        schema = "auth"
         strict = True
         connection = None
 
@@ -193,29 +207,18 @@ class Group(Model):
     updated_at: datetime = Column(required=False, default=datetime.now())
     class Meta:
         name = "groups"
-        schema = "public"
+        schema = "auth"
         strict = True
         connection = None
 
 ## User belong to Group:
 class UserGroup(Model):
-    user_id: User = Column(required=True)
-    group_id: Group = Column(required=True)
+    user_id: User = Column(required=True, primary_key=True)
+    group_id: Group = Column(required=True, primary_key=True)
 
     class Meta:
-        name = "user_group"
-        schema = "public"
-        strict = True
-        connection = None
-
-class ProgramGroup(Model):
-    pgroup_id: int = Column(required=True, primary_key=True, db_default='auto')
-    program_id: Program = Column(required=True)
-    group_id: Group = Column(required=True)
-
-    class Meta:
-        name = "program_group"
-        schema = "public"
+        name = "user_groups"
+        schema = "auth"
         strict = True
         connection = None
 
@@ -234,34 +237,34 @@ class Permission(Model):
 
     class Meta:
         name = "permissions"
-        schema = "public"
+        schema = "auth"
         strict = True
         connection = None
 
 class GroupPermission(Model):
     """Direct association between a permission and a Group (associated to a Program).
     """
-    pgroup_id: ProgramGroup = Column(required=True)
-    permission_id: Permission = Column(required=True)
+    group_id: Group = Column(required=True, primary_key=True)
+    permission_id: Permission = Column(required=True, primary_key=True)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
 
     class Meta:
         name = "group_permissions"
-        schema = "public"
+        schema = "auth"
         strict = True
         connection = None
 
 class UserPermission(Model):
     """Direct asssociation between an User and a Permission.
     """
-    user_id: User = Column(required=True)
-    permission_id: Permission = Column(required=True)
+    user_id: User = Column(required=True, primary_key=True)
+    permission_id: Permission = Column(required=True, primary_key=True)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
 
     class Meta:
         name = "user_permissions"
-        schema = "public"
+        schema = "auth"
         strict = True
         connection = None

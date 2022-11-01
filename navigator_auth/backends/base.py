@@ -148,7 +148,12 @@ class BaseAuthBackend(ABC):
         userdata = {}
         for name, item in self.user_mapping.items():
             if name != self.password_attribute:
-                userdata[name] = user[item]
+                try:
+                    userdata[name] = user[item]
+                except AttributeError:
+                    logging.warning(
+                        f'Error on User Data: asking for a non existing attribute: {item}'
+                    )
         if AUTH_SESSION_OBJECT:
             return {
                 AUTH_SESSION_OBJECT: userdata

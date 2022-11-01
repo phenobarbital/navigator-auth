@@ -28,7 +28,7 @@ from .conf import (
 )
 ### Table Handlers:
 from .handlers import ClientHandler, OrganizationHandler, PermissionHandler
-from .handlers.program import ProgramCatHandler
+from .handlers.program import ProgramCatHandler, ProgramHandler, ProgramClientHandler
 from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
 from .backends.base import auth_middleware
@@ -436,6 +436,17 @@ class AuthHandler:
             OrganizationHandler,
             name='api_organizations'
         )
+        ### Programs:
+        router.add_view(
+            r'/api/v1/programs/{id:.*}',
+            ProgramHandler,
+            name='api_programs_id'
+        )
+        router.add_view(
+            r'/api/v1/programs{meta:\:?.*}',
+            ProgramHandler,
+            name='api_programs'
+        )
         router.add_view(
             r'/api/v1/program_categories/{id:.*}',
             ProgramCatHandler,
@@ -445,6 +456,17 @@ class AuthHandler:
             r'/api/v1/program_categories{meta:\:?.*}',
             ProgramCatHandler,
             name='api_program_categories'
+        )
+        # Program Client:
+        router.add_view(
+            r'/api/v1/program_clients/{id:.*}',
+            ProgramClientHandler,
+            name='api_programs_clients_id'
+        )
+        router.add_view(
+            r'/api/v1/program_clients{meta:\:?.*}',
+            ProgramClientHandler,
+            name='api_programs_clients'
         )
         ### Model permissions:
         router.add_view(
