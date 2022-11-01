@@ -48,14 +48,11 @@ class BaseHandler(CorsViewMixin):
     # function returns
     def no_content(
         self,
-        request: web.Request = None,
         headers: dict = None,
         content_type: str = "application/json",
     ) -> web.Response:
         if not headers:
             headers = {}
-        if not request:
-            request = self.request
         response = HTTPNoContent(content_type=content_type, headers=headers)
         response.headers["Pragma"] = "no-cache"
         raise response
@@ -63,7 +60,6 @@ class BaseHandler(CorsViewMixin):
     def response(
         self,
         response: str = "",
-        request: web.Request = None,
         status: int = 200,
         headers: dict = None,
         content_type: str = "application/json",
@@ -71,8 +67,6 @@ class BaseHandler(CorsViewMixin):
     ) -> web.Response:
         if not headers: # TODO: set to default headers.
             headers = {}
-        if not request:
-            request = self.request
         args = {"status": status, "content_type": content_type, "headers": headers, **kwargs}
         if isinstance(response, dict):
             args["text"] = self._json.dumps(response)
@@ -109,17 +103,13 @@ class BaseHandler(CorsViewMixin):
         self,
         reason: str = None,
         exception: Exception = None,
-        request: web.Request = None,
         stacktrace: str = None,
         status: int = 500,
         headers: dict = None,
         content_type: str = "application/json",
         **kwargs,
     ) -> web.Response:
-        if not request:
-            request = self.request
         response_obj = {
-            "status": "Failed",
             "reason": reason if reason else str(exception),
             "stacktrace": stacktrace,
         }
@@ -145,7 +135,6 @@ class BaseHandler(CorsViewMixin):
     def error(
         self,
         reason: dict = None,
-        request: web.Request = None,
         exception: Exception = None,
         headers: dict = None,
         content_type: str = "application/json",
@@ -153,8 +142,6 @@ class BaseHandler(CorsViewMixin):
         **kwargs,
     ) -> web.Response:
         response_obj = {"status": "Failed"}
-        if not request:
-            request = self.request
         response_obj = {
             "reason": reason if reason else str(exception),
             "content_type": content_type,
@@ -187,7 +174,6 @@ class BaseHandler(CorsViewMixin):
 
     def not_implemented(
         self,
-        request: web.Request,
         response: dict = None,
         headers: dict = None,
         content_type: str = "application/json",
