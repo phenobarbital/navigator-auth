@@ -203,6 +203,7 @@ class Group(Model):
     group_name: str = Column(required=True)
     client_id: Optional[Client] = Column(required=False)
     is_active: bool = Column(required=True, default=True)
+    description: Text = Column(required=False)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
     class Meta:
@@ -215,9 +216,21 @@ class Group(Model):
 class UserGroup(Model):
     user_id: User = Column(required=True, primary_key=True)
     group_id: Group = Column(required=True, primary_key=True)
+    created_at: datetime = Column(required=False, default=datetime.now())
 
     class Meta:
         name = "user_groups"
+        schema = "auth"
+        strict = True
+        connection = None
+
+class ProgramGroup(Model):
+    program_id: Program = Column(required=True, primary_key=True)
+    group_id: Group = Column(required=True, primary_key=True)
+    created_at: datetime = Column(required=False, default=datetime.now())
+
+    class Meta:
+        name = "program_groups"
         schema = "auth"
         strict = True
         connection = None

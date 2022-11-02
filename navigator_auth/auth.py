@@ -29,6 +29,8 @@ from .conf import (
 ### Table Handlers:
 from .handlers import ClientHandler, OrganizationHandler, PermissionHandler
 from .handlers.program import ProgramCatHandler, ProgramHandler, ProgramClientHandler
+from .handlers.groups import GroupHandler, GroupPermissionHandler, UserGroupHandler
+## Responses
 from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
 from .backends.base import auth_middleware
@@ -414,6 +416,43 @@ class AuthHandler:
             name="api_session"
         )
         ### Handler for Auth Objects:
+        self.model_routes(router)
+        # the backend add a middleware to the app
+        mdl = self.app.middlewares
+        # first: add the basic jwt middleware (used by basic auth and others)
+        mdl.append(auth_middleware)
+        # if authentication backend needs initialization
+        for name, backend in self.backends.items():
+            try:
+                # backend.configure(app, router, handler=app)
+                backend.configure(self.app, router)
+                if hasattr(backend, "auth_middleware"):
+                    # add the middleware for this backend Authentication
+                    mdl.append(backend.auth_middleware)
+            except Exception as err:
+                logging.exception(
+                    f"Auth: Error on Backend {name} init: {err!s}"
+                )
+                raise ConfigError(
+                    f"Auth: Error on Backend {name} init: {err!s}"
+                ) from err
+        # at the End: configure CORS for routes:
+        cors = aiohttp_cors.setup(
+            self.app,
+            defaults={
+                "*": aiohttp_cors.ResourceOptions(
+                    allow_credentials=True,
+                    expose_headers="*",
+                    allow_methods="*",
+                    allow_headers="*",
+                    max_age=3600,
+                )
+            },
+        )
+        self.setup_cors(cors)
+        return self.app
+
+    def model_routes(self, router):
         ## Clients
         router.add_view(
             r'/api/v1/clients/{id:.*}',
@@ -479,37 +518,35 @@ class AuthHandler:
             PermissionHandler,
             name='api_permissions'
         )
-        # the backend add a middleware to the app
-        mdl = self.app.middlewares
-        # first: add the basic jwt middleware (used by basic auth and others)
-        mdl.append(auth_middleware)
-        # if authentication backend needs initialization
-        for name, backend in self.backends.items():
-            try:
-                # backend.configure(app, router, handler=app)
-                backend.configure(self.app, router)
-                if hasattr(backend, "auth_middleware"):
-                    # add the middleware for this backend Authentication
-                    mdl.append(backend.auth_middleware)
-            except Exception as err:
-                logging.exception(
-                    f"Auth: Error on Backend {name} init: {err!s}"
-                )
-                raise ConfigError(
-                    f"Auth: Error on Backend {name} init: {err!s}"
-                ) from err
-        # at the End: configure CORS for routes:
-        cors = aiohttp_cors.setup(
-            self.app,
-            defaults={
-                "*": aiohttp_cors.ResourceOptions(
-                    allow_credentials=True,
-                    expose_headers="*",
-                    allow_methods="*",
-                    allow_headers="*",
-                    max_age=3600,
-                )
-            },
+        ### Groups:
+        router.add_view(
+            r'/api/v1/groups/{id:.*}',
+            GroupHandler,
+            name='api_groups_id'
         )
-        self.setup_cors(cors)
-        return self.app
+        router.add_view(
+            r'/api/v1/groups{meta:\:?.*}',
+            GroupHandler,
+            name='api_groups'
+        )
+        router.add_view(
+            r'/api/v1/user_groups/{id:.*}',
+            UserGroupHandler,
+            name='api_user_groups_id'
+        )
+        router.add_view(
+            r'/api/v1/user_groups{meta:\:?.*}',
+            UserGroupHandler,
+            name='api_user_groups'
+        )
+        router.add_view(
+            r'/api/v1/group_permissions/{id:.*}',
+            GroupPermissionHandler,
+            name='api_group_permissions_id'
+        )
+        router.add_view(
+            r'/api/v1/group_permissions{meta:\:?.*}',
+            GroupPermissionHandler,
+            name='api_group_permissions'
+        )
+        ### User Methods:

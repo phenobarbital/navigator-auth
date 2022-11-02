@@ -79,10 +79,14 @@ class ModelHandler(BaseView):
             try:
                 objid = data[self.pk]
             except (TypeError, KeyError):
-                objid = params['id']
-            args = {
-                self.pk: objid
-            }
+                try:
+                    objid = params['id']
+                except KeyError:
+                    objid = None
+            if objid:
+                args = {
+                    self.pk: objid
+                }
         elif isinstance(self.pk, list):
             paramlist = params['id'].split('/')
             if len(paramlist) != len(self.pk):
