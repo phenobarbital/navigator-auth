@@ -15,6 +15,8 @@ class Text(str):
     """Base Definition for Big Text.
     """
 
+## Create a TENANT as Main Level.
+
 class Client(Model):
     """Highest hierarchy level."""
     client_id: int = Column(required=False, primary_key=True, db_default='auto')
@@ -27,6 +29,7 @@ class Client(Model):
     is_active: bool = Column(required=True, default=True)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
+    created_by: str = Column(required=False)
     class Meta:
         name = 'clients'
         schema = "auth"
@@ -40,7 +43,7 @@ class Client(Model):
 
 class Organization(Model):
     org_id: int = Column(required=False, primary_key=True, db_default='auto')
-    client_id: Client = Column(required=True)
+    oid: UUID = Column(required=True, db_default='auto')
     organization: str = Column(required=True, max=254)
     description: Text
     attributes: dict = Column(required=False, default_factory=dict)
@@ -48,6 +51,7 @@ class Organization(Model):
     is_active: bool = Column(required=True, default=True)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
+    created_by: str = Column(required=False)
     class Meta:
         name = 'organizations'
         schema = "auth"
@@ -58,18 +62,6 @@ class Organization(Model):
         super(Organization, self).__post_init__()
         if not self.org_slug:
             self.org_slug = slugify(self.organization)
-
-class OrganizationAttribute(Model):
-    org_id: Organization = Column(required=True)
-    attribute: str = Column(required=True, max=254)
-    properties: dict = Column(required=False, default_factory=dict)
-    created_at: datetime = Column(required=False, default=datetime.now())
-    class Meta:
-        name = 'organization_attributes'
-        schema = "auth"
-        strict = True
-        frozen = False
-
 
 class ProgramCategory(Model):
     program_cat_id: int = Column(required=False, primary_key=True, db_default='auto')
@@ -90,6 +82,7 @@ class Program(Model):
     is_active: bool = Column(required=True, default=True)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
+    created_by: str = Column(required=False)
 
     def __post_init__(self) -> None:
         super(Program, self).__post_init__()
@@ -105,6 +98,7 @@ class ProgramAttribute(Model):
     program_id: Program = Column(required=True, primary_key=True)
     attribute: str = Column(required=True, max=254, primary_key=True)
     properties: dict = Column(required=False, default_factory=dict)
+    created_by: str = Column(required=False)
 
     class Meta:
         name = 'program_attributes'
@@ -118,6 +112,8 @@ class ProgramClient(Model):
     client_slug: str
     program_slug: str
     active: bool = Column(required=False, default=True)
+    created_at: datetime = Column(required=False, default=datetime.now())
+    created_by: str = Column(required=False)
 
     class Meta:
         name = 'program_clients'
@@ -140,7 +136,9 @@ class User(Model):
     userid: UUID = Column(required=True, db_default='auto')
     first_name: str = Column(required=True, max=254, label="First Name")
     last_name: str = Column(required=True, max=254, label="Last Name")
+    display_name: str = Column(required=False)
     email: str = Column(required=False, max=254, label="User's Email")
+    alt_email: str = Column(required=False, max=254, label="Alternate Email")
     password: str = Column(required=False, max=16, secret=True, repr=False)
     last_login: datetime = Column(required=False, readonly=True, default=datetime.now())
     username: str = Column(required=False)
@@ -157,13 +155,10 @@ class User(Model):
     attributes: Optional[dict] = Column(required=False, default_factory=dict)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
+    created_by: str = Column(required=False)
 
-    def __getitem__(self, item):
-        return getattr(self, item)
-
-    @property
-    def display_name(self):
-        return f"{self.first_name} {self.last_name}"
+    # def __getitem__(self, item):
+    #     return getattr(self, item)
 
     class Meta:
         name = USERS_TABLE
@@ -185,18 +180,34 @@ class UserIdentity(Model):
         strict = True
         connection = None
 
-class UserProgram(Model):
-    user_id: User = Column(required=True, primary_key=True)
-    program_id: Program = Column(required=True, primary_key=True)
-    enabled: bool = Column(required=True, default=True)
+
+# class UserProgram(Model):
+#     user_id: User = Column(required=True, primary_key=True)
+#     program_id: Program = Column(required=True, primary_key=True)
+#     enabled: bool = Column(required=True, default=True)
+#     created_at: datetime = Column(required=False, default=datetime.now())
+#     updated_at: datetime = Column(required=False, default=datetime.now())
+
+#     class Meta:
+#         name = "user_programs"
+#         schema = "auth"
+#         strict = True
+#         connection = None
+
+
+class OrganizationUser(Model):
+    org_id: Organization = Column(required=True)
+    user_id: User = Column(required=True)
+    properties: dict = Column(required=False, default_factory=dict)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
+    created_by: str = Column(required=False)
 
     class Meta:
-        name = "user_programs"
+        name = 'organization_users'
         schema = "auth"
         strict = True
-        connection = None
+        frozen = False
 
 class Group(Model):
     group_id: int = Column(required=True, primary_key=True, db_default='auto')
@@ -206,6 +217,8 @@ class Group(Model):
     description: Text = Column(required=False)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
+    created_by: str = Column(required=False)
+
     class Meta:
         name = "groups"
         schema = "auth"
@@ -217,6 +230,7 @@ class UserGroup(Model):
     user_id: User = Column(required=True, primary_key=True)
     group_id: Group = Column(required=True, primary_key=True)
     created_at: datetime = Column(required=False, default=datetime.now())
+    created_by: str = Column(required=False)
 
     class Meta:
         name = "user_groups"
@@ -228,6 +242,7 @@ class ProgramGroup(Model):
     program_id: Program = Column(required=True, primary_key=True)
     group_id: Group = Column(required=True, primary_key=True)
     created_at: datetime = Column(required=False, default=datetime.now())
+    created_by: str = Column(required=False)
 
     class Meta:
         name = "program_groups"

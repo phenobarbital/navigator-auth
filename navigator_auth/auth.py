@@ -27,7 +27,7 @@ from .conf import (
     logging
 )
 ### Table Handlers:
-from .handlers import ClientHandler, OrganizationHandler, PermissionHandler
+from .handlers import ClientHandler, OrganizationHandler, PermissionHandler, UserHandler, UserSession
 from .handlers.program import ProgramCatHandler, ProgramHandler, ProgramClientHandler
 from .handlers.groups import GroupHandler, GroupPermissionHandler, UserGroupHandler
 ## Responses
@@ -550,3 +550,13 @@ class AuthHandler:
             name='api_group_permissions'
         )
         ### User Methods:
+        router.add_view(
+            r'/api/v1/users/{id:.*}',
+            UserHandler,
+            name='api_auth_users_id'
+        )
+        router.add_view(
+            r'/api/v1/users{meta:\:?.*}',
+            UserHandler,
+            name='api_auth_users'
+        )

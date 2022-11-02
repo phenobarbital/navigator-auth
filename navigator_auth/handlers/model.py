@@ -167,7 +167,7 @@ class ModelHandler(BaseView):
                 )
 
     async def put(self):
-        """ Creating Client information."""
+        """ Creating Model information."""
         session = await self.session()
         if not session:
             return self.error(

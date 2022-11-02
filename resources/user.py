@@ -1,7 +1,6 @@
 from datetime import datetime
-from typing import List
 from asyncdb.models import Column, Model
-# from navigator_auth.conf import USERS_TABLE, default_dsn
+
 
 
 class User(Model):
@@ -10,7 +9,9 @@ class User(Model):
     user_id: int = Column(required=False, primary_key=True)
     first_name: str
     last_name: str
+    display_name: str
     email: str = Column(required=False, max=254)
+    alt_email: str = Column(required=False, max=254)
     password: str = Column(required=False, max=128)
     last_login: datetime = Column(required=False)
     username: str = Column(required=False)
@@ -19,25 +20,21 @@ class User(Model):
     is_new: bool = Column(required=True, default=True)
     is_staff: bool = Column(required=False, default=True)
     title: str = Column(equired=False, max=90)
-    registration_key: str = Column(equired=False, max=512)
-    reset_pwd_key: str = Column(equired=False, max=512)
     avatar: str = Column(max=512)
     associate_id: str = Column(required=False)
+    associate_oid: str = Column(required=False)
+    department_code: str = Column(required=False)
+    position_id: str = Column(required=False)
     group_id: list = Column(required=False)
     groups: list = Column(required=False)
+    program_id: list = Column(required=False)
     programs: list = Column(required=False)
-
-    def __getitem__(self, item):
-        return getattr(self, item)
-
-    @property
-    def display_name(self):
-        return f"{self.first_name} {self.last_name}"
+    created_at: datetime = Column(required=False)
 
     class Meta:
         driver = "pg"
         name = 'vw_users'
-        schema = "public"
+        schema = "auth"
         strict = True
         frozen = False
         connection = None
