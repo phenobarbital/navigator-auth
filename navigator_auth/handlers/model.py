@@ -4,7 +4,12 @@ Model Handler: Abstract Model for managing Model with Views.
 from typing import Union
 from datamodel import BaseModel
 from datamodel.exceptions import ValidationError
-from asyncdb.exceptions import DriverError, ProviderError, NoDataFound, StatementError
+from asyncdb.exceptions import (
+    DriverError,
+    ProviderError,
+    NoDataFound,
+    StatementError
+)
 from navigator_session import get_session
 from navigator_auth.exceptions import AuthException
 from .base import BaseView
