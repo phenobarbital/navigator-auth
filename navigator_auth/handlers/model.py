@@ -88,15 +88,18 @@ class ModelHandler(BaseView):
                     self.pk: objid
                 }
         elif isinstance(self.pk, list):
-            paramlist = params['id'].split('/')
-            if len(paramlist) != len(self.pk):
-                return self.error(
-                    reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
-                    status=410
-                )
-            args = {}
-            for key in self.pk:
-                args[key] = paramlist.pop(0)
+            try:
+                paramlist = params['id'].split('/')
+                if len(paramlist) != len(self.pk):
+                    return self.error(
+                        reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
+                        status=410
+                    )
+                args = {}
+                for key in self.pk:
+                    args[key] = paramlist.pop(0)
+            except KeyError:
+                pass
         else:
             return self.error(
                 reason=f"Invalid PK definition for {self.name}: {self.pk}",
@@ -247,15 +250,18 @@ class ModelHandler(BaseView):
                 self.pk: objid
             }
         elif isinstance(self.pk, list):
-            paramlist = params['id'].split('/')
-            if len(paramlist) != len(self.pk):
-                return self.error(
-                    reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
-                    status=410
-                )
-            args = {}
-            for key in self.pk:
-                args[key] = paramlist.pop(0)
+            try:
+                paramlist = params['id'].split('/')
+                if len(paramlist) != len(self.pk):
+                    return self.error(
+                        reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
+                        status=410
+                    )
+                args = {}
+                for key in self.pk:
+                    args[key] = paramlist.pop(0)
+            except KeyError:
+                pass
         else:
             return self.error(
                 reason=f"Invalid PK definition for {self.name}: {self.pk}",
@@ -323,15 +329,18 @@ class ModelHandler(BaseView):
                 self.pk: objid
             }
         elif isinstance(self.pk, list):
-            paramlist = params['id'].split('/')
-            if len(paramlist) != len(self.pk):
-                return self.error(
-                    reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
-                    status=410
-                )
-            args = {}
-            for key in self.pk:
-                args[key] = paramlist.pop(0)
+            try:
+                paramlist = params['id'].split('/')
+                if len(paramlist) != len(self.pk):
+                    return self.error(
+                        reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
+                        status=410
+                    )
+                args = {}
+                for key in self.pk:
+                    args[key] = paramlist.pop(0)
+            except KeyError:
+                pass
         else:
             return self.error(
                 reason=f"Invalid PK definition for {self.name}: {self.pk}",
@@ -427,15 +436,18 @@ class ModelHandler(BaseView):
                 self.pk: objid
             }
         elif isinstance(self.pk, list):
-            paramlist = params['id'].split('/')
-            if len(paramlist) != len(self.pk):
-                return self.error(
-                    reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
-                    status=410
-                )
-            args = {}
-            for key in self.pk:
-                args[key] = paramlist.pop(0)
+            try:
+                paramlist = params['id'].split('/')
+                if len(paramlist) != len(self.pk):
+                    return self.error(
+                        reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
+                        status=410
+                    )
+                args = {}
+                for key in self.pk:
+                    args[key] = paramlist.pop(0)
+            except KeyError:
+                pass
         else:
             return self.error(
                 reason=f"Invalid PK definition for {self.name}: {self.pk}",
