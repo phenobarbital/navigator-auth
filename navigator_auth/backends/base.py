@@ -23,7 +23,8 @@ from navigator_auth.exceptions import (
     UserNotFound,
     InvalidAuth,
     FailedAuth,
-    AuthExpired
+    AuthExpired,
+    Forbidden
 )
 from navigator_auth.conf import (
     AUTH_DEFAULT_ISSUER,
@@ -313,27 +314,23 @@ def decode_token(request, issuer: str = None):
             return [tenant, payload]
         except jwt.exceptions.ExpiredSignatureError as err:
             raise AuthExpired(
-                f"Credentials Expired: {err!s}",
-                status=401
+                f"Credentials Expired: {err!s}"
             ) from err
         except jwt.exceptions.InvalidSignatureError as err:
             raise AuthExpired(
-                f"Signature Failed or Expired: {err!s}",
-                status=410
+                f"Signature Failed or Expired: {err!s}"
             ) from err
         except jwt.exceptions.DecodeError as err:
             raise FailedAuth(
-                f"Token Decoding Error: {err}",
-                status=406
+                f"Token Decoding Error: {err}"
             ) from err
         except jwt.exceptions.InvalidTokenError as err:
             raise InvalidAuth(
-                f"Invalid authorization token {err!s}",
-                status=406
+                f"Invalid authorization token {err!s}"
             ) from err
         except Exception as err:
             raise AuthException(
-                err,
+                str(err),
                 status=501
             ) from err
     else:
@@ -389,23 +386,25 @@ async def auth_middleware(
                     logging.error(
                         f'Missing User Object from Session: {ex}'
                     )
+        except (Forbidden) as err:
+            logging.error('Auth Middleware: Access Denied')
+            raise web.HTTPForbidden(
+                reason=err.message
+            )
         except (AuthExpired, FailedAuth) as err:
             logging.error('Auth Middleware: Auth Credentials were expired')
-            if CREDENTIALS_REQUIRED is True:
-                raise web.HTTPForbidden(
-                    reason=err
-                )
+            raise web.HTTPForbidden(
+                reason=err.message
+            )
         except AuthException as err:
             logging.error('Auth Middleware: Invalid Signature or secret')
-            if CREDENTIALS_REQUIRED is True:
-                raise web.HTTPClientError(
-                    reason=err.message
-                )
+            raise web.HTTPClientError(
+                reason=err.message
+            )
         except Exception as err: # pylint: disable=W0703
             logging.error(f"Bad Request: {err!s}")
-            if CREDENTIALS_REQUIRED is True:
-                raise web.HTTPClientError(
-                    reason=err
-                )
+            raise web.HTTPClientError(
+                reason=str(err)
+            )
         return await handler(request)
     return middleware

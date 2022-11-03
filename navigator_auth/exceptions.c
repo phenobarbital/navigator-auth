@@ -1610,25 +1610,25 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_13AuthException_2__str__
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_13AuthException_4get(struct __pyx_obj_14navigator_auth_10exceptions_AuthException *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_13AuthException_6__reduce_cython__(struct __pyx_obj_14navigator_auth_10exceptions_AuthException *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_13AuthException_8__setstate_cython__(struct __pyx_obj_14navigator_auth_10exceptions_AuthException *__pyx_v_self, PyObject *__pyx_v___pyx_state); /* proto */
-static int __pyx_pf_14navigator_auth_10exceptions_11ConfigError___init__(struct __pyx_obj_14navigator_auth_10exceptions_ConfigError *__pyx_v_self, PyObject *__pyx_v_message); /* proto */
+static int __pyx_pf_14navigator_auth_10exceptions_11ConfigError___init__(struct __pyx_obj_14navigator_auth_10exceptions_ConfigError *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_11ConfigError_2__reduce_cython__(struct __pyx_obj_14navigator_auth_10exceptions_ConfigError *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_11ConfigError_4__setstate_cython__(struct __pyx_obj_14navigator_auth_10exceptions_ConfigError *__pyx_v_self, PyObject *__pyx_v___pyx_state); /* proto */
-static int __pyx_pf_14navigator_auth_10exceptions_12UserNotFound___init__(struct __pyx_obj_14navigator_auth_10exceptions_UserNotFound *__pyx_v_self, PyObject *__pyx_v_message); /* proto */
+static int __pyx_pf_14navigator_auth_10exceptions_12UserNotFound___init__(struct __pyx_obj_14navigator_auth_10exceptions_UserNotFound *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_12UserNotFound_2__reduce_cython__(struct __pyx_obj_14navigator_auth_10exceptions_UserNotFound *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_12UserNotFound_4__setstate_cython__(struct __pyx_obj_14navigator_auth_10exceptions_UserNotFound *__pyx_v_self, PyObject *__pyx_v___pyx_state); /* proto */
-static int __pyx_pf_14navigator_auth_10exceptions_12Unauthorized___init__(struct __pyx_obj_14navigator_auth_10exceptions_Unauthorized *__pyx_v_self, PyObject *__pyx_v_message); /* proto */
+static int __pyx_pf_14navigator_auth_10exceptions_12Unauthorized___init__(struct __pyx_obj_14navigator_auth_10exceptions_Unauthorized *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_12Unauthorized_2__reduce_cython__(struct __pyx_obj_14navigator_auth_10exceptions_Unauthorized *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_12Unauthorized_4__setstate_cython__(struct __pyx_obj_14navigator_auth_10exceptions_Unauthorized *__pyx_v_self, PyObject *__pyx_v___pyx_state); /* proto */
-static int __pyx_pf_14navigator_auth_10exceptions_11InvalidAuth___init__(struct __pyx_obj_14navigator_auth_10exceptions_InvalidAuth *__pyx_v_self, PyObject *__pyx_v_message); /* proto */
+static int __pyx_pf_14navigator_auth_10exceptions_11InvalidAuth___init__(struct __pyx_obj_14navigator_auth_10exceptions_InvalidAuth *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_11InvalidAuth_2__reduce_cython__(struct __pyx_obj_14navigator_auth_10exceptions_InvalidAuth *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_11InvalidAuth_4__setstate_cython__(struct __pyx_obj_14navigator_auth_10exceptions_InvalidAuth *__pyx_v_self, PyObject *__pyx_v___pyx_state); /* proto */
-static int __pyx_pf_14navigator_auth_10exceptions_10FailedAuth___init__(struct __pyx_obj_14navigator_auth_10exceptions_FailedAuth *__pyx_v_self, PyObject *__pyx_v_message); /* proto */
+static int __pyx_pf_14navigator_auth_10exceptions_10FailedAuth___init__(struct __pyx_obj_14navigator_auth_10exceptions_FailedAuth *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_10FailedAuth_2__reduce_cython__(struct __pyx_obj_14navigator_auth_10exceptions_FailedAuth *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_10FailedAuth_4__setstate_cython__(struct __pyx_obj_14navigator_auth_10exceptions_FailedAuth *__pyx_v_self, PyObject *__pyx_v___pyx_state); /* proto */
-static int __pyx_pf_14navigator_auth_10exceptions_9Forbidden___init__(struct __pyx_obj_14navigator_auth_10exceptions_Forbidden *__pyx_v_self, PyObject *__pyx_v_message); /* proto */
+static int __pyx_pf_14navigator_auth_10exceptions_9Forbidden___init__(struct __pyx_obj_14navigator_auth_10exceptions_Forbidden *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_9Forbidden_2__reduce_cython__(struct __pyx_obj_14navigator_auth_10exceptions_Forbidden *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_9Forbidden_4__setstate_cython__(struct __pyx_obj_14navigator_auth_10exceptions_Forbidden *__pyx_v_self, PyObject *__pyx_v___pyx_state); /* proto */
-static int __pyx_pf_14navigator_auth_10exceptions_11AuthExpired___init__(struct __pyx_obj_14navigator_auth_10exceptions_AuthExpired *__pyx_v_self, PyObject *__pyx_v_message); /* proto */
+static int __pyx_pf_14navigator_auth_10exceptions_11AuthExpired___init__(struct __pyx_obj_14navigator_auth_10exceptions_AuthExpired *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_11AuthExpired_2__reduce_cython__(struct __pyx_obj_14navigator_auth_10exceptions_AuthExpired *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions_11AuthExpired_4__setstate_cython__(struct __pyx_obj_14navigator_auth_10exceptions_AuthExpired *__pyx_v_self, PyObject *__pyx_v___pyx_state); /* proto */
 static PyObject *__pyx_pf_14navigator_auth_10exceptions___pyx_unpickle_AuthException(CYTHON_UNUSED PyObject *__pyx_self, PyObject *__pyx_v___pyx_type, long __pyx_v___pyx_checksum, PyObject *__pyx_v___pyx_state); /* proto */
@@ -2356,8 +2356,8 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_13AuthException_8__setst
 /* "navigator_auth/exceptions.pyx":27
  * cdef class ConfigError(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or f"Auth Configuration Error.", status=500)
+ *     def __init__(self, str message = None, status=500):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or f"Auth Configuration Error.", status=status)
  * 
  */
 
@@ -2365,6 +2365,7 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_13AuthException_8__setst
 static int __pyx_pw_14navigator_auth_10exceptions_11ConfigError_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
 static int __pyx_pw_14navigator_auth_10exceptions_11ConfigError_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   PyObject *__pyx_v_message = 0;
+  PyObject *__pyx_v_status = 0;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -2372,13 +2373,16 @@ static int __pyx_pw_14navigator_auth_10exceptions_11ConfigError_1__init__(PyObje
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("__init__ (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,0};
-    PyObject* values[1] = {0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,&__pyx_n_s_status,0};
+    PyObject* values[2] = {0,0};
     values[0] = ((PyObject*)Py_None);
+    values[1] = ((PyObject *)__pyx_int_500);
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
       const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
       switch (pos_args) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -2391,12 +2395,20 @@ static int __pyx_pw_14navigator_auth_10exceptions_11ConfigError_1__init__(PyObje
           PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_message);
           if (value) { values[0] = value; kw_args--; }
         }
+        CYTHON_FALLTHROUGH;
+        case  1:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_status);
+          if (value) { values[1] = value; kw_args--; }
+        }
       }
       if (unlikely(kw_args > 0)) {
         if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__init__") < 0)) __PYX_ERR(0, 27, __pyx_L3_error)
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -2404,17 +2416,18 @@ static int __pyx_pw_14navigator_auth_10exceptions_11ConfigError_1__init__(PyObje
       }
     }
     __pyx_v_message = ((PyObject*)values[0]);
+    __pyx_v_status = values[1];
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 1, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 27, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 2, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 27, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("navigator_auth.exceptions.ConfigError.__init__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_message), (&PyUnicode_Type), 1, "message", 1))) __PYX_ERR(0, 27, __pyx_L1_error)
-  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_11ConfigError___init__(((struct __pyx_obj_14navigator_auth_10exceptions_ConfigError *)__pyx_v_self), __pyx_v_message);
+  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_11ConfigError___init__(((struct __pyx_obj_14navigator_auth_10exceptions_ConfigError *)__pyx_v_self), __pyx_v_message, __pyx_v_status);
 
   /* function exit code */
   goto __pyx_L0;
@@ -2425,7 +2438,7 @@ static int __pyx_pw_14navigator_auth_10exceptions_11ConfigError_1__init__(PyObje
   return __pyx_r;
 }
 
-static int __pyx_pf_14navigator_auth_10exceptions_11ConfigError___init__(struct __pyx_obj_14navigator_auth_10exceptions_ConfigError *__pyx_v_self, PyObject *__pyx_v_message) {
+static int __pyx_pf_14navigator_auth_10exceptions_11ConfigError___init__(struct __pyx_obj_14navigator_auth_10exceptions_ConfigError *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status) {
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -2440,8 +2453,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_11ConfigError___init__(struct 
 
   /* "navigator_auth/exceptions.pyx":28
  * 
- *     def __init__(self, str message = None):
- *         super().__init__(message or f"Auth Configuration Error.", status=500)             # <<<<<<<<<<<<<<
+ *     def __init__(self, str message = None, status=500):
+ *         super().__init__(message or f"Auth Configuration Error.", status=status)             # <<<<<<<<<<<<<<
  * 
  * #### Authentication / Authorization
  */
@@ -2476,7 +2489,7 @@ static int __pyx_pf_14navigator_auth_10exceptions_11ConfigError___init__(struct 
   __pyx_t_2 = 0;
   __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 28, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_int_500) < 0) __PYX_ERR(0, 28, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_v_status) < 0) __PYX_ERR(0, 28, __pyx_L1_error)
   __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 28, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -2487,8 +2500,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_11ConfigError___init__(struct 
   /* "navigator_auth/exceptions.pyx":27
  * cdef class ConfigError(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or f"Auth Configuration Error.", status=500)
+ *     def __init__(self, str message = None, status=500):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or f"Auth Configuration Error.", status=status)
  * 
  */
 
@@ -2799,8 +2812,8 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_11ConfigError_4__setstat
 /* "navigator_auth/exceptions.pyx":33
  * cdef class UserNotFound(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "User doesn't exists.", status=404)
+ *     def __init__(self, str message = None, status=404):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "User doesn't exists.", status=status)
  * 
  */
 
@@ -2808,6 +2821,7 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_11ConfigError_4__setstat
 static int __pyx_pw_14navigator_auth_10exceptions_12UserNotFound_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
 static int __pyx_pw_14navigator_auth_10exceptions_12UserNotFound_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   PyObject *__pyx_v_message = 0;
+  PyObject *__pyx_v_status = 0;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -2815,13 +2829,16 @@ static int __pyx_pw_14navigator_auth_10exceptions_12UserNotFound_1__init__(PyObj
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("__init__ (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,0};
-    PyObject* values[1] = {0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,&__pyx_n_s_status,0};
+    PyObject* values[2] = {0,0};
     values[0] = ((PyObject*)Py_None);
+    values[1] = ((PyObject *)__pyx_int_404);
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
       const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
       switch (pos_args) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -2834,12 +2851,20 @@ static int __pyx_pw_14navigator_auth_10exceptions_12UserNotFound_1__init__(PyObj
           PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_message);
           if (value) { values[0] = value; kw_args--; }
         }
+        CYTHON_FALLTHROUGH;
+        case  1:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_status);
+          if (value) { values[1] = value; kw_args--; }
+        }
       }
       if (unlikely(kw_args > 0)) {
         if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__init__") < 0)) __PYX_ERR(0, 33, __pyx_L3_error)
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -2847,17 +2872,18 @@ static int __pyx_pw_14navigator_auth_10exceptions_12UserNotFound_1__init__(PyObj
       }
     }
     __pyx_v_message = ((PyObject*)values[0]);
+    __pyx_v_status = values[1];
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 1, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 33, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 2, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 33, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("navigator_auth.exceptions.UserNotFound.__init__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_message), (&PyUnicode_Type), 1, "message", 1))) __PYX_ERR(0, 33, __pyx_L1_error)
-  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_12UserNotFound___init__(((struct __pyx_obj_14navigator_auth_10exceptions_UserNotFound *)__pyx_v_self), __pyx_v_message);
+  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_12UserNotFound___init__(((struct __pyx_obj_14navigator_auth_10exceptions_UserNotFound *)__pyx_v_self), __pyx_v_message, __pyx_v_status);
 
   /* function exit code */
   goto __pyx_L0;
@@ -2868,7 +2894,7 @@ static int __pyx_pw_14navigator_auth_10exceptions_12UserNotFound_1__init__(PyObj
   return __pyx_r;
 }
 
-static int __pyx_pf_14navigator_auth_10exceptions_12UserNotFound___init__(struct __pyx_obj_14navigator_auth_10exceptions_UserNotFound *__pyx_v_self, PyObject *__pyx_v_message) {
+static int __pyx_pf_14navigator_auth_10exceptions_12UserNotFound___init__(struct __pyx_obj_14navigator_auth_10exceptions_UserNotFound *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status) {
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -2883,8 +2909,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_12UserNotFound___init__(struct
 
   /* "navigator_auth/exceptions.pyx":34
  * 
- *     def __init__(self, str message = None):
- *         super().__init__(message or "User doesn't exists.", status=404)             # <<<<<<<<<<<<<<
+ *     def __init__(self, str message = None, status=404):
+ *         super().__init__(message or "User doesn't exists.", status=status)             # <<<<<<<<<<<<<<
  * 
  * cdef class Unauthorized(AuthException):
  */
@@ -2919,7 +2945,7 @@ static int __pyx_pf_14navigator_auth_10exceptions_12UserNotFound___init__(struct
   __pyx_t_2 = 0;
   __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 34, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_int_404) < 0) __PYX_ERR(0, 34, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_v_status) < 0) __PYX_ERR(0, 34, __pyx_L1_error)
   __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 34, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -2930,8 +2956,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_12UserNotFound___init__(struct
   /* "navigator_auth/exceptions.pyx":33
  * cdef class UserNotFound(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "User doesn't exists.", status=404)
+ *     def __init__(self, str message = None, status=404):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "User doesn't exists.", status=status)
  * 
  */
 
@@ -3242,8 +3268,8 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_12UserNotFound_4__setsta
 /* "navigator_auth/exceptions.pyx":38
  * cdef class Unauthorized(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "Unauthorized", status=401)
+ *     def __init__(self, str message = None, status=401):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "Unauthorized", status=status)
  * 
  */
 
@@ -3251,6 +3277,7 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_12UserNotFound_4__setsta
 static int __pyx_pw_14navigator_auth_10exceptions_12Unauthorized_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
 static int __pyx_pw_14navigator_auth_10exceptions_12Unauthorized_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   PyObject *__pyx_v_message = 0;
+  PyObject *__pyx_v_status = 0;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -3258,13 +3285,16 @@ static int __pyx_pw_14navigator_auth_10exceptions_12Unauthorized_1__init__(PyObj
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("__init__ (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,0};
-    PyObject* values[1] = {0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,&__pyx_n_s_status,0};
+    PyObject* values[2] = {0,0};
     values[0] = ((PyObject*)Py_None);
+    values[1] = ((PyObject *)__pyx_int_401);
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
       const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
       switch (pos_args) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -3277,12 +3307,20 @@ static int __pyx_pw_14navigator_auth_10exceptions_12Unauthorized_1__init__(PyObj
           PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_message);
           if (value) { values[0] = value; kw_args--; }
         }
+        CYTHON_FALLTHROUGH;
+        case  1:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_status);
+          if (value) { values[1] = value; kw_args--; }
+        }
       }
       if (unlikely(kw_args > 0)) {
         if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__init__") < 0)) __PYX_ERR(0, 38, __pyx_L3_error)
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -3290,17 +3328,18 @@ static int __pyx_pw_14navigator_auth_10exceptions_12Unauthorized_1__init__(PyObj
       }
     }
     __pyx_v_message = ((PyObject*)values[0]);
+    __pyx_v_status = values[1];
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 1, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 38, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 2, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 38, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("navigator_auth.exceptions.Unauthorized.__init__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_message), (&PyUnicode_Type), 1, "message", 1))) __PYX_ERR(0, 38, __pyx_L1_error)
-  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_12Unauthorized___init__(((struct __pyx_obj_14navigator_auth_10exceptions_Unauthorized *)__pyx_v_self), __pyx_v_message);
+  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_12Unauthorized___init__(((struct __pyx_obj_14navigator_auth_10exceptions_Unauthorized *)__pyx_v_self), __pyx_v_message, __pyx_v_status);
 
   /* function exit code */
   goto __pyx_L0;
@@ -3311,7 +3350,7 @@ static int __pyx_pw_14navigator_auth_10exceptions_12Unauthorized_1__init__(PyObj
   return __pyx_r;
 }
 
-static int __pyx_pf_14navigator_auth_10exceptions_12Unauthorized___init__(struct __pyx_obj_14navigator_auth_10exceptions_Unauthorized *__pyx_v_self, PyObject *__pyx_v_message) {
+static int __pyx_pf_14navigator_auth_10exceptions_12Unauthorized___init__(struct __pyx_obj_14navigator_auth_10exceptions_Unauthorized *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status) {
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -3326,8 +3365,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_12Unauthorized___init__(struct
 
   /* "navigator_auth/exceptions.pyx":39
  * 
- *     def __init__(self, str message = None):
- *         super().__init__(message or "Unauthorized", status=401)             # <<<<<<<<<<<<<<
+ *     def __init__(self, str message = None, status=401):
+ *         super().__init__(message or "Unauthorized", status=status)             # <<<<<<<<<<<<<<
  * 
  * cdef class InvalidAuth(AuthException):
  */
@@ -3362,7 +3401,7 @@ static int __pyx_pf_14navigator_auth_10exceptions_12Unauthorized___init__(struct
   __pyx_t_2 = 0;
   __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 39, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_int_401) < 0) __PYX_ERR(0, 39, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_v_status) < 0) __PYX_ERR(0, 39, __pyx_L1_error)
   __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 39, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -3373,8 +3412,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_12Unauthorized___init__(struct
   /* "navigator_auth/exceptions.pyx":38
  * cdef class Unauthorized(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "Unauthorized", status=401)
+ *     def __init__(self, str message = None, status=401):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "Unauthorized", status=status)
  * 
  */
 
@@ -3685,8 +3724,8 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_12Unauthorized_4__setsta
 /* "navigator_auth/exceptions.pyx":43
  * cdef class InvalidAuth(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "Invalid Authentication", status=401)
+ *     def __init__(self, str message = None, status=401):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "Invalid Authentication", status=status)
  * 
  */
 
@@ -3694,6 +3733,7 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_12Unauthorized_4__setsta
 static int __pyx_pw_14navigator_auth_10exceptions_11InvalidAuth_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
 static int __pyx_pw_14navigator_auth_10exceptions_11InvalidAuth_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   PyObject *__pyx_v_message = 0;
+  PyObject *__pyx_v_status = 0;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -3701,13 +3741,16 @@ static int __pyx_pw_14navigator_auth_10exceptions_11InvalidAuth_1__init__(PyObje
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("__init__ (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,0};
-    PyObject* values[1] = {0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,&__pyx_n_s_status,0};
+    PyObject* values[2] = {0,0};
     values[0] = ((PyObject*)Py_None);
+    values[1] = ((PyObject *)__pyx_int_401);
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
       const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
       switch (pos_args) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -3720,12 +3763,20 @@ static int __pyx_pw_14navigator_auth_10exceptions_11InvalidAuth_1__init__(PyObje
           PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_message);
           if (value) { values[0] = value; kw_args--; }
         }
+        CYTHON_FALLTHROUGH;
+        case  1:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_status);
+          if (value) { values[1] = value; kw_args--; }
+        }
       }
       if (unlikely(kw_args > 0)) {
         if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__init__") < 0)) __PYX_ERR(0, 43, __pyx_L3_error)
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -3733,17 +3784,18 @@ static int __pyx_pw_14navigator_auth_10exceptions_11InvalidAuth_1__init__(PyObje
       }
     }
     __pyx_v_message = ((PyObject*)values[0]);
+    __pyx_v_status = values[1];
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 1, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 43, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 2, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 43, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("navigator_auth.exceptions.InvalidAuth.__init__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_message), (&PyUnicode_Type), 1, "message", 1))) __PYX_ERR(0, 43, __pyx_L1_error)
-  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_11InvalidAuth___init__(((struct __pyx_obj_14navigator_auth_10exceptions_InvalidAuth *)__pyx_v_self), __pyx_v_message);
+  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_11InvalidAuth___init__(((struct __pyx_obj_14navigator_auth_10exceptions_InvalidAuth *)__pyx_v_self), __pyx_v_message, __pyx_v_status);
 
   /* function exit code */
   goto __pyx_L0;
@@ -3754,7 +3806,7 @@ static int __pyx_pw_14navigator_auth_10exceptions_11InvalidAuth_1__init__(PyObje
   return __pyx_r;
 }
 
-static int __pyx_pf_14navigator_auth_10exceptions_11InvalidAuth___init__(struct __pyx_obj_14navigator_auth_10exceptions_InvalidAuth *__pyx_v_self, PyObject *__pyx_v_message) {
+static int __pyx_pf_14navigator_auth_10exceptions_11InvalidAuth___init__(struct __pyx_obj_14navigator_auth_10exceptions_InvalidAuth *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status) {
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -3769,8 +3821,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_11InvalidAuth___init__(struct 
 
   /* "navigator_auth/exceptions.pyx":44
  * 
- *     def __init__(self, str message = None):
- *         super().__init__(message or "Invalid Authentication", status=401)             # <<<<<<<<<<<<<<
+ *     def __init__(self, str message = None, status=401):
+ *         super().__init__(message or "Invalid Authentication", status=status)             # <<<<<<<<<<<<<<
  * 
  * cdef class FailedAuth(AuthException):
  */
@@ -3805,7 +3857,7 @@ static int __pyx_pf_14navigator_auth_10exceptions_11InvalidAuth___init__(struct 
   __pyx_t_2 = 0;
   __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 44, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_int_401) < 0) __PYX_ERR(0, 44, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_v_status) < 0) __PYX_ERR(0, 44, __pyx_L1_error)
   __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 44, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -3816,8 +3868,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_11InvalidAuth___init__(struct 
   /* "navigator_auth/exceptions.pyx":43
  * cdef class InvalidAuth(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "Invalid Authentication", status=401)
+ *     def __init__(self, str message = None, status=401):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "Invalid Authentication", status=status)
  * 
  */
 
@@ -4128,8 +4180,8 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_11InvalidAuth_4__setstat
 /* "navigator_auth/exceptions.pyx":48
  * cdef class FailedAuth(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "Failed Authorization", status=403)
+ *     def __init__(self, str message = None, status=403):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "Failed Authorization", status=status)
  * 
  */
 
@@ -4137,6 +4189,7 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_11InvalidAuth_4__setstat
 static int __pyx_pw_14navigator_auth_10exceptions_10FailedAuth_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
 static int __pyx_pw_14navigator_auth_10exceptions_10FailedAuth_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   PyObject *__pyx_v_message = 0;
+  PyObject *__pyx_v_status = 0;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -4144,13 +4197,16 @@ static int __pyx_pw_14navigator_auth_10exceptions_10FailedAuth_1__init__(PyObjec
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("__init__ (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,0};
-    PyObject* values[1] = {0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,&__pyx_n_s_status,0};
+    PyObject* values[2] = {0,0};
     values[0] = ((PyObject*)Py_None);
+    values[1] = ((PyObject *)__pyx_int_403);
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
       const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
       switch (pos_args) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -4163,12 +4219,20 @@ static int __pyx_pw_14navigator_auth_10exceptions_10FailedAuth_1__init__(PyObjec
           PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_message);
           if (value) { values[0] = value; kw_args--; }
         }
+        CYTHON_FALLTHROUGH;
+        case  1:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_status);
+          if (value) { values[1] = value; kw_args--; }
+        }
       }
       if (unlikely(kw_args > 0)) {
         if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__init__") < 0)) __PYX_ERR(0, 48, __pyx_L3_error)
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -4176,17 +4240,18 @@ static int __pyx_pw_14navigator_auth_10exceptions_10FailedAuth_1__init__(PyObjec
       }
     }
     __pyx_v_message = ((PyObject*)values[0]);
+    __pyx_v_status = values[1];
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 1, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 48, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 2, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 48, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("navigator_auth.exceptions.FailedAuth.__init__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_message), (&PyUnicode_Type), 1, "message", 1))) __PYX_ERR(0, 48, __pyx_L1_error)
-  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_10FailedAuth___init__(((struct __pyx_obj_14navigator_auth_10exceptions_FailedAuth *)__pyx_v_self), __pyx_v_message);
+  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_10FailedAuth___init__(((struct __pyx_obj_14navigator_auth_10exceptions_FailedAuth *)__pyx_v_self), __pyx_v_message, __pyx_v_status);
 
   /* function exit code */
   goto __pyx_L0;
@@ -4197,7 +4262,7 @@ static int __pyx_pw_14navigator_auth_10exceptions_10FailedAuth_1__init__(PyObjec
   return __pyx_r;
 }
 
-static int __pyx_pf_14navigator_auth_10exceptions_10FailedAuth___init__(struct __pyx_obj_14navigator_auth_10exceptions_FailedAuth *__pyx_v_self, PyObject *__pyx_v_message) {
+static int __pyx_pf_14navigator_auth_10exceptions_10FailedAuth___init__(struct __pyx_obj_14navigator_auth_10exceptions_FailedAuth *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status) {
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -4212,8 +4277,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_10FailedAuth___init__(struct _
 
   /* "navigator_auth/exceptions.pyx":49
  * 
- *     def __init__(self, str message = None):
- *         super().__init__(message or "Failed Authorization", status=403)             # <<<<<<<<<<<<<<
+ *     def __init__(self, str message = None, status=403):
+ *         super().__init__(message or "Failed Authorization", status=status)             # <<<<<<<<<<<<<<
  * 
  * cdef class Forbidden(AuthException):
  */
@@ -4248,7 +4313,7 @@ static int __pyx_pf_14navigator_auth_10exceptions_10FailedAuth___init__(struct _
   __pyx_t_2 = 0;
   __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 49, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_int_403) < 0) __PYX_ERR(0, 49, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_v_status) < 0) __PYX_ERR(0, 49, __pyx_L1_error)
   __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 49, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -4259,8 +4324,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_10FailedAuth___init__(struct _
   /* "navigator_auth/exceptions.pyx":48
  * cdef class FailedAuth(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "Failed Authorization", status=403)
+ *     def __init__(self, str message = None, status=403):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "Failed Authorization", status=status)
  * 
  */
 
@@ -4571,8 +4636,8 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_10FailedAuth_4__setstate
 /* "navigator_auth/exceptions.pyx":53
  * cdef class Forbidden(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "Forbidden", status=403)
+ *     def __init__(self, str message = None, status=403):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "Forbidden", status=status)
  * 
  */
 
@@ -4580,6 +4645,7 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_10FailedAuth_4__setstate
 static int __pyx_pw_14navigator_auth_10exceptions_9Forbidden_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
 static int __pyx_pw_14navigator_auth_10exceptions_9Forbidden_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   PyObject *__pyx_v_message = 0;
+  PyObject *__pyx_v_status = 0;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -4587,13 +4653,16 @@ static int __pyx_pw_14navigator_auth_10exceptions_9Forbidden_1__init__(PyObject 
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("__init__ (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,0};
-    PyObject* values[1] = {0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,&__pyx_n_s_status,0};
+    PyObject* values[2] = {0,0};
     values[0] = ((PyObject*)Py_None);
+    values[1] = ((PyObject *)__pyx_int_403);
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
       const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
       switch (pos_args) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -4606,12 +4675,20 @@ static int __pyx_pw_14navigator_auth_10exceptions_9Forbidden_1__init__(PyObject 
           PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_message);
           if (value) { values[0] = value; kw_args--; }
         }
+        CYTHON_FALLTHROUGH;
+        case  1:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_status);
+          if (value) { values[1] = value; kw_args--; }
+        }
       }
       if (unlikely(kw_args > 0)) {
         if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__init__") < 0)) __PYX_ERR(0, 53, __pyx_L3_error)
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -4619,17 +4696,18 @@ static int __pyx_pw_14navigator_auth_10exceptions_9Forbidden_1__init__(PyObject 
       }
     }
     __pyx_v_message = ((PyObject*)values[0]);
+    __pyx_v_status = values[1];
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 1, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 53, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 2, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 53, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("navigator_auth.exceptions.Forbidden.__init__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_message), (&PyUnicode_Type), 1, "message", 1))) __PYX_ERR(0, 53, __pyx_L1_error)
-  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_9Forbidden___init__(((struct __pyx_obj_14navigator_auth_10exceptions_Forbidden *)__pyx_v_self), __pyx_v_message);
+  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_9Forbidden___init__(((struct __pyx_obj_14navigator_auth_10exceptions_Forbidden *)__pyx_v_self), __pyx_v_message, __pyx_v_status);
 
   /* function exit code */
   goto __pyx_L0;
@@ -4640,7 +4718,7 @@ static int __pyx_pw_14navigator_auth_10exceptions_9Forbidden_1__init__(PyObject 
   return __pyx_r;
 }
 
-static int __pyx_pf_14navigator_auth_10exceptions_9Forbidden___init__(struct __pyx_obj_14navigator_auth_10exceptions_Forbidden *__pyx_v_self, PyObject *__pyx_v_message) {
+static int __pyx_pf_14navigator_auth_10exceptions_9Forbidden___init__(struct __pyx_obj_14navigator_auth_10exceptions_Forbidden *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status) {
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -4655,8 +4733,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_9Forbidden___init__(struct __p
 
   /* "navigator_auth/exceptions.pyx":54
  * 
- *     def __init__(self, str message = None):
- *         super().__init__(message or "Forbidden", status=403)             # <<<<<<<<<<<<<<
+ *     def __init__(self, str message = None, status=403):
+ *         super().__init__(message or "Forbidden", status=status)             # <<<<<<<<<<<<<<
  * 
  * cdef class AuthExpired(AuthException):
  */
@@ -4691,7 +4769,7 @@ static int __pyx_pf_14navigator_auth_10exceptions_9Forbidden___init__(struct __p
   __pyx_t_2 = 0;
   __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 54, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_int_403) < 0) __PYX_ERR(0, 54, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_v_status) < 0) __PYX_ERR(0, 54, __pyx_L1_error)
   __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 54, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -4702,8 +4780,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_9Forbidden___init__(struct __p
   /* "navigator_auth/exceptions.pyx":53
  * cdef class Forbidden(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "Forbidden", status=403)
+ *     def __init__(self, str message = None, status=403):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "Forbidden", status=status)
  * 
  */
 
@@ -5014,14 +5092,15 @@ static PyObject *__pyx_pf_14navigator_auth_10exceptions_9Forbidden_4__setstate_c
 /* "navigator_auth/exceptions.pyx":58
  * cdef class AuthExpired(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "Gone: Authentication Expired.", status=410)
+ *     def __init__(self, str message = None, status=410):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "Gone: Authentication Expired.", status=status)
  */
 
 /* Python wrapper */
 static int __pyx_pw_14navigator_auth_10exceptions_11AuthExpired_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds); /*proto*/
 static int __pyx_pw_14navigator_auth_10exceptions_11AuthExpired_1__init__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   PyObject *__pyx_v_message = 0;
+  PyObject *__pyx_v_status = 0;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -5029,13 +5108,16 @@ static int __pyx_pw_14navigator_auth_10exceptions_11AuthExpired_1__init__(PyObje
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("__init__ (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,0};
-    PyObject* values[1] = {0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_message,&__pyx_n_s_status,0};
+    PyObject* values[2] = {0,0};
     values[0] = ((PyObject*)Py_None);
+    values[1] = ((PyObject *)__pyx_int_410);
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
       const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
       switch (pos_args) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -5048,12 +5130,20 @@ static int __pyx_pw_14navigator_auth_10exceptions_11AuthExpired_1__init__(PyObje
           PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_message);
           if (value) { values[0] = value; kw_args--; }
         }
+        CYTHON_FALLTHROUGH;
+        case  1:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_status);
+          if (value) { values[1] = value; kw_args--; }
+        }
       }
       if (unlikely(kw_args > 0)) {
         if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__init__") < 0)) __PYX_ERR(0, 58, __pyx_L3_error)
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
         CYTHON_FALLTHROUGH;
         case  0: break;
@@ -5061,17 +5151,18 @@ static int __pyx_pw_14navigator_auth_10exceptions_11AuthExpired_1__init__(PyObje
       }
     }
     __pyx_v_message = ((PyObject*)values[0]);
+    __pyx_v_status = values[1];
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 1, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 58, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__init__", 0, 0, 2, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(0, 58, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("navigator_auth.exceptions.AuthExpired.__init__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
   if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_message), (&PyUnicode_Type), 1, "message", 1))) __PYX_ERR(0, 58, __pyx_L1_error)
-  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_11AuthExpired___init__(((struct __pyx_obj_14navigator_auth_10exceptions_AuthExpired *)__pyx_v_self), __pyx_v_message);
+  __pyx_r = __pyx_pf_14navigator_auth_10exceptions_11AuthExpired___init__(((struct __pyx_obj_14navigator_auth_10exceptions_AuthExpired *)__pyx_v_self), __pyx_v_message, __pyx_v_status);
 
   /* function exit code */
   goto __pyx_L0;
@@ -5082,7 +5173,7 @@ static int __pyx_pw_14navigator_auth_10exceptions_11AuthExpired_1__init__(PyObje
   return __pyx_r;
 }
 
-static int __pyx_pf_14navigator_auth_10exceptions_11AuthExpired___init__(struct __pyx_obj_14navigator_auth_10exceptions_AuthExpired *__pyx_v_self, PyObject *__pyx_v_message) {
+static int __pyx_pf_14navigator_auth_10exceptions_11AuthExpired___init__(struct __pyx_obj_14navigator_auth_10exceptions_AuthExpired *__pyx_v_self, PyObject *__pyx_v_message, PyObject *__pyx_v_status) {
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -5097,8 +5188,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_11AuthExpired___init__(struct 
 
   /* "navigator_auth/exceptions.pyx":59
  * 
- *     def __init__(self, str message = None):
- *         super().__init__(message or "Gone: Authentication Expired.", status=410)             # <<<<<<<<<<<<<<
+ *     def __init__(self, str message = None, status=410):
+ *         super().__init__(message or "Gone: Authentication Expired.", status=status)             # <<<<<<<<<<<<<<
  */
   __pyx_t_1 = PyTuple_New(2); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 59, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
@@ -5131,7 +5222,7 @@ static int __pyx_pf_14navigator_auth_10exceptions_11AuthExpired___init__(struct 
   __pyx_t_2 = 0;
   __pyx_t_2 = __Pyx_PyDict_NewPresized(1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 59, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_int_410) < 0) __PYX_ERR(0, 59, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_t_2, __pyx_n_s_status, __pyx_v_status) < 0) __PYX_ERR(0, 59, __pyx_L1_error)
   __pyx_t_5 = __Pyx_PyObject_Call(__pyx_t_1, __pyx_t_4, __pyx_t_2); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 59, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -5142,8 +5233,8 @@ static int __pyx_pf_14navigator_auth_10exceptions_11AuthExpired___init__(struct 
   /* "navigator_auth/exceptions.pyx":58
  * cdef class AuthExpired(AuthException):
  * 
- *     def __init__(self, str message = None):             # <<<<<<<<<<<<<<
- *         super().__init__(message or "Gone: Authentication Expired.", status=410)
+ *     def __init__(self, str message = None, status=410):             # <<<<<<<<<<<<<<
+ *         super().__init__(message or "Gone: Authentication Expired.", status=status)
  */
 
   /* function exit code */
@@ -8628,7 +8719,7 @@ static PyTypeObject __pyx_type_14navigator_auth_10exceptions_ConfigError = {
   0, /*tp_setattro*/
   0, /*tp_as_buffer*/
   Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_VERSION_TAG|Py_TPFLAGS_CHECKTYPES|Py_TPFLAGS_HAVE_NEWBUFFER|Py_TPFLAGS_BASETYPE|Py_TPFLAGS_HAVE_GC, /*tp_flags*/
-  "ConfigError(unicode message=None)", /*tp_doc*/
+  "ConfigError(unicode message=None, status=500)", /*tp_doc*/
   __pyx_tp_traverse_14navigator_auth_10exceptions_AuthException, /*tp_traverse*/
   __pyx_tp_clear_14navigator_auth_10exceptions_AuthException, /*tp_clear*/
   0, /*tp_richcompare*/
@@ -8716,7 +8807,7 @@ static PyTypeObject __pyx_type_14navigator_auth_10exceptions_UserNotFound = {
   0, /*tp_setattro*/
   0, /*tp_as_buffer*/
   Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_VERSION_TAG|Py_TPFLAGS_CHECKTYPES|Py_TPFLAGS_HAVE_NEWBUFFER|Py_TPFLAGS_BASETYPE|Py_TPFLAGS_HAVE_GC, /*tp_flags*/
-  "UserNotFound(unicode message=None)", /*tp_doc*/
+  "UserNotFound(unicode message=None, status=404)", /*tp_doc*/
   __pyx_tp_traverse_14navigator_auth_10exceptions_AuthException, /*tp_traverse*/
   __pyx_tp_clear_14navigator_auth_10exceptions_AuthException, /*tp_clear*/
   0, /*tp_richcompare*/
@@ -8804,7 +8895,7 @@ static PyTypeObject __pyx_type_14navigator_auth_10exceptions_Unauthorized = {
   0, /*tp_setattro*/
   0, /*tp_as_buffer*/
   Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_VERSION_TAG|Py_TPFLAGS_CHECKTYPES|Py_TPFLAGS_HAVE_NEWBUFFER|Py_TPFLAGS_BASETYPE|Py_TPFLAGS_HAVE_GC, /*tp_flags*/
-  "Unauthorized(unicode message=None)", /*tp_doc*/
+  "Unauthorized(unicode message=None, status=401)", /*tp_doc*/
   __pyx_tp_traverse_14navigator_auth_10exceptions_AuthException, /*tp_traverse*/
   __pyx_tp_clear_14navigator_auth_10exceptions_AuthException, /*tp_clear*/
   0, /*tp_richcompare*/
@@ -8892,7 +8983,7 @@ static PyTypeObject __pyx_type_14navigator_auth_10exceptions_InvalidAuth = {
   0, /*tp_setattro*/
   0, /*tp_as_buffer*/
   Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_VERSION_TAG|Py_TPFLAGS_CHECKTYPES|Py_TPFLAGS_HAVE_NEWBUFFER|Py_TPFLAGS_BASETYPE|Py_TPFLAGS_HAVE_GC, /*tp_flags*/
-  "InvalidAuth(unicode message=None)", /*tp_doc*/
+  "InvalidAuth(unicode message=None, status=401)", /*tp_doc*/
   __pyx_tp_traverse_14navigator_auth_10exceptions_AuthException, /*tp_traverse*/
   __pyx_tp_clear_14navigator_auth_10exceptions_AuthException, /*tp_clear*/
   0, /*tp_richcompare*/
@@ -8980,7 +9071,7 @@ static PyTypeObject __pyx_type_14navigator_auth_10exceptions_FailedAuth = {
   0, /*tp_setattro*/
   0, /*tp_as_buffer*/
   Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_VERSION_TAG|Py_TPFLAGS_CHECKTYPES|Py_TPFLAGS_HAVE_NEWBUFFER|Py_TPFLAGS_BASETYPE|Py_TPFLAGS_HAVE_GC, /*tp_flags*/
-  "FailedAuth(unicode message=None)", /*tp_doc*/
+  "FailedAuth(unicode message=None, status=403)", /*tp_doc*/
   __pyx_tp_traverse_14navigator_auth_10exceptions_AuthException, /*tp_traverse*/
   __pyx_tp_clear_14navigator_auth_10exceptions_AuthException, /*tp_clear*/
   0, /*tp_richcompare*/
@@ -9068,7 +9159,7 @@ static PyTypeObject __pyx_type_14navigator_auth_10exceptions_Forbidden = {
   0, /*tp_setattro*/
   0, /*tp_as_buffer*/
   Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_VERSION_TAG|Py_TPFLAGS_CHECKTYPES|Py_TPFLAGS_HAVE_NEWBUFFER|Py_TPFLAGS_BASETYPE|Py_TPFLAGS_HAVE_GC, /*tp_flags*/
-  "Forbidden(unicode message=None)", /*tp_doc*/
+  "Forbidden(unicode message=None, status=403)", /*tp_doc*/
   __pyx_tp_traverse_14navigator_auth_10exceptions_AuthException, /*tp_traverse*/
   __pyx_tp_clear_14navigator_auth_10exceptions_AuthException, /*tp_clear*/
   0, /*tp_richcompare*/
@@ -9156,7 +9247,7 @@ static PyTypeObject __pyx_type_14navigator_auth_10exceptions_AuthExpired = {
   0, /*tp_setattro*/
   0, /*tp_as_buffer*/
   Py_TPFLAGS_DEFAULT|Py_TPFLAGS_HAVE_VERSION_TAG|Py_TPFLAGS_CHECKTYPES|Py_TPFLAGS_HAVE_NEWBUFFER|Py_TPFLAGS_BASETYPE|Py_TPFLAGS_HAVE_GC, /*tp_flags*/
-  "AuthExpired(unicode message=None)", /*tp_doc*/
+  "AuthExpired(unicode message=None, status=410)", /*tp_doc*/
   __pyx_tp_traverse_14navigator_auth_10exceptions_AuthException, /*tp_traverse*/
   __pyx_tp_clear_14navigator_auth_10exceptions_AuthException, /*tp_clear*/
   0, /*tp_richcompare*/
