@@ -1,8 +1,10 @@
 from typing import Any
+import time
 import importlib
 import hashlib
 import base64
 import secrets
+from aiohttp import web
 from datamodel.exceptions import ValidationError
 from navigator_session import get_session, SESSION_KEY, AUTH_SESSION_OBJECT
 from asyncdb.exceptions import (
@@ -11,6 +13,7 @@ from asyncdb.exceptions import (
     NoDataFound,
     StatementError
 )
+from navigator.libs.cypher import Cipher
 from navigator_auth.exceptions import AuthException
 from navigator_auth.models import User
 from navigator_auth.conf import (
@@ -18,9 +21,10 @@ from navigator_auth.conf import (
     AUTH_PWD_DIGEST,
     AUTH_PWD_LENGTH,
     AUTH_PWD_ALGORITHM,
-    AUTH_PWD_SALT_LENGTH
+    AUTH_PWD_SALT_LENGTH,
+    PARTNER_KEY
 )
-from .base import BaseView
+from .base import BaseView, BaseHandler
 
 
 def set_basic_password(
@@ -43,6 +47,8 @@ def set_basic_password(
 
 
 def check_password(current_password, password):
+    if not password:
+        return False
     try:
         algorithm, iterations, salt, _ = current_password.split("$", 3)
     except ValueError as ex:
@@ -58,12 +64,12 @@ def check_password(current_password, password):
     )
     return secrets.compare_digest(current_password, compare_hash)
 
-class UserSession(BaseView):
+class UserSession(BaseHandler):
 
-    async def session(self):
+    async def session(self, request):
         session = None
         try:
-            session = await get_session(self.request)
+            session = await get_session(request)
         except (ValueError, RuntimeError) as err:
             return self.critical(
                 reason="Error Decoding Session",
@@ -90,9 +96,9 @@ class UserSession(BaseView):
             return session
 
 
-    async def put(self):
+    async def in_session(self, request: web.Request):
         """ Adding (put) information (persistence) to User Session."""
-        session = await self.session()
+        session = await self.session(request)
         try:
             data = await self.json_data()
         except (TypeError, ValueError, AuthException):
@@ -108,52 +114,183 @@ class UserSession(BaseView):
             headers=headers
         )
 
-    async def patch(self):
-        """ Changing User Attributes or Reset Password. """
-        session = await self.session()
+    async def gen_token(self, request: web.Request):
+        """ Generate a RCCRYPT TOKEN from Email account."""
+        session = await self.session(request)
+        params = self.match_parameters(request)
         try:
-            data = await self.json_data()
-        except (TypeError, ValueError, AuthException):
+            userid = params['userid']
+        except KeyError:
+            userid = None
+        ### TODO: check if user is superuser:
+        userinfo = session[AUTH_SESSION_OBJECT]
+        if userinfo['superuser'] is False:
             return self.error(
-                reason="Invalid or Empty Session Data",
+                reason = 'Access Denied',
                 status=406
             )
-        ## Attributes: Password, is_new, is_active (disable user)
-
-    async def get(self):
-        """ Getting User Session information or User Profile."""
-        session = await self.session()
-        params = self.match_parameters()
         try:
-            if params['meta'] == ':profile':
-                ## Need to return instead User Profile
-                try:
-                    userinfo = session[AUTH_SESSION_OBJECT]
-                    user_id = userinfo['user_id']
-                except KeyError:
-                    return self.error(
-                        reason = 'Invalid Session, missing Session ID',
-                        status=406
-                    )
-                try:
-                    user = await User.get(user_id=user_id)
-                    return self.json_response(
-                        content=user.json(ensure_ascii=True, indent=4),
-                        status=200
-                    )
-                except ValidationError as ex:
-                    self.error(
-                        reason='User info has errors',
-                        exception=ex.payload,
-                        status=412
-                    )
-                except Exception as err: # pylint: disable=W0703
-                    return self.critical(
-                        reason="Error getting User Profile",
-                        exception=err
-                    )
+            db = request.app['authdb']
+            async with await db.acquire() as conn:
+                User.Meta.connection = conn
+                user = await User.get(user_id=userid)
+                data = {
+                    "magic": "Navigator",
+                    "firstName": user.first_name,
+                    "lastName": user.last_name,
+                    "email": user.email,
+                    "username": user.username,
+                    "timestamp": str(time.time())
+                }
+                cipher = Cipher(PARTNER_KEY, type="RNC")
+                rnc = cipher.encode(self._json.dumps(data))
+                headers = {"x-status": "OK", "x-message": "Token Generated"}
+                response = {
+                    "token": rnc.upper()
+                }
+                return self.json_response(
+                    content=response,
+                    headers=headers
+                )
+        except ValidationError as ex:
+            self.error(
+                reason='User info has errors',
+                exception=ex.payload,
+                status=412
+            )
+        except Exception as err: # pylint: disable=W0703
+            return self.critical(
+                reason=f"Error getting User: {err}",
+                exception=err
+            )
+
+    async def password_change(self, request: web.Request):
+        """ Reset User Password. """
+        session = await self.session(request)
+        params = self.match_parameters(request)
+        try:
+            userid = params['userid']
         except KeyError:
-            pass
+            userid = None
+        try:
+            data = await self.get_json(request)
+            new_password = data['password']
+            old_password = data['old_password']
+        except (TypeError, ValueError, AuthException):
+            return self.error(
+                reason="Invalid User Data",
+                status=406
+            )
+        try:
+            userinfo = session[AUTH_SESSION_OBJECT]
+            user_id = userinfo['user_id']
+        except KeyError:
+            return self.error(
+                reason = 'Invalid Session, missing Session ID',
+                status=406
+            )
+        ## validating user Id:
+        if userid is not None and userid != user_id:
+            return self.error(
+                reason="Forbidden: User ID from session and URL doesn't match.",
+                status=403
+            )
+        try:
+            db = request.app['authdb']
+            async with await db.acquire() as conn:
+                User.Meta.connection = conn
+                user = await User.get(user_id=user_id)
+                if check_password(user.password, old_password):
+                    # valid, can change password
+                    user.password = set_basic_password(new_password)
+                    await user.update()
+                    headers = {"x-status": "OK", "x-message": "Session OK"}
+                    response = {
+                        "action": "Password Changed",
+                        "status": "OK"
+                    }
+                    return self.json_response(
+                        content=response,
+                        headers=headers,
+                        status=202
+                    )
+                else:
+                    return self.error(
+                        reason="Forbidden: Current Password doesn't match.",
+                        status=403
+                    )
+        except ValidationError as ex:
+            self.error(
+                reason='User info has errors',
+                exception=ex.payload,
+                status=412
+            )
+        except Exception as err: # pylint: disable=W0703
+            return self.critical(
+                reason=f"Error getting User: {err}",
+                exception=err
+            )
+
+
+    async def password_reset(self, request: web.Request):
+        """ Reset User Password. """
+        session = await self.session(request)
+        params = self.match_parameters(request)
+        try:
+            userid = params['userid']
+        except KeyError:
+            userid = None
+        try:
+            data = await self.json_data(request)
+            new_password = data['password']
+        except (TypeError, ValueError, AuthException):
+            return self.error(
+                reason="Invalid User Data",
+                status=406
+            )
+        ### TODO: check if user is superuser:
+        userinfo = session[AUTH_SESSION_OBJECT]
+        if userinfo['superuser'] is False:
+            return self.error(
+                reason = 'Access Denied',
+                status=406
+            )
+        try:
+            db = request.app['authdb']
+            async with await db.acquire() as conn:
+                User.Meta.connection = conn
+                user = await User.get(user_id=userid)
+                ## Reset Password:
+                user.password = set_basic_password(new_password)
+                user.is_new = True
+                await user.update()
+                headers = {"x-status": "OK", "x-message": "Session OK"}
+                response = {
+                    "action": "Password was changed successfully",
+                    "user": user.user_id,
+                    "username": user.username,
+                    "status": "OK"
+                }
+                return self.json_response(
+                    content=response,
+                    headers=headers,
+                    status=202
+                )
+        except ValidationError as ex:
+            self.error(
+                reason='User info has errors',
+                exception=ex.payload,
+                status=412
+            )
+        except Exception as err: # pylint: disable=W0703
+            return self.critical(
+                reason=f"Error getting User: {err}",
+                exception=err
+            )
+
+    async def user_session(self, request: web.Request):
+        """ Getting User Session information."""
+        session = await self.session(request)
         ## get session Data:
         headers = {"x-status": "OK", "x-message": "Session OK"}
         userdata = dict(session)
@@ -173,10 +310,43 @@ class UserSession(BaseView):
                 status=406
             )
 
-    async def delete(self):
+    async def user_profile(self, request: web.Request):
+        """ Getting User Profile."""
+        session = await self.session(request)
+        try:
+            userinfo = session[AUTH_SESSION_OBJECT]
+            user_id = userinfo['user_id']
+        except KeyError:
+            return self.error(
+                reason = 'Invalid Session, missing Session ID',
+                status=406
+            )
+        try:
+            db = request.app['authdb']
+            async with await db.acquire() as conn:
+                User.Meta.connection = conn
+                user = await User.get(user_id=user_id)
+                user.password = None
+                return self.json_response(
+                    content=user,
+                    status=200
+                )
+        except ValidationError as ex:
+            self.error(
+                reason='User info has errors',
+                exception=ex.payload,
+                status=412
+            )
+        except Exception as err: # pylint: disable=W0703
+            return self.critical(
+                reason=f"Error getting User Profile: {err}",
+                exception=err
+            )
+
+    async def logout(self, request: web.Request):
         """ Logout: Close and Delete User Session."""
-        session = await self.session()
-        app = self.request.app
+        session = await self.session(request)
+        app = request.app
         router = app.router
         try:
             session.invalidate()

@@ -560,3 +560,13 @@ class AuthHandler:
             UserHandler,
             name='api_auth_users'
         )
+        ### User Session Methods:
+        usr = UserSession()
+        router.add_get("/api/v2/user/logout", usr.logout, allow_head=True)
+        router.add_delete("/api/v2/user/logout", usr.logout)
+        router.add_get("/api/v2/user/session", usr.user_session, allow_head=True)
+        router.add_get("/api/v2/user/profile", usr.user_profile, allow_head=True)
+        router.add_put("/api/v2/user/in_session", usr.in_session)
+        router.add_post("/api/v2/user/set_password", usr.password_change)
+        router.add_post("/api/v2/user/password_reset/{userid:.*}", usr.password_reset)
+        router.add_get("/api/v2/user/gen_token/{userid:.*}", usr.gen_token, allow_head=True)

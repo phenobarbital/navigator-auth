@@ -145,6 +145,8 @@ DJANGO_USER_MAPPING = {
     "employee": "employee",
 }
 
+PARTNER_KEY = config.get("PARTNER_KEY")
+
 try:
     from settings.settings import * # pylint: disable=W0614,W0401
 except ImportError as ex:
