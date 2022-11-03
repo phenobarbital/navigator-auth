@@ -72,6 +72,8 @@ class BasicAuth(BaseAuthBackend):
             raise InvalidAuth(
                 'NAV: Missing Password attr on User Account'
             ) from ex
+        except Exception as err:
+            logging.error(err)
         try:
             if self.check_password(pwd, password):
                 # return the user Object

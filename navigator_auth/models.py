@@ -132,7 +132,7 @@ class UserType(Enum):
 class User(Model):
     """Basic User notation."""
 
-    user_id: int = Column(required=False, primary_key=True)
+    user_id: int = Column(required=False, primary_key=True, db_default='auto')
     userid: UUID = Column(required=True, db_default='auto')
     first_name: str = Column(required=True, max=254, label="First Name")
     last_name: str = Column(required=True, max=254, label="Last Name")
@@ -156,9 +156,6 @@ class User(Model):
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
     created_by: str = Column(required=False)
-
-    # def __getitem__(self, item):
-    #     return getattr(self, item)
 
     class Meta:
         name = USERS_TABLE

@@ -1,5 +1,8 @@
 from typing import Any
 import importlib
+import hashlib
+import base64
+import secrets
 from datamodel.exceptions import ValidationError
 from navigator_session import get_session, SESSION_KEY, AUTH_SESSION_OBJECT
 from asyncdb.exceptions import (
@@ -10,10 +13,50 @@ from asyncdb.exceptions import (
 )
 from navigator_auth.exceptions import AuthException
 from navigator_auth.models import User
-from navigator_auth.conf import AUTH_USER_MODEL
+from navigator_auth.conf import (
+    AUTH_USER_MODEL,
+    AUTH_PWD_DIGEST,
+    AUTH_PWD_LENGTH,
+    AUTH_PWD_ALGORITHM,
+    AUTH_PWD_SALT_LENGTH
+)
 from .base import BaseView
 
 
+def set_basic_password(
+    password: str,
+    token_num: int = 6,
+    iterations: int = 80000,
+    salt: str = None
+):
+    if not salt:
+        salt = secrets.token_hex(token_num)
+    key = hashlib.pbkdf2_hmac(
+        AUTH_PWD_DIGEST,
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        iterations,
+        dklen=AUTH_PWD_LENGTH,
+    )
+    hst = base64.b64encode(key).decode("utf-8").strip()
+    return f"{AUTH_PWD_ALGORITHM}${iterations}${salt}${hst}"
+
+
+def check_password(current_password, password):
+    try:
+        algorithm, iterations, salt, _ = current_password.split("$", 3)
+    except ValueError as ex:
+        raise AuthException(
+            'Invalid Password Algorithm: {ex}'
+        ) from ex
+    assert algorithm == AUTH_PWD_ALGORITHM
+    compare_hash = set_basic_password(
+        password,
+        iterations=int(iterations),
+        salt=salt,
+        token_num=AUTH_PWD_SALT_LENGTH
+    )
+    return secrets.compare_digest(current_password, compare_hash)
 
 class UserSession(BaseView):
 
@@ -224,7 +267,6 @@ class UserHandler(BaseView):
             ## Using fallback Model
             return self.model
 
-
     async def get(self):
         """ Getting Client information."""
         session = await self.session()
@@ -383,8 +425,14 @@ class UserHandler(BaseView):
                 ## saved with new changes:
                 for key, val in data.items():
                     if key in result.get_fields():
-                        result.set(key, val)
+                        if key == 'password':
+                            passwd = set_basic_password(val)
+                            result.set(key, passwd)
+                        else:
+                            result.set(key, val)
                 data = await result.update()
+                ## hidden password:
+                data.password = None
                 return self.json_response(content=data, status=202)
         else:
             self.error(
@@ -393,7 +441,7 @@ class UserHandler(BaseView):
             )
 
     async def delete(self):
-        """ Delete a Client."""
+        """ Delete a User."""
         session = await self.session()
         if not session:
             self.error(
@@ -443,3 +491,185 @@ class UserHandler(BaseView):
                 reason="Cannot Delete an missing User ID",
                 status=404
             )
+
+    async def put(self):
+        """ Creating a New User."""
+        session = await self.session()
+        if not session:
+            return self.error(
+                reason="Unauthorized",
+                status=403
+            )
+        ### get session Data:
+        try:
+            data = await self.json_data()
+        except (TypeError, ValueError, AuthException):
+            return self.error(
+                reason="Invalid User Data",
+                status=403
+            )
+        # first, validate with model:
+        try:
+            resultset = self.model(**data) # pylint: disable=E1102
+            # set creation:
+            resultset.created_by = session[SESSION_KEY]
+        except ValidationError as ex:
+            error = {
+                "error": f"Unable to insert {self.name} info",
+                "payload": ex.payload,
+            }
+            return self.error(
+                reason=error,
+                status=406
+            )
+        try:
+            db = self.request.app['authdb']
+            async with await db.acquire() as conn:
+                resultset.Meta.connection = conn
+                # changing the password:
+                val = resultset.password
+                if val:
+                    resultset.password = set_basic_password(val)
+                result = await resultset.insert()
+                result.password = None
+                return self.json_response(content=result, status=201)
+        except StatementError as ex:
+            # UniqueViolation, already exists:
+            error = {
+                "error": "User already exists",
+                "payload": str(ex),
+            }
+            return self.error(
+                exception=error,
+                status=412
+            )
+        except (TypeError, AttributeError, ValueError) as ex:
+            error = {
+                "error": "Invalid payload for User",
+                "payload": str(ex),
+            }
+            return self.error(
+                exception=error,
+                status=406
+            )
+        except (DriverError, ProviderError) as ex:
+            error = {
+                "error": "User Error",
+                "payload": str(ex),
+            }
+            return self.error(
+                exception=error,
+                status=400
+            )
+
+    async def post(self):
+        """ Create or Update a Client."""
+        session = await self.session()
+        if not session:
+            return self.error(
+                reason="Unauthorized",
+                status=403
+            )
+        ### get session Data:
+        params = self.match_parameters()
+        try:
+            data = await self.json_data()
+        except (TypeError, ValueError, AuthException):
+            return self.error(
+                reason="Invalid User Data",
+                status=403
+            )
+        args = {}
+        try:
+            userid = data['user_id']
+        except (TypeError, KeyError):
+            try:
+                userid = params['id']
+            except KeyError:
+                userid = None
+        if userid:
+            args = {
+                'user_id': userid
+            }
+        db = self.request.app['authdb']
+        if args:
+            async with await db.acquire() as conn:
+                self.model.Meta.connection = conn
+                # look for this client, after, save changes
+                error = {
+                    "error": "User was not Found"
+                }
+                try:
+                    result = await self.model.get(**args)
+                except NoDataFound:
+                    # create new Record
+                    result = None
+                if not result:
+                    try:
+                        resultset = self.model(**data) # pylint: disable=E1102
+                        val = resultset.password
+                        if val:
+                            resultset.password = set_basic_password(val)
+                        result = await resultset.insert()
+                        result.password = None
+                        return self.json_response(content=result, status=201)
+                    except ValidationError as ex:
+                        error = {
+                            "error": f"Unable to insert {self.name} info",
+                            "payload": ex.payload,
+                        }
+                        return self.error(
+                            reason=error,
+                            status=406
+                        )
+                ## saved with new changes:
+                for key, val in data.items():
+                    if key in result.get_fields():
+                        if key == 'password':
+                            if val:
+                                pwd = set_basic_password(val)
+                                result.set(key, pwd)
+                        else:
+                            result.set(key, val)
+                data = await result.update()
+                data.password = None
+                return self.json_response(content=data, status=202)
+        else:
+            # create a new client based on data:
+            try:
+                resultset = self.model(**data) # pylint: disable=E1102
+                async with await db.acquire() as conn:
+                    resultset.Meta.connection = conn
+                    val = resultset.password
+                    if val:
+                        resultset.password = set_basic_password(val)
+                    result = await resultset.insert() # TODO: migrate to use save()
+                    result.password = None
+                    return self.json_response(content=result, status=201)
+            except ValidationError as ex:
+                error = {
+                    "error": f"Unable to insert {self.name} info",
+                    "payload": ex.payload,
+                }
+                return self.error(
+                    reason=error,
+                    status=406
+                )
+            except (TypeError, AttributeError, ValueError) as ex:
+                error = {
+                    "error": f"Invalid payload for {self.name}",
+                    "payload": str(ex),
+                }
+                return self.error(
+                    exception=error,
+                    status=406
+                )
+            except (DriverError, ProviderError) as ex:
+                error = {
+                    "error": "User Error",
+                    "payload": str(ex),
+                }
+                return self.error(
+                    exception=error,
+                    status=400
+                )
