@@ -23,7 +23,7 @@ from navigator_auth.conf import (
 )
 # Authenticated Entity
 from navigator_auth.identities import AuthUser
-from .base import BaseAuthBackend
+from .abstract import BaseAuthBackend
 
 
 class BasicUser(AuthUser):

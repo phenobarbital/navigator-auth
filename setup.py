@@ -64,6 +64,12 @@ extensions = [
         extra_compile_args=COMPILE_ARGS,
         language="c++"
     ),
+    Extension(
+        name='navigator_auth.libs.cipher',
+        sources=['navigator_auth/libs/cipher.pyx'],
+        extra_compile_args=COMPILE_ARGS,
+        language="c++"
+    ),
 ]
 
 

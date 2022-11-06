@@ -4,9 +4,9 @@ Authentication Backends.
 """
 from .noauth import NoAuth
 from .basic import BasicAuth
-# from .troc import TrocToken
 from .django import DjangoAuth
-# from .token import TokenAuth
+from .troc import TrocToken
+from .token import TokenAuth
 # from .google import GoogleAuth
 # from .okta import OktaAuth
 # from .adfs import ADFSAuth
@@ -16,9 +16,9 @@ from .django import DjangoAuth
 __all__ = [
     "NoAuth",
     "BasicAuth",
-    # "TrocToken",
     "DjangoAuth",
-    # "TokenAuth",
+    "TrocToken",
+    "TokenAuth",
     # "GoogleAuth",
     # "OktaAuth",
     # "ADFSAuth",

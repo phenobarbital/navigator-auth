@@ -10,7 +10,7 @@ from navigator_session import (
 )
 # Authenticated Entity
 from navigator_auth.identities import AuthUser, Guest
-from .base import BaseAuthBackend
+from .abstract import BaseAuthBackend
 
 class AnonymousUser(AuthUser):
     first_name: str = 'Anonymous'

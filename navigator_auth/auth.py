@@ -11,12 +11,15 @@ Supporting:
 from textwrap import dedent
 import importlib
 import inspect
-from collections.abc import Iterable
-from aiohttp import web
+from collections.abc import Iterable, Callable, Awaitable
+from aiohttp import web, hdrs
 from aiohttp.abc import AbstractView
+from aiohttp.web_urldispatcher import SystemRoute
 import aiohttp_cors
 from navigator_session import (
-    SessionHandler, SESSION_KEY
+    get_session,
+    SessionHandler,
+    SESSION_KEY
 )
 from .conf import (
     AUTHENTICATION_BACKENDS,
@@ -26,14 +29,11 @@ from .conf import (
     default_dsn,
     logging
 )
-### Table Handlers:
-from .handlers import ClientHandler, OrganizationHandler, PermissionHandler, UserHandler, UserSession
-from .handlers.program import ProgramCatHandler, ProgramHandler, ProgramClientHandler
-from .handlers.groups import GroupHandler, GroupPermissionHandler, UserGroupHandler
+from .backends.abstract import decode_token
+from .handlers import handler_routes
 ## Responses
 from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
-from .backends.base import auth_middleware
 from .authorizations import authz_hosts, authz_allow_hosts
 from .exceptions import (
     AuthException,
@@ -41,7 +41,18 @@ from .exceptions import (
     InvalidAuth,
     FailedAuth,
     Forbidden,
-    ConfigError
+    ConfigError,
+    AuthExpired
+)
+
+exclude_list = (
+    "/static/",
+    "/api/v1/login",
+    "/api/v1/logout",
+    "/login",
+    "/logout",
+    "/signin",
+    "/signout",
 )
 
 class AuthHandler:
@@ -72,9 +83,6 @@ class AuthHandler:
         self.backends: dict = {}
         self._session = None
         self._template = dedent(self._template)
-        authz_backends = self.get_authorization_backends(
-            AUTHORIZATION_BACKENDS
-        )
         if 'scheme' in kwargs:
             self.auth_scheme = kwargs['scheme']
         else:
@@ -88,7 +96,6 @@ class AuthHandler:
             ) from ex
         args = {
             "scheme": self.auth_scheme,
-            "authorization_backends": authz_backends,
             "user_model": user_model,
             **kwargs,
         }
@@ -96,6 +103,9 @@ class AuthHandler:
         self.backends = self.get_backends(**args)
         self._middlewares = self.get_authorization_middlewares(
             AUTHORIZATION_MIDDLEWARES
+        )
+        self._authz_backends: list = self.get_authorization_backends(
+            AUTHORIZATION_BACKENDS
         )
         # TODO: Session Support with parametrization (other backends):
         self._session = SessionHandler(storage='redis')
@@ -416,11 +426,11 @@ class AuthHandler:
             name="api_session"
         )
         ### Handler for Auth Objects:
-        self.model_routes(router)
+        handler_routes(router)
         # the backend add a middleware to the app
         mdl = self.app.middlewares
         # first: add the basic jwt middleware (used by basic auth and others)
-        mdl.append(auth_middleware)
+        mdl.append(self.auth_middleware)
         # if authentication backend needs initialization
         for name, backend in self.backends.items():
             try:
@@ -452,121 +462,80 @@ class AuthHandler:
         self.setup_cors(cors)
         return self.app
 
-    def model_routes(self, router):
-        ## Clients
-        router.add_view(
-            r'/api/v1/clients/{id:.*}',
-            ClientHandler,
-            name='api_clients_id'
-        )
-        router.add_view(
-            r'/api/v1/clients{meta:\:?.*}',
-            ClientHandler,
-            name='api_clients'
-        )
-        ## Organizations:
-        router.add_view(
-            r'/api/v1/organizations/{id:.*}',
-            OrganizationHandler,
-            name='api_organizations_id'
-        )
-        router.add_view(
-            r'/api/v1/organizations{meta:\:?.*}',
-            OrganizationHandler,
-            name='api_organizations'
-        )
-        ### Programs:
-        router.add_view(
-            r'/api/v1/programs/{id:.*}',
-            ProgramHandler,
-            name='api_programs_id'
-        )
-        router.add_view(
-            r'/api/v1/programs{meta:\:?.*}',
-            ProgramHandler,
-            name='api_programs'
-        )
-        router.add_view(
-            r'/api/v1/program_categories/{id:.*}',
-            ProgramCatHandler,
-            name='api_program_categories_id'
-        )
-        router.add_view(
-            r'/api/v1/program_categories{meta:\:?.*}',
-            ProgramCatHandler,
-            name='api_program_categories'
-        )
-        # Program Client:
-        router.add_view(
-            r'/api/v1/program_clients/{id:.*}',
-            ProgramClientHandler,
-            name='api_programs_clients_id'
-        )
-        router.add_view(
-            r'/api/v1/program_clients{meta:\:?.*}',
-            ProgramClientHandler,
-            name='api_programs_clients'
-        )
-        ### Model permissions:
-        router.add_view(
-            r'/api/v1/permissions/{id:.*}',
-            PermissionHandler,
-            name='api_permissions_id'
-        )
-        router.add_view(
-            r'/api/v1/permissions{meta:\:?.*}',
-            PermissionHandler,
-            name='api_permissions'
-        )
-        ### Groups:
-        router.add_view(
-            r'/api/v1/groups/{id:.*}',
-            GroupHandler,
-            name='api_groups_id'
-        )
-        router.add_view(
-            r'/api/v1/groups{meta:\:?.*}',
-            GroupHandler,
-            name='api_groups'
-        )
-        router.add_view(
-            r'/api/v1/user_groups/{id:.*}',
-            UserGroupHandler,
-            name='api_user_groups_id'
-        )
-        router.add_view(
-            r'/api/v1/user_groups{meta:\:?.*}',
-            UserGroupHandler,
-            name='api_user_groups'
-        )
-        router.add_view(
-            r'/api/v1/group_permissions/{id:.*}',
-            GroupPermissionHandler,
-            name='api_group_permissions_id'
-        )
-        router.add_view(
-            r'/api/v1/group_permissions{meta:\:?.*}',
-            GroupPermissionHandler,
-            name='api_group_permissions'
-        )
-        ### User Methods:
-        router.add_view(
-            r'/api/v1/users/{id:.*}',
-            UserHandler,
-            name='api_auth_users_id'
-        )
-        router.add_view(
-            r'/api/v1/users{meta:\:?.*}',
-            UserHandler,
-            name='api_auth_users'
-        )
-        ### User Session Methods:
-        usr = UserSession()
-        router.add_get("/api/v2/user/logout", usr.logout, allow_head=True)
-        router.add_delete("/api/v2/user/logout", usr.logout)
-        router.add_get("/api/v2/user/session", usr.user_session, allow_head=True)
-        router.add_get("/api/v2/user/profile", usr.user_profile, allow_head=True)
-        router.add_put("/api/v2/user/in_session", usr.in_session)
-        router.add_post("/api/v2/user/set_password", usr.password_change)
-        router.add_post("/api/v2/user/password_reset/{userid:.*}", usr.password_reset)
-        router.add_get("/api/v2/user/gen_token/{userid:.*}", usr.gen_token, allow_head=True)
+    async def auth_middleware(
+        self,
+        app: web.Application,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]]
+    ) -> web.StreamResponse:
+        """
+            Basic Auth Middleware.
+            Description: Basic Authentication for NoAuth, Basic, Token and Django.
+        """
+        @web.middleware
+        async def middleware(request: web.Request) -> web.StreamResponse:
+            logging.debug(':: AUTH MIDDLEWARE ::')
+            # avoid authorization backend on excluded methods:
+            if request.method == hdrs.METH_OPTIONS:
+                return await handler(request)
+            # avoid authorization on exclude list
+            if request.path in exclude_list:
+                return await handler(request)
+            # avoid check system routes
+            try:
+                if isinstance(request.match_info.route, SystemRoute):  # eg. 404
+                    return await handler(request)
+            except Exception as err: # pylint: disable=W0703
+                logging.error(err)
+            ### Authorization backends:
+            for backend in self._authz_backends:
+                if await backend.check_authorization(request):
+                    return await handler(request)
+            ## Already Authenticated
+            try:
+                if request.get('authenticated', False) is True:
+                    return await handler(request)
+            except KeyError:
+                pass
+            try:
+                _, payload = decode_token(request)
+                if payload:
+                    # load session information
+                    session = await get_session(request, payload, new = False)
+                    try:
+                        try:
+                            request.user = session.decode('user')
+                            if request.user:
+                                request.user.is_authenticated = True
+                        except RuntimeError as ex:
+                            logging.error(
+                                f'NAV: Unable to decode User session: {ex}'
+                            )
+                            # Error decoding user session, try to create them instead
+                        request['authenticated'] = True
+                        print('IS AUTH ', request.get('authenticated'))
+                    except Exception as ex: # pylint: disable=W0703
+                        logging.error(
+                            f'Missing User Object from Session: {ex}'
+                        )
+            except (Forbidden) as err:
+                logging.error('Auth Middleware: Access Denied')
+                raise web.HTTPForbidden(
+                    reason=err.message
+                )
+            except (AuthExpired, FailedAuth) as err:
+                logging.error('Auth Middleware: Auth Credentials were expired')
+                raise web.HTTPForbidden(
+                    reason=err.message
+                )
+            except AuthException as err:
+                logging.error('Auth Middleware: Invalid Signature or secret')
+                raise web.HTTPClientError(
+                    reason=err.message
+                )
+            except Exception as err: # pylint: disable=W0703
+                logging.error(f"Bad Request: {err!s}")
+                raise web.HTTPClientError(
+                    reason=str(err)
+                )
+            return await handler(request)
+        return middleware

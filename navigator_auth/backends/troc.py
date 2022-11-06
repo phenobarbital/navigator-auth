@@ -2,27 +2,21 @@
 
 Troc Authentication using RNC algorithm.
 """
-import logging
 from aiohttp import web
 import orjson
 from navigator_session import AUTH_SESSION_OBJECT
-from navigator.libs.cypher import Cipher
-from navigator.exceptions import (
-    NavException,
+from navigator_auth.libs.cipher import Cipher
+from navigator_auth.exceptions import (
+    AuthException,
     UserNotFound,
     InvalidAuth
 )
-from navigator.conf import (
+from navigator_auth.conf import (
     PARTNER_KEY,
     CYPHER_TYPE
 )
-from .base import BaseAuthBackend
+from .abstract import BaseAuthBackend
 from .basic import BasicUser
-
-
-# TODO: add expiration logic when read the token
-CIPHER = Cipher(PARTNER_KEY, type=CYPHER_TYPE)
-
 
 class TrocToken(BaseAuthBackend):
     """TROC authentication Header."""
@@ -36,24 +30,31 @@ class TrocToken(BaseAuthBackend):
         user_attribute: str = None,
         userid_attribute: str = None,
         password_attribute: str = None,
-        credentials_required: bool = False,
-        authorization_backends: tuple = (),
         **kwargs,
     ):
         super().__init__(
             user_attribute,
             userid_attribute,
             password_attribute,
-            credentials_required,
-            authorization_backends,
             **kwargs,
         )
         # forcing to use Email as Username Attribute
         self.username_attribute = "email"
+        self.cypher: Cipher = None
 
-    def configure(self, app, router, handler):
+    def configure(self, app, router):
         """Base configuration for Auth Backends, need to be extended
         to create Session Object."""
+        super(TrocToken, self).configure(app, router)
+
+    async def on_startup(self, app: web.Application):
+        """Used to initialize Backend requirements.
+        """
+        self.cypher = Cipher(PARTNER_KEY, type=CYPHER_TYPE)
+
+    async def on_cleanup(self, app: web.Application):
+        """Used to cleanup and shutdown any db connection.
+        """
 
     async def validate_user(self, login: str = None):
         # get the user based on Model
@@ -66,7 +67,7 @@ class TrocToken(BaseAuthBackend):
                 f"User {login} doesn't exists"
             ) from err
         except Exception as err:
-            logging.exception(err)
+            self.logger.exception(err)
             raise
 
     async def get_payload(self, request):
@@ -92,7 +93,7 @@ class TrocToken(BaseAuthBackend):
                     print(e)
                     return None
         except Exception as err:
-            logging.exception(f"TrocAuth: Error getting payload: {err}")
+            self.logger.exception(f"TrocAuth: Error getting payload: {err}")
             return None
         return token
 
@@ -101,39 +102,41 @@ class TrocToken(BaseAuthBackend):
         try:
             token = await self.get_payload(request)
         except Exception as err:
-            raise NavException(
-                err, state=400
+            raise AuthException(
+                str(err), status=400
             ) from err
         if not token:
             raise InvalidAuth(
                 "Missing Credentials",
-                state=401
+                status=401
             )
         else:
             # getting user information
             # TODO: making the validation of token and expiration
             try:
-                data = orjson.loads(CIPHER.decode(passphrase=token))
-                logging.debug(
+                data = orjson.loads(
+                    self.cypher.decode(token)
+                )
+                self.logger.debug(
                     f'TrocToken: Decoded User data: {data!r}'
                 )
             except Exception as err:
                 raise InvalidAuth(
-                    f"Invalid Token: {err!s}", state=401
+                    f"Invalid Token: {err!s}", status=401
                 ) from err
             # making validation
             try:
                 username = data[self.username_attribute]
             except KeyError as err:
                 raise InvalidAuth(
-                    f"Missing Email attribute: {err!s}", state=401
+                    f"Missing Email attribute: {err!s}", status=401
                 ) from err
             try:
                 user = await self.validate_user(login=username)
             except UserNotFound as err:
-                raise UserNotFound(err) from err
+                raise UserNotFound(str(err)) from err
             except Exception as err:
-                raise NavException(err, state=500) from err
+                raise AuthException(err, status=500) from err
             try:
                 userdata = self.get_userdata(user)
                 try:
@@ -142,7 +145,7 @@ class TrocToken(BaseAuthBackend):
                         **userdata[AUTH_SESSION_OBJECT], **data
                     }
                 except Exception as err:
-                    logging.exception(err)
+                    self.logger.exception(err)
                 id = user[self.username_attribute]
                 username = user[self.username_attribute]
                 userdata[self.session_key_property] = id
@@ -167,7 +170,7 @@ class TrocToken(BaseAuthBackend):
                     **userdata
                 }
             except Exception as err:
-                logging.exception(f'DjangoAuth: Authentication Error: {err}')
+                self.logger.exception(f'DjangoAuth: Authentication Error: {err}')
                 return False
 
     async def check_credentials(self, request):

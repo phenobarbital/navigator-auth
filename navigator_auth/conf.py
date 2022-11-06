@@ -145,7 +145,13 @@ DJANGO_USER_MAPPING = {
     "employee": "employee",
 }
 
+# used by tokenauth with RNC.
 PARTNER_KEY = config.get("PARTNER_KEY")
+CYPHER_TYPE = config.get("CYPHER_TYPE", fallback="RNC")
+
+## Token:
+AUTH_TOKEN_ISSUER = config.get("AUTH_TOKEN_ISSUER", fallback="Navigator")
+AUTH_TOKEN_SECRET = config.get("AUTH_TOKEN_SECRET", fallback=PARTNER_KEY)
 
 try:
     from settings.settings import * # pylint: disable=W0614,W0401

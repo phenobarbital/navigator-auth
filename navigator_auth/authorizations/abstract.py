@@ -23,5 +23,5 @@ class AuthorizationPolicy(ABC):
 class BaseAuthzHandler(ABC):
     """ Abstract handler for Authorization Middleware."""
     @abstractmethod
-    def check_authorization(self, request: web.Request) -> bool:
+    async def check_authorization(self, request: web.Request) -> bool:
         pass

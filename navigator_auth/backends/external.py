@@ -30,7 +30,7 @@ from navigator.conf import (
 from navconfig.logging import logging
 from requests.models import PreparedRequest
 from urllib.parse import urlparse, parse_qs
-from .base import BaseAuthBackend
+from .abstract import BaseAuthBackend
 
 
 class OauthUser(AuthUser):

@@ -11,7 +11,7 @@ class authz_hosts(BaseAuthzHandler):
        Use for basic Host authorization, simply creating a list of allowed hosts
     """
 
-    def check_authorization(self, request: web.Request) -> bool:
+    async def check_authorization(self, request: web.Request) -> bool:
         if request.host in HOSTS:
             logging.debug('Authorized based on HOST Authorization')
             return True

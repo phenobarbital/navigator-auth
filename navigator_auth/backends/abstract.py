@@ -1,17 +1,15 @@
-import logging
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 import jwt
 from aiohttp import web, hdrs
-from aiohttp.web_urldispatcher import SystemRoute
+from navconfig.logging import logging
 from datamodel.exceptions import ValidationError
 from asyncdb.models import Model
 from navigator_session import (
-    get_session,
     new_session,
     AUTH_SESSION_OBJECT,
     SESSION_TIMEOUT,
@@ -35,18 +33,9 @@ from navigator_auth.conf import (
     CREDENTIALS_REQUIRED,
     SECRET_KEY
 )
+
 # Authenticated Identity
 from navigator_auth.identities import Identity
-
-exclude_list = (
-    "/static/",
-    "/api/v1/login",
-    "/api/v1/logout",
-    "/login",
-    "/logout",
-    "/signin",
-    "/signout",
-)
 
 
 class BaseAuthBackend(ABC):
@@ -66,7 +55,6 @@ class BaseAuthBackend(ABC):
         user_attribute: str = None,
         userid_attribute: str = None,
         password_attribute: str = None,
-        authorization_backends: tuple = (),
         **kwargs,
     ):
         self._service = self.__class__.__name__
@@ -88,8 +76,6 @@ class BaseAuthBackend(ABC):
             self.scheme = kwargs["scheme"]
         except KeyError:
             pass
-        # configuration Authorization Backends:
-        self._authz_backends: list = authorization_backends
         # user and group models
         # getting User and Group Models
         self.user_model: Model = kwargs["user_model"]
@@ -97,6 +83,8 @@ class BaseAuthBackend(ABC):
         self.user_mapping = USER_MAPPING
         # starts the Executor
         self.executor = ThreadPoolExecutor(max_workers=1)
+        # logger
+        self.logger = logging.getLogger('Nav-auth.backends')
 
     @classmethod
     def authz_backends(cls):
@@ -121,10 +109,10 @@ class BaseAuthBackend(ABC):
                 self.user_model.Meta.connection = conn
                 user = await self.user_model.get(**search)
         except ValidationError as ex:
-            logging.error(f"Invalid User Information {search!s}")
+            self.logger.error(f"Invalid User Information {search!s}")
             print(ex.payload)
         except Exception as e:
-            logging.error(f"Error getting User {search!s}")
+            self.logger.error(f"Error getting User {search!s}")
             raise UserNotFound(
                 f"Error getting User {search!s}: {e!s}"
             ) from e
@@ -140,7 +128,7 @@ class BaseAuthBackend(ABC):
             usr = self._ident(
                 data=userdata
             )
-            logging.debug(f'User Created > {usr}')
+            self.logger.debug(f'User Created > {usr}')
             return usr
         except Exception as err:
             raise Exception(err) from err
@@ -152,7 +140,7 @@ class BaseAuthBackend(ABC):
                 try:
                     userdata[name] = user[item]
                 except AttributeError:
-                    logging.warning(
+                    self.logger.warning(
                         f'Error on User Data: asking for a non existing attribute: {item}'
                     )
         if AUTH_SESSION_OBJECT:
@@ -192,28 +180,7 @@ class BaseAuthBackend(ABC):
                 )
             # to allowing request.user.is_authenticated
         except Exception as err: # pylint: disable=W0703
-            logging.exception(err)
-
-    async def authorization_backends(self, app, handler, request):
-        try:
-            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
-                return True
-        except Exception as err: # pylint: disable=W0703
-            logging.error(err)
-        # avoid authorization on exclude list
-        if request.path in exclude_list:
-            return True
-        # avoid authorization backend on excluded methods:
-        if request.method == hdrs.METH_OPTIONS:
-            return True
-        try:
-            # logic for authorization backends
-            for backend in self._authz_backends:
-                if backend.check_authorization(request):
-                    return True
-        except Exception as err: # pylint: disable=W0703
-            logging.error(err)
-        return None
+            self.logger.exception(err)
 
     def create_jwt(
         self,
@@ -271,7 +238,7 @@ class BaseAuthBackend(ABC):
                     result = await func(*args, **kwargs)
                 return result
             except Exception as err: # pylint: disable=W0703
-                logging.exception(err)
+                self.logger.exception(err)
         return _wrap
 
 
@@ -310,7 +277,7 @@ def decode_token(request, issuer: str = None):
                 iss=issuer,
                 leeway=30,
             )
-            logging.debug(f"Decoded Token: {payload!s}")
+            self.logger.debug(f"Decoded Token: {payload!s}")
             return [tenant, payload]
         except jwt.exceptions.ExpiredSignatureError as err:
             raise AuthExpired(
@@ -335,76 +302,3 @@ def decode_token(request, issuer: str = None):
             ) from err
     else:
         return [tenant, payload]
-
-async def auth_middleware(
-    app: web.Application,
-    handler: Callable[[web.Request], Awaitable[web.StreamResponse]]
-) -> web.StreamResponse:
-    """
-        Basic Auth Middleware.
-        Description: Basic Authentication for NoAuth, Basic, Token and Django.
-    """
-    @web.middleware
-    async def middleware(request: web.Request) -> web.StreamResponse:
-        logging.debug(':: AUTH MIDDLEWARE ::')
-        # avoid authorization backend on excluded methods:
-        if request.method == hdrs.METH_OPTIONS:
-            return await handler(request)
-        # avoid authorization on exclude list
-        if request.path in exclude_list:
-            return await handler(request)
-        # avoid check system routes
-        try:
-            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
-                return await handler(request)
-        except Exception as err: # pylint: disable=W0703
-            logging.error(err)
-        ## Already Authenticated
-        try:
-            if request.get('authenticated', False) is True:
-                return await handler(request)
-        except KeyError:
-            pass
-        try:
-            _, payload = decode_token(request)
-            if payload:
-                # load session information
-                session = await get_session(request, payload, new = False)
-                print('SESSION ', session)
-                try:
-                    try:
-                        request.user = session.decode('user')
-                        if request.user:
-                            request.user.is_authenticated = True
-                    except RuntimeError as ex:
-                        logging.error(
-                            f'NAV: Unable to decode User session: {ex}'
-                        )
-                        # Error decoding user session, try to create them instead
-                    request['authenticated'] = True
-                except Exception as ex: # pylint: disable=W0703
-                    logging.error(
-                        f'Missing User Object from Session: {ex}'
-                    )
-        except (Forbidden) as err:
-            logging.error('Auth Middleware: Access Denied')
-            raise web.HTTPForbidden(
-                reason=err.message
-            )
-        except (AuthExpired, FailedAuth) as err:
-            logging.error('Auth Middleware: Auth Credentials were expired')
-            raise web.HTTPForbidden(
-                reason=err.message
-            )
-        except AuthException as err:
-            logging.error('Auth Middleware: Invalid Signature or secret')
-            raise web.HTTPClientError(
-                reason=err.message
-            )
-        except Exception as err: # pylint: disable=W0703
-            logging.error(f"Bad Request: {err!s}")
-            raise web.HTTPClientError(
-                reason=str(err)
-            )
-        return await handler(request)
-    return middleware

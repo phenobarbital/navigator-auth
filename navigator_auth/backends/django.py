@@ -25,7 +25,7 @@ from navigator_auth.conf import (
     DJANGO_SESSION_PREFIX
 )
 # User Identity
-from .base import BaseAuthBackend
+from .abstract import BaseAuthBackend
 class DjangoUser(AuthUser):
     """DjangoUser.
 
@@ -46,7 +46,6 @@ class DjangoAuth(BaseAuthBackend):
         user_attribute: str = None,
         userid_attribute: str = None,
         password_attribute: str = None,
-        authorization_backends: tuple = (),
         **kwargs,
     ):
         self._pool: Callable = None
@@ -56,7 +55,6 @@ class DjangoAuth(BaseAuthBackend):
             user_attribute,
             userid_attribute,
             password_attribute,
-            authorization_backends,
             **kwargs
         )
 
