@@ -277,7 +277,7 @@ def decode_token(request, issuer: str = None):
                 iss=issuer,
                 leeway=30,
             )
-            self.logger.debug(f"Decoded Token: {payload!s}")
+            logging.debug(f"Decoded Token: {payload!s}")
             return [tenant, payload]
         except jwt.exceptions.ExpiredSignatureError as err:
             raise AuthExpired(

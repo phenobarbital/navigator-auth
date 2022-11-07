@@ -3,13 +3,23 @@ Model System for Navigator Auth.
 
 Model for User, Group and Roles for Navigator Auth.
 """
-from uuid import UUID
+import json
+from uuid import UUID, uuid4
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
+import jwt
 from slugify import slugify
 from asyncdb.models import Model, Column
-from .conf import USERS_TABLE
+from .libs.cipher import Cipher
+from .libs.json import json_encoder
+from .conf import (
+    USERS_TABLE,
+    AUTH_DEFAULT_ISSUER,
+    SECRET_KEY,
+    AUTH_JWT_ALGORITHM,
+    AUTH_TOKEN_SECRET
+)
 
 class Text(str):
     """Base Definition for Big Text.
@@ -178,18 +188,53 @@ class UserIdentity(Model):
         connection = None
 
 
-# class UserProgram(Model):
-#     user_id: User = Column(required=True, primary_key=True)
-#     program_id: Program = Column(required=True, primary_key=True)
-#     enabled: bool = Column(required=True, default=True)
-#     created_at: datetime = Column(required=False, default=datetime.now())
-#     updated_at: datetime = Column(required=False, default=datetime.now())
+def auto_uuid():
+    return uuid4()
+class UserDevices(Model):
+    """Users can create API Keys or JWT Tokens with expiration for accessing.
+    """
+    user_id: User = Column(required=True, primary_key=True)
+    device_id: UUID = Column(required=True, db_default='auto')
+    name: str = Column(required=True)
+    token: str = Column(required=False)
+    api_key: str = Column(required=False)
+    issuer: str = Column(required=False)
+    revoked: bool = Column(required=True, default=False)
+    created_at: datetime = Column(required=False, default=datetime.now())
+    updated_at: datetime = Column(required=False, default=datetime.now())
+    created_by: str = Column(required=False)
 
-#     class Meta:
-#         name = "user_programs"
-#         schema = "auth"
-#         strict = True
-#         connection = None
+    def __post_init__(self) -> None:
+        super(UserDevices, self).__post_init__()
+        if not self.issuer:
+            self.issuer = AUTH_DEFAULT_ISSUER
+        if not self.token:
+            payload = {
+                "exp": datetime.utcnow() + timedelta(days=1460),
+                "iat": datetime.utcnow(),
+                "iss": self.issuer,
+                "user_id": self.user_id,
+                "device_id": str(self.device_id)
+            }
+            self.token = jwt.encode(
+                payload,
+                SECRET_KEY,
+                AUTH_JWT_ALGORITHM,
+            )
+        if not self.api_key:
+            ## generate the API key for Name:
+            cipher = Cipher(AUTH_TOKEN_SECRET, type='AES')
+            data = {
+                "user_id": self.user_id,
+                "device_id": self.device_id
+            }
+            self.api_key = cipher.encode(json_encoder(data))
+
+    class Meta:
+        name = "user_devices"
+        schema = "auth"
+        strict = True
+        connection = None
 
 
 class OrganizationUser(Model):

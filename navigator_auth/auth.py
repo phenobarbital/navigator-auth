@@ -319,7 +319,11 @@ class AuthHandler:
             except Exception: # pylint: disable=W0703
                 # always return a null session for user:
                 session = await self._session.storage.new_session(request, {})
-        userdata = dict(session)
+        if isinstance(session, bool):
+            # missing User Data:
+            userdata = {}
+        else:
+            userdata = dict(session)
         try:
             del userdata['user']
         except KeyError:
@@ -499,6 +503,7 @@ class AuthHandler:
             try:
                 _, payload = decode_token(request)
                 if payload:
+                    ## check if user has a session:
                     # load session information
                     session = await get_session(request, payload, new = False)
                     try:
@@ -506,36 +511,35 @@ class AuthHandler:
                             request.user = session.decode('user')
                             if request.user:
                                 request.user.is_authenticated = True
-                        except RuntimeError as ex:
+                        except (AttributeError, RuntimeError) as ex:
                             logging.error(
                                 f'NAV: Unable to decode User session: {ex}'
                             )
                             # Error decoding user session, try to create them instead
                         request['authenticated'] = True
-                        print('IS AUTH ', request.get('authenticated'))
                     except Exception as ex: # pylint: disable=W0703
                         logging.error(
                             f'Missing User Object from Session: {ex}'
                         )
             except (Forbidden) as err:
                 logging.error('Auth Middleware: Access Denied')
-                raise web.HTTPForbidden(
+                raise web.HTTPUnauthorized(
                     reason=err.message
                 )
             except (AuthExpired, FailedAuth) as err:
                 logging.error('Auth Middleware: Auth Credentials were expired')
-                raise web.HTTPForbidden(
+                raise web.HTTPUnauthorized(
                     reason=err.message
                 )
             except AuthException as err:
                 logging.error('Auth Middleware: Invalid Signature or secret')
-                raise web.HTTPClientError(
+                raise web.HTTPForbidden(
                     reason=err.message
                 )
             except Exception as err: # pylint: disable=W0703
                 logging.error(f"Bad Request: {err!s}")
-                raise web.HTTPClientError(
-                    reason=str(err)
+                raise web.HTTPBadRequest(
+                    reason=f"Auth Error: {err!s}"
                 )
             return await handler(request)
         return middleware

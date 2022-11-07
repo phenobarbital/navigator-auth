@@ -130,3 +130,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+navigator_auth/libs/cipher.cpp
+navigator_auth/libs/json.cpp
+navigator_auth/libs/json.cpp

@@ -1,6 +1,6 @@
-"""Django Session Backend.
+"""Token Auth Backend.
 
-Navigator Authentication using API Token
+Navigator Authentication using an API Token for partners.
 description: Single API Token Authentication
 """
 from typing import List
@@ -139,7 +139,7 @@ class TokenAuth(BaseAuthBackend):
                     **user
                 }
             except Exception as err:
-                self.logger.exception(f'DjangoAuth: Authentication Error: {err}')
+                self.logger.exception(f'TokenAuth: Authentication Error: {err}')
                 return False
 
     async def check_credentials(self, request):
@@ -224,7 +224,7 @@ class TokenAuth(BaseAuthBackend):
                     )
                 except Exception as err:
                     self.logger.exception(f"Error on Token Middleware: {err}")
-                    raise web.HTTPClientError(
+                    raise web.BadRequest(
                         reason=f"Error on TokenAuth Middleware: {err}"
                     )
             return await handler(request)

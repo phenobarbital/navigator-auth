@@ -7,6 +7,7 @@ from .basic import BasicAuth
 from .django import DjangoAuth
 from .troc import TrocToken
 from .token import TokenAuth
+from .api import APIKeyAuth
 # from .google import GoogleAuth
 # from .okta import OktaAuth
 # from .adfs import ADFSAuth
@@ -19,6 +20,7 @@ __all__ = [
     "DjangoAuth",
     "TrocToken",
     "TokenAuth",
+    "APIKeyAuth",
     # "GoogleAuth",
     # "OktaAuth",
     # "ADFSAuth",
