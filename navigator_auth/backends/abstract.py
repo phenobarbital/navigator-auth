@@ -21,8 +21,7 @@ from navigator_auth.exceptions import (
     UserNotFound,
     InvalidAuth,
     FailedAuth,
-    AuthExpired,
-    Forbidden
+    AuthExpired
 )
 from navigator_auth.conf import (
     AUTH_DEFAULT_ISSUER,

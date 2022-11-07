@@ -59,6 +59,9 @@ class APIKeyAuth(BaseAuthBackend):
                         "Invalid Authorization Scheme",
                         status=400
                     )
+                if ':' in token:
+                    # is an Partner Token, not API
+                    return [None, None]
             elif 'apikey' in request.rel_url.query:
                 token = request.rel_url.query['apikey']
                 mech = 'api'
