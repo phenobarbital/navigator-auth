@@ -3,7 +3,6 @@ Model System for Navigator Auth.
 
 Model for User, Group and Roles for Navigator Auth.
 """
-import json
 from uuid import UUID, uuid4
 from typing import Optional
 from datetime import datetime, timedelta

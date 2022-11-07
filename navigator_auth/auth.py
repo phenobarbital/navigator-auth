@@ -372,6 +372,9 @@ class AuthHandler:
             self.app = app # register the app into the Extension
         else:
             self.app = app.get_app() # Nav Application
+        ## load the Session System
+        # configuring Session Object
+        self._session.setup(self.app)
         ## Manager for Auth Storage and Policy Storage
         ## getting Database Connection:
         try:
@@ -390,9 +393,6 @@ class AuthHandler:
             self.on_cleanup
         )
         logging.debug(':::: Auth Handler Loaded ::::')
-        ## also, load the Session System
-        # configuring Session Object
-        self._session.setup(self.app)
         # register the Auth extension into the app
         self.app[self.name] = self
         ## Configure Routes
