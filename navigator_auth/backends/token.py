@@ -5,7 +5,8 @@ description: Single API Token Authentication
 """
 from typing import List
 import jwt
-from aiohttp import web
+from aiohttp import web, hdrs
+from aiohttp.web_urldispatcher import SystemRoute
 from navigator_session import get_session
 from navigator_auth.exceptions import AuthException, InvalidAuth
 from navigator_auth.conf import (
@@ -41,29 +42,30 @@ class TokenAuth(BaseAuthBackend):
     async def get_payload(self, request):
         token = None
         tenant = None
-        id = None
         try:
             if "Authorization" in request.headers:
                 try:
-                    scheme, id = (
+                    scheme, token = (
                         request.headers.get("Authorization").strip().split(" ", 1)
                     )
-                except ValueError:
+                except ValueError as ex:
                     raise AuthException(
                         "Invalid authorization Header",
                         status=400
-                    )
+                    ) from ex
                 if scheme != self.scheme:
                     raise AuthException(
                         "Invalid Authorization Scheme",
                         status=400
                     )
                 try:
-                    tenant, token = id.split(":")
+                    tenant, token = token.split(":")
                 except ValueError:
-                    token = id
+                    pass
         except Exception as err:
-            self.logger.exception(f"TokenAuth: Error getting payload: {err}")
+            self.logger.exception(
+                f"TokenAuth: Error getting payload: {err}"
+            )
             return None
         return [tenant, token]
 
@@ -80,6 +82,9 @@ class TokenAuth(BaseAuthBackend):
             raise AuthException(
                 err, status=400
             ) from err
+        if not tenant:
+            # is another auth
+            return False
         if not token:
             raise InvalidAuth(
                 "Invalid Credentials", status=401
@@ -149,7 +154,7 @@ class TokenAuth(BaseAuthBackend):
         try:
             name = payload["name"]
             partner = payload["partner"]
-        except KeyError as err:
+        except KeyError:
             return False
         sql = """
         SELECT name, partner, grants, programs FROM auth.partner_keys
@@ -173,6 +178,15 @@ class TokenAuth(BaseAuthBackend):
     async def auth_middleware(self, app, handler):
         async def middleware(request):
             self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
+            # avoid authorization backend on excluded methods:
+            if request.method == hdrs.METH_OPTIONS:
+                return await handler(request)
+            # avoid check system routes
+            try:
+                if isinstance(request.match_info.route, SystemRoute):  # eg. 404
+                    return await handler(request)
+            except Exception as err: # pylint: disable=W0703
+                self.logger.error(err)
             request.user = None
             try:
                 if request.get('authenticated', False) is True:
@@ -181,6 +195,8 @@ class TokenAuth(BaseAuthBackend):
             except KeyError:
                 pass
             tenant, jwt_token = await self.get_payload(request)
+            if not tenant:
+                return await handler(request)
             if jwt_token:
                 try:
                     payload = jwt.decode(
@@ -189,13 +205,12 @@ class TokenAuth(BaseAuthBackend):
                     # self.logger.debug(f"Decoded Token: {payload!s}")
                     result = await self.check_token_info(request, tenant, payload)
                     if not result:
-                        raise web.HTTPForbidden(
-                            reason="API Key Not Authorized",
-                        )
+                        # Token missing, maybe auth with another mechanism?
+                        return await handler(request)
                     else:
                         request[self.session_key_property] = payload['name']
                         # TRUE because if data doesnt exists, returned
-                        session = await get_session(request, payload, new = True)
+                        session = await get_session(request, payload, new = False)
                         session["grants"] = result["grants"]
                         session["partner"] = result["partner"]
                         session["tenant"] = tenant
@@ -217,7 +232,7 @@ class TokenAuth(BaseAuthBackend):
                     raise web.HTTPForbidden(
                         reason=f"TokenAuth: Invalid or missing Credentials: {err!r}"
                     )
-                except (jwt.exceptions.DecodeError, jwt.exceptions.InvalidTokenError) as err:
+                except jwt.exceptions.DecodeError as err:
                     self.logger.error(f"Invalid authorization token: {err!r}")
                     raise web.HTTPForbidden(
                         reason=f"TokenAuth: Invalid authorization token: {err!r}"
@@ -225,7 +240,7 @@ class TokenAuth(BaseAuthBackend):
                 except Exception as err:
                     self.logger.exception(f"Error on Token Middleware: {err}")
                     raise web.BadRequest(
-                        reason=f"Error on TokenAuth Middleware: {err}"
+                        reason=f"Authentication Error: {err}"
                     )
             return await handler(request)
 

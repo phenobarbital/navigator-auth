@@ -6,7 +6,7 @@ description: Single API Token Authentication
 import jwt
 import orjson
 from aiohttp import web
-from navigator_session import get_session
+from aiohttp.web_urldispatcher import SystemRoute
 from navigator_auth.libs.cipher import Cipher
 from navigator_auth.exceptions import AuthException, InvalidAuth
 from navigator_auth.conf import (
@@ -29,9 +29,6 @@ class APIKeyAuth(BaseAuthBackend):
     _pool = None
     _ident: AuthUser = APIKeyUser
 
-    def configure(self, app, router):
-        super(APIKeyAuth, self).configure(app, router)
-
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements.
         """
@@ -43,7 +40,7 @@ class APIKeyAuth(BaseAuthBackend):
 
     async def get_payload(self, request):
         token = None
-        mech = 'api'
+        mech = None
         try:
             if "Authorization" in request.headers:
                 # Bearer Token (jwt)
@@ -52,11 +49,11 @@ class APIKeyAuth(BaseAuthBackend):
                         request.headers.get("Authorization").strip().split(" ", 1)
                     )
                     mech = 'bearer'
-                except ValueError:
+                except ValueError as ex:
                     raise AuthException(
                         "Invalid authorization Header",
                         status=400
-                    )
+                    ) from ex
                 if scheme != self.scheme:
                     raise AuthException(
                         "Invalid Authorization Scheme",
@@ -64,11 +61,9 @@ class APIKeyAuth(BaseAuthBackend):
                     )
             elif 'apikey' in request.rel_url.query:
                 token = request.rel_url.query['apikey']
+                mech = 'api'
             else:
-                raise AuthException(
-                    "Missing Auth Token",
-                    status=400
-                )
+                return [None, None]
         except Exception as err:
             self.logger.exception(f"API Key Auth: Error getting payload: {err}")
             return None
@@ -86,11 +81,8 @@ class APIKeyAuth(BaseAuthBackend):
             raise AuthException(
                 str(err), status=400
             ) from err
-        if not token:
-            raise InvalidAuth(
-                "Invalid Credentials",
-                status=401
-            )
+        if not token or not mech:
+            return None
         else:
             if mech == 'bearer':
                 payload = jwt.decode(
@@ -106,10 +98,11 @@ class APIKeyAuth(BaseAuthBackend):
             # getting user information
             data = await self.check_token_info(request, mech, payload)
             if not data:
-                raise InvalidAuth(
-                    f"Invalid Session for {token!s}",
-                    status=401
-                )
+                return None
+                # raise InvalidAuth(
+                #     f"Invalid Session for {token!s}",
+                #     status=401
+                # )
             # making validation
             try:
                 device = data["name"]
@@ -151,7 +144,7 @@ class APIKeyAuth(BaseAuthBackend):
             user_id = payload["user_id"]
             device_id = payload["device_id"]
         except KeyError:
-            pass
+            return False
             ##
         sql = """
          SELECT user_id, name, device_id, token FROM auth.api_keys
@@ -179,6 +172,12 @@ class APIKeyAuth(BaseAuthBackend):
         async def middleware(request):
             self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
             request.user = None
+            # avoid check system routes
+            try:
+                if isinstance(request.match_info.route, SystemRoute):  # eg. 404
+                    return await handler(request)
+            except Exception as err: # pylint: disable=W0703
+                self.logger.error(err)
             try:
                 if request.get('authenticated', False) is True:
                     # already authenticated
@@ -187,12 +186,11 @@ class APIKeyAuth(BaseAuthBackend):
                 pass
             try:
                 userdata = await self.authenticate(request)
+                if not userdata:
+                    # API Key missing, maybe auth with another mechanism?
+                    return await handler(request)
                 request['authenticated'] = True
                 request[self.session_key_property] = userdata['user_id']
-                if not userdata:
-                    raise web.HTTPForbidden(
-                        reason="API Key Not Authorized",
-                    )
             except (InvalidAuth) as err:
                 raise web.HTTPForbidden(
                     reason=f"API Key: {err.message!s}"
@@ -204,8 +202,8 @@ class APIKeyAuth(BaseAuthBackend):
                 )
             except Exception as err:
                 self.logger.exception(f"Error on Token Middleware: {err}")
-                raise web.BadRequest(
-                    reason=f"Error on API Key Middleware: {err}"
+                raise web.HTTPBadRequest(
+                    reason=f"Authentication Error: {err}"
                 )
             return await handler(request)
 

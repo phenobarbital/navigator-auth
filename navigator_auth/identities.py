@@ -102,10 +102,21 @@ class AuthUser(Identity):
                 self.add_group(group)
         else:
             self.groups = []
-        self.organizations = []
+        if self.organizations is not None:
+            org = self.organizations.copy()
+            self.organizations = []
+            for o in org:
+                self.add_organization(o)
+        else:
+            self.organizations = []
 
     ### User Methods.
     def add_group(self, group: Group):
         if isinstance(group, str):
             group = Group(group=group)
         self.groups.append(group)
+
+    def add_organization(self, org: Organization):
+        if isinstance(org, str):
+            org = Organization(organization=org)
+        self.organizations.append(org)

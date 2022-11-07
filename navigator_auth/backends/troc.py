@@ -78,10 +78,10 @@ class TrocToken(BaseAuthBackend):
                     scheme, token = (
                         request.headers.get("Authorization").strip().split(" ")
                     )
-                except ValueError:
+                except ValueError as ex:
                     raise web.HTTPForbidden(
                         reason="Invalid authorization Header",
-                    )
+                    ) from ex
                 if scheme != self.scheme:
                     raise web.HTTPForbidden(
                         reason="Invalid Session scheme",
