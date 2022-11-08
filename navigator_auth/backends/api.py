@@ -102,11 +102,6 @@ class APIKeyAuth(BaseAuthBackend):
             data = await self.check_token_info(request, mech, payload)
             if not data:
                 return None
-                # raise InvalidAuth(
-                #     f"Invalid Session for {token!s}",
-                #     status=401
-                # )
-            # making validation
             try:
                 device = data["name"]
                 device_id = str(data["device_id"])

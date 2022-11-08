@@ -1,6 +1,12 @@
 from aiohttp import web
 from navigator_session import get_session
-from navigator_auth.decorators import user_session, is_authenticated, allowed_groups, allowed_programs
+from navigator_auth.decorators import (
+    user_session,
+    is_authenticated,
+    allowed_groups,
+    allowed_programs,
+    apikey_required
+)
 from navigator_auth import AuthHandler
 
 async def handle(request):
@@ -49,11 +55,23 @@ async def only_walmart(request):
     text = "Walmart Content for: " + name
     return web.Response(text=text)
 
+@apikey_required()
+async def api_required(request):
+    userdata = request.get('userdata', {})
+    print(userdata)
+    if userdata:
+        name = str(userdata['id'])
+    else:
+        name = 'Anonymous'
+    text = "Only available with API Key Backend: " + name
+    return web.Response(text=text)
+
 app.add_routes([
     web.get('/services/usersession', usersession),
     web.get('/services/protected', url_protected),
     web.get('/services/admin', only_supers),
     web.get('/services/walmart', only_walmart),
+    web.get('/services/api_required', api_required),
 ])
 
 

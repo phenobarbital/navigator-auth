@@ -228,12 +228,46 @@ def allowed_organizations(org: list, content_type: str = 'application/json') -> 
         return _wrap
     return _wrapper
 
-# def has_permission(func, permission, context=None):
-#     """Check user permissions.
-#     Return Function if the identity is allowed the permission in the
-#     current context, else raise ``web.HTTPUnauthorized()``
-#     """
-#     @wraps(func)
-#     async def _wrap(*args, **kwargs):
-#         pass
-#     return _wrap
+
+def apikey_required(content_type: str = 'application/json') -> Callable:
+    """Allow only API Keys on Request.
+    """
+    def _wrapper(handler: F):
+        @wraps(handler)
+        async def _wrap(*args, **kwargs) -> web.StreamResponse:
+            # Supports class based views see web.View
+            if isinstance(args[0], AbstractView):
+                request = args[0].request
+            else:
+                request = args[-1]
+            if request is None:
+                raise ValueError(
+                    f'web.Request was not found in arguments. {handler!s}'
+                )
+            ###
+            app = request.app
+            auth = app["auth"]
+            userdata = None
+            try:
+                backend = auth.backends['APIKeyAuth']
+                if userdata := await backend.authenticate(request):
+                    request['userdata'] = userdata
+                    return await handler(*args, **kwargs)
+                else:
+                    raise web.HTTPUnauthorized(
+                        reason="Unauthorized: Access Denied to this resource.",
+                        headers={
+                            hdrs.CONTENT_TYPE: content_type,
+                            hdrs.CONNECTION: 'keep-alive',
+                        }
+                    )
+            except KeyError as ex:
+                raise web.HTTPBadRequest(
+                    reason="API Key Backend Auth is not enabled.",
+                    headers={
+                        hdrs.CONTENT_TYPE: content_type,
+                        hdrs.CONNECTION: 'keep-alive',
+                    }
+                ) from ex
+        return _wrap
+    return _wrapper
