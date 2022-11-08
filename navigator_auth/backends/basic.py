@@ -176,20 +176,20 @@ class BasicAuth(BaseAuthBackend):
             try:
                 userdata = self.get_userdata(user)
                 username = user[self.username_attribute]
-                id = user[self.userid_attribute]
+                uid = user[self.userid_attribute]
                 userdata[self.username_attribute] = username
                 userdata[self.session_key_property] = username
                 # usr = BasicUser(data=userdata[AUTH_SESSION_OBJECT])
                 usr = await self.create_user(
                     userdata[AUTH_SESSION_OBJECT]
                 )
-                usr.id = id
+                usr.id = uid
                 usr.set(self.username_attribute, username)
-                logging.debug(f'User Created > {usr}')
+                # logging.debug(f'User Created > {usr}')
                 payload = {
                     self.user_property: user[self.userid_attribute],
                     self.username_attribute: username,
-                    "user_id": id,
+                    "user_id": uid,
                     self.session_key_property: username
                 }
                 # Create the User session and returned.

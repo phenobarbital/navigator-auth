@@ -433,8 +433,6 @@ class AuthHandler:
         handler_routes(router)
         # the backend add a middleware to the app
         mdl = self.app.middlewares
-        # first: add the basic jwt middleware (used by basic auth and others)
-        mdl.append(self.auth_middleware)
         # if authentication backend needs initialization
         for name, backend in self.backends.items():
             try:
@@ -450,6 +448,8 @@ class AuthHandler:
                 raise ConfigError(
                     f"Auth: Error on Backend {name} init: {err!s}"
                 ) from err
+        # last: add the basic jwt middleware (used by basic auth and others)
+        mdl.append(self.auth_middleware)
         # at the End: configure CORS for routes:
         cors = aiohttp_cors.setup(
             self.app,
@@ -477,7 +477,7 @@ class AuthHandler:
         """
         @web.middleware
         async def middleware(request: web.Request) -> web.StreamResponse:
-            logging.debug(':: AUTH MIDDLEWARE ::')
+            logging.debug(':: BASIC AUTH MIDDLEWARE ::')
             # avoid authorization backend on excluded methods:
             if request.method == hdrs.METH_OPTIONS:
                 return await handler(request)
