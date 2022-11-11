@@ -161,7 +161,7 @@ class BaseAuthBackend(ABC):
             user: Identity
         ):
         """
-        Saves User Identity into request Object.
+        Saves User Identity into request Object and session.
         """
         try:
             request[self.session_key_property] = identity

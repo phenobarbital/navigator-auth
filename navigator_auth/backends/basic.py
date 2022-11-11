@@ -185,7 +185,6 @@ class BasicAuth(BaseAuthBackend):
                 )
                 usr.id = uid
                 usr.set(self.username_attribute, username)
-                # logging.debug(f'User Created > {usr}')
                 payload = {
                     self.user_property: user[self.userid_attribute],
                     self.username_attribute: username,
@@ -195,6 +194,7 @@ class BasicAuth(BaseAuthBackend):
                 # Create the User session and returned.
                 token = self.create_jwt(data=payload)
                 usr.access_token = token
+                ### saving User data into session:
                 await self.remember(
                     request, username, userdata, usr
                 )

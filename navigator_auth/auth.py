@@ -8,42 +8,39 @@ Supporting:
  * authorization exceptions via middlewares
  * Session Support (on top of navigator-session)
 """
-from textwrap import dedent
 import importlib
 import inspect
-from collections.abc import Iterable, Callable, Awaitable
-from aiohttp import web, hdrs
+from collections.abc import Awaitable, Callable, Iterable
+
+import aiohttp_cors
+from aiohttp import hdrs, web
 from aiohttp.abc import AbstractView
 from aiohttp.web_urldispatcher import SystemRoute
-import aiohttp_cors
-from navigator_session import (
-    get_session,
-    SessionHandler,
-    SESSION_KEY
-)
+from navigator_session import SESSION_KEY, SessionHandler, get_session
+
+from .authorizations import authz_allow_hosts, authz_hosts
+from .backends.abstract import decode_token
 from .conf import (
+    AUTH_USER_MODEL,
     AUTHENTICATION_BACKENDS,
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,
-    AUTH_USER_MODEL,
     default_dsn,
-    logging
+    logging,
 )
-from .backends.abstract import decode_token
+from .exceptions import (
+    AuthException,
+    AuthExpired,
+    ConfigError,
+    FailedAuth,
+    Forbidden,
+    InvalidAuth,
+    UserNotFound,
+)
 from .handlers import handler_routes
 ## Responses
 from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
-from .authorizations import authz_hosts, authz_allow_hosts
-from .exceptions import (
-    AuthException,
-    UserNotFound,
-    InvalidAuth,
-    FailedAuth,
-    Forbidden,
-    ConfigError,
-    AuthExpired
-)
 
 exclude_list = (
     "/static/",
@@ -59,30 +56,18 @@ class AuthHandler:
     """Authentication Backend for Navigator."""
     name: str = 'auth'
     app: web.Application = None
-    _template: str = """
-        <!doctype html>
-            <head></head>
-            <body>
-                <p>{message}</p>
-                <form action="/login" method="POST">
-                  Login:
-                  <input type="text" name="login">
-                  Password:
-                  <input type="password" name="password">
-                  <input type="submit" value="Login">
-                </form>
-                <a href="/logout">Logout</a>
-            </body>
-    """
+    secure_cookies: bool = True
+
     def __init__(
             self,
             app_name: str = 'auth',
+            secure_cookies: bool = True,
             **kwargs
         ) -> None:
         self.name: str = app_name
         self.backends: dict = {}
         self._session = None
-        self._template = dedent(self._template)
+        self.secure_cookies = secure_cookies
         if 'scheme' in kwargs:
             self.auth_scheme = kwargs['scheme']
         else:
@@ -108,7 +93,7 @@ class AuthHandler:
             AUTHORIZATION_BACKENDS
         )
         # TODO: Session Support with parametrization (other backends):
-        self._session = SessionHandler(storage='redis')
+        self._session = SessionHandler(storage='redis', use_cookie=True) # pylint: disable=E1123
 
     async def auth_startup(self, app):
         """
@@ -202,14 +187,15 @@ class AuthHandler:
         API-based Logout.
         """
         try:
-            await self._session.storage.forgot(request)
-            return web.json_response(
+            response = web.json_response(
                 {
                     "message": "Logout successful",
                     "state": 202
                 },
                 status=202
             )
+            await self._session.storage.forgot(request, response)
+            return response
         except Exception as err:
             print(err)
             raise web.HTTPUnauthorized(
@@ -223,6 +209,7 @@ class AuthHandler:
         """
         # first: getting header for an existing backend
         method = request.headers.get('X-Auth-Method')
+        userdata = None
         if method:
             try:
                 backend = self.backends[method]
@@ -254,7 +241,6 @@ class AuthHandler:
                 raise web.HTTPClientError(
                     reason=f"{err.message}"
                 )
-            return JSONResponse(userdata, status=200)
         else:
             # second: if no backend declared, will iterate over all backends
             userdata = None
@@ -275,20 +261,21 @@ class AuthHandler:
                     raise web.HTTPClientError(
                         reason=err
                     ) from err
-            # if not userdata, then raise an not Authorized
-            if not userdata:
-                raise web.HTTPForbidden(
-                    reason="Login Failure in all Auth Methods."
-                )
-            else:
-                # at now: create the user-session
-                try:
-                    await self._session.storage.new_session(request, userdata)
-                except Exception as err:
-                    raise web.HTTPUnauthorized(
-                        reason=f"Error Creating User Session: {err.message}"
-                    ) from err
-                return JSONResponse(userdata, status=200)
+        # if not userdata, then raise an not Authorized
+        if not userdata:
+            raise web.HTTPForbidden(
+                reason="Login Failure in all Auth Methods."
+            )
+        else:
+            # at now: create the user-session
+            try:
+                response = JSONResponse(userdata, status=200)
+                await self._session.storage.load_session(request, userdata, response=response)
+            except Exception as err:
+                raise web.HTTPUnauthorized(
+                    reason=f"Error Creating User Session: {err.message}"
+                ) from err
+            return response
 
     # Session Methods:
     async def forgot_session(self, request: web.Request):

@@ -10,7 +10,12 @@ from navigator_auth.decorators import (
 from navigator_auth import AuthHandler
 
 async def handle(request):
-    name = request.match_info.get('name', "Anonymous")
+    session = await get_session(request)
+    print(session)
+    if session:
+        name = session.username
+    else:
+        name = request.match_info.get('name', "Anonymous")
     text = "Hello, " + name
     return web.Response(text=text)
 

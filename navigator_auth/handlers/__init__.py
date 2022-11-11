@@ -115,6 +115,17 @@ def handler_routes(router) -> None:
         UserHandler,
         name='api_auth_users'
     )
+    # User Group:
+    router.add_view(
+        r'/api/v1/usergroups/{id:.*}',
+        UserGroupHandler,
+        name='api_auth_usergroups_id'
+    )
+    router.add_view(
+        r'/api/v1/usergroups{meta:\:?.*}',
+        UserGroupHandler,
+        name='api_auth_usergroups'
+    )
     ### User Session Methods:
     usr = UserSession()
     router.add_get("/api/v2/user/logout", usr.logout, allow_head=True)
