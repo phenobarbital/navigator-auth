@@ -224,6 +224,10 @@ class AuthHandler:
                     raise web.HTTPForbidden(
                         reason='User was not authenticated'
                     )
+            except UserNotFound as err:
+                raise web.HTTPForbidden(
+                    reason=f"{err.message}"
+                )
             except (Forbidden, FailedAuth) as err:
                 raise web.HTTPForbidden(
                     reason=f"{err.message}"
@@ -238,7 +242,7 @@ class AuthHandler:
                     reason=f"User Doesn't exists: {err.message}"
                 )
             except Exception as err:
-                raise web.HTTPClientError(
+                raise web.HTTPInternalServerError(
                     reason=f"{err.message}"
                 )
         else:
