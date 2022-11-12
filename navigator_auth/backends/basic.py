@@ -163,12 +163,12 @@ class BasicAuth(BaseAuthBackend):
             # making validation
             try:
                 user = await self.validate_user(login=user, password=pwd)
-            except FailedAuth as err:
-                raise FailedAuth(err) from err
-            except UserNotFound as err:
-                raise UserNotFound(err) from err
+            except (FailedAuth, UserNotFound): # pylint: disable=W0706
+                raise
             except (ValidationError, InvalidAuth) as err:
-                raise InvalidAuth(err, status=401) from err
+                raise InvalidAuth(
+                    str(err), status=401
+                ) from err
             except Exception as err:
                 raise AuthException(
                     str(err), status=500
