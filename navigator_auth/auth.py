@@ -95,6 +95,10 @@ class AuthHandler:
         # TODO: Session Support with parametrization (other backends):
         self._session = SessionHandler(storage='redis', use_cookie=True) # pylint: disable=E1123
 
+    @property
+    def session(self):
+        return self._session
+
     async def auth_startup(self, app):
         """
         Some Authentication backends need to call an Startup.
