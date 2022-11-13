@@ -461,6 +461,16 @@ class AuthHandler:
         self.setup_cors(cors)
         return self.app
 
+    async def get_session_user(self, session: Iterable, name: str = 'user') -> Iterable:
+        try:
+            user = session.decode(name)
+            user.is_authenticated = True
+            return user
+        except (AttributeError, RuntimeError) as ex:
+            logging.error(
+                f'NAV: Unable to decode User session: {ex}'
+            )
+
     async def auth_middleware(
         self,
         app: web.Application,
@@ -502,20 +512,16 @@ class AuthHandler:
                     # load session information
                     session = await get_session(request, payload, new = False)
                     try:
-                        try:
-                            request.user = session.decode('user')
-                            if request.user:
-                                request.user.is_authenticated = True
-                        except (AttributeError, RuntimeError) as ex:
-                            logging.error(
-                                f'NAV: Unable to decode User session: {ex}'
-                            )
-                            # Error decoding user session, try to create them instead
+                        request.user = self.get_session_user(session)
                         request['authenticated'] = True
                     except Exception as ex: # pylint: disable=W0703
                         logging.error(
                             f'Missing User Object from Session: {ex}'
                         )
+                elif self.secure_cookies is True:
+                    session = await get_session(request, None, new = False)
+                    request.user = self.get_session_user(session)
+                    request['authenticated'] = True
             except (Forbidden) as err:
                 logging.error('Auth Middleware: Access Denied')
                 raise web.HTTPUnauthorized(
