@@ -17,6 +17,7 @@ from navigator_auth.exceptions import (
     UserNotFound,
 )
 from navigator_auth.conf import (
+    AUTH_CREDENTIALS_REQUIRED,
     PARTNER_KEY,
     CYPHER_TYPE,
     exclude_list
@@ -214,7 +215,7 @@ class TrocToken(BaseAuthBackend):
                         ## check if user has a session:
                         # load session information
                         session = await get_session(request, payload, new=False, ignore_cookie=True)
-                        if not session:
+                        if not session and AUTH_CREDENTIALS_REQUIRED is True:
                             raise web.HTTPUnauthorized(
                                 reason="There is no Session for User or Authentication is missing"
                             )
@@ -226,9 +227,10 @@ class TrocToken(BaseAuthBackend):
                                 f'Missing User Object from Session: {ex}'
                             )
                     else:
-                        raise web.HTTPUnauthorized(
-                            reason="There is no Session for User or Authentication is missing"
-                        )
+                        if AUTH_CREDENTIALS_REQUIRED is True:
+                            raise web.HTTPUnauthorized(
+                                reason="There is no Session for User or Authentication is missing"
+                            )
                 except (Forbidden) as err:
                     self.logger.error('Auth Middleware: Access Denied')
                     raise web.HTTPUnauthorized(
@@ -246,8 +248,9 @@ class TrocToken(BaseAuthBackend):
                     )
                 except Exception as err: # pylint: disable=W0703
                     self.logger.error(f"Bad Request: {err!s}")
-                    raise web.HTTPBadRequest(
-                        reason=f"Auth Error: {err!s}"
-                    )
+                    if AUTH_CREDENTIALS_REQUIRED is True:
+                        raise web.HTTPBadRequest(
+                            reason=f"Auth Error: {err!s}"
+                        )
                 return await handler(request)
             return middleware

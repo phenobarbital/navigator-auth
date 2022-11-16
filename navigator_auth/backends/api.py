@@ -10,6 +10,7 @@ from aiohttp.web_urldispatcher import SystemRoute
 from navigator_auth.libs.cipher import Cipher
 from navigator_auth.exceptions import AuthException, InvalidAuth
 from navigator_auth.conf import (
+    AUTH_CREDENTIALS_REQUIRED,
     AUTH_JWT_ALGORITHM,
     AUTH_TOKEN_ISSUER,
     AUTH_TOKEN_SECRET,
@@ -202,9 +203,10 @@ class APIKeyAuth(BaseAuthBackend):
                 )
             except Exception as err:
                 self.logger.exception(f"Error on Token Middleware: {err}")
-                raise web.HTTPBadRequest(
-                    reason=f"Authentication Error: {err}"
-                )
+                if AUTH_CREDENTIALS_REQUIRED is True:
+                    raise web.HTTPBadRequest(
+                        reason=f"Authentication Error: {err}"
+                    )
             return await handler(request)
 
         return middleware
