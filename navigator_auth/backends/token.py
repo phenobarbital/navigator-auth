@@ -28,9 +28,6 @@ class TokenAuth(BaseAuthBackend):
     _pool = None
     _ident: AuthUser = TokenUser
 
-    def configure(self, app, router):
-        super(TokenAuth, self).configure(app, router)
-
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements.
         """
@@ -62,7 +59,7 @@ class TokenAuth(BaseAuthBackend):
                     tenant, token = token.split(":")
                 except ValueError:
                     pass
-        except Exception as err:
+        except Exception as err: # pylint: disable=W0703
             self.logger.exception(
                 f"TokenAuth: Error getting payload: {err}"
             )
@@ -102,7 +99,7 @@ class TokenAuth(BaseAuthBackend):
             # getting user information
             # making validation
             try:
-                u = data["name"]
+                # u = data["name"]
                 username = data["partner"]
                 grants = data["grants"]
                 programs = data["programs"]
@@ -115,7 +112,7 @@ class TokenAuth(BaseAuthBackend):
             # TODO: Validate that partner (tenants table):
             try:
                 userdata = dict(data)
-                id = data["name"]
+                uid = data["name"]
                 user = {
                     "name": data["name"],
                     "partner": username,
@@ -124,26 +121,25 @@ class TokenAuth(BaseAuthBackend):
                     "grants": grants,
                     "tenant": tenant,
                     "id": data["name"],
-                    "user_id": id,
+                    "user_id": uid,
                 }
-                userdata[self.session_key_property] = id
+                userdata[self.session_key_property] = uid
                 usr = await self.create_user(userdata)
-                usr.id = id
-                usr.set(self.username_attribute, id)
+                usr.id = uid
+                usr.set(self.username_attribute, uid)
                 usr.programs = programs
                 usr.tenant = tenant
-                self.logger.debug(f'User Created: {usr}')
                 token = self.create_jwt(data=user)
                 usr.access_token = token
                 # saving user-data into request:
                 await self.remember(
-                    request, id, userdata, usr
+                    request, uid, userdata, usr
                 )
                 return {
                     "token": f"{tenant}:{token}",
                     **user
                 }
-            except Exception as err:
+            except Exception as err: # pylint: disable=W0703
                 self.logger.exception(f'TokenAuth: Authentication Error: {err}')
                 return False
 
@@ -171,7 +167,7 @@ class TokenAuth(BaseAuthBackend):
                     return False
                 else:
                     return result
-        except Exception as err:
+        except Exception as err: # pylint: disable=W0703
             self.logger.exception(err)
             return False
 
@@ -202,7 +198,7 @@ class TokenAuth(BaseAuthBackend):
                     payload = jwt.decode(
                         jwt_token, AUTH_TOKEN_SECRET, algorithms=[AUTH_JWT_ALGORITHM], leeway=30
                     )
-                    # self.logger.debug(f"Decoded Token: {payload!s}")
+                    self.logger.debug(f"Decoded Token: {payload!s}")
                     result = await self.check_token_info(request, tenant, payload)
                     if not result:
                         # Token missing, maybe auth with another mechanism?
@@ -210,17 +206,15 @@ class TokenAuth(BaseAuthBackend):
                     else:
                         request[self.session_key_property] = payload['name']
                         # TRUE because if data doesnt exists, returned
-                        session = await get_session(request, payload, new = False)
+                        session = await get_session(request, payload, new = False, ignore_cookie=True)
                         session["grants"] = result["grants"]
                         session["partner"] = result["partner"]
                         session["tenant"] = tenant
                         try:
-                            # request.user = session.decode('name')
                             request.user = session.decode('user')
                             request.user.is_authenticated = True
-                        except KeyError:
+                        except (AttributeError, KeyError):
                             pass
-                        # print('USER> ', request.user, type(request.user))
                         request['authenticated'] = True
                 except (jwt.exceptions.ExpiredSignatureError) as err:
                     self.logger.error(f"TokenAuth: token expired: {err!s}")
@@ -239,7 +233,7 @@ class TokenAuth(BaseAuthBackend):
                     )
                 except Exception as err:
                     self.logger.exception(f"Error on Token Middleware: {err}")
-                    raise web.BadRequest(
+                    raise web.HTTPBadRequest(
                         reason=f"Authentication Error: {err}"
                     )
             return await handler(request)

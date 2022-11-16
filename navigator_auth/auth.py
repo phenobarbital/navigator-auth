@@ -27,6 +27,7 @@ from .conf import (
     AUTHORIZATION_MIDDLEWARES,
     default_dsn,
     logging,
+    exclude_list
 )
 from .exceptions import (
     AuthException,
@@ -42,15 +43,7 @@ from .handlers import handler_routes
 from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
 
-exclude_list = (
-    "/static/",
-    "/api/v1/login",
-    "/api/v1/logout",
-    "/login",
-    "/logout",
-    "/signin",
-    "/signout",
-)
+
 
 class AuthHandler:
     """Authentication Backend for Navigator."""
@@ -464,7 +457,8 @@ class AuthHandler:
     async def get_session_user(self, session: Iterable, name: str = 'user') -> Iterable:
         try:
             user = session.decode(name)
-            user.is_authenticated = True
+            if user:
+                user.is_authenticated = True
             return user
         except (AttributeError, RuntimeError) as ex:
             logging.error(
@@ -511,8 +505,12 @@ class AuthHandler:
                     ## check if user has a session:
                     # load session information
                     session = await get_session(request, payload, new = False)
+                    if not session:
+                        raise web.HTTPUnauthorized(
+                            reason="There is no Session for User or Authentication is missing"
+                        )
                     try:
-                        request.user = self.get_session_user(session)
+                        request.user = await self.get_session_user(session)
                         request['authenticated'] = True
                     except Exception as ex: # pylint: disable=W0703
                         logging.error(
@@ -520,7 +518,11 @@ class AuthHandler:
                         )
                 elif self.secure_cookies is True:
                     session = await get_session(request, None, new = False)
-                    request.user = self.get_session_user(session)
+                    if not session:
+                        raise web.HTTPUnauthorized(
+                            reason="There is no Session for User or Authentication is missing"
+                        )
+                    request.user = await self.get_session_user(session)
                     request['authenticated'] = True
             except (Forbidden) as err:
                 logging.error('Auth Middleware: Access Denied')

@@ -1,6 +1,7 @@
 import logging
 import base64
 import functools
+from xml.etree import ElementTree
 import requests
 import jwt
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
@@ -8,7 +9,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends.openssl.backend import backend
 from cryptography.x509 import load_der_x509_certificate
-from xml.etree import ElementTree
+
 
 class InvalidToken(Exception):
     pass
@@ -27,7 +28,9 @@ def load_certs(response):
     signing_certificates = [node.text for node in cert_nodes]
     new_keys = []
     for cert in signing_certificates:
-        logging.debug("Loading public key from certificate: %s", cert)
+        logging.debug(
+            f"Loading public key from certificate: {cert}"
+        )
         cert_obj = load_der_x509_certificate(
             base64.b64decode(cert), backend
         )
@@ -64,7 +67,7 @@ def _fetch_discovery_meta(tenant_id=None, discovery_url: str = None):
             discovery_url = f'https://login.microsoftonline.com/{tenant_id}/.well-known/openid-configuration'
     try:
         print('DISCOVERY URL: ', discovery_url)
-        response = requests.get(discovery_url)
+        response = requests.get(discovery_url, timeout=60)
         response.raise_for_status()
     except requests.exceptions.HTTPError as err:
         logging.debug(response.text)
@@ -95,7 +98,7 @@ def get_jwks_uri(tenant_id: str = None, discovery_url: str = None):
 def get_jwks(tenant_id: str = None, discovery_url: str = None):
     jwks_uri= get_jwks_uri(tenant_id, discovery_url)
     try:
-        response = requests.get(jwks_uri)
+        response = requests.get(jwks_uri, timeout=60)
         response.raise_for_status()
     except requests.exceptions.HTTPError as err:
         logging.debug(response.text)

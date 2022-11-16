@@ -23,10 +23,6 @@ class NoAuth(BaseAuthBackend):
     user_attribute: str = "userid"
     _ident: AuthUser = AnonymousUser
 
-    def configure(self, app, router):
-        """Base configuration for Auth Backends, need to be extended
-        to create Session Object."""
-
     async def check_credentials(self, request):
         """ Authentication and create a session."""
         return True

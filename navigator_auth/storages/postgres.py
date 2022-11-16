@@ -17,7 +17,8 @@ class PostgresStorage(AuthStorage):
         **kwargs
     ):
         kwargs = {
-            "min_size": 5,
+            "min_size": 2,
+            "max_size": 100,
             "server_settings": {
                 "application_name": 'NAV-AUTH',
                 "client_min_messages": "notice",
@@ -47,4 +48,3 @@ class PostgresStorage(AuthStorage):
     async def cleanup(self, app: web.Application):
         """Called when application ends.
         """
-        pass

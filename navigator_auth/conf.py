@@ -30,6 +30,18 @@ PG_PORT = config.get("DBPORT", fallback=5432)
 
 default_dsn = f"postgres://{PG_USER}:{PG_PWD}@{PG_HOST}:{PG_PORT}/{PG_DATABASE}"
 
+### Exclude List:
+excluded_default = [
+    "/static/",
+    "/api/v1/login",
+    "/api/v1/logout",
+    "/login",
+    "/logout",
+    "/signin",
+    "/signout",
+]
+new_excluded = [e.strip() for e in list(config.get("ROUTES_EXCLUDED", fallback="").split(","))]
+exclude_list = excluded_default + new_excluded
 
 # if false, force credentials are not required for using this system.
 CREDENTIALS_REQUIRED = config.getboolean(

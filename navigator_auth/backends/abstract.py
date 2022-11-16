@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from functools import partial, wraps
@@ -83,7 +83,7 @@ class BaseAuthBackend(ABC):
         # starts the Executor
         self.executor = ThreadPoolExecutor(max_workers=1)
         # logger
-        self.logger = logging.getLogger('Nav-auth.backends')
+        self.logger = logging.getLogger('Auth.backends')
 
     @classmethod
     def authz_backends(cls):
@@ -171,7 +171,10 @@ class BaseAuthBackend(ABC):
                 session = await new_session(request, userdata)
                 user.is_authenticated = True # if session, then, user is authenticated.
                 session[self.session_key_property] = identity
-                session['user'] = session.encode(user)
+                try:
+                    session['user'] = session.encode(user)
+                except RuntimeError:
+                    pass
                 request['session'] = session
             except Exception as err:
                 raise web.HTTPForbidden(
@@ -239,6 +242,17 @@ class BaseAuthBackend(ABC):
             except Exception as err: # pylint: disable=W0703
                 self.logger.exception(err)
         return _wrap
+
+    async def get_session_user(self, session: Iterable, name: str = 'user') -> Iterable:
+        try:
+            user = session.decode(name)
+            if user:
+                user.is_authenticated = True
+            return user
+        except (AttributeError, RuntimeError) as ex:
+            logging.error(
+                f'NAV: Unable to decode User session: {ex}'
+            )
 
 
 def decode_token(request, issuer: str = None):

@@ -6,26 +6,33 @@ and decrypt, after that, a session will be created.
 """
 import base64
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Awaitable
 import aioredis
 import orjson
-from aiohttp import web
+from aiohttp import web, hdrs
+from aiohttp.web_urldispatcher import SystemRoute
 from navigator_session import (
+    get_session,
     AUTH_SESSION_OBJECT
 )
 from navigator_auth.exceptions import (
     AuthException,
+    AuthExpired,
+    FailedAuth,
+    Forbidden,
+    InvalidAuth,
     UserNotFound,
-    InvalidAuth
 )
 from navigator_auth.identities import AuthUser, Column
 from navigator_auth.conf import (
     DJANGO_USER_MAPPING,
     DJANGO_SESSION_URL,
-    DJANGO_SESSION_PREFIX
+    DJANGO_SESSION_PREFIX,
+    exclude_list
 )
 # User Identity
-from .abstract import BaseAuthBackend
+from .abstract import BaseAuthBackend, decode_token
+
 class DjangoUser(AuthUser):
     """DjangoUser.
 
@@ -57,9 +64,6 @@ class DjangoAuth(BaseAuthBackend):
             password_attribute,
             **kwargs
         )
-
-    def configure(self, app, router):
-        super(DjangoAuth, self).configure(app, router)
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements.
@@ -199,7 +203,7 @@ class DjangoAuth(BaseAuthBackend):
                 # extract data from Django Session to Session Object:
                 udata = {}
                 for k, v in data[self._user_object].items():
-                    if k in DJANGO_USER_MAPPING.keys():
+                    if k in DJANGO_USER_MAPPING:
                         if k in userdata:
                             if isinstance(userdata[k], list):
                                 # if userdata of k is a list, we need to mix with data:
@@ -249,3 +253,77 @@ class DjangoAuth(BaseAuthBackend):
                     f'DjangoAuth: Authentication Error: {err}'
                 )
                 return False
+
+    async def auth_middleware(
+            self,
+            app: web.Application,
+            handler: Callable[[web.Request], Awaitable[web.StreamResponse]]
+        ) -> web.StreamResponse:
+            """
+                Basic Auth Middleware.
+                Description: Basic Authentication for NoAuth, Basic, Token and Django.
+            """
+            @web.middleware
+            async def middleware(request: web.Request) -> web.StreamResponse:
+                self.logger.debug(':: DJANGO SESSION MIDDLEWARE ::')
+                # avoid authorization backend on excluded methods:
+                if request.method == hdrs.METH_OPTIONS:
+                    return await handler(request)
+                # avoid authorization on exclude list
+                if request.path in exclude_list:
+                    return await handler(request)
+                # avoid check system routes
+                try:
+                    if isinstance(request.match_info.route, SystemRoute):  # eg. 404
+                        return await handler(request)
+                except Exception as err: # pylint: disable=W0703
+                    self.logger.error(err)
+                ## Already Authenticated
+                try:
+                    if request.get('authenticated', False) is True:
+                        return await handler(request)
+                except KeyError:
+                    pass
+                try:
+                    _, payload = decode_token(request)
+                    if payload:
+                        ## check if user has a session:
+                        # load session information
+                        session = await get_session(request, payload, new=False, ignore_cookie=True)
+                        if not session:
+                            raise web.HTTPUnauthorized(
+                                reason="There is no Session for User or Authentication is missing"
+                            )
+                        try:
+                            request.user = await self.get_session_user(session)
+                            request['authenticated'] = True
+                        except Exception as ex: # pylint: disable=W0703
+                            self.logger.error(
+                                f'Missing User Object from Session: {ex}'
+                            )
+                    else:
+                        raise web.HTTPUnauthorized(
+                            reason="There is no Session for User or Authentication is missing"
+                        )
+                except (Forbidden) as err:
+                    self.logger.error('Auth Middleware: Access Denied')
+                    raise web.HTTPUnauthorized(
+                        reason=err.message
+                    )
+                except (AuthExpired, FailedAuth) as err:
+                    self.logger.error('Auth Middleware: Auth Credentials were expired')
+                    raise web.HTTPUnauthorized(
+                        reason=err.message
+                    )
+                except AuthException as err:
+                    self.logger.error('Auth Middleware: Invalid Signature or secret')
+                    raise web.HTTPForbidden(
+                        reason=err.message
+                    )
+                except Exception as err: # pylint: disable=W0703
+                    self.logger.error(f"Bad Request: {err!s}")
+                    raise web.HTTPBadRequest(
+                        reason=f"Auth Error: {err!s}"
+                    )
+                return await handler(request)
+            return middleware

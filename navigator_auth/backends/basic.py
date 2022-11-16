@@ -41,11 +41,6 @@ class BasicAuth(BaseAuthBackend):
     pwd_atrribute: str = "password"
     _ident: AuthUser = BasicUser
 
-    def configure(self, app, router):
-        """Base configuration for Auth Backends, need to be extended
-        to create Session Object."""
-        super(BasicAuth, self).configure(app, router)
-
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements.
         """
@@ -70,9 +65,9 @@ class BasicAuth(BaseAuthBackend):
             pwd = user[self.pwd_atrribute]
         except KeyError as ex:
             raise InvalidAuth(
-                'NAV: Missing Password attr on User Account'
+                'Missing Password attr on User Account'
             ) from ex
-        except Exception as err:
+        except Exception as err: # pylint: disable=W0703
             logging.error(err)
         try:
             if self.check_password(pwd, password):
@@ -106,7 +101,7 @@ class BasicAuth(BaseAuthBackend):
 
     def check_password(self, current_password, password):
         try:
-            algorithm, iterations, salt, hash = current_password.split("$", 3)
+            algorithm, iterations, salt, _ = current_password.split("$", 3)
         except ValueError as ex:
             raise InvalidAuth(
                 'Basic Auth: Invalid Password Algorithm: {ex}'
@@ -127,7 +122,7 @@ class BasicAuth(BaseAuthBackend):
                 user = request.query.get(self.username_attribute, None)
                 password = request.query.get(self.pwd_atrribute, None)
                 return [user, password]
-            except Exception:
+            except Exception: # pylint: disable=W0703
                 return [None, None]
         elif ctype in ("multipart/mixed", "multipart/form-data", "application/x-www-form-urlencoded"):
             data = await request.post()
@@ -143,7 +138,7 @@ class BasicAuth(BaseAuthBackend):
                 user = data[self.username_attribute]
                 password = data[self.pwd_atrribute]
                 return [user, password]
-            except Exception:
+            except Exception: # pylint: disable=W0703
                 return [None, None]
         else:
             return [None, None]
@@ -179,7 +174,6 @@ class BasicAuth(BaseAuthBackend):
                 uid = user[self.userid_attribute]
                 userdata[self.username_attribute] = username
                 userdata[self.session_key_property] = username
-                # usr = BasicUser(data=userdata[AUTH_SESSION_OBJECT])
                 usr = await self.create_user(
                     userdata[AUTH_SESSION_OBJECT]
                 )
@@ -202,8 +196,8 @@ class BasicAuth(BaseAuthBackend):
                     "token": token,
                     **userdata
                 }
-            except Exception as err:
-                logging.exception(f'DjangoAuth: Authentication Error: {err}')
+            except Exception as err: # pylint: disable=W0703
+                logging.exception(f'BasicAuth: Authentication Error: {err}')
                 return False
 
     async def check_credentials(self, request):

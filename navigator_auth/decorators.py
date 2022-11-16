@@ -6,7 +6,6 @@ from aiohttp.abc import AbstractView
 from navigator_session import get_session
 from navigator_auth.exceptions import AuthException
 from navigator_auth.conf import AUTH_SESSION_OBJECT
-#from navigator.auth import get_userdata
 
 
 F = TypeVar('F', bound=Callable[..., Any])

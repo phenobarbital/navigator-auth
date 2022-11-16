@@ -67,7 +67,7 @@ class APIKeyAuth(BaseAuthBackend):
                 mech = 'api'
             else:
                 return [None, None]
-        except Exception as err:
+        except Exception as err: # pylint: disable=W0703
             self.logger.exception(f"API Key Auth: Error getting payload: {err}")
             return None
         return [mech, token]
@@ -133,8 +133,10 @@ class APIKeyAuth(BaseAuthBackend):
                     "token": token,
                     **user
                 }
-            except Exception as err:
-                self.logger.exception(f'API Key Auth: Authentication Error: {err}')
+            except Exception as err: # pylint: disable=W0703
+                self.logger.exception(
+                    f'API Key Auth: Authentication Error: {err}'
+                )
                 return False
 
     async def check_token_info(self, request, mech, payload):
@@ -159,7 +161,7 @@ class APIKeyAuth(BaseAuthBackend):
                     return False
                 else:
                     return result
-        except Exception as err:
+        except Exception as err: # pylint: disable=W0703
             self.logger.exception(err)
             return False
 

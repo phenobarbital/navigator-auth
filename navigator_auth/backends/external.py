@@ -19,7 +19,7 @@ from aiohttp.client import (
     ClientTimeout,
     ClientSession
 )
-from navigator.auth.identities import AuthUser
+from navigator_auth.identities import AuthUser
 from navigator.exceptions import UserNotFound
 from navigator.conf import (
     AUTH_LOGIN_FAILED_URI,

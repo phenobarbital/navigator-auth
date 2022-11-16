@@ -2,20 +2,26 @@
 
 Troc Authentication using RNC algorithm.
 """
-from aiohttp import web
+from collections.abc import Awaitable, Callable
+from aiohttp import web, hdrs
+from aiohttp.web_urldispatcher import SystemRoute
 import orjson
-from navigator_session import AUTH_SESSION_OBJECT
+from navigator_session import get_session, AUTH_SESSION_OBJECT
 from navigator_auth.libs.cipher import Cipher
 from navigator_auth.exceptions import (
     AuthException,
+    AuthExpired,
+    FailedAuth,
+    Forbidden,
+    InvalidAuth,
     UserNotFound,
-    InvalidAuth
 )
 from navigator_auth.conf import (
     PARTNER_KEY,
-    CYPHER_TYPE
+    CYPHER_TYPE,
+    exclude_list
 )
-from .abstract import BaseAuthBackend
+from .abstract import BaseAuthBackend, decode_token
 from .basic import BasicUser
 
 class TrocToken(BaseAuthBackend):
@@ -42,11 +48,6 @@ class TrocToken(BaseAuthBackend):
         self.username_attribute = "email"
         self.cypher: Cipher = None
 
-    def configure(self, app, router):
-        """Base configuration for Auth Backends, need to be extended
-        to create Session Object."""
-        super(TrocToken, self).configure(app, router)
-
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements.
         """
@@ -71,7 +72,6 @@ class TrocToken(BaseAuthBackend):
             raise
 
     async def get_payload(self, request):
-        troctoken = None
         try:
             if "Authorization" in request.headers:
                 try:
@@ -89,10 +89,10 @@ class TrocToken(BaseAuthBackend):
             else:
                 try:
                     token = request.query.get("auth", None)
-                except Exception as e:
+                except Exception as e: # pylint: disable=W0703
                     print(e)
                     return None
-        except Exception as err:
+        except Exception as err: # pylint: disable=W0703
             self.logger.exception(f"TrocAuth: Error getting payload: {err}")
             return None
         return token
@@ -144,15 +144,15 @@ class TrocToken(BaseAuthBackend):
                     userdata[AUTH_SESSION_OBJECT] = {
                         **userdata[AUTH_SESSION_OBJECT], **data
                     }
-                except Exception as err:
+                except Exception as err: # pylint: disable=W0703
                     self.logger.exception(err)
-                id = user[self.username_attribute]
+                uid = user[self.username_attribute]
                 username = user[self.username_attribute]
-                userdata[self.session_key_property] = id
+                userdata[self.session_key_property] = uid
                 usr = await self.create_user(
                     userdata[AUTH_SESSION_OBJECT]
                 )
-                usr.id = id
+                usr.id = uid
                 usr.set(self.username_attribute, username)
                 payload = {
                     self.user_property: user[self.userid_attribute],
@@ -163,16 +163,91 @@ class TrocToken(BaseAuthBackend):
                 usr.access_token = token
                 # saving user-data into request:
                 await self.remember(
-                    request, id, userdata, usr
+                    request, uid, userdata, usr
                 )
                 return {
                     "token": token,
                     **userdata
                 }
-            except Exception as err:
-                self.logger.exception(f'DjangoAuth: Authentication Error: {err}')
+            except Exception as err: # pylint: disable=W0703
+                self.logger.exception(f'TROC Auth: Authentication Error: {err}')
                 return False
 
     async def check_credentials(self, request):
         """ Authentication and create a session."""
         return True
+
+
+    async def auth_middleware(
+            self,
+            app: web.Application,
+            handler: Callable[[web.Request], Awaitable[web.StreamResponse]]
+        ) -> web.StreamResponse:
+            """
+                Basic Auth Middleware.
+                Description: Basic Authentication for NoAuth, Basic, Token and Django.
+            """
+            @web.middleware
+            async def middleware(request: web.Request) -> web.StreamResponse:
+                self.logger.debug(':: TROC AUTH MIDDLEWARE ::')
+                # avoid authorization backend on excluded methods:
+                if request.method == hdrs.METH_OPTIONS:
+                    return await handler(request)
+                # avoid authorization on exclude list
+                if request.path in exclude_list:
+                    return await handler(request)
+                # avoid check system routes
+                try:
+                    if isinstance(request.match_info.route, SystemRoute):  # eg. 404
+                        return await handler(request)
+                except Exception as err: # pylint: disable=W0703
+                    self.logger.error(err)
+                ## Already Authenticated
+                try:
+                    if request.get('authenticated', False) is True:
+                        return await handler(request)
+                except KeyError:
+                    pass
+                try:
+                    _, payload = decode_token(request)
+                    if payload:
+                        ## check if user has a session:
+                        # load session information
+                        session = await get_session(request, payload, new=False, ignore_cookie=True)
+                        if not session:
+                            raise web.HTTPUnauthorized(
+                                reason="There is no Session for User or Authentication is missing"
+                            )
+                        try:
+                            request.user = await self.get_session_user(session)
+                            request['authenticated'] = True
+                        except Exception as ex: # pylint: disable=W0703
+                            self.logger.error(
+                                f'Missing User Object from Session: {ex}'
+                            )
+                    else:
+                        raise web.HTTPUnauthorized(
+                            reason="There is no Session for User or Authentication is missing"
+                        )
+                except (Forbidden) as err:
+                    self.logger.error('Auth Middleware: Access Denied')
+                    raise web.HTTPUnauthorized(
+                        reason=err.message
+                    )
+                except (AuthExpired, FailedAuth) as err:
+                    self.logger.error('Auth Middleware: Auth Credentials were expired')
+                    raise web.HTTPUnauthorized(
+                        reason=err.message
+                    )
+                except AuthException as err:
+                    self.logger.error('Auth Middleware: Invalid Signature or secret')
+                    raise web.HTTPForbidden(
+                        reason=err.message
+                    )
+                except Exception as err: # pylint: disable=W0703
+                    self.logger.error(f"Bad Request: {err!s}")
+                    raise web.HTTPBadRequest(
+                        reason=f"Auth Error: {err!s}"
+                    )
+                return await handler(request)
+            return middleware
