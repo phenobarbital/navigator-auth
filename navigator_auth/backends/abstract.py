@@ -29,7 +29,7 @@ from navigator_auth.conf import (
     AUTH_USERNAME_ATTRIBUTE,
     AUTH_JWT_ALGORITHM,
     USER_MAPPING,
-    CREDENTIALS_REQUIRED,
+    AUTH_CREDENTIALS_REQUIRED,
     SECRET_KEY
 )
 
@@ -60,7 +60,7 @@ class BaseAuthBackend(ABC):
         self._session = None
         self._app: web.Application = None # reference for Application
         # force using of credentials
-        self.credentials_required: bool = CREDENTIALS_REQUIRED
+        self.credentials_required: bool = AUTH_CREDENTIALS_REQUIRED
         self._credentials = None
         self.user_property = SESSION_USER_PROPERTY
         if user_attribute:

@@ -44,7 +44,7 @@ new_excluded = [e.strip() for e in list(config.get("ROUTES_EXCLUDED", fallback="
 exclude_list = excluded_default + new_excluded
 
 # if false, force credentials are not required for using this system.
-CREDENTIALS_REQUIRED = config.getboolean(
+AUTH_CREDENTIALS_REQUIRED = config.getboolean(
     "AUTH_CREDENTIALS_REQUIRED", fallback=True
 )
 
