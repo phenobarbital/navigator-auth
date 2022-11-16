@@ -45,7 +45,7 @@ exclude_list = excluded_default + new_excluded
 
 # if false, force credentials are not required for using this system.
 CREDENTIALS_REQUIRED = config.getboolean(
-    "AUTH_CREDENTIALS_REQUIRED", fallback=False
+    "AUTH_CREDENTIALS_REQUIRED", fallback=True
 )
 
 # AsyncDB Model representing a User Record.

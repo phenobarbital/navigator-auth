@@ -21,6 +21,7 @@ from navigator_session import SESSION_KEY, SessionHandler, get_session
 from .authorizations import authz_allow_hosts, authz_hosts
 from .backends.abstract import decode_token
 from .conf import (
+    AUTH_CREDENTIALS_REQUIRED,
     AUTH_USER_MODEL,
     AUTHENTICATION_BACKENDS,
     AUTHORIZATION_BACKENDS,
@@ -506,9 +507,10 @@ class AuthHandler:
                     # load session information
                     session = await get_session(request, payload, new = False)
                     if not session:
-                        raise web.HTTPUnauthorized(
-                            reason="There is no Session for User or Authentication is missing"
-                        )
+                        if AUTH_CREDENTIALS_REQUIRED is True:
+                            raise web.HTTPUnauthorized(
+                                reason="There is no Session for User or Authentication is missing"
+                            )
                     try:
                         request.user = await self.get_session_user(session)
                         request['authenticated'] = True
@@ -519,9 +521,10 @@ class AuthHandler:
                 elif self.secure_cookies is True:
                     session = await get_session(request, None, new = False)
                     if not session:
-                        raise web.HTTPUnauthorized(
-                            reason="There is no Session for User or Authentication is missing"
-                        )
+                        if AUTH_CREDENTIALS_REQUIRED is True:
+                            raise web.HTTPUnauthorized(
+                                reason="There is no Session for User or Authentication is missing"
+                            )
                     request.user = await self.get_session_user(session)
                     request['authenticated'] = True
             except (Forbidden) as err:
@@ -541,8 +544,9 @@ class AuthHandler:
                 )
             except Exception as err: # pylint: disable=W0703
                 logging.error(f"Bad Request: {err!s}")
-                raise web.HTTPBadRequest(
-                    reason=f"Auth Error: {err!s}"
-                )
+                if AUTH_CREDENTIALS_REQUIRED is True:
+                    raise web.HTTPBadRequest(
+                        reason=f"Auth Error: {err!s}"
+                    )
             return await handler(request)
         return middleware
