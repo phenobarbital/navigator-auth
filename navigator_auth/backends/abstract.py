@@ -245,12 +245,13 @@ class BaseAuthBackend(ABC):
 
     async def get_session_user(self, session: Iterable, name: str = 'user') -> Iterable:
         try:
-            user = session.decode(name)
-            if user:
-                user.is_authenticated = True
+            if session:
+                user = session.decode(name)
+                if user:
+                    user.is_authenticated = True
             return user
         except (AttributeError, RuntimeError) as ex:
-            logging.error(
+            logging.warning(
                 f'NAV: Unable to decode User session: {ex}'
             )
 

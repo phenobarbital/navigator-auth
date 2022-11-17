@@ -21,6 +21,11 @@ HOSTS = [e.strip() for e in list(config.get("HOSTS", fallback="localhost").split
 ## Default Domain
 DOMAIN = config.get("DOMAIN", fallback="dev.local")
 
+### DATABASE INFORMATION:
+AUTH_DB_SCHEMA = config.get('AUTH_DB_SCHEMA', fallback="auth")
+AUTH_USERS_TABLE = config.get("AUTH_USERS_TABLE", fallback="users")
+AUTH_USERS_VIEW = config.get("AUTH_USERS_VIEW", fallback="vw_users")
+
 #### Main Database
 PG_USER = config.get("DBUSER")
 PG_HOST = config.get("DBHOST", fallback="localhost")
@@ -107,8 +112,6 @@ if mapping is not None:
         logging.exception(
             'Auth: Invalid User Mapping on *AUTH_USER_MAPPING*'
         )
-
-USERS_TABLE = config.get("AUTH_USERS_TABLE", fallback="users")
 
 ## Redis Session:
 CACHE_HOST = config.get("CACHEHOST", fallback="localhost")

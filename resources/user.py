@@ -1,6 +1,9 @@
 from datetime import datetime
 from asyncdb.models import Column, Model
-
+from navigator_auth.conf import (
+    AUTH_DB_SCHEMA,
+    AUTH_USERS_VIEW
+)
 
 
 class User(Model):
@@ -33,8 +36,8 @@ class User(Model):
 
     class Meta:
         driver = "pg"
-        name = 'vw_users'
-        schema = "auth"
+        name = AUTH_USERS_VIEW
+        schema = AUTH_DB_SCHEMA
         strict = True
         frozen = False
         connection = None

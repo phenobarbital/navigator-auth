@@ -13,7 +13,8 @@ from asyncdb.models import Model, Column
 from .libs.cipher import Cipher
 from .libs.json import json_encoder
 from .conf import (
-    USERS_TABLE,
+    AUTH_DB_SCHEMA,
+    AUTH_USERS_TABLE,
     AUTH_DEFAULT_ISSUER,
     SECRET_KEY,
     AUTH_JWT_ALGORITHM,
@@ -41,7 +42,7 @@ class Client(Model):
     created_by: str = Column(required=False)
     class Meta:
         name = 'clients'
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
 
@@ -63,7 +64,7 @@ class Organization(Model):
     created_by: str = Column(required=False)
     class Meta:
         name = 'organizations'
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         frozen = False
 
@@ -77,7 +78,7 @@ class ProgramCategory(Model):
     category: str = Column(required=True)
     class Meta:
         name = 'program_categories'
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         frozen = False
 
@@ -99,7 +100,7 @@ class Program(Model):
             self.program_slug = slugify(self.program_name)
     class Meta:
         name = 'programs'
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         frozen = False
 
@@ -111,7 +112,7 @@ class ProgramAttribute(Model):
 
     class Meta:
         name = 'program_attributes'
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         frozen = False
 
@@ -126,7 +127,7 @@ class ProgramClient(Model):
 
     class Meta:
         name = 'program_clients'
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         frozen = False
 
@@ -167,8 +168,8 @@ class User(Model):
     created_by: str = Column(required=False)
 
     class Meta:
-        name = USERS_TABLE
-        schema = "auth"
+        name = AUTH_USERS_TABLE
+        schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
 
@@ -182,7 +183,7 @@ class UserIdentity(Model):
 
     class Meta:
         name = "user_identities"
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
 
@@ -231,7 +232,7 @@ class UserDevices(Model):
 
     class Meta:
         name = "user_devices"
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
 
@@ -246,7 +247,7 @@ class OrganizationUser(Model):
 
     class Meta:
         name = 'organization_users'
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         frozen = False
 
@@ -262,7 +263,7 @@ class Group(Model):
 
     class Meta:
         name = "groups"
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
 
@@ -275,7 +276,7 @@ class UserGroup(Model):
 
     class Meta:
         name = "user_groups"
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
 
@@ -287,7 +288,7 @@ class ProgramGroup(Model):
 
     class Meta:
         name = "program_groups"
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
 
@@ -306,7 +307,7 @@ class Permission(Model):
 
     class Meta:
         name = "permissions"
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
 
@@ -320,7 +321,7 @@ class GroupPermission(Model):
 
     class Meta:
         name = "group_permissions"
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
 
@@ -334,6 +335,6 @@ class UserPermission(Model):
 
     class Meta:
         name = "user_permissions"
-        schema = "auth"
+        schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
