@@ -147,7 +147,7 @@ class DjangoAuth(BaseAuthBackend):
             return user
         except UserNotFound as err:
             raise UserNotFound(
-                f"User {login} doesn\'t exists"
+                f"User {login} doesn\'t exists: {err}"
             ) from err
         except Exception as e:
             raise Exception(e) from e

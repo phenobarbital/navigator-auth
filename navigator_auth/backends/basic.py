@@ -56,7 +56,7 @@ class BasicAuth(BaseAuthBackend):
             user = await self.get_user(**search)
         except UserNotFound as err:
             raise UserNotFound(
-                f"User {login} doesn't exists"
+                f"User {login} doesn't exists: {err}"
             ) from err
         except Exception as err:
             raise Exception from err
