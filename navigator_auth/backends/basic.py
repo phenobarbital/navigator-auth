@@ -77,6 +77,8 @@ class BasicAuth(BaseAuthBackend):
                 raise FailedAuth(
                     "Basic Auth: Invalid Credentials"
                 )
+        except InvalidAuth as err:
+            raise
         except Exception as err:
             raise Exception from err
 
@@ -104,7 +106,7 @@ class BasicAuth(BaseAuthBackend):
             algorithm, iterations, salt, _ = current_password.split("$", 3)
         except ValueError as ex:
             raise InvalidAuth(
-                'Basic Auth: Invalid Password Algorithm: {ex}'
+                f'Basic Auth: Invalid Password: {ex}'
             ) from ex
         assert algorithm == AUTH_PWD_ALGORITHM
         compare_hash = self.set_password(
