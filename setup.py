@@ -105,26 +105,23 @@ setup(
     packages=find_packages(exclude=["contrib", "docs", "tests"]),
     license=__license__,
     setup_requires=[
-        "wheel==0.37.1",
+        "wheel==0.38.4",
         "Cython==0.29.32",
         "asyncio==3.4.3"
     ],
     install_requires=[
-        "wheel==0.37.1",
-        "Cython==0.29.32",
         "PyNaCl==1.5.0",
         "aiohttp==3.8.3",
         "uvloop==0.17.0",
         "asyncio==3.4.3",
         "cchardet==2.1.7",
-        "orjson==3.8.0",
+        "orjson==3.8.2",
         "jsonpickle==2.2.0",
         'yarl==1.8.1',
         'wrapt==1.14.1',
         "aioredis==2.0.1",
-        "navconfig>=0.10.0"
-        "asyncdb>=2.1.18",
-        "navigator-session>=0.1.1",
+        "asyncdb>=2.1.30",
+        "navconfig>=1.0.6",
         "PyJWT==2.6.0",
         "pycryptodome==3.15.0",
         "rncryptor==3.3.0",
@@ -133,7 +130,8 @@ setup(
         "okta-jwt-verifier==0.2.3",
         "python-slugify==6.1.1",
         "platformdirs==2.5.1",
-        "aiohttp_cors==0.7.0",
+        "aiohttp_cors>=0.7.0",
+        "navigator-session>=0.3.0",
         "pendulum==2.1.2"
     ],
     tests_require=[
