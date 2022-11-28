@@ -102,6 +102,7 @@ class BaseAuthBackend(ABC):
     async def get_user(self, **search):
         """Getting User Object."""
         user = None
+        error = None
         try:
             db = self._app['authdb']
             async with await db.acquire() as conn:
@@ -110,7 +111,9 @@ class BaseAuthBackend(ABC):
         except ValidationError as ex:
             self.logger.error(f"Invalid User Information {search!s}")
             print(ex.payload)
+            error = ex
         except Exception as e:
+            error = e
             self.logger.error(f"Error getting User {search!s}")
             raise UserNotFound(
                 f"Error getting User {search!s}: {e!s}"
@@ -118,7 +121,7 @@ class BaseAuthBackend(ABC):
         # if not exists, return error of missing
         if not user:
             raise UserNotFound(
-                f"User {search!s} doesn't exists"
+                f"User {search!s} doesn't exists: {error}"
             )
         return user
 

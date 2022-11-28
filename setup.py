@@ -125,7 +125,7 @@ setup(
         "navconfig>=0.10.0"
         "asyncdb>=2.1.18",
         "navigator-session>=0.1.1",
-        "PyJWT==2.4.0",
+        "PyJWT==2.6.0",
         "pycryptodome==3.15.0",
         "rncryptor==3.3.0",
         "msal==1.20.0",
