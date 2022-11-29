@@ -128,7 +128,7 @@ setup(
         "msal==1.20.0",
         "aiogoogle==3.1.2",
         "okta-jwt-verifier==0.2.3",
-        "python-slugify==6.1.1",
+        "python-slugify==7.0.0",
         "platformdirs==2.5.1",
         "aiohttp_cors>=0.7.0",
         "navigator-session>=0.3.0",
