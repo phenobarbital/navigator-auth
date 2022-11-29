@@ -126,7 +126,7 @@ setup(
         "pycryptodome==3.15.0",
         "rncryptor==3.3.0",
         "msal==1.20.0",
-        "aiogoogle==3.1.2",
+        "aiogoogle==4.4.0",
         "okta-jwt-verifier==0.2.3",
         "python-slugify==6.1.1",
         "platformdirs==2.5.1",
