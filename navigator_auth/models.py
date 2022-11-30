@@ -29,7 +29,7 @@ class Text(str):
 
 class Client(Model):
     """Highest hierarchy level."""
-    client_id: int = Column(required=False, primary_key=True, db_default='auto')
+    client_id: int = Column(required=False, primary_key=True, db_default='auto', repr=False)
     client: str = Column(required=True, max=254)
     description: Text
     auth_backends: list = Column(required=False)
@@ -52,7 +52,7 @@ class Client(Model):
             self.client_slug = slugify(self.client)
 
 class Organization(Model):
-    org_id: int = Column(required=False, primary_key=True, db_default='auto')
+    org_id: int = Column(required=False, primary_key=True, db_default='auto', repr=False)
     oid: UUID = Column(required=True, db_default='auto')
     organization: str = Column(required=True, max=254)
     description: Text
@@ -74,7 +74,7 @@ class Organization(Model):
             self.org_slug = slugify(self.organization)
 
 class ProgramCategory(Model):
-    program_cat_id: int = Column(required=False, primary_key=True, db_default='auto')
+    program_cat_id: int = Column(required=False, primary_key=True, db_default='auto', repr=False)
     category: str = Column(required=True)
     class Meta:
         name = 'program_categories'
@@ -83,7 +83,7 @@ class ProgramCategory(Model):
         frozen = False
 
 class Program(Model):
-    program_id: int = Column(required=False, primary_key=True, db_default='auto')
+    program_id: int = Column(required=False, primary_key=True, db_default='auto', repr=False)
     program_name: str
     description: Text
     attributes: dict = Column(required=False, default_factory=dict)
@@ -142,7 +142,7 @@ class UserType(Enum):
 class User(Model):
     """Basic User notation."""
 
-    user_id: int = Column(required=False, primary_key=True, db_default='auto')
+    user_id: int = Column(required=False, primary_key=True, db_default='auto', repr=False)
     userid: UUID = Column(required=True, db_default='auto')
     first_name: str = Column(required=False, max=254, label="First Name")
     last_name: str = Column(required=False, max=254, label="Last Name")
@@ -252,7 +252,7 @@ class OrganizationUser(Model):
         frozen = False
 
 class Group(Model):
-    group_id: int = Column(required=True, primary_key=True, db_default='auto')
+    group_id: int = Column(required=True, primary_key=True, db_default='auto', repr=False)
     group_name: str = Column(required=True)
     client_id: Optional[Client] = Column(required=False)
     is_active: bool = Column(required=True, default=True)
