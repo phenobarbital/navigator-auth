@@ -511,7 +511,8 @@ class AuthHandler:
             except KeyError:
                 pass
             try:
-                _, payload = decode_token(request)
+                tenant, payload = decode_token(request)
+                print('TENANT ', tenant, payload)
                 if payload:
                     ## check if user has a session:
                     # load session information
