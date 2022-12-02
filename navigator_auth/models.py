@@ -100,6 +100,7 @@ class Program(Model):
             self.program_slug = slugify(self.program_name)
     class Meta:
         name = 'programs'
+        description = 'Modelo del programa'
         schema = AUTH_DB_SCHEMA
         strict = True
         frozen = False
