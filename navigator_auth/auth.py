@@ -27,6 +27,7 @@ from .conf import (
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,
     default_dsn,
+    REDIS_AUTH_URL,
     logging,
     exclude_list
 )
@@ -43,7 +44,7 @@ from .handlers import handler_routes
 ## Responses
 from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
-
+from .storages.redis import RedisStorage
 
 
 class AuthHandler:
@@ -365,6 +366,14 @@ class AuthHandler:
         # configuring Session Object
         self._session.setup(self.app)
         ## Manager for Auth Storage and Policy Storage
+        ## adding a Redis Connection:
+        try:
+            redis = RedisStorage(driver='redis', dsn=REDIS_AUTH_URL)
+            redis.configure(self.app) # pylint: disable=E1123
+        except RuntimeError as ex:
+            raise web.HTTPServerError(
+                reason=f"Error creating Redis connection: {ex}"
+            )
         ## getting Database Connection:
         try:
             pool = PostgresStorage(driver='pg', dsn=default_dsn)

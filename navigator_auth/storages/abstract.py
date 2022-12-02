@@ -74,7 +74,7 @@ class AuthStorage(ABC):
                 )
                 await self.conn.connection()
             logging.debug(f'Starting Auth DB driver={self.driver} On: {app}')
-            app['authdb'] = self.conn
+            app[self.name] = self.conn
         except (ProviderError, DriverError) as ex:
             raise RuntimeError(
                 f"Error creating DB {self.driver}: {ex}"

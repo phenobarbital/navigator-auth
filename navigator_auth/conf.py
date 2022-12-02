@@ -119,6 +119,9 @@ CACHE_PORT = config.get("CACHEPORT", fallback=6379)
 CACHE_URL = f"redis://{CACHE_HOST}:{CACHE_PORT}"
 REDIS_SESSION_DB = config.get("REDIS_SESSION_DB", fallback=0)
 
+redis_url = f"redis://{CACHE_HOST}:{CACHE_PORT}/1"
+REDIS_AUTH_URL = config.get('REDIS_AUTH_URL', fallback=redis_url)
+
 ### Session and Auth Backends:
 CACHE_PREFIX = config.get('CACHE_PREFIX', fallback='navigator')
 SESSION_PREFIX = f'{CACHE_PREFIX}_session'
