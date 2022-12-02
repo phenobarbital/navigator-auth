@@ -206,7 +206,7 @@ class TokenAuth(BaseAuthBackend):
                         try:
                             request[self.session_key_property] = payload['name']
                             # TRUE because if data doesnt exists, returned
-                            session = await get_session(request, payload, new = False, ignore_cookie=True)
+                            session = await get_session(request, payload, new = True, ignore_cookie=True)
                             session["grants"] = result["grants"]
                             session["partner"] = result["partner"]
                             session["tenant"] = tenant
