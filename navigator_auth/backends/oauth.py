@@ -2,14 +2,12 @@
 
 Oauth is a Abstract Class with basic functionalities for all Oauth2 backends.
 """
+from abc import abstractmethod
 from aiohttp import web
-from .external import ExternalAuth
-from navigator.exceptions import (
+from navigator_auth.exceptions import (
     NavException
 )
-from abc import abstractmethod
-from typing import Dict
-
+from .external import ExternalAuth
 
 class OauthAuth(ExternalAuth):
     """OauthAuth.
@@ -37,10 +35,10 @@ class OauthAuth(ExternalAuth):
                 f"{self._service_name}: Client doesn't have info for Authentication: {err}"
             ) from err
 
-    def get_auth_response(self, request: web.Request) -> Dict:
+    def get_auth_response(self, request: web.Request) -> dict:
         return dict(request.rel_url.query.items())
 
-    def get_auth_code(self, response: Dict) -> str:
+    def get_auth_code(self, response: dict) -> str:
         try:
             code = response.get(self._auth_code)
         except KeyError:

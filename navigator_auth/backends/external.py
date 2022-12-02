@@ -5,31 +5,30 @@ Abstract Model to any Oauth2 or external Auth Support.
 import asyncio
 from typing import (
     Dict,
-    Any,
-    Tuple,
-    Callable
+    Any
 )
+from collections.abc import Callable
 import importlib
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor
 from abc import abstractmethod
+from urllib.parse import urlparse, parse_qs
+from requests.models import PreparedRequest
 import aiohttp
 from aiohttp import web, hdrs
 from aiohttp.client import (
     ClientTimeout,
     ClientSession
 )
+from navconfig.logging import logging
 from navigator_auth.identities import AuthUser
-from navigator.exceptions import UserNotFound
-from navigator.conf import (
+from navigator_auth.exceptions import UserNotFound
+from navigator_auth.conf import (
     AUTH_LOGIN_FAILED_URI,
     AUTH_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
     AUTH_SUCCESSFUL_CALLBACKS
 )
-from navconfig.logging import logging
-from requests.models import PreparedRequest
-from urllib.parse import urlparse, parse_qs
 from .abstract import BaseAuthBackend
 
 
@@ -53,7 +52,7 @@ class ExternalAuth(BaseAuthBackend):
     username_attribute: str = "username"
     pwd_atrribute: str = "password"
     _service_name: str = "service"
-    _user_mapping: Dict = {}
+    _user_mapping: dict = {}
     _ident: AuthUser = OauthUser
 
     def __init__(
@@ -61,16 +60,12 @@ class ExternalAuth(BaseAuthBackend):
         user_attribute: str = None,
         userid_attribute: str = None,
         password_attribute: str = None,
-        credentials_required: bool = False,
-        authorization_backends: tuple = (),
         **kwargs,
     ):
         super().__init__(
             user_attribute,
             userid_attribute,
             password_attribute,
-            credentials_required,
-            authorization_backends,
             **kwargs
         )
         self.base_url: str = ''
@@ -83,7 +78,7 @@ class ExternalAuth(BaseAuthBackend):
         self.users_info: str = None
         self.authority: str = None
 
-    def configure(self, app, router, handler):
+    def configure(self, app, router):
         # add the callback url
         router = app.router
         # TODO: know the host we already are running
@@ -114,7 +109,7 @@ class ExternalAuth(BaseAuthBackend):
             self.finish_logout,
             name=f"{self._service_name}_complete_logout"
         )
-        super(ExternalAuth, self).configure(app, router, handler)
+        super(ExternalAuth, self).configure(app, router)
 
     def get_domain(self, request: web.Request) -> str:
         absolute_uri = str(request.url)
@@ -170,7 +165,7 @@ class ExternalAuth(BaseAuthBackend):
     async def finish_logout(self, request: web.Request):
         """finish_logout, Finish Logout Method."""
 
-    def build_user_info(self, userdata: Dict) -> Tuple:
+    def build_user_info(self, userdata: dict) -> tuple:
         """build_user_info.
             Get user or validate user from model.
         Args:

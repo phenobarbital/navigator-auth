@@ -2,14 +2,14 @@
 
 Description: Backend Authentication/Authorization using Google AUTH API.
 """
-import logging
 from aiohttp import web
-from navigator.exceptions import (
-    NavException
-)
 from aiogoogle import Aiogoogle
 from aiogoogle.auth.utils import create_secret
-from navigator.conf import (
+from navconfig.logging import logging
+from navigator_auth.exceptions import (
+    NavException
+)
+from navigator_auth.conf import (
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_API_SCOPES
@@ -27,8 +27,8 @@ class GoogleAuth(ExternalAuth):
     pwd_atrribute: str = "password"
     _service_name: str = "google"
 
-    def configure(self, app, router, handler):
-        super(GoogleAuth, self).configure(app, router, handler)
+    def configure(self, app, router):
+        super(GoogleAuth, self).configure(app, router)
         # TODO: build the callback URL and append to routes
         self._credentials = {
             "client_id": GOOGLE_CLIENT_ID,
@@ -79,7 +79,7 @@ class GoogleAuth(ExternalAuth):
                     "error": request.query.get("error"),
                     "error_description": request.query.get("error_description"),
                 }
-                logging.exception(f"Google Login Error: {err}, {err.state}")
+                # logging.exception(f"Google Login Error: {err}, {err.state}")
                 response = {
                     "message": "Google Login Error",
                     **error

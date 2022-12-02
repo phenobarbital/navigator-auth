@@ -2,18 +2,18 @@
 
 Description: Backend Authentication/Authorization using Okta Service.
 """
-import logging
-from aiohttp import web
-from .oauth import OauthAuth
 import requests
-from navigator.conf import (
+from aiohttp import web
+from okta_jwt_verifier import JWTVerifier
+from navconfig.logging import logging
+from navigator_auth.conf import (
     OKTA_CLIENT_ID,
     OKTA_CLIENT_SECRET,
     OKTA_DOMAIN,
-    OKTA_APP_NAME
+    # OKTA_APP_NAME
 )
-from okta_jwt_verifier import JWTVerifier
 
+from .oauth import OauthAuth
 
 async def is_token_valid(token, issuer, client_id):
     jwt_verifier = JWTVerifier(issuer, client_id, 'api://default')
@@ -94,6 +94,7 @@ class OktaAuth(OauthAuth):
                 self._token_uri,
                 headers=headers,
                 data=query_params,
+                timeout=60,
                 auth=(
                     OKTA_CLIENT_ID,
                     OKTA_CLIENT_SECRET
@@ -130,6 +131,7 @@ class OktaAuth(OauthAuth):
         try:
             data = requests.get(
                 self.userinfo_uri,
+                timeout=60,
                 headers={'Authorization': f'Bearer {access_token}'}
             ).json()
             userdata, uid = self.build_user_info(data)

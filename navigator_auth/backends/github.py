@@ -4,12 +4,11 @@ Description: Backend Authentication/Authorization using Okta Service.
 """
 import logging
 from aiohttp import web
-from .oauth import OauthAuth
-from navigator.conf import (
+from navigator_auth.conf import (
     GITHUB_CLIENT_ID,
     GITHUB_CLIENT_SECRET
 )
-
+from .oauth import OauthAuth
 
 class GithubAuth(OauthAuth):
     """GithubAuth.
@@ -21,8 +20,8 @@ class GithubAuth(OauthAuth):
     username_attribute: str = "email"
     _service_name: str = "github"
 
-    def configure(self, app, router, handler):
-        super(GithubAuth, self).configure(app, router, handler) # first, configure parents
+    def configure(self, app, router):
+        super(GithubAuth, self).configure(app, router) # first, configure parents
 
         # auth paths.
         self.base_url = 'https://api.github.com/'
@@ -48,7 +47,8 @@ class GithubAuth(OauthAuth):
             message = f"Github: Missing Auth Token: {auth_response}"
             logging.exception(message)
             response = {
-                "message": message
+                "message": message,
+                "error": str(err)
             }
             return web.json_response(response, status=403)
         grant = {
