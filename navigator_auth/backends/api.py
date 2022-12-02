@@ -171,7 +171,6 @@ class APIKeyAuth(BaseAuthBackend):
 
     async def auth_middleware(self, app, handler):
         async def middleware(request):
-            self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
             request.user = None
             # avoid check system routes
             try:
@@ -185,27 +184,29 @@ class APIKeyAuth(BaseAuthBackend):
                     return await handler(request)
             except KeyError:
                 pass
+            self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
             try:
                 userdata = await self.authenticate(request)
-                if not userdata:
-                    # API Key missing, maybe auth with another mechanism?
-                    return await handler(request)
-                request['authenticated'] = True
-                request[self.session_key_property] = userdata['user_id']
+                if userdata:
+                    request['authenticated'] = True
+                    request[self.session_key_property] = userdata['user_id']
             except (InvalidAuth) as err:
                 raise web.HTTPForbidden(
                     reason=f"API Key: {err.message!s}"
                 )
             except AuthException as err:
-                self.logger.error(f"Invalid authorization token: {err!r}")
-                raise web.HTTPForbidden(
-                    reason=f"API Key: Invalid authorization Key: {err!r}"
-                )
-            except Exception as err:
-                self.logger.exception(f"Error on Token Middleware: {err}")
                 if AUTH_CREDENTIALS_REQUIRED is True:
+                    self.logger.error(
+                        f"Invalid authorization token: {err!r}"
+                    )
+                    raise web.HTTPForbidden(
+                        reason=f"API Key: Invalid authorization Key: {err!r}"
+                    )
+            except Exception as err:
+                if AUTH_CREDENTIALS_REQUIRED is True:
+                    self.logger.exception(f"Error on API Key Middleware: {err}")
                     raise web.HTTPBadRequest(
-                        reason=f"Authentication Error: {err}"
+                        reason=f"API Auth Error: {err}"
                     )
             return await handler(request)
 

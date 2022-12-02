@@ -190,7 +190,6 @@ class TrocToken(BaseAuthBackend):
             """
             @web.middleware
             async def middleware(request: web.Request) -> web.StreamResponse:
-                self.logger.debug(':: TROC AUTH MIDDLEWARE ::')
                 # avoid authorization backend on excluded methods:
                 if request.method == hdrs.METH_OPTIONS:
                     return await handler(request)
@@ -209,6 +208,7 @@ class TrocToken(BaseAuthBackend):
                         return await handler(request)
                 except KeyError:
                     pass
+                self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
                 try:
                     _, payload = decode_token(request)
                     if payload:
@@ -232,12 +232,12 @@ class TrocToken(BaseAuthBackend):
                                 reason="There is no Session for User or Authentication is missing"
                             )
                 except (Forbidden) as err:
-                    self.logger.error('Auth Middleware: Access Denied')
+                    self.logger.error('TROC Auth: Access Denied')
                     raise web.HTTPUnauthorized(
                         reason=err.message
                     )
                 except (AuthExpired, FailedAuth) as err:
-                    self.logger.error('Auth Middleware: Auth Credentials were expired')
+                    self.logger.error('TROC Auth: Auth Credentials were expired')
                     raise web.HTTPUnauthorized(
                         reason=err.message
                     )

@@ -448,6 +448,7 @@ class AuthHandler:
                 ) from err
         # last: add the basic jwt middleware (used by basic auth and others)
         mdl.append(self.auth_middleware)
+
         # at the End: configure CORS for routes:
         cors = aiohttp_cors.setup(
             self.app,
@@ -487,7 +488,6 @@ class AuthHandler:
         """
         @web.middleware
         async def middleware(request: web.Request) -> web.StreamResponse:
-            logging.debug(':: BASIC AUTH MIDDLEWARE ::')
             # avoid authorization backend on excluded methods:
             if request.method == hdrs.METH_OPTIONS:
                 return await handler(request)
@@ -510,9 +510,9 @@ class AuthHandler:
                     return await handler(request)
             except KeyError:
                 pass
+            logging.debug(':: AUTH MIDDLEWARE ::')
             try:
-                tenant, payload = decode_token(request)
-                print('TENANT ', tenant, payload)
+                _, payload = decode_token(request)
                 if payload:
                     ## check if user has a session:
                     # load session information
