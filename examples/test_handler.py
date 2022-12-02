@@ -12,7 +12,7 @@ from navigator_auth import AuthHandler
 async def handle(request):
     session = await get_session(request)
     if session:
-        name = session.username
+        name = session.id
     else:
         name = request.match_info.get('name', "Anonymous")
     text = "Hello, " + name
