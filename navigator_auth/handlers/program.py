@@ -5,17 +5,20 @@ from navigator_auth.models import (
     ProgramAttribute,
     ProgramClient
 )
+from navigator_auth.conf import AUTH_PROGRAM_MODEL
 from .model import ModelHandler
+
+
+class ProgramHandler(ModelHandler):
+    model: Any = Program
+    model_name: str = AUTH_PROGRAM_MODEL
+    name: str = 'Program'
+    pk: str = 'program_id'
 
 class ProgramCatHandler(ModelHandler):
     model: Any = ProgramCategory
     name: str = 'Program Category'
     pk: str = 'program_cat_id'
-
-class ProgramHandler(ModelHandler):
-    model: Any = Program
-    name: str = 'Program'
-    pk: str = 'program_id'
 
 class ProgramAttrHandler(ModelHandler):
     model: Any = ProgramAttribute

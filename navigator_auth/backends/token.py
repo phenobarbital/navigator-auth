@@ -202,13 +202,16 @@ class TokenAuth(BaseAuthBackend):
                     self.logger.debug(f"Decoded Token: {payload!s}")
                     result = await self.check_token_info(request, tenant, payload)
                     if result:
-                        request[self.session_key_property] = payload['name']
-                        # TRUE because if data doesnt exists, returned
-                        session = await get_session(request, payload, new = False, ignore_cookie=True)
-                        session["grants"] = result["grants"]
-                        session["partner"] = result["partner"]
-                        session["tenant"] = tenant
                         request['authenticated'] = True
+                        try:
+                            request[self.session_key_property] = payload['name']
+                            # TRUE because if data doesnt exists, returned
+                            session = await get_session(request, payload, new = True, ignore_cookie=True)
+                            session["grants"] = result["grants"]
+                            session["partner"] = result["partner"]
+                            session["tenant"] = tenant
+                        except (AttributeError, KeyError, TypeError) as err:
+                            self.logger.warning(f'Error loading Token Session {err}')
                         try:
                             request.user = session.decode('user')
                             request.user.is_authenticated = True

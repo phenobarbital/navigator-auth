@@ -63,6 +63,23 @@ AUTH_GROUP_MODEL = config.get(
     "AUTH_GROUP_MODEL", fallback="navigator_auth.models.Group"
 )
 
+### Other Models (clients, organizations and Programs):
+AUTH_CLIENT_MODEL = config.get(
+    "AUTH_CLIENT_MODEL", fallback=None
+)
+
+AUTH_PROGRAM_MODEL = config.get(
+    "AUTH_PROGRAM_MODEL", fallback=None
+)
+
+AUTH_ORGANIZATION_MODEL = config.get(
+    "AUTH_ORGANIZATION_MODEL", fallback=None
+)
+
+AUTH_PERMISSION_MODEL = config.get(
+    "AUTH_PERMISSION_MODEL", fallback=None
+)
+
 ALLOWED_HOSTS = [
     e.strip()
     for e in list(config.get("ALLOWED_HOSTS", section="auth", fallback="localhost*").split(","))
