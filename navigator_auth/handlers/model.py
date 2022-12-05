@@ -3,6 +3,7 @@ Model Handler: Abstract Model for managing Model with Views.
 """
 from typing import Union
 from datamodel import BaseModel
+import importlib
 from datamodel.exceptions import ValidationError
 from asyncdb.exceptions import (
     DriverError,
@@ -17,8 +18,27 @@ from .base import BaseView
 
 class ModelHandler(BaseView):
     model: BaseModel = None
+    model_name: str = None
     name: str = 'Model'
     pk: Union[str, list] = 'id'
+
+    def __init__(self, request, *args, **kwargs):
+        if self.model_name is not None:
+            ## get Model from Variable
+            self.model = self.get_authmodel(self.model_name)
+        super(ModelHandler, self).__init__(request, *args, **kwargs)
+
+    def get_authmodel(self, model: str):
+        try:
+            parts = model.split(".")
+            name = parts[-1]
+            classpath = ".".join(parts[:-1])
+            module = importlib.import_module(classpath, package=name)
+            obj = getattr(module, name)
+            return obj
+        except ImportError:
+            ## Using fallback Model
+            return self.model
 
     async def session(self):
         session = None
