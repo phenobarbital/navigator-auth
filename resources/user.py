@@ -27,6 +27,7 @@ class User(Model):
     associate_id: str = Column(required=False)
     associate_oid: str = Column(required=False)
     company: str = Column(required=False)
+    department_code: str = Column(required=False)
     department: str = Column(required=False)
     position_id: str = Column(required=False)
     group_id: list = Column(required=False)

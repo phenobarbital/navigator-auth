@@ -2,29 +2,28 @@
 
 Description: Backend Authentication/Authorization using Microsoft authentication.
 """
+from typing import Dict
+import orjson
 import base64
 from aiohttp import web
-from navigator.exceptions import (
-    NavException,
-    UserNotFound,
-    InvalidAuth
-)
-from navigator.conf import (
-    AZURE_ADFS_CLIENT_ID,
-    AZURE_ADFS_CLIENT_SECRET,
-    AZURE_ADFS_SCOPES,
-    AZURE_ADFS_DOMAIN,
-    AZURE_ADFS_TENANT_ID
-)
-from navconfig.logging import logging
 import msal
-import json
 from msal.authority import (
     AuthorityBuilder,
     AZURE_PUBLIC
 )
+from navconfig.logging import logging
+from navigator_auth.exceptions import (
+    NavException
+)
+from navigator_auth.conf import (
+    AZURE_ADFS_CLIENT_ID,
+    AZURE_ADFS_CLIENT_SECRET,
+    AZURE_ADFS_DOMAIN,
+    AZURE_ADFS_TENANT_ID
+)
+from navigator_auth.libs.json import json_encoder
 from .external import ExternalAuth
-from typing import Dict
+
 
 logging.getLogger("msal").setLevel(logging.INFO)
 
@@ -162,7 +161,7 @@ class AzureAuth(ExternalAuth):
                 client_info = {}
                 if "client_info" in result:
                     # It happens when client_info and profile are in request
-                    client_info = json.loads(decode_part(result["client_info"]))
+                    client_info = orjson.loads(decode_part(result["client_info"]))
                 try:
                     if 'access_token' in result:
                         access_token = result['access_token']
@@ -210,7 +209,7 @@ class AzureAuth(ExternalAuth):
                 )
                 async with await request.app['redis'].acquire() as redis:
                     state = flow['state']
-                    await redis.setex(f'azure_auth_{state}', json.dumps(flow), timeout=120)
+                    await redis.setex(f'azure_auth_{state}', json_encoder(flow), timeout=120)
                 login_url = flow['auth_uri']
                 return self.redirect(login_url)
             except Exception as err:
@@ -239,7 +238,7 @@ class AzureAuth(ExternalAuth):
             try:
                 async with await request.app['redis'].acquire() as redis:
                     result = await redis.get(f'azure_auth_{state}')
-                    flow = json.loads(result)
+                    flow = orjson.loads(result)
             except Exception as err:
                 raise Exception(
                     f'Azure: Error reading Flow State from Cache: {err}'
@@ -260,7 +259,7 @@ class AzureAuth(ExternalAuth):
                     client_info = {}
                     if "client_info" in result:
                         # It happens when client_info and profile are in request
-                        client_info = json.loads(decode_part(result["client_info"]))
+                        client_info = orjson.loads(decode_part(result["client_info"]))
                     # getting user information:
                     try:
                         data = await self.get(url=self.userinfo_uri, token=access_token, token_type=token_type)

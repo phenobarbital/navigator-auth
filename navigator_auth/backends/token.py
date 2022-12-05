@@ -174,7 +174,6 @@ class TokenAuth(BaseAuthBackend):
 
     async def auth_middleware(self, app, handler):
         async def middleware(request):
-            self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
             # avoid authorization backend on excluded methods:
             if request.method == hdrs.METH_OPTIONS:
                 return await handler(request)
@@ -191,6 +190,7 @@ class TokenAuth(BaseAuthBackend):
                     return await handler(request)
             except KeyError:
                 pass
+            self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
             tenant, jwt_token = await self.get_payload(request)
             if not tenant:
                 return await handler(request)
@@ -201,22 +201,19 @@ class TokenAuth(BaseAuthBackend):
                     )
                     self.logger.debug(f"Decoded Token: {payload!s}")
                     result = await self.check_token_info(request, tenant, payload)
-                    if not result:
-                        # Token missing, maybe auth with another mechanism?
-                        return await handler(request)
-                    else:
+                    if result:
                         request[self.session_key_property] = payload['name']
                         # TRUE because if data doesnt exists, returned
                         session = await get_session(request, payload, new = False, ignore_cookie=True)
                         session["grants"] = result["grants"]
                         session["partner"] = result["partner"]
                         session["tenant"] = tenant
+                        request['authenticated'] = True
                         try:
                             request.user = session.decode('user')
                             request.user.is_authenticated = True
                         except (AttributeError, KeyError):
                             pass
-                        request['authenticated'] = True
                 except (jwt.exceptions.ExpiredSignatureError) as err:
                     self.logger.error(f"TokenAuth: token expired: {err!s}")
                     raise web.HTTPForbidden(

@@ -266,7 +266,6 @@ class DjangoAuth(BaseAuthBackend):
             """
             @web.middleware
             async def middleware(request: web.Request) -> web.StreamResponse:
-                self.logger.debug(':: DJANGO SESSION MIDDLEWARE ::')
                 # avoid authorization backend on excluded methods:
                 if request.method == hdrs.METH_OPTIONS:
                     return await handler(request)
@@ -285,6 +284,7 @@ class DjangoAuth(BaseAuthBackend):
                         return await handler(request)
                 except KeyError:
                     pass
+                self.logger.debug(':: DJANGO MIDDLEWARE ::')
                 try:
                     _, payload = decode_token(request)
                     if payload:
@@ -313,12 +313,12 @@ class DjangoAuth(BaseAuthBackend):
                         reason=err.message
                     )
                 except (AuthExpired, FailedAuth) as err:
-                    self.logger.error('Auth Middleware: Auth Credentials were expired')
+                    self.logger.error('Django Auth: Auth Credentials were expired')
                     raise web.HTTPUnauthorized(
                         reason=err.message
                     )
                 except AuthException as err:
-                    self.logger.error('Auth Middleware: Invalid Signature or secret')
+                    self.logger.error('Django Auth: Invalid Signature or secret')
                     raise web.HTTPForbidden(
                         reason=err.message
                     )

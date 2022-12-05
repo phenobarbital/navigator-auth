@@ -2,20 +2,18 @@
 
 Description: Backend Authentication/Authorization using Okta Service.
 """
-import logging
+from typing import Dict
 import base64
 from aiohttp import web
-from .external import ExternalAuth
-from typing import Dict
 import jwt
-from .jwksutils import get_public_key
 # needed by ADFS
 import requests
 import requests.adapters
-from navigator.exceptions import (
+from navconfig.logging import logging
+from navigator_auth.exceptions import (
     NavException
 )
-from navigator.conf import (
+from navigator_auth.conf import (
     ADFS_SERVER,
     ADFS_CLIENT_ID,
     ADFS_TENANT_ID,
@@ -30,6 +28,8 @@ from navigator.conf import (
     ADFS_LOGIN_REDIRECT_URL,
     AZURE_AD_SERVER
 )
+from .jwksutils import get_public_key
+from .external import ExternalAuth
 
 _jwks_cache = {}
 
@@ -45,7 +45,7 @@ class ADFSAuth(ExternalAuth):
     username_attribute: str = "username"
     pwd_atrribute: str = "password"
     version = 'v1.0'
-    _user_mapping: Dict = {
+    _user_mapping: dict = {
         'user_id': 'upn',
         'email': 'email',
         'given_name': 'given_name',
@@ -55,8 +55,8 @@ class ADFSAuth(ExternalAuth):
         'name': 'Display-Name'
     }
 
-    def configure(self, app, router, handler):
-        super(ADFSAuth, self).configure(app, router, handler)
+    def configure(self, app, router):
+        super(ADFSAuth, self).configure(app, router)
         # URIs:
         if ADFS_TENANT_ID:
             self.server = AZURE_AD_SERVER
@@ -148,7 +148,7 @@ class ADFSAuth(ExternalAuth):
                 f"ADFS: Invalid Callback response: {err}"
             ) from err
         # print(authorization_code, state, request_id)
-        logging.debug("Received authorization token: %s", authorization_code)
+        logging.debug(f"Received authorization token: {authorization_code}")
         # getting an Access Token
         query_params = {
             "code": authorization_code,

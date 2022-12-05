@@ -6,6 +6,7 @@ from .abstract import AuthStorage
 
 class PostgresStorage(AuthStorage):
     driver: str = "pg"
+    name: str = 'authdb'
     pool_based: bool = True
     timeout: int = 3600
 
