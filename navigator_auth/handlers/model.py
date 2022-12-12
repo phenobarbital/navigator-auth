@@ -2,8 +2,8 @@
 Model Handler: Abstract Model for managing Model with Views.
 """
 from typing import Union
-from datamodel import BaseModel
 import importlib
+from datamodel import BaseModel
 from datamodel.exceptions import ValidationError
 from asyncdb.exceptions import (
     DriverError,

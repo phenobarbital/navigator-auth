@@ -55,7 +55,10 @@ AUTH_CREDENTIALS_REQUIRED = config.getboolean(
 
 # AsyncDB Model representing a User Record.
 AUTH_USER_MODEL = config.get(
-    "AUTH_USER_MODEL", fallback="navigator_auth.models.User"
+    "AUTH_USER_MODEL", fallback=None
+)
+AUTH_VIEW_MODEL = config.get(
+    "AUTH_VIEW_MODEL", fallback="navigator_auth.models.User"
 )
 
 # Group Record.
