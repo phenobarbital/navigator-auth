@@ -129,7 +129,7 @@ setup(
         "aiogoogle==3.1.2",
         "okta-jwt-verifier==0.2.3",
         "python-slugify==7.0.0",
-        "platformdirs==2.5.1",
+        "platformdirs==2.6.0",
         "aiohttp_cors>=0.7.0",
         "navigator-session>=0.3.0",
         "pendulum==2.1.2"
