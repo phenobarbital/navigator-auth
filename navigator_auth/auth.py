@@ -22,7 +22,7 @@ from .authorizations import authz_allow_hosts, authz_hosts
 from .backends.abstract import decode_token
 from .conf import (
     AUTH_CREDENTIALS_REQUIRED,
-    AUTH_USER_MODEL,
+    AUTH_VIEW_MODEL,
     AUTHENTICATION_BACKENDS,
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,
@@ -69,7 +69,7 @@ class AuthHandler:
             self.auth_scheme = 'Bearer'
         # Get User Model:
         try:
-            user_model = self.get_usermodel(AUTH_USER_MODEL)
+            user_model = self.get_usermodel(AUTH_VIEW_MODEL)
         except Exception as ex:
             raise ConfigError(
                 f"Error Getting Auth User Model: {ex}"
