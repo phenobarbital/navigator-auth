@@ -144,21 +144,18 @@ class User(Model):
     """Basic User notation."""
 
     user_id: int = Column(required=False, primary_key=True, db_default='auto', repr=False)
-    userid: UUID = Column(required=True, db_default='auto')
+    userid: UUID = Column(required=True, db_default='auto', repr=False)
     first_name: str = Column(required=False, max=254, label="First Name")
     last_name: str = Column(required=False, max=254, label="Last Name")
     display_name: str = Column(required=False)
     email: str = Column(required=False, max=254, label="User's Email")
     alt_email: str = Column(required=False, max=254, label="Alternate Email")
     password: str = Column(required=False, max=16, secret=True, repr=False)
-    last_login: datetime = Column(required=False, readonly=True, default=datetime.now())
     username: str = Column(required=True)
     user_role: UserType = Column(required=False)
     is_superuser: bool = Column(required=True, default=False)
     is_staff: bool = Column(required=False, default=True)
     title: str = Column(required=False, max=120)
-    registration_key: str = Column(required=False, max=512)
-    challenge_key: str = Column(required=False, max=512)
     avatar: Text = Column(max=2048)
     is_active: bool = Column(required=True, default=True)
     is_new: bool = Column(required=True, default=True)
@@ -166,6 +163,7 @@ class User(Model):
     attributes: Optional[dict] = Column(required=False, default_factory=dict)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
+    last_login: datetime = Column(required=False, readonly=True, default=datetime.now())
     created_by: str = Column(required=False)
 
     class Meta:
