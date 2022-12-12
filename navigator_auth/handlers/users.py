@@ -18,6 +18,7 @@ from navigator_auth.exceptions import AuthException
 from navigator_auth.models import User
 from navigator_auth.conf import (
     AUTH_USER_MODEL,
+    AUTH_VIEW_MODEL,
     AUTH_PWD_DIGEST,
     AUTH_PWD_LENGTH,
     AUTH_PWD_ALGORITHM,
@@ -366,11 +367,27 @@ class UserHandler(BaseView):
     """
     model: Any = User
     name: str = 'Users'
+    model_name: str = AUTH_USER_MODEL
     pk: str = 'user_id'
 
+    def get_authmodel(self, model: str):
+        try:
+            parts = model.split(".")
+            name = parts[-1]
+            classpath = ".".join(parts[:-1])
+            module = importlib.import_module(classpath, package=name)
+            obj = getattr(module, name)
+            return obj
+        except ImportError:
+            ## Using fallback Model
+            return self.model
+
     def __init__(self, request, *args, **kwargs):
-        self.user_model = self.get_usermodel(AUTH_USER_MODEL)
+        self.user_model = self.get_usermodel(AUTH_VIEW_MODEL)
         self.session_id = None
+        if self.model_name is not None:
+            ## get Model from Variable
+            self.model = self.get_authmodel(self.model_name)
         super(UserHandler, self).__init__(request, *args, **kwargs)
 
     async def session(self):
