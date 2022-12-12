@@ -153,7 +153,7 @@ class User(Model):
     password: str = Column(required=False, max=16, secret=True, repr=False)
     last_login: datetime = Column(required=False, readonly=True, default=datetime.now(), repr=False)
     username: str = Column(required=True)
-    user_role: UserType = Column(required=False)
+    user_role: UserType = Column(required=False, widget='/properties/select')
     is_superuser: bool = Column(required=True, default=False)
     is_staff: bool = Column(required=False, default=True)
     title: str = Column(required=False, max=120)
