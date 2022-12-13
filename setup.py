@@ -115,7 +115,7 @@ setup(
         "uvloop==0.17.0",
         "asyncio==3.4.3",
         "cchardet==2.1.7",
-        "orjson==3.8.2",
+        "orjson==3.8.3",
         "jsonpickle==2.2.0",
         'yarl==1.8.1',
         'wrapt==1.14.1',
