@@ -117,7 +117,7 @@ setup(
         "cchardet==2.1.7",
         "orjson==3.8.2",
         "jsonpickle==2.2.0",
-        'yarl==1.8.1',
+        'yarl==1.8.2',
         'wrapt==1.14.1',
         "aioredis==2.0.1",
         "asyncdb>=2.1.30",
