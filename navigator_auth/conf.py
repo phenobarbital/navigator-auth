@@ -134,15 +134,14 @@ if mapping is not None:
         )
 
 ## Redis Session:
-CACHE_HOST = config.get("CACHEHOST", fallback="localhost")
-CACHE_PORT = config.get("CACHEPORT", fallback=6379)
-CACHE_URL = f"redis://{CACHE_HOST}:{CACHE_PORT}"
-REDIS_SESSION_DB = config.get("REDIS_SESSION_DB", fallback=0)
-
-redis_url = f"redis://{CACHE_HOST}:{CACHE_PORT}/1"
-REDIS_AUTH_URL = config.get('REDIS_AUTH_URL', fallback=redis_url)
+REDIS_HOST = config.get("REDIS_HOST", fallback="localhost")
+REDIS_PORT = config.get("REDIS_PORT", fallback=6379)
+REDIS_DB = config.get("REDIS_DB", fallback=1)
+REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+REDIS_AUTH_URL = config.get('REDIS_AUTH_URL', fallback=REDIS_URL)
 
 ### Session and Auth Backends:
+REDIS_SESSION_DB = config.get("SESSION_DB", fallback=0)
 CACHE_PREFIX = config.get('CACHE_PREFIX', fallback='navigator')
 SESSION_PREFIX = f'{CACHE_PREFIX}_session'
 
@@ -169,7 +168,7 @@ AUTH_USERNAME_ATTRIBUTE = config.get(
 
 ## Django Auth Backend:
 DJANGO_SESSION_DB = config.get('DJANGO_SESSION_DB', fallback=REDIS_SESSION_DB)
-DJANGO_SESSION_URL = f"redis://{CACHE_HOST}:{CACHE_PORT}/{DJANGO_SESSION_DB}"
+DJANGO_SESSION_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{DJANGO_SESSION_DB}"
 DJANGO_SESSION_PREFIX = config.get('DJANGO_SESSION_PREFIX', fallback=f'{CACHE_PREFIX}_session')
 
 DJANGO_USER_MAPPING = {
