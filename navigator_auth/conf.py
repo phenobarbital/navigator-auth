@@ -66,6 +66,11 @@ AUTH_GROUP_MODEL = config.get(
     "AUTH_GROUP_MODEL", fallback="navigator_auth.models.Group"
 )
 
+# User Group Record.
+AUTH_USER_GROUP_MODEL = config.get(
+    "AUTH_USER_GROUP_MODEL", fallback="navigator_auth.models.UserGroup"
+)
+
 ### Other Models (clients, organizations and Programs):
 AUTH_CLIENT_MODEL = config.get(
     "AUTH_CLIENT_MODEL", fallback=None
