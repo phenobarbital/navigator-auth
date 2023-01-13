@@ -84,6 +84,10 @@ AUTH_ORGANIZATION_MODEL = config.get(
     "AUTH_ORGANIZATION_MODEL", fallback=None
 )
 
+AUTH_USER_ORGANIZATION_MODEL = config.get(
+    "AUTH_USER_ORGANIZATION_MODEL", fallback=None
+)
+
 AUTH_PERMISSION_MODEL = config.get(
     "AUTH_PERMISSION_MODEL", fallback=None
 )
