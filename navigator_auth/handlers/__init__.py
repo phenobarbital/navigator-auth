@@ -83,7 +83,7 @@ def handler_routes(router) -> None:
         PermissionHandler,
         name='api_permissions'
     )
-    ### Groups:
+    ## Groups:
     router.add_view(
         r'/api/v1/groups/{id:.*}',
         GroupHandler,
