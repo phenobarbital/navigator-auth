@@ -1,5 +1,5 @@
 from .clients import ClientHandler
-from .orgs import OrganizationHandler
+from .orgs import OrganizationHandler, UserOrganizationHandler
 from .permissions import PermissionHandler
 from .users import UserHandler, UserSession
 from .program import ProgramCatHandler, ProgramHandler, ProgramClientHandler
@@ -29,6 +29,16 @@ def handler_routes(router) -> None:
         r'/api/v1/organizations{meta:\:?.*}',
         OrganizationHandler,
         name='api_organizations'
+    )
+    router.add_view(
+        r'/api/v1/user_organizations/{id:.*}',
+        UserOrganizationHandler,
+        name='api_user_organizations_id'
+    )
+    router.add_view(
+        r'/api/v1/user_organizations{meta:\:?.*}',
+        UserOrganizationHandler,
+        name='api_user_organizations'
     )
     ### Programs:
     router.add_view(

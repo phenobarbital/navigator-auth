@@ -10,7 +10,7 @@ class OrganizationHandler(ModelHandler):
     name: str = 'Organization'
     pk: str = 'organization_id'
 
-class UserGroupHandler(ModelHandler):
+class UserOrganizationHandler(ModelHandler):
     model: BaseModel = OrganizationUser
     model_name: str = AUTH_USER_ORGANIZATION_MODEL
     name: str = 'User Organization'
