@@ -5,7 +5,7 @@ from navigator_auth.models import (
     ProgramAttribute,
     ProgramClient
 )
-from navigator_auth.conf import AUTH_PROGRAM_MODEL
+from navigator_auth.conf import AUTH_PROGRAM_MODEL, AUTH_PROGRAM_CLIENT_MODEL
 from .model import ModelHandler
 
 
@@ -27,5 +27,6 @@ class ProgramAttrHandler(ModelHandler):
 
 class ProgramClientHandler(ModelHandler):
     model: Any = ProgramClient
+    model_name: str = AUTH_PROGRAM_CLIENT_MODEL
     name: str = 'Program Client'
     pk: list = ['program_id', 'client_id']
