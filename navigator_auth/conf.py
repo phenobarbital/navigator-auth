@@ -80,6 +80,10 @@ AUTH_PROGRAM_MODEL = config.get(
     "AUTH_PROGRAM_MODEL", fallback=None
 )
 
+AUTH_PROGRAM_CLIENT_MODEL = config.get(
+    "AUTH_PROGRAM_CLIENT_MODEL", fallback=None
+)
+
 AUTH_ORGANIZATION_MODEL = config.get(
     "AUTH_ORGANIZATION_MODEL", fallback=None
 )
