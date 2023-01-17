@@ -1,6 +1,6 @@
 from datamodel import BaseModel
 from navigator_auth.models import Group, UserGroup, GroupPermission
-from navigator_auth.conf import AUTH_GROUP_MODEL
+from navigator_auth.conf import AUTH_GROUP_MODEL, AUTH_USER_GROUP_MODEL
 from .model import ModelHandler
 
 
@@ -13,6 +13,7 @@ class GroupHandler(ModelHandler):
 
 class UserGroupHandler(ModelHandler):
     model: BaseModel = UserGroup
+    model_name: str = AUTH_USER_GROUP_MODEL
     name: str = 'User Group'
     pk: list = ['user_id', 'group_id']
 
