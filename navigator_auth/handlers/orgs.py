@@ -8,7 +8,7 @@ class OrganizationHandler(ModelHandler):
     model: Any = Organization
     model_name: str = AUTH_ORGANIZATION_MODEL
     name: str = 'Organization'
-    pk: str = 'organization_id'
+    pk: str = 'org_id'
 
 class UserOrganizationHandler(ModelHandler):
     model: BaseModel = OrganizationUser
