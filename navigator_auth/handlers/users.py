@@ -18,7 +18,7 @@ from navigator_auth.exceptions import AuthException
 from navigator_auth.models import User
 from navigator_auth.conf import (
     AUTH_USER_MODEL,
-    AUTH_VIEW_MODEL,
+    AUTH_USER_VIEW,
     AUTH_PWD_DIGEST,
     AUTH_PWD_LENGTH,
     AUTH_PWD_ALGORITHM,
@@ -383,7 +383,7 @@ class UserHandler(BaseView):
             return self.model
 
     def __init__(self, request, *args, **kwargs):
-        self.user_model = self.get_usermodel(AUTH_VIEW_MODEL)
+        self.user_model = self.get_usermodel(AUTH_USER_VIEW)
         self.session_id = None
         if self.model_name is not None:
             ## get Model from Variable

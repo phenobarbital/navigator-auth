@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
+import importlib
 import jwt
 from aiohttp import web, hdrs
 from navconfig.logging import logging
@@ -83,7 +84,7 @@ class BaseAuthBackend(ABC):
         # starts the Executor
         self.executor = ThreadPoolExecutor(max_workers=1)
         # logger
-        self.logger = logging.getLogger('Auth.backends')
+        self.logger = logging.getLogger(f'Auth.{self._service}')
 
     @classmethod
     def authz_backends(cls):
@@ -98,6 +99,20 @@ class BaseAuthBackend(ABC):
     async def on_cleanup(self, app: web.Application):
         """Used to cleanup and shutdown any db connection.
         """
+
+    def get_authmodel(self, model: str):
+        try:
+            parts = model.split(".")
+            name = parts[-1]
+            classpath = ".".join(parts[:-1])
+            module = importlib.import_module(classpath, package=name)
+            obj = getattr(module, name)
+            return obj
+        except ImportError as err:
+            ## Using fallback Model
+            raise RuntimeError(
+                f"Auth Model: Cannot import model {model}: {err}"
+            ) from err
 
     async def get_user(self, **search):
         """Getting User Object."""
@@ -130,7 +145,7 @@ class BaseAuthBackend(ABC):
             usr = self._ident(
                 data=userdata
             )
-            self.logger.debug(f'User Created > {usr}')
+            self.logger.debug(f'User Created > {usr.username}')
             return usr
         except Exception as err:
             raise Exception(err) from err

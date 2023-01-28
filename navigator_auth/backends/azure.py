@@ -2,24 +2,25 @@
 
 Description: Backend Authentication/Authorization using Microsoft authentication.
 """
-from typing import Dict
-import orjson
 import base64
+import orjson
 from aiohttp import web
 import msal
+import aioredis
 from msal.authority import (
     AuthorityBuilder,
     AZURE_PUBLIC
 )
 from navconfig.logging import logging
 from navigator_auth.exceptions import (
-    NavException
+    AuthException
 )
 from navigator_auth.conf import (
     AZURE_ADFS_CLIENT_ID,
     AZURE_ADFS_CLIENT_SECRET,
     AZURE_ADFS_DOMAIN,
-    AZURE_ADFS_TENANT_ID
+    AZURE_ADFS_TENANT_ID,
+    REDIS_AUTH_URL
 )
 from navigator_auth.libs.json import json_encoder
 from .external import ExternalAuth
@@ -27,21 +28,24 @@ from .external import ExternalAuth
 
 logging.getLogger("msal").setLevel(logging.INFO)
 
+
 def decode_part(raw, encoding="utf-8"):
-    """Decode a part of the JWT.
+    """decode_part.
+    Decode a part of the JWT.
     JWT is encoded by padding-less base64url,
     based on `JWS specs <https://tools.ietf.org/html/rfc7515#appendix-C>`_.
-    :param encoding:
-        If you are going to decode the first 2 parts of a JWT, i.e. the header
+    Args:
+        raw (str): Data to be encoded-
+        encoding (str, optional): If you are going to decode the first 2 parts of a JWT, i.e. the header
         or the payload, the default value "utf-8" would work fine.
         If you are going to decode the last part i.e. the signature part,
-        it is a binary string so you should use `None` as encoding here.
+        it is a binary string so you should use `None` as encoding here. Defaults to "utf-8".
+
+    Returns:
+        str: part string decoded.
     """
     raw += '=' * (-len(raw) % 4)  # https://stackoverflow.com/a/32517907/728675
-    raw = str(
-        # On Python 2.7, argument of urlsafe_b64decode must be str, not unicode.
-        # This is not required on Python 3.
-        raw)
+    raw = str(raw)
     output = base64.urlsafe_b64decode(raw)
     if encoding:
         output = output.decode(encoding)
@@ -57,7 +61,7 @@ class AzureAuth(ExternalAuth):
     userid_attribute: str = 'id'
     pwd_atrribute: str = "password"
     _service_name: str = "azure"
-    _user_mapping: Dict = {
+    _user_mapping: dict = {
         'email': 'mail',
         'username': 'userPrincipalName',
         'given_name': 'givenName',
@@ -65,8 +69,8 @@ class AzureAuth(ExternalAuth):
         'name': 'displayName'
     }
 
-    def configure(self, app, router, handler):
-        super(AzureAuth, self).configure(app, router, handler)
+    def configure(self, app, router):
+        super(AzureAuth, self).configure(app, router)
 
         # TODO: build the callback URL and append to routes
         self.base_url: str = f'https://login.microsoftonline.com/{AZURE_ADFS_TENANT_ID}'
@@ -78,6 +82,24 @@ class AzureAuth(ExternalAuth):
         self.authority = AuthorityBuilder(AZURE_PUBLIC, "contoso.onmicrosoft.com")
         self.users_info = "https://graph.microsoft.com/v1.0/users"
 
+    async def on_startup(self, app: web.Application):
+        """Used to initialize Backend requirements.
+        """
+        ## loading redis connection:
+        await super(AzureAuth, self).on_startup(app)
+        self._pool = aioredis.ConnectionPool.from_url(
+            REDIS_AUTH_URL,
+            decode_responses=True,
+            encoding='utf-8'
+        )
+
+    async def on_cleanup(self, app: web.Application):
+        """Used to cleanup and shutdown any db connection.
+        """
+        try:
+            await self._pool.disconnect(inuse_connections=True)
+        except Exception as e: # pylint: disable=W0703
+            logging.warning(e)
 
     async def get_payload(self, request):
         ctype = request.content_type
@@ -105,7 +127,7 @@ class AzureAuth(ExternalAuth):
     async def get_cache(self, request: web.Request, state: str):
         cache = msal.SerializableTokenCache()
         result = None
-        async with await request.app['redis'].acquire() as redis:
+        async with aioredis.Redis(connection_pool=self._pool) as redis:
             result = await redis.get(f'azure_cache_{state}')
         if result:
             cache.deserialize(result)
@@ -114,8 +136,8 @@ class AzureAuth(ExternalAuth):
     async def save_cache(self, request: web.Request, state: str, cache: msal.SerializableTokenCache):
         if cache.has_state_changed:
             result = cache.serialize()
-            async with await request.app['redis'].acquire() as redis:
-                await redis.setex(f'azure_cache_{state}', result, timeout=120)
+            async with aioredis.Redis(connection_pool=self._pool) as redis:
+                await redis.setex(f'azure_cache_{state}', 120, result)
 
     def get_msal_app(self):
         authority = self._issuer if self._issuer else self.authority
@@ -175,7 +197,9 @@ class AzureAuth(ExternalAuth):
                         # also, user information:
                         data = await self.validate_user_info(request, uid, userdata, access_token)
                         # Redirect User to HOME
-                        return self.home_redirect(request, token=data["token"], token_type='Bearer')
+                        return self.home_redirect(
+                            request, token=data["token"], token_type='Bearer'
+                        )
                     else:
                         if 65001 in result.get('error_codes', []):
                             # AAD requires user consent for U/P flow
@@ -207,25 +231,19 @@ class AzureAuth(ExternalAuth):
                     domain_hint=AZURE_ADFS_DOMAIN,
                     max_age=120
                 )
-                async with await request.app['redis'].acquire() as redis:
+                async with aioredis.Redis(connection_pool=self._pool) as redis:
                     state = flow['state']
-                    await redis.setex(f'azure_auth_{state}', json_encoder(flow), timeout=120)
+                    await redis.setex(f'azure_auth_{state}', 120, json_encoder(flow))
                 login_url = flow['auth_uri']
                 return self.redirect(login_url)
             except Exception as err:
-                raise NavException(
+                raise AuthException(
                     f"Azure: Client doesn't have info for Authentication: {err}"
                 ) from err
 
 
     async def auth_callback(self, request: web.Request):
         try:
-            try:
-                redis = request.app['redis']
-            except Exception as err:
-                raise Exception(
-                    f'Azure Auth: Cannot get a Redis Cache connection: {err}'
-                ) from err
             auth_response = dict(request.rel_url.query.items())
             state = None
             # SCOPE = ["https://graph.microsoft.com/.default"]
@@ -236,7 +254,7 @@ class AzureAuth(ExternalAuth):
                     f'Azure: Wrong authentication Callback, State: {err}'
                 ) from err
             try:
-                async with await request.app['redis'].acquire() as redis:
+                async with aioredis.Redis(connection_pool=self._pool) as redis:
                     result = await redis.get(f'azure_auth_{state}')
                     flow = orjson.loads(result)
             except Exception as err:
@@ -251,7 +269,6 @@ class AzureAuth(ExternalAuth):
                 )
                 if 'token_type' in result:
                     token_type = result['token_type']
-                    # expires_in = result['expires_in']
                     access_token = result['access_token']
                     # refresh_token = result['refresh_token']
                     id_token = result['id_token']
@@ -259,7 +276,9 @@ class AzureAuth(ExternalAuth):
                     client_info = {}
                     if "client_info" in result:
                         # It happens when client_info and profile are in request
-                        client_info = orjson.loads(decode_part(result["client_info"]))
+                        client_info = orjson.loads(
+                            decode_part(result["client_info"])
+                        )
                     # getting user information:
                     try:
                         data = await self.get(url=self.userinfo_uri, token=access_token, token_type=token_type)
