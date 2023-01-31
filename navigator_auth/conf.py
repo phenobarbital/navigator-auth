@@ -55,10 +55,11 @@ AUTH_CREDENTIALS_REQUIRED = config.getboolean(
 
 # AsyncDB Model representing a User Record.
 AUTH_USER_MODEL = config.get(
-    "AUTH_USER_MODEL", fallback=None
+    "AUTH_USER_MODEL", fallback="navigator_auth.models.User"
 )
-AUTH_VIEW_MODEL = config.get(
-    "AUTH_VIEW_MODEL", fallback="navigator_auth.models.User"
+# User View can represent a more complex user View used for getting User Data.
+AUTH_USER_VIEW = config.get(
+    "AUTH_USER_VIEW", fallback="navigator_auth.models.User"
 )
 
 # Group Record.
@@ -202,6 +203,33 @@ CYPHER_TYPE = config.get("CYPHER_TYPE", fallback="RNC")
 ## Token:
 AUTH_TOKEN_ISSUER = config.get("AUTH_TOKEN_ISSUER", fallback="Navigator")
 AUTH_TOKEN_SECRET = config.get("AUTH_TOKEN_SECRET", fallback=PARTNER_KEY)
+
+
+### Azure Authentication
+adfs_mapping = {
+    "first_name": "given_name",
+    "last_name": "family_name",
+    "email": "email"
+}
+AZURE_AD_SERVER = config.get(
+    'AZURE_AD_SERVER',
+    fallback="login.microsoftonline.com"
+)
+ADFS_CLAIM_MAPPING = config.get('ADFS_CLAIM_MAPPING', fallback=adfs_mapping)
+
+# Microsoft Azure
+AZURE_ADFS_CLIENT_ID = config.get('AZURE_ADFS_CLIENT_ID')
+AZURE_ADFS_CLIENT_SECRET = config.get('AZURE_ADFS_CLIENT_SECRET')
+AZURE_ADFS_TENANT_ID = config.get('AZURE_ADFS_TENANT_ID', fallback='common')
+AZURE_ADFS_SECRET = config.get('AZURE_ADFS_SECRET')
+AZURE_ADFS_DOMAIN = config.get(
+    'AZURE_ADFS_DOMAIN', fallback='contoso.onmicrosoft.com')
+
+default_scopes = "User.Read,User.Read.All,User.ReadBasic.All,openid"
+AZURE_ADFS_SCOPES = [
+    e.strip()
+    for e in list(config.get("AZURE_ADFS_SCOPES", fallback="").split(","))
+]
 
 try:
     from settings.settings import * # pylint: disable=W0614,W0401

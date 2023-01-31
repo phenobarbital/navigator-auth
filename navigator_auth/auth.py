@@ -22,7 +22,7 @@ from .authorizations import authz_allow_hosts, authz_hosts
 from .backends.abstract import decode_token
 from .conf import (
     AUTH_CREDENTIALS_REQUIRED,
-    AUTH_VIEW_MODEL,
+    AUTH_USER_VIEW,
     AUTHENTICATION_BACKENDS,
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,
@@ -47,6 +47,9 @@ from .storages.postgres import PostgresStorage
 from .storages.redis import RedisStorage
 
 
+url = logging.getLogger('urllib3.connectionpool')
+url.setLevel(logging.WARNING)
+
 class AuthHandler:
     """Authentication Backend for Navigator."""
     name: str = 'auth'
@@ -69,7 +72,7 @@ class AuthHandler:
             self.auth_scheme = 'Bearer'
         # Get User Model:
         try:
-            user_model = self.get_usermodel(AUTH_VIEW_MODEL)
+            user_model = self.get_usermodel(AUTH_USER_VIEW)
         except Exception as ex:
             raise ConfigError(
                 f"Error Getting Auth User Model: {ex}"

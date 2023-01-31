@@ -11,10 +11,10 @@ from .api import APIKeyAuth
 # from .google import GoogleAuth
 # from .okta import OktaAuth
 # from .adfs import ADFSAuth
-# from .azure import AzureAuth
+from .azure import AzureAuth
 # from .github import GithubAuth
 
-__all__ = [
+__all__ = (
     "NoAuth",
     "BasicAuth",
     "DjangoAuth",
@@ -24,6 +24,6 @@ __all__ = [
     # "GoogleAuth",
     # "OktaAuth",
     # "ADFSAuth",
-    # "AzureAuth",
+    "AzureAuth",
     # 'GithubAuth'
-]
+)
