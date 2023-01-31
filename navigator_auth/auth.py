@@ -11,7 +11,8 @@ Supporting:
 import importlib
 import inspect
 from collections.abc import Awaitable, Callable, Iterable
-
+import orjson
+from orjson import JSONDecodeError
 import aiohttp_cors
 from aiohttp import hdrs, web
 from aiohttp.abc import AbstractView
@@ -283,6 +284,34 @@ class AuthHandler:
                 ) from err
             return response
 
+    ### Auth Methods:
+    async def auth_methods(self, request: web.Request) -> web.Response:
+        """auth_methods.
+
+        Return information about enabled auth backends.
+        Args:
+            request (web.Request): _description_
+
+        Returns:
+            web.Response: _description_
+        """
+        response = {}
+        if request.method == 'GET':
+            # get info about all enable backends
+            for name, backend in self.backends.items():
+                response[name] = backend.get_backend_info()
+        else:
+            try:
+                backends = await request.json(loads=orjson.loads)
+                for name, backend in self.backends.items():
+                    bk = backend.get_backend_info()
+                    if bk.name in backends:
+                        response[name] = backend.get_backend_info()
+            except JSONDecodeError as err:
+                raise web.HTTPClientError(
+                    reason=f"Invalid POST DATA: {err!s}"
+                ) from err
+        return JSONResponse(response, status=200)
     # Session Methods:
     async def forgot_session(self, request: web.Request):
         await self._session.storage.forgot(request)
@@ -429,6 +458,19 @@ class AuthHandler:
             "/api/v1/user/session",
             self.get_session,
             name="api_session"
+        )
+        ### get info about auth methods
+        router.add_route(
+            "GET",
+            "/api/v1/auth/methods",
+            self.auth_methods,
+            name="api_get_auth_methods"
+        )
+        router.add_route(
+            "POST",
+            "/api/v1/auth/methods",
+            self.auth_methods,
+            name="api_get_auth_methods"
         )
         ### Handler for Auth Objects:
         handler_routes(router)

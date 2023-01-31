@@ -28,6 +28,7 @@ class TokenAuth(BaseAuthBackend):
 
     _pool = None
     _ident: AuthUser = TokenUser
+    _description: str = 'Partner Token authentication'
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements.

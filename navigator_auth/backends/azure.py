@@ -68,6 +68,7 @@ class AzureAuth(ExternalAuth):
         'family_name': 'surname',
         'name': 'displayName'
     }
+    _description: str = 'Microsoft Azure Authentication'
 
     def configure(self, app, router):
         super(AzureAuth, self).configure(app, router)

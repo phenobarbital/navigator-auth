@@ -40,6 +40,8 @@ class BasicAuth(BaseAuthBackend):
     user_attribute: str = "user"
     pwd_atrribute: str = "password"
     _ident: AuthUser = BasicUser
+    _description: str = 'Basic User/Password authentication'
+    _service_name: str = 'basic'
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements.
