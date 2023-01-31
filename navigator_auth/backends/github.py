@@ -19,6 +19,7 @@ class GithubAuth(OauthAuth):
     user_attribute: str = "name"
     username_attribute: str = "email"
     _service_name: str = "github"
+    _description: str = 'Github Oauth Authentication'
 
     def configure(self, app, router):
         super(GithubAuth, self).configure(app, router) # first, configure parents

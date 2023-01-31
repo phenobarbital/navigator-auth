@@ -43,6 +43,7 @@ class OktaAuth(OauthAuth):
     userid_attribute: str = "sub"
     pwd_atrribute: str = "password"
     _service_name: str = "okta"
+    _description: str = 'Okta Authentication'
 
     def configure(self, app, router):
         super(OktaAuth, self).configure(app, router) # first, configure parents

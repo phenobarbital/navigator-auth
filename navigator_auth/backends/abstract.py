@@ -102,6 +102,9 @@ class BaseAuthBackend(ABC):
             "x-auth-method": self._service
         }
 
+    def get_backend_info(self):
+        return self._info
+
     @classmethod
     def authz_backends(cls):
         return cls._authz_backends

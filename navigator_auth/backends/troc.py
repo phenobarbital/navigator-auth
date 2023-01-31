@@ -32,6 +32,7 @@ class TrocToken(BaseAuthBackend):
     username_attribute: str = "email"
     _ident: BasicUser = BasicUser
     _description: str = 'Partnership Token authentication'
+    _service_name: str = 'troctoken'
 
     def __init__(
         self,
