@@ -206,17 +206,6 @@ AUTH_TOKEN_SECRET = config.get("AUTH_TOKEN_SECRET", fallback=PARTNER_KEY)
 
 
 ### Azure Authentication
-adfs_mapping = {
-    "first_name": "given_name",
-    "last_name": "family_name",
-    "email": "email"
-}
-AZURE_AD_SERVER = config.get(
-    'AZURE_AD_SERVER',
-    fallback="login.microsoftonline.com"
-)
-ADFS_CLAIM_MAPPING = config.get('ADFS_CLAIM_MAPPING', fallback=adfs_mapping)
-
 # Microsoft Azure
 AZURE_ADFS_CLIENT_ID = config.get('AZURE_ADFS_CLIENT_ID')
 AZURE_ADFS_CLIENT_SECRET = config.get('AZURE_ADFS_CLIENT_SECRET')
@@ -230,6 +219,47 @@ AZURE_ADFS_SCOPES = [
     e.strip()
     for e in list(config.get("AZURE_ADFS_SCOPES", fallback="").split(","))
 ]
+
+# ADFS SSO
+ADFS_SERVER = config.get("ADFS_SERVER")
+ADFS_CLIENT_ID = config.get("ADFS_CLIENT_ID")
+ADFS_RELYING_PARTY_ID = config.get("ADFS_RELYING_PARTY_ID")
+ADFS_RESOURCE = config.get("ADFS_RESOURCE")
+ADFS_AUDIENCE = config.get("ADFS_AUDIENCE")
+ADFS_ISSUER = config.get("ADFS_ISSUER")
+ADFS_SCOPES = config.get("ADFS_SCOPES", fallback="https://graph.microsoft.com/.default")
+ADFS_TENANT_ID = config.get("ADFS_TENANT_ID", fallback=None)
+USERNAME_CLAIM = config.get("USERNAME_CLAIM")
+GROUP_CLAIM = config.get("GROUP_CLAIM")
+ADFS_LOGIN_REDIRECT_URL = config.get("ADFS_LOGIN_REDIRECT_URL")
+ADFS_CALLBACK_REDIRECT_URL = config.get("ADFS_CALLBACK_REDIRECT_URL", fallback=None)
+
+adfs_mapping = {
+    "first_name": "given_name",
+    "last_name": "family_name",
+    "email": "email",
+}
+AZURE_AD_SERVER = config.get("AZURE_AD_SERVER", fallback="login.microsoftonline.com")
+ADFS_CLAIM_MAPPING = config.get("ADFS_CLAIM_MAPPING", fallback=adfs_mapping)
+
+# Okta
+OKTA_CLIENT_ID = config.get('OKTA_CLIENT_ID')
+OKTA_CLIENT_SECRET = config.get('OKTA_CLIENT_SECRET')
+OKTA_DOMAIN = config.get('OKTA_DOMAIN')
+OKTA_APP_NAME = config.get('OKTA_APP_NAME')
+
+# GOOGLE
+GOOGLE_CLIENT_ID = config.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = config.get("GOOGLE_CLIENT_SECRET")
+GOOGLE_API_SCOPES = [
+    "https://www.googleapis.com/auth/youtube",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+    "email",
+]
+
+## Github Support:
+GITHUB_CLIENT_ID = config.get("GITHUB_CLIENT_ID")
+GITHUB_CLIENT_SECRET = config.get("GITHUB_CLIENT_SECRET")
 
 try:
     from settings.settings import * # pylint: disable=W0614,W0401

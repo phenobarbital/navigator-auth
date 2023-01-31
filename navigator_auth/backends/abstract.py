@@ -70,7 +70,8 @@ class BaseAuthBackend(ABC):
             self.password_attribute = password_attribute
         if userid_attribute:
             self.userid_attribute = userid_attribute
-        self.username_attribute = AUTH_USERNAME_ATTRIBUTE
+        if not self.username_attribute:
+            self.username_attribute = AUTH_USERNAME_ATTRIBUTE
         # authentication scheme
         try:
             self.scheme = kwargs["scheme"]

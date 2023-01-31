@@ -126,6 +126,9 @@ class ExternalAuth(BaseAuthBackend):
         if self._success_callbacks:
             self.get_successful_callbacks()
 
+    async def on_cleanup(self, app: web.Application):
+        pass
+
     def get_successful_callbacks(self) -> list[Callable]:
         fns = []
         for fn in self._success_callbacks:

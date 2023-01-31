@@ -78,7 +78,7 @@ class GithubAuth(OauthAuth):
                 if data:
                     userdata, uid = self.build_user_info(data)
                     # also, user information:
-                    data = await self.get_user_session(request, uid, userdata, access_token)
+                    data = await self.validate_user_info(request, uid, userdata, access_token)
                     # Redirect User to HOME
                     return self.home_redirect(request, token=data["token"], token_type='Bearer')
                 else:

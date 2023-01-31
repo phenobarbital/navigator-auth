@@ -44,8 +44,8 @@ class OktaAuth(OauthAuth):
     pwd_atrribute: str = "password"
     _service_name: str = "okta"
 
-    def configure(self, app, router, handler):
-        super(OktaAuth, self).configure(app, router, handler) # first, configure parents
+    def configure(self, app, router):
+        super(OktaAuth, self).configure(app, router) # first, configure parents
 
         # auth paths.
         self.base_url = f"https://{OKTA_DOMAIN}/"
@@ -136,7 +136,7 @@ class OktaAuth(OauthAuth):
             ).json()
             userdata, uid = self.build_user_info(data)
             # get user data
-            data = await self.get_user_session(request, uid, userdata, access_token)
+            data = await self.validate_user_info(request, uid, userdata, access_token)
             return self.home_redirect(request, token=data['token'], token_type='Bearer')
         except Exception as err:
             logging.exception(f"Okta Auth Error: {err}")

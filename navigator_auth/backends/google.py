@@ -7,7 +7,7 @@ from aiogoogle import Aiogoogle
 from aiogoogle.auth.utils import create_secret
 from navconfig.logging import logging
 from navigator_auth.exceptions import (
-    NavException
+    AuthException
 )
 from navigator_auth.conf import (
     GOOGLE_CLIENT_ID,
@@ -23,7 +23,7 @@ class GoogleAuth(ExternalAuth):
     Authentication Backend using Google+aiogoogle.
     """
     user_attribute: str = "user"
-    username_attribute: str = "username"
+    username_attribute: str = "email"
     pwd_atrribute: str = "password"
     _service_name: str = "google"
 
@@ -68,7 +68,7 @@ class GoogleAuth(ExternalAuth):
             # Step A: redirect
             return self.redirect(uri)
         else:
-            raise NavException(
+            raise AuthException(
                 "Client doesn't have info for Authentication"
             )
 
@@ -110,10 +110,10 @@ class GoogleAuth(ExternalAuth):
                 user_creds
             )
             try:
-                id = userdata['id']
+                uid = userdata['id']
                 access_token = user_creds['id_token_jwt']
-                userdata[self.session_key_property] = id
-                data = await self.get_user_session(request, id, userdata, access_token)
+                userdata[self.session_key_property] = uid
+                data = await self.validate_user_info(request, uid, userdata, access_token)
                 return self.home_redirect(request, token=data['token'], token_type='Bearer')
             except Exception as err:
                 logging.exception(f"Google Auth Error: {err}")

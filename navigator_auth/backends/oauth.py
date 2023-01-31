@@ -5,7 +5,7 @@ Oauth is a Abstract Class with basic functionalities for all Oauth2 backends.
 from abc import abstractmethod
 from aiohttp import web
 from navigator_auth.exceptions import (
-    NavException
+    AuthException
 )
 from .external import ExternalAuth
 
@@ -31,7 +31,7 @@ class OauthAuth(ExternalAuth):
             # Step A: redirect
             return self.redirect(url)
         except Exception as err:
-            raise NavException(
+            raise AuthException(
                 f"{self._service_name}: Client doesn't have info for Authentication: {err}"
             ) from err
 

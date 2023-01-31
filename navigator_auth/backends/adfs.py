@@ -2,7 +2,6 @@
 
 Description: Backend Authentication/Authorization using Okta Service.
 """
-from typing import Dict
 import base64
 from aiohttp import web
 import jwt
@@ -11,7 +10,7 @@ import requests
 import requests.adapters
 from navconfig.logging import logging
 from navigator_auth.exceptions import (
-    NavException
+    AuthException
 )
 from navigator_auth.conf import (
     ADFS_SERVER,
@@ -130,7 +129,7 @@ class ADFSAuth(ExternalAuth):
             return self.redirect(login_url)
         except Exception as err:
             logging.exception(err)
-            raise NavException(
+            raise AuthException(
                 f"Client doesn't have info for ADFS Authentication: {err}"
             ) from err
 
@@ -144,7 +143,7 @@ class ADFSAuth(ExternalAuth):
             request_id = auth_response['client-request-id']
         except Exception as err:
             print(err)
-            raise NavException(
+            raise AuthException(
                 f"ADFS: Invalid Callback response: {err}"
             ) from err
         # print(authorization_code, state, request_id)
@@ -209,7 +208,7 @@ class ADFSAuth(ExternalAuth):
                     print('USER DATA: ', data)
                     userdata, uid = self.build_user_info(data)
                     userdata['id_token'] = id_token
-                    data = await self.get_user_session(request, uid, userdata, access_token)
+                    data = await self.validate_user_info(request, uid, userdata, access_token)
                 except Exception as err:
                     logging.exception(f'ADFS: Error getting User information: {err}')
                     raise web.HTTPForbidden(
