@@ -265,7 +265,6 @@ class ExternalAuth(BaseAuthBackend):
             }
             await self.auth_successful_callback(request, user, **args)
         try:
-            print('AT END >>', userdata, user)
             user = await self.create_user(
                 userdata
             )

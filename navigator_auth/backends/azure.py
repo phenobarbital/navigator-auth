@@ -256,7 +256,6 @@ class AzureAuth(ExternalAuth):
             try:
                 async with aioredis.Redis(connection_pool=self._pool) as redis:
                     result = await redis.get(f'azure_auth_{state}')
-                    print('REDIS >>> ', result)
                     flow = orjson.loads(result)
             except Exception as err:
                 raise Exception(
