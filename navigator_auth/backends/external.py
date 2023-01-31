@@ -56,6 +56,7 @@ class ExternalAuth(BaseAuthBackend):
     _ident: AuthUser = OauthUser
     _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
     _callbacks: Optional[list[Callable]] = None
+    _external_auth: bool = True
 
 
     def __init__(
@@ -92,6 +93,7 @@ class ExternalAuth(BaseAuthBackend):
             self.authenticate,
             name=f"{self._service_name}_api_login"
         )
+        self._info.uri = f"/api/v1/auth/{self._service_name}/"
         # finish login (callback)
         router.add_route(
             "GET",

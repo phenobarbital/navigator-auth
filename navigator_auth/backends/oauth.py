@@ -15,6 +15,7 @@ class OauthAuth(ExternalAuth):
     Description: Abstract Class for all Oauth2 backends.
     """
     _auth_code: str = 'code'
+    _external_auth: bool = True
 
     @abstractmethod
     async def get_credentials(self, request: web.Request):

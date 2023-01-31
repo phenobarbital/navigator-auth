@@ -35,7 +35,7 @@ from navigator_auth.conf import (
 )
 
 # Authenticated Identity
-from navigator_auth.identities import Identity
+from navigator_auth.identities import Identity, AuthBackend
 
 
 class BaseAuthBackend(ABC):
@@ -49,6 +49,11 @@ class BaseAuthBackend(ABC):
     session_timeout: int = int(SESSION_TIMEOUT)
     _service: str = None
     _ident: Identity = Identity
+    _info: AuthBackend = None
+    _description: str = 'Abstract Backend'
+    _service_name: str = 'abstract'
+    _external_auth: bool = False
+
 
     def __init__(
         self,
@@ -86,6 +91,16 @@ class BaseAuthBackend(ABC):
         self.executor = ThreadPoolExecutor(max_workers=1)
         # logger
         self.logger = logging.getLogger(f'Auth.{self._service}')
+        ## Backend Info:
+        self._info = AuthBackend()
+        self._info.name = self._service
+        self._info.uri = '/api/v1/login'
+        self._info.description = self._description
+        self._info.icon = f"/static/auth/icons/{self._service_name}.png"
+        self._info.external = self._external_auth
+        self._info.headers = {
+            "x-auth-method": self._service
+        }
 
     @classmethod
     def authz_backends(cls):

@@ -48,6 +48,8 @@ class DjangoAuth(BaseAuthBackend):
     _user_object: str = 'user'
     _user_id_key: str = '_auth_user_id'
     _ident: AuthUser = DjangoUser
+    _service_name: str = 'django'
+    _description: str = 'Django Middleware Authentication'
 
     def __init__(
         self,

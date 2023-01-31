@@ -29,6 +29,7 @@ class APIKeyAuth(BaseAuthBackend):
 
     _pool = None
     _ident: AuthUser = APIKeyUser
+    _description: str = 'API/Key authentication'
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements.

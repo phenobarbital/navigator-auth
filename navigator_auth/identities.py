@@ -8,6 +8,14 @@ from slugify import slugify
 from datamodel import BaseModel, Column
 
 
+class AuthBackend(BaseModel):
+    name: str
+    uri: str
+    description: str
+    icon: str
+    external: bool = Column(required=True, default=False)
+    headers: dict = Column(required=False, default_factory=dict)
+
 class Group(BaseModel):
     """Group.
 

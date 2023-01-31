@@ -26,6 +26,7 @@ class GoogleAuth(ExternalAuth):
     username_attribute: str = "email"
     pwd_atrribute: str = "password"
     _service_name: str = "google"
+    _description: str = 'Google Apps Authentication'
 
     def configure(self, app, router):
         super(GoogleAuth, self).configure(app, router)
