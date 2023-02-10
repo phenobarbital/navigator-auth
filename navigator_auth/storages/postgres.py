@@ -43,7 +43,6 @@ class PostgresStorage(AuthStorage):
             if self.conn:
                 await self.conn.wait_close(gracefully=True, timeout=2)
         finally:
-            app['authdb'] = None
             logging.debug("Exiting ...")
 
     async def cleanup(self, app: web.Application):
