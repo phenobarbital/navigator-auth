@@ -185,7 +185,7 @@ class APIKeyAuth(BaseAuthBackend):
                     return await handler(request)
             except KeyError:
                 pass
-            self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
+            # self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
             try:
                 userdata = await self.authenticate(request)
                 if userdata:

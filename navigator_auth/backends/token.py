@@ -191,7 +191,7 @@ class TokenAuth(BaseAuthBackend):
                     return await handler(request)
             except KeyError:
                 pass
-            self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
+            # self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
             tenant, jwt_token = await self.get_payload(request)
             if not tenant:
                 return await handler(request)

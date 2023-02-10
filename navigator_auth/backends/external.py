@@ -27,7 +27,8 @@ from navigator_auth.conf import (
     AUTH_LOGIN_FAILED_URI,
     AUTH_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
-    AUTH_SUCCESSFUL_CALLBACKS
+    AUTH_SUCCESSFUL_CALLBACKS,
+    PREFERRED_URL_SCHEME
 )
 from .abstract import BaseAuthBackend
 
@@ -154,8 +155,8 @@ class ExternalAuth(BaseAuthBackend):
         self._callbacks = fns
 
     def get_domain(self, request: web.Request) -> str:
-        absolute_uri = str(request.url)
-        domain_url = absolute_uri.replace(str(request.rel_url), '')
+        uri = urlparse(str(request.url))
+        domain_url = f"{PREFERRED_URL_SCHEME}://{uri.netloc}"
         logging.debug(f'DOMAIN: {domain_url}')
         return domain_url
 

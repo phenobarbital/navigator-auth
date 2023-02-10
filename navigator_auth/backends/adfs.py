@@ -97,13 +97,6 @@ class ADFSAuth(ExternalAuth):
             self.authenticate,
             name=f"{self._service_name}_login"
         )
-        ## alt login:
-        router.add_route(
-            "GET",
-            f"/auth/{self._service_name}/login",
-            self.authenticate,
-            name=f"{self._service_name}_alt_login"
-        )
         # finish login (callback)
         router.add_route(
             "*",
