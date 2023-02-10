@@ -120,7 +120,7 @@ setup(
         "pycryptodome==3.15.0",
         "rncryptor==3.3.0",
         "msal==1.20.0",
-        "aiogoogle==3.1.2",
+        "aiogoogle==5.1.0",
         "okta-jwt-verifier==0.2.3",
         "python-slugify==7.0.0",
         "aiohttp_cors>=0.7.0",
