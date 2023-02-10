@@ -94,6 +94,13 @@ class ExternalAuth(BaseAuthBackend):
             name=f"{self._service_name}_api_login"
         )
         self._info.uri = f"/api/v1/auth/{self._service_name}/"
+        ## alt login
+        router.add_route(
+            "GET",
+            f"/auth/{self._service_name}/login",
+            self.authenticate,
+            name=f"{self._service_name}_alt_login"
+        )
         # finish login (callback)
         router.add_route(
             "GET",
@@ -149,7 +156,7 @@ class ExternalAuth(BaseAuthBackend):
     def get_domain(self, request: web.Request) -> str:
         absolute_uri = str(request.url)
         domain_url = absolute_uri.replace(str(request.rel_url), '')
-        # logging.debug(f'DOMAIN: {domain_url}')
+        logging.debug(f'DOMAIN: {domain_url}')
         return domain_url
 
     def redirect(self, uri: str):

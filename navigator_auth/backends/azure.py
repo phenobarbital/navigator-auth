@@ -251,7 +251,7 @@ class AzureAuth(ExternalAuth):
             try:
                 state = auth_response['state']
             except Exception as err:
-                raise Exception(
+                raise AuthException(
                     f'Azure: Wrong authentication Callback, State: {err}'
                 ) from err
             try:
@@ -259,7 +259,7 @@ class AzureAuth(ExternalAuth):
                     result = await redis.get(f'azure_auth_{state}')
                     flow = orjson.loads(result)
             except Exception as err:
-                raise Exception(
+                raise AuthException(
                     f'Azure: Error reading Flow State from Cache: {err}'
                 )  from err
             app = self.get_msal_app()
@@ -289,6 +289,7 @@ class AzureAuth(ExternalAuth):
                         userdata['id_token'] = id_token
                         userdata['claims'] = claims
                         data = await self.validate_user_info(request, uid, userdata, access_token)
+                        print('DATA AZURE >> ', userdata)
                     except Exception as err:
                         logging.exception('Azure: Error getting User information')
                         raise web.HTTPForbidden(

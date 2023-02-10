@@ -83,7 +83,7 @@ class ADFSAuth(ExternalAuth):
         if ADFS_LOGIN_REDIRECT_URL is not None:
             login = ADFS_LOGIN_REDIRECT_URL
         else:
-            login = f"/api/v1/auth/{self._service_name}/"
+            login = f"/api/v1/auth/{self._service_name}"
 
         if ADFS_CALLBACK_REDIRECT_URL is not None:
             callback = ADFS_CALLBACK_REDIRECT_URL
@@ -92,10 +92,17 @@ class ADFSAuth(ExternalAuth):
             callback = f"/auth/{self._service_name}/callback/"
         # Login and Redirect Routes:
         router.add_route(
-            "*",
+            "GET",
             login,
             self.authenticate,
             name=f"{self._service_name}_login"
+        )
+        ## alt login:
+        router.add_route(
+            "GET",
+            f"/auth/{self._service_name}/login",
+            self.authenticate,
+            name=f"{self._service_name}_alt_login"
         )
         # finish login (callback)
         router.add_route(
@@ -123,6 +130,8 @@ class ADFSAuth(ExternalAuth):
                 "state": self.state,
                 "scope": ADFS_SCOPES
             }
+            logging.debug(' === AUTH Params === ')
+            logging.debug(f"{query_params!s}")
             params = requests.compat.urlencode(query_params)
             login_url = f"{self.authorize_uri}?{params}"
             # Step A: redirect
@@ -138,13 +147,14 @@ class ADFSAuth(ExternalAuth):
         self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
         try:
             auth_response = dict(request.rel_url.query.items())
+            print('SUCCESS RESPONSE : ', auth_response)
             authorization_code = auth_response['code']
             state = auth_response['state'] # TODO: making validation with previous state
             request_id = auth_response['client-request-id']
         except Exception as err:
             print(err)
             raise AuthException(
-                f"ADFS: Invalid Callback response: {err}"
+                f"ADFS: Invalid Callback response: {err}, payload: {auth_response}"
             ) from err
         # print(authorization_code, state, request_id)
         logging.debug(f"Received authorization token: {authorization_code}")
