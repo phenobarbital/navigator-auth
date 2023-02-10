@@ -32,7 +32,6 @@ class RedisStorage(AuthStorage):
         """
         logging.debug(" === Closing Auth Redis Connections === ")
         try:
-            if self.conn:
-                await self.conn.close()
-        finally:
-            app['redis'] = None
+            await self.conn.close()
+        except Exception:  # pylint: disable=W0718
+            pass

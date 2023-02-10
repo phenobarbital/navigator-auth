@@ -82,7 +82,4 @@ class AuthStorage(ABC):
 
     async def shutdown(self, app: web.Application) -> None:
         logging.debug(f'Closing Auth DB on App: {app!r}')
-        try:
-            await self.conn.close()
-        finally:
-            app['authdb'] = None
+        await self.conn.close()

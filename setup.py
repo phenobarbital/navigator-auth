@@ -114,8 +114,8 @@ setup(
         "aiohttp==3.8.3",
         "uvloop==0.17.0",
         "asyncio==3.4.3",
-        "asyncdb>=2.1.30",
-        "navconfig[default]>=1.0.8",
+        "asyncdb>=2.1.38",
+        "navconfig[default]>=1.0.15",
         "PyJWT==2.6.0",
         "pycryptodome==3.15.0",
         "rncryptor==3.3.0",
@@ -125,7 +125,7 @@ setup(
         "python-slugify==7.0.0",
         "platformdirs==2.5.1",
         "aiohttp_cors>=0.7.0",
-        "navigator-session>=0.3.0",
+        "navigator-session>=0.3.3",
         "pendulum==2.1.2"
     ],
     tests_require=[
