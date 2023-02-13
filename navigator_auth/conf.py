@@ -224,7 +224,7 @@ AZURE_ADFS_SCOPES = [
     for e in list(config.get("AZURE_ADFS_SCOPES", fallback="").split(","))
 ]
 
-PREFERRED_URL_SCHEME = config.get('PREFERRED_URL_SCHEME', fallback='https')
+PREFERRED_URL_SCHEME = config.get('PREFERRED_URL_SCHEME', section="ssl", fallback='https')
 # ADFS SSO
 ADFS_SERVER = config.get("ADFS_SERVER")
 ADFS_CLIENT_ID = config.get("ADFS_CLIENT_ID")

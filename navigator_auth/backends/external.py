@@ -79,6 +79,7 @@ class ExternalAuth(BaseAuthBackend):
         self._token_uri: str = ''
         self.login_failed_uri = AUTH_LOGIN_FAILED_URI
         self.redirect_uri = "{domain}/auth/{service}/callback/"
+        self.finish_redirect_url = None
         self._issuer: str = None
         self.users_info: str = None
         self.authority: str = None
@@ -95,6 +96,7 @@ class ExternalAuth(BaseAuthBackend):
             name=f"{self._service_name}_api_login"
         )
         self._info.uri = f"/api/v1/auth/{self._service_name}/"
+        self.finish_redirect_url = AUTH_REDIRECT_URI
         ## alt login
         router.add_route(
             "GET",
@@ -160,6 +162,19 @@ class ExternalAuth(BaseAuthBackend):
         logging.debug(f'DOMAIN: {domain_url}')
         return domain_url
 
+    def get_finish_redirect_url(self, request: web.Request) -> str:
+        domain_url = self.get_domain(request)
+        print(request.query.items())
+        try:
+            redirect_url = request.query['redirect_url']
+        except (TypeError, KeyError):
+            redirect_url = AUTH_REDIRECT_URI
+        print('NEW REDIRECT URL ', redirect_url)
+        if not bool(urlparse(redirect_url).netloc):
+            redirect_url = f"{domain_url}{redirect_url}"
+        print('NEW REDIRECT URL ', redirect_url)
+        self.finish_redirect_url = redirect_url
+
     def redirect(self, uri: str):
         """redirect.
             Making the redirection to External Auth Page.
@@ -173,12 +188,6 @@ class ExternalAuth(BaseAuthBackend):
         return req.url
 
     def home_redirect(self, request: web.Request, token: str = None, token_type: str = 'Bearer'):
-        domain_url = self.get_domain(request)
-        if bool(urlparse(AUTH_REDIRECT_URI).netloc):
-            # is an absolute URI
-            redirect_url = AUTH_REDIRECT_URI
-        else:
-            redirect_url = f"{domain_url}{AUTH_REDIRECT_URI}"
         headers = {
             "x-authenticated": 'true'
         }
@@ -189,8 +198,10 @@ class ExternalAuth(BaseAuthBackend):
             params = {
                 "token" : token, "type":  token_type
             }
-        url = self.prepare_url(redirect_url, params)
+        url = self.prepare_url(self.finish_redirect_url, params)
         return web.HTTPFound(url, headers=headers)
+
+
 
     @abstractmethod
     async def authenticate(self, request: web.Request):

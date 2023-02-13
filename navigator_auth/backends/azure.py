@@ -167,6 +167,8 @@ class AzureAuth(ExternalAuth):
             user = None
             pwd = None
             logging.error(err)
+        ## getting Finish Redirect URL
+        self.get_finish_redirect_url(request)
         if user and pwd:
             Default_SCOPE = ['User.ReadBasic.All']
             # will use User/Pass Authentication

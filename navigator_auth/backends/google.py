@@ -42,7 +42,7 @@ class GoogleAuth(ExternalAuth):
     async def get_payload(self, request):
         pass
 
-    async def authenticate(self, request):
+    async def authenticate(self, request: web.Request):
         """ Authenticate, refresh or return the user credentials."""
         self._state = (
             create_secret()
@@ -52,6 +52,8 @@ class GoogleAuth(ExternalAuth):
         )  # Shouldn't be a global or a hardcoded variable. should be tied to a session or a user and shouldn't be used more than once
         domain_url = self.get_domain(request)
         self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
+        ## getting Finish Redirect URL
+        self.get_finish_redirect_url(request)
         self._credentials["redirect_uri"] = self.redirect_uri
         self.google = Aiogoogle(
             client_creds=self._credentials

@@ -112,6 +112,8 @@ class ADFSAuth(ExternalAuth):
         """
         domain_url = self.get_domain(request)
         self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
+        ## getting Finish Redirect URL
+        self.get_finish_redirect_url(request)
         try:
             self.state = base64.urlsafe_b64encode(self.redirect_uri.encode()).decode()
             query_params = {
