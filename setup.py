@@ -111,7 +111,7 @@ setup(
     ],
     install_requires=[
         "PyNaCl==1.5.0",
-        "aiohttp==3.8.3",
+        "aiohttp==3.8.4",
         "uvloop==0.17.0",
         "asyncio==3.4.3",
         "asyncdb>=2.1.38",
