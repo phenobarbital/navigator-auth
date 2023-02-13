@@ -28,7 +28,8 @@ from navigator_auth.conf import (
     AUTH_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
     AUTH_SUCCESSFUL_CALLBACKS,
-    PREFERRED_AUTH_SCHEME
+    PREFERRED_AUTH_SCHEME,
+    exclude_list
 )
 from .abstract import BaseAuthBackend
 
@@ -96,6 +97,8 @@ class ExternalAuth(BaseAuthBackend):
             name=f"{self._service_name}_api_login"
         )
         self._info.uri = f"/api/v1/auth/{self._service_name}/"
+        ## added to excluded list:
+        exclude_list.append(f"/api/v1/auth/{self._service_name}/")
         self.finish_redirect_url = AUTH_REDIRECT_URI
         ## alt login
         router.add_route(
@@ -104,6 +107,7 @@ class ExternalAuth(BaseAuthBackend):
             self.authenticate,
             name=f"{self._service_name}_alt_login"
         )
+        exclude_list.append(f"/auth/{self._service_name}/login")
         # finish login (callback)
         router.add_route(
             "GET",
@@ -111,6 +115,7 @@ class ExternalAuth(BaseAuthBackend):
             self.auth_callback,
             name=f"{self._service_name}_complete_login"
         )
+        exclude_list.append(f"/auth/{self._service_name}/callback/")
         # logout process
         router.add_route(
             "GET",
