@@ -28,7 +28,7 @@ from navigator_auth.conf import (
     AUTH_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
     AUTH_SUCCESSFUL_CALLBACKS,
-    PREFERRED_URL_SCHEME
+    PREFERRED_AUTH_SCHEME
 )
 from .abstract import BaseAuthBackend
 
@@ -158,7 +158,7 @@ class ExternalAuth(BaseAuthBackend):
 
     def get_domain(self, request: web.Request) -> str:
         uri = urlparse(str(request.url))
-        domain_url = f"{PREFERRED_URL_SCHEME}://{uri.netloc}"
+        domain_url = f"{PREFERRED_AUTH_SCHEME}://{uri.netloc}"
         logging.debug(f'DOMAIN: {domain_url}')
         return domain_url
 
