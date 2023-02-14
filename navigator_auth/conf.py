@@ -108,7 +108,7 @@ ALLOWED_HOSTS = [
 
 ## Redirections:
 AUTH_REDIRECT_URI = config.get('AUTH_REDIRECT_URI', section="auth")
-AUTH_LOGIN_FAILED_URI = config.get('AUTH_REDIRECT_URI', section="auth")
+AUTH_LOGIN_FAILED_URI = config.get('AUTH_LOGIN_FAILED_URI', section="auth")
 
 AUTH_SUCCESSFUL_CALLBACKS = (
 )
@@ -245,6 +245,7 @@ adfs_mapping = {
     "email": "email",
 }
 AZURE_AD_SERVER = config.get("AZURE_AD_SERVER", fallback="login.microsoftonline.com")
+AZURE_SESSION_TIMEOUT = config.get("AZURE_SESSION_TIMEOUT", fallback=120)
 ADFS_CLAIM_MAPPING = config.get("ADFS_CLAIM_MAPPING", fallback=adfs_mapping)
 
 # Okta

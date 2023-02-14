@@ -26,6 +26,9 @@ class ModelHandler(BaseView):
         if self.model_name is not None:
             ## get Model from Variable
             self.model = self.get_authmodel(self.model_name)
+        
+        if hasattr(self.model.Meta, "pk") is True:
+            self.pk = self.model.Meta.pk
         super(ModelHandler, self).__init__(request, *args, **kwargs)
 
     def get_authmodel(self, model: str):
