@@ -206,6 +206,17 @@ class ExternalAuth(BaseAuthBackend):
         url = self.prepare_url(self.finish_redirect_url, params)
         return web.HTTPFound(url, headers=headers)
 
+    def failed_redirect(self, request: web.Request, error: str = 'ERROR_UNKNOWN '):
+        headers = {
+            "x-authenticated": 'false'
+        }
+        params = {
+            "error" : error
+        }
+        # url = self.prepare_url(self.login_failed_uri, params)
+        url = self.prepare_url(self.finish_redirect_url, params)
+    
+        return web.HTTPFound(url, headers=headers)
 
 
     @abstractmethod

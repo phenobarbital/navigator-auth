@@ -20,6 +20,7 @@ from navigator_auth.conf import (
     AZURE_ADFS_CLIENT_SECRET,
     AZURE_ADFS_DOMAIN,
     AZURE_ADFS_TENANT_ID,
+    AZURE_SESSION_TIMEOUT,
     REDIS_AUTH_URL
 )
 from navigator_auth.libs.json import json_encoder
@@ -138,7 +139,7 @@ class AzureAuth(ExternalAuth):
         if cache.has_state_changed:
             result = cache.serialize()
             async with aioredis.Redis(connection_pool=self._pool) as redis:
-                await redis.setex(f'azure_cache_{state}', 120, result)
+                await redis.setex(f'azure_cache_{state}', AZURE_SESSION_TIMEOUT, result)
 
     def get_msal_app(self):
         authority = self._issuer if self._issuer else self.authority
@@ -232,11 +233,11 @@ class AzureAuth(ExternalAuth):
                     scopes=SCOPE,
                     redirect_uri=self.redirect_uri,
                     domain_hint=AZURE_ADFS_DOMAIN,
-                    max_age=120
+                    max_age=AZURE_SESSION_TIMEOUT
                 )
                 async with aioredis.Redis(connection_pool=self._pool) as redis:
                     state = flow['state']
-                    await redis.setex(f'azure_auth_{state}', 120, json_encoder(flow))
+                    await redis.setex(f'azure_auth_{state}', AZURE_SESSION_TIMEOUT, json_encoder(flow))
                 login_url = flow['auth_uri']
                 return self.redirect(login_url)
             except Exception as err:
@@ -253,17 +254,19 @@ class AzureAuth(ExternalAuth):
             try:
                 state = auth_response['state']
             except Exception as err:
-                raise AuthException(
-                    f'Azure: Wrong authentication Callback, State: {err}'
-                ) from err
+                # raise AuthException(
+                #     f'Azure: Wrong authentication Callback, State: {err}'
+                # ) from err
+                return self.failed_redirect(request, error='ERROR_CONFIGURATION')
             try:
                 async with aioredis.Redis(connection_pool=self._pool) as redis:
                     result = await redis.get(f'azure_auth_{state}')
                     flow = orjson.loads(result)
             except Exception as err:
-                raise AuthException(
-                    f'Azure: Error reading Flow State from Cache: {err}'
-                )  from err
+                # raise AuthException(
+                #     f'Azure: Error reading Flow State from Cache: {err}'
+                # )  from err
+                return self.failed_redirect(request, error='ERROR_RATE_LIMIT_EXCEEDED')
             app = self.get_msal_app()
             try:
                 result = app.acquire_token_by_auth_code_flow(
@@ -294,9 +297,10 @@ class AzureAuth(ExternalAuth):
                         print('DATA AZURE >> ', userdata)
                     except Exception as err:
                         logging.exception('Azure: Error getting User information')
-                        raise web.HTTPForbidden(
-                            reason=f"Azure: Error with User Information: {err}"
-                        ) from err
+                        # raise web.HTTPForbidden(
+                        #     reason=f"Azure: Error with User Information: {err}"
+                        # ) from err
+                        return self.failed_redirect(request, error='ERROR_RESOURCE_NOT_FOUND')
                     # Redirect User to HOME
                     return self.home_redirect(request, token=data['token'], token_type=token_type)
                 elif 'error' in result:
@@ -304,19 +308,23 @@ class AzureAuth(ExternalAuth):
                     desc = result['error_description']
                     message = f"Azure {error}: {desc}"
                     logging.exception(message)
-                    raise web.HTTPForbidden(
-                        reason=message
-                    )
+                    # raise web.HTTPForbidden(
+                    #     reason=message
+                    # )
+                    return self.failed_redirect(request, error='ERROR_CONFIGURATION')
                 else:
-                    raise web.HTTPForbidden(
-                        reason="Azure: Invalid Response from Server."
-                    )
+                    # raise web.HTTPForbidden(
+                    #     reason="Azure: Invalid Response from Server."
+                    # )
+                    return self.failed_redirect(request, error='ERROR_CONFIGURATION')
             except Exception as err:
                 logging.exception(err)
-                return self.redirect(uri=self.login_failed_uri)
+                # return self.redirect(uri=self.login_failed_uri)
+                return self.failed_redirect(request, error='ERROR_INVALID_REQUEST')
         except Exception as err:
             logging.exception(err)
-            return self.redirect(uri=self.login_failed_uri)
+            # return self.redirect(uri=self.login_failed_uri)
+            return self.failed_redirect(request, error='ERROR_UNKNOWN')
 
     async def logout(self, request):
         pass
