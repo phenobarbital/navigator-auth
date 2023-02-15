@@ -233,7 +233,7 @@ class AzureAuth(ExternalAuth):
                     scopes=SCOPE,
                     redirect_uri=self.redirect_uri,
                     domain_hint=AZURE_ADFS_DOMAIN,
-                    max_age=AZURE_SESSION_TIMEOUT
+                    max_age=int(AZURE_SESSION_TIMEOUT)
                 )
                 async with aioredis.Redis(connection_pool=self._pool) as redis:
                     state = flow['state']
