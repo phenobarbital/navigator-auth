@@ -1,8 +1,4 @@
-from typing import (
-    Any,
-    List,
-    Optional
-)
+from typing import Any, List, Optional
 from dataclasses import InitVar
 from slugify import slugify
 from datamodel import BaseModel, Column
@@ -16,19 +12,22 @@ class AuthBackend(BaseModel):
     external: bool = Column(required=True, default=False)
     headers: dict = Column(required=False, default_factory=dict)
 
+
 class Group(BaseModel):
     """Group.
 
     Association (group) were users belongs to.
     """
+
     group: str = Column(required=True)
 
     class Meta:
         strict = True
         frozen = False
 
+
 # create a Guest Group.
-Guest = Group(group = 'guest')
+Guest = Group(group="guest")
 
 
 class Organization(BaseModel):
@@ -44,6 +43,7 @@ class Organization(BaseModel):
     class Meta:
         strict = True
         frozen = False
+
 
 class Program(BaseModel):
     program_id: int
@@ -65,15 +65,16 @@ class Identity(BaseModel):
 
     Describe an Authenticated Entity on Navigator.
     """
+
     id: Any = Column(required=True)
     auth_method: str = None
     access_token: Optional[str] = None
     enabled: bool = Column(required=True, default=True)
     data: InitVar = Column(required=False, default_factory=dict)
     is_authenticated: bool = Column(equired=False, default=False)
-    userdata: dict  = Column(required=False, default_factory={})
+    userdata: dict = Column(required=False, default_factory={})
 
-    def __post_init__(self, data): # pylint: disable=W0221
+    def __post_init__(self, data):  # pylint: disable=W0221
         self.userdata = data
         for key, value in data.items():
             self.create_field(key, value)
@@ -92,6 +93,7 @@ class AuthUser(Identity):
 
     Model for any Authenticated User.
     """
+
     first_name: str
     last_name: str
     name: str

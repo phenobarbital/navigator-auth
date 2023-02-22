@@ -5,12 +5,7 @@ from typing import Union
 import importlib
 from datamodel import BaseModel
 from datamodel.exceptions import ValidationError
-from asyncdb.exceptions import (
-    DriverError,
-    ProviderError,
-    NoDataFound,
-    StatementError
-)
+from asyncdb.exceptions import DriverError, ProviderError, NoDataFound, StatementError
 from navigator_session import get_session
 from navigator_auth.exceptions import AuthException
 from .base import BaseView
@@ -19,14 +14,14 @@ from .base import BaseView
 class ModelHandler(BaseView):
     model: BaseModel = None
     model_name: str = None
-    name: str = 'Model'
-    pk: Union[str, list] = 'id'
+    name: str = "Model"
+    pk: Union[str, list] = "id"
 
     def __init__(self, request, *args, **kwargs):
         if self.model_name is not None:
             ## get Model from Variable
             self.model = self.get_authmodel(self.model_name)
-        
+
         if hasattr(self.model.Meta, "pk") is True:
             self.pk = self.model.Meta.pk
         super(ModelHandler, self).__init__(request, *args, **kwargs)
@@ -49,20 +44,15 @@ class ModelHandler(BaseView):
             session = await get_session(self.request)
         except (ValueError, RuntimeError) as err:
             return self.critical(
-                reason="Error Decoding Session",
-                request=self.request,
-                exception=err
+                reason="Error Decoding Session", request=self.request, exception=err
             )
         return session
 
     async def head(self):
-        """ Getting Client information."""
+        """Getting Client information."""
         session = await self.session()
         if not session:
-            return self.error(
-                reason="Unauthorized",
-                status=403
-            )
+            return self.error(reason="Unauthorized", status=403)
         ## calculating resource:
         response = self.model.schema(as_dict=True)
         columns = list(response["properties"].keys())
@@ -74,22 +64,17 @@ class ModelHandler(BaseView):
             "X-Tablename": self.model.Meta.name,
             "X-Schema": self.model.Meta.schema,
         }
-        return self.no_content(
-            headers=headers
-        )
+        return self.no_content(headers=headers)
 
     async def get(self):
-        """ Getting Client information."""
+        """Getting Client information."""
         session = await self.session()
         if not session:
-            return self.error(
-                reason="Unauthorized",
-                status=403
-            )
+            return self.error(reason="Unauthorized", status=403)
         ## getting all clients:
         params = self.match_parameters(self.request)
         try:
-            if params['meta'] == ':meta':
+            if params["meta"] == ":meta":
                 # returning JSON schema of Model:
                 response = self.model.schema(as_dict=True)
                 return self.json_response(content=response)
@@ -100,7 +85,7 @@ class ModelHandler(BaseView):
         except (TypeError, ValueError, AuthException):
             data = None
         ## validate directly with model:
-        db = self.request.app['authdb']
+        db = self.request.app["authdb"]
         ## getting first the id from params or data:
         args = {}
         if isinstance(self.pk, str):
@@ -108,20 +93,18 @@ class ModelHandler(BaseView):
                 objid = data[self.pk]
             except (TypeError, KeyError):
                 try:
-                    objid = params['id']
+                    objid = params["id"]
                 except KeyError:
                     objid = None
             if objid:
-                args = {
-                    self.pk: objid
-                }
+                args = {self.pk: objid}
         elif isinstance(self.pk, list):
             try:
-                paramlist = params['id'].split('/')
+                paramlist = params["id"].split("/")
                 if len(paramlist) != len(self.pk):
                     return self.error(
                         reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
-                        status=410
+                        status=410,
                     )
                 args = {}
                 for key in self.pk:
@@ -130,29 +113,20 @@ class ModelHandler(BaseView):
                 pass
         else:
             return self.error(
-                reason=f"Invalid PK definition for {self.name}: {self.pk}",
-                status=410
+                reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410
             )
         if args:
             # get data for specific client:
             async with await db.acquire() as conn:
                 self.model.Meta.connection = conn
                 # look for this client, after, save changes
-                error = {
-                    "error": f"{self.name} was not Found"
-                }
+                error = {"error": f"{self.name} was not Found"}
                 try:
                     result = await self.model.get(**args)
                 except NoDataFound:
-                    self.error(
-                        exception=error,
-                        status=403
-                    )
+                    self.error(exception=error, status=403)
                 if not result:
-                    self.error(
-                        exception=error,
-                        status=403
-                    )
+                    self.error(exception=error, status=403)
                 return self.json_response(content=result)
         else:
             # TODO: add FILTER method
@@ -166,49 +140,34 @@ class ModelHandler(BaseView):
                     "error": f"Unable to load {self.name} info from Database",
                     "payload": ex.payload,
                 }
-                return self.critical(
-                    reason=error,
-                    statu=501
-                )
+                return self.critical(reason=error, statu=501)
             except TypeError as ex:
                 error = {
                     "error": f"Invalid payload for {self.name}",
                     "payload": str(ex),
                 }
-                return self.error(
-                    exception=error,
-                    statu=406
-                )
+                return self.error(exception=error, statu=406)
             except (DriverError, ProviderError, RuntimeError):
                 error = {
                     "error": "Database Error",
                     "payload": str(ex),
                 }
-                return self.critical(
-                    reason=error,
-                    statu=500
-                )
+                return self.critical(reason=error, statu=500)
 
     async def put(self):
-        """ Creating Model information."""
+        """Creating Model information."""
         session = await self.session()
         if not session:
-            return self.error(
-                reason="Unauthorized",
-                status=403
-            )
+            return self.error(reason="Unauthorized", status=403)
         ### get session Data:
         try:
             data = await self.json_data()
         except (TypeError, ValueError, AuthException):
-            return self.error(
-                reason=f"Invalid {self.name} Data",
-                status=403
-            )
+            return self.error(reason=f"Invalid {self.name} Data", status=403)
         ## validate directly with model:
         try:
-            resultset = self.model(**data) # pylint: disable=E1102
-            db = self.request.app['authdb']
+            resultset = self.model(**data)  # pylint: disable=E1102
+            db = self.request.app["authdb"]
             async with await db.acquire() as conn:
                 resultset.Meta.connection = conn
                 result = await resultset.insert()
@@ -218,42 +177,30 @@ class ModelHandler(BaseView):
                 "error": f"Unable to insert {self.name} info",
                 "payload": ex.payload,
             }
-            return self.error(
-                reason=error,
-                status=406
-            )
+            return self.error(reason=error, status=406)
         except StatementError as ex:
             # UniqueViolation, already exists:
             error = {
                 "error": f"Record already exists for {self.name}",
                 "payload": str(ex),
             }
-            return self.error(
-                exception=error,
-                status=412
-            )
+            return self.error(exception=error, status=412)
         except (TypeError, AttributeError, ValueError) as ex:
             error = {
                 "error": f"Invalid payload for {self.name}",
                 "payload": str(ex),
             }
-            return self.error(
-                exception=error,
-                status=406
-            )
+            return self.error(exception=error, status=406)
 
     async def patch(self):
-        """ Patch an existing Client or retrieve the column names."""
+        """Patch an existing Client or retrieve the column names."""
         session = await self.session()
         if not session:
-            return self.error(
-                reason="Unauthorized",
-                status=403
-            )
+            return self.error(reason="Unauthorized", status=403)
         ### get session Data:
         params = self.match_parameters()
         try:
-            if params['meta'] == ':meta':
+            if params["meta"] == ":meta":
                 ## returning the columns on Model:
                 fields = self.model.__fields__
                 return self.json_response(content=fields)
@@ -262,10 +209,7 @@ class ModelHandler(BaseView):
         try:
             data = await self.json_data()
         except (TypeError, ValueError, AuthException):
-            return self.error(
-                reason=f"Invalid {self.name} Data",
-                status=403
-            )
+            return self.error(reason=f"Invalid {self.name} Data", status=403)
         ## validate directly with model:
         ## getting first the id from params or data:
         args = {}
@@ -273,17 +217,15 @@ class ModelHandler(BaseView):
             try:
                 objid = data[self.pk]
             except (TypeError, KeyError):
-                objid = params['id']
-            args = {
-                self.pk: objid
-            }
+                objid = params["id"]
+            args = {self.pk: objid}
         elif isinstance(self.pk, list):
             try:
-                paramlist = params['id'].split('/')
+                paramlist = params["id"].split("/")
                 if len(paramlist) != len(self.pk):
                     return self.error(
                         reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
-                        status=410
+                        status=410,
                     )
                 args = {}
                 for key in self.pk:
@@ -292,10 +234,9 @@ class ModelHandler(BaseView):
                 pass
         else:
             return self.error(
-                reason=f"Invalid PK definition for {self.name}: {self.pk}",
-                status=410
+                reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410
             )
-        db = self.request.app['authdb']
+        db = self.request.app["authdb"]
         if args:
             ## getting client
             async with await db.acquire() as conn:
@@ -303,19 +244,11 @@ class ModelHandler(BaseView):
                 try:
                     result = await self.model.get(**args)
                 except NoDataFound:
-                    headers = {
-                        "x-error": f"{self.name} was not Found"
-                    }
-                    self.no_content(
-                        headers=headers
-                    )
+                    headers = {"x-error": f"{self.name} was not Found"}
+                    self.no_content(headers=headers)
                 if not result:
-                    headers = {
-                        "x-error": f"{self.name} was not Found"
-                    }
-                    self.no_content(
-                        headers=headers
-                    )
+                    headers = {"x-error": f"{self.name} was not Found"}
+                    self.no_content(headers=headers)
                 ## saved with new changes:
                 for key, val in data.items():
                     if key in result.get_fields():
@@ -323,28 +256,19 @@ class ModelHandler(BaseView):
                 data = await result.update()
                 return self.json_response(content=data, status=202)
         else:
-            self.error(
-                reason=f"Invalid {self.name} Data to Patch",
-                status=403
-            )
+            self.error(reason=f"Invalid {self.name} Data to Patch", status=403)
 
     async def post(self):
-        """ Create or Update a Client."""
+        """Create or Update a Client."""
         session = await self.session()
         if not session:
-            return self.error(
-                reason="Unauthorized",
-                status=403
-            )
+            return self.error(reason="Unauthorized", status=403)
         ### get session Data:
         params = self.match_parameters()
         try:
             data = await self.json_data()
         except (TypeError, ValueError, AuthException):
-            return self.error(
-                reason=f"Invalid {self.name} Data",
-                status=403
-            )
+            return self.error(reason=f"Invalid {self.name} Data", status=403)
         ## validate directly with model:
         ## getting first the id from params or data:
         args = {}
@@ -352,17 +276,15 @@ class ModelHandler(BaseView):
             try:
                 objid = data[self.pk]
             except (TypeError, KeyError):
-                objid = params['id']
-            args = {
-                self.pk: objid
-            }
+                objid = params["id"]
+            args = {self.pk: objid}
         elif isinstance(self.pk, list):
             try:
-                paramlist = params['id'].split('/')
+                paramlist = params["id"].split("/")
                 if len(paramlist) != len(self.pk):
                     return self.error(
                         reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
-                        status=410
+                        status=410,
                     )
                 args = {}
                 for key in self.pk:
@@ -371,17 +293,14 @@ class ModelHandler(BaseView):
                 pass
         else:
             return self.error(
-                reason=f"Invalid PK definition for {self.name}: {self.pk}",
-                status=410
+                reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410
             )
-        db = self.request.app['authdb']
+        db = self.request.app["authdb"]
         if args:
             async with await db.acquire() as conn:
                 self.model.Meta.connection = conn
                 # look for this client, after, save changes
-                error = {
-                    "error": f"{self.name} was not Found"
-                }
+                error = {"error": f"{self.name} was not Found"}
                 try:
                     result = await self.model.get(**args)
                 except NoDataFound:
@@ -389,7 +308,7 @@ class ModelHandler(BaseView):
                     result = None
                 if not result:
                     try:
-                        resultset = self.model(**data) # pylint: disable=E1102
+                        resultset = self.model(**data)  # pylint: disable=E1102
                         result = await resultset.insert()
                         return self.json_response(content=result, status=201)
                     except ValidationError as ex:
@@ -397,10 +316,7 @@ class ModelHandler(BaseView):
                             "error": f"Unable to insert {self.name} info",
                             "payload": ex.payload,
                         }
-                        return self.error(
-                            reason=error,
-                            status=406
-                        )
+                        return self.error(reason=error, status=406)
                 ## saved with new changes:
                 for key, val in data.items():
                     if key in result.get_fields():
@@ -410,38 +326,29 @@ class ModelHandler(BaseView):
         else:
             # create a new client based on data:
             try:
-                resultset = self.model(**data) # pylint: disable=E1102
+                resultset = self.model(**data)  # pylint: disable=E1102
                 async with await db.acquire() as conn:
                     resultset.Meta.connection = conn
-                    result = await resultset.insert() # TODO: migrate to use save()
+                    result = await resultset.insert()  # TODO: migrate to use save()
                     return self.json_response(content=result, status=201)
             except ValidationError as ex:
                 error = {
                     "error": f"Unable to insert {self.name} info",
                     "payload": ex.payload,
                 }
-                return self.error(
-                    reason=error,
-                    status=406
-                )
+                return self.error(reason=error, status=406)
             except (TypeError, AttributeError, ValueError) as ex:
                 error = {
                     "error": f"Invalid payload for {self.name}",
                     "payload": str(ex),
                 }
-                return self.error(
-                    exception=error,
-                    status=406
-                )
+                return self.error(exception=error, status=406)
 
     async def delete(self):
-        """ Delete a Client."""
+        """Delete a Client."""
         session = await self.session()
         if not session:
-            self.error(
-                reason="Unauthorized",
-                status=403
-            )
+            self.error(reason="Unauthorized", status=403)
         ### get session Data:
         params = self.match_parameters()
         try:
@@ -449,27 +356,22 @@ class ModelHandler(BaseView):
         except AuthException:
             data = None
         except (TypeError, ValueError):
-            self.error(
-                reason=f"Invalid {self.name} Data",
-                status=403
-            )
+            self.error(reason=f"Invalid {self.name} Data", status=403)
         ## getting first the id from params or data:
         args = {}
         if isinstance(self.pk, str):
             try:
                 objid = data[self.pk]
             except (TypeError, KeyError):
-                objid = params['id']
-            args = {
-                self.pk: objid
-            }
+                objid = params["id"]
+            args = {self.pk: objid}
         elif isinstance(self.pk, list):
             try:
-                paramlist = params['id'].split('/')
+                paramlist = params["id"].split("/")
                 if len(paramlist) != len(self.pk):
                     return self.error(
                         reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
-                        status=410
+                        status=410,
                     )
                 args = {}
                 for key in self.pk:
@@ -478,25 +380,18 @@ class ModelHandler(BaseView):
                 pass
         else:
             return self.error(
-                reason=f"Invalid PK definition for {self.name}: {self.pk}",
-                status=410
+                reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410
             )
-        db = self.request.app['authdb']
+        db = self.request.app["authdb"]
         if args:
             async with await db.acquire() as conn:
                 self.model.Meta.connection = conn
                 # look for this client, after, save changes
                 result = await self.model.get(**args)
                 if not result:
-                    self.error(
-                        reason=f"{self.name} was Not Found",
-                        status=204
-                    )
+                    self.error(reason=f"{self.name} was Not Found", status=204)
                 # Delete them this Client
                 data = await result.delete()
                 return self.json_response(content=data, status=202)
         else:
-            self.error(
-                reason=f"Cannot Delete an Empty {self.name}",
-                status=204
-            )
+            self.error(reason=f"Cannot Delete an Empty {self.name}", status=204)

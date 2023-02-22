@@ -1,32 +1,34 @@
 """
 Abstract Class for Navigator Authorization Middlewares.
 """
-from typing import (
-    Optional
-)
+from typing import Optional
 from collections.abc import Callable, Awaitable
 from abc import ABC, abstractmethod
 import fnmatch
 from aiohttp import web, hdrs
 from aiohttp.web_urldispatcher import SystemRoute
-from navigator_session import (
-    SESSION_USER_PROPERTY
-)
+from navigator_session import SESSION_USER_PROPERTY
 
 
 class base_middleware(ABC):
-
-    anonymous_routes: list = ["/login", "logout", "/static/", "/signin", "/signout", "/_debugtoolbar/"]
+    anonymous_routes: list = [
+        "/login",
+        "logout",
+        "/static/",
+        "/signin",
+        "/signout",
+        "/_debugtoolbar/",
+    ]
     check_static: bool = True
     exclude_routes: tuple = tuple()
-    protected_routes: tuple = tuple() # list of paths to be protected by middleware
+    protected_routes: tuple = tuple()  # list of paths to be protected by middleware
     user_property: str = SESSION_USER_PROPERTY
 
     def __call__(
-            self,
-            request: web.Request,
-            handler: Callable[[web.Request], Awaitable[web.Response]]
-        ):
+        self,
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.Response]],
+    ):
         """
         Base middleware returns a Awaitable Middleware.
         """
@@ -52,7 +54,6 @@ class base_middleware(ABC):
             return True
         return False
 
-
     async def valid_routes(self, request):
         """
         Avoid Authorization on System Routes.
@@ -70,30 +71,26 @@ class base_middleware(ABC):
         return False
 
     def get_authorization_header(
-            self,
-            request: web.Request,
-            scheme: Optional[str] = None
-        ):
+        self, request: web.Request, scheme: Optional[str] = None
+    ):
         """
         Get the token and authorization header scheme.
         """
         _scheme = None
         token = None
-        if 'Authorization' in request.headers:
+        if "Authorization" in request.headers:
             try:
-                _scheme, token = request.headers['Authorization'].strip().split(' ')
+                _scheme, token = request.headers["Authorization"].strip().split(" ")
             except KeyError as ex:
                 raise web.HTTPUnauthorized(
-                    reason='Token Auth: Missing authorization header',
+                    reason="Token Auth: Missing authorization header",
                 ) from ex
             except ValueError as ex:
                 raise web.HTTPForbidden(
-                    reason='Token Auth: Invalid authorization header',
-            ) from ex
+                    reason="Token Auth: Invalid authorization header",
+                ) from ex
             if scheme is not None and scheme != _scheme:
-                raise web.HTTPUnauthorized(
-                    reason="Invalid Authorization Scheme"
-                )
+                raise web.HTTPUnauthorized(reason="Invalid Authorization Scheme")
         else:
             try:
                 token = request.query.get("auth", request.headers.get("X-Token", None))
@@ -103,10 +100,10 @@ class base_middleware(ABC):
 
     @abstractmethod
     async def middleware(
-            self,
-            app: web.Application,
-            handler: Callable[[web.Request], Awaitable[web.Response]]
-        ):
+        self,
+        app: web.Application,
+        handler: Callable[[web.Request], Awaitable[web.Response]],
+    ):
         """
         Abstract Method for declaring Middleware Function.
         """

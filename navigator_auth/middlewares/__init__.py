@@ -14,5 +14,5 @@ __all__ = [
     "jwt_middleware",
     "django_middleware",
     "token_middleware",
-    "apikey_middleware"
+    "apikey_middleware",
 ]

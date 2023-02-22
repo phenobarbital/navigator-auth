@@ -22,7 +22,7 @@ HOSTS = [e.strip() for e in list(config.get("HOSTS", fallback="localhost").split
 DOMAIN = config.get("DOMAIN", fallback="dev.local")
 
 ### DATABASE INFORMATION:
-AUTH_DB_SCHEMA = config.get('AUTH_DB_SCHEMA', fallback="auth")
+AUTH_DB_SCHEMA = config.get("AUTH_DB_SCHEMA", fallback="auth")
 AUTH_USERS_TABLE = config.get("AUTH_USERS_TABLE", fallback="users")
 AUTH_USERS_VIEW = config.get("AUTH_USERS_VIEW", fallback="vw_users")
 
@@ -45,7 +45,9 @@ excluded_default = [
     "/signin",
     "/signout",
 ]
-new_excluded = [e.strip() for e in list(config.get("ROUTES_EXCLUDED", fallback="").split(","))]
+new_excluded = [
+    e.strip() for e in list(config.get("ROUTES_EXCLUDED", fallback="").split(","))
+]
 exclude_list = excluded_default + new_excluded
 
 # if false, force credentials are not required for using this system.
@@ -54,13 +56,9 @@ AUTH_CREDENTIALS_REQUIRED = config.getboolean(
 )
 
 # AsyncDB Model representing a User Record.
-AUTH_USER_MODEL = config.get(
-    "AUTH_USER_MODEL", fallback="navigator_auth.models.User"
-)
+AUTH_USER_MODEL = config.get("AUTH_USER_MODEL", fallback="navigator_auth.models.User")
 # User View can represent a more complex user View used for getting User Data.
-AUTH_USER_VIEW = config.get(
-    "AUTH_USER_VIEW", fallback="navigator_auth.models.User"
-)
+AUTH_USER_VIEW = config.get("AUTH_USER_VIEW", fallback="navigator_auth.models.User")
 
 # Group Record.
 AUTH_GROUP_MODEL = config.get(
@@ -73,49 +71,35 @@ AUTH_USER_GROUP_MODEL = config.get(
 )
 
 ### Other Models (clients, organizations and Programs):
-AUTH_CLIENT_MODEL = config.get(
-    "AUTH_CLIENT_MODEL", fallback=None
-)
+AUTH_CLIENT_MODEL = config.get("AUTH_CLIENT_MODEL", fallback=None)
 
-AUTH_PROGRAM_MODEL = config.get(
-    "AUTH_PROGRAM_MODEL", fallback=None
-)
+AUTH_PROGRAM_MODEL = config.get("AUTH_PROGRAM_MODEL", fallback=None)
 
-AUTH_PROGRAM_CLIENT_MODEL = config.get(
-    "AUTH_PROGRAM_CLIENT_MODEL", fallback=None
-)
+AUTH_PROGRAM_CLIENT_MODEL = config.get("AUTH_PROGRAM_CLIENT_MODEL", fallback=None)
 
-AUTH_PROGRAM_CATEGORY_MODEL = config.get(
-    "AUTH_PROGRAM_CATEGORY_MODEL", fallback=None
-)
+AUTH_PROGRAM_CATEGORY_MODEL = config.get("AUTH_PROGRAM_CATEGORY_MODEL", fallback=None)
 
-AUTH_ORGANIZATION_MODEL = config.get(
-    "AUTH_ORGANIZATION_MODEL", fallback=None
-)
+AUTH_ORGANIZATION_MODEL = config.get("AUTH_ORGANIZATION_MODEL", fallback=None)
 
-AUTH_USER_ORGANIZATION_MODEL = config.get(
-    "AUTH_USER_ORGANIZATION_MODEL", fallback=None
-)
+AUTH_USER_ORGANIZATION_MODEL = config.get("AUTH_USER_ORGANIZATION_MODEL", fallback=None)
 
-AUTH_PERMISSION_MODEL = config.get(
-    "AUTH_PERMISSION_MODEL", fallback=None
-)
+AUTH_PERMISSION_MODEL = config.get("AUTH_PERMISSION_MODEL", fallback=None)
 
 ALLOWED_HOSTS = [
     e.strip()
-    for e in list(config.get("ALLOWED_HOSTS", section="auth", fallback="localhost*").split(","))
+    for e in list(
+        config.get("ALLOWED_HOSTS", section="auth", fallback="localhost*").split(",")
+    )
 ]
 
 ## Redirections:
-AUTH_REDIRECT_URI = config.get('AUTH_REDIRECT_URI', section="auth")
-AUTH_LOGIN_FAILED_URI = config.get('AUTH_LOGIN_FAILED_URI', section="auth")
+AUTH_REDIRECT_URI = config.get("AUTH_REDIRECT_URI", section="auth")
+AUTH_LOGIN_FAILED_URI = config.get("AUTH_LOGIN_FAILED_URI", section="auth")
 
-AUTH_SUCCESSFUL_CALLBACKS = (
-)
+AUTH_SUCCESSFUL_CALLBACKS = ()
 
 # Enable authentication backends
-AUTHENTICATION_BACKENDS = (
-)
+AUTHENTICATION_BACKENDS = ()
 
 AUTHORIZATION_BACKENDS = [
     e.strip()
@@ -125,8 +109,7 @@ AUTHORIZATION_BACKENDS = [
 ]
 
 ## Basic Authorization Middlewares
-AUTHORIZATION_MIDDLEWARES = (
-)
+AUTHORIZATION_MIDDLEWARES = ()
 
 DEFAULT_MAPPING = {
     "user_id": "user_id",
@@ -142,52 +125,48 @@ DEFAULT_MAPPING = {
 }
 
 USER_MAPPING = DEFAULT_MAPPING
-mapping = config.get('AUTH_USER_MAPPING')
+mapping = config.get("AUTH_USER_MAPPING")
 if mapping is not None:
     try:
         USER_MAPPING = orjson.loads(mapping)
     except orjson.JSONDecodeError:
-        logging.exception(
-            'Auth: Invalid User Mapping on *AUTH_USER_MAPPING*'
-        )
+        logging.exception("Auth: Invalid User Mapping on *AUTH_USER_MAPPING*")
 
 ## Redis Session:
 REDIS_HOST = config.get("REDIS_HOST", fallback="localhost")
 REDIS_PORT = config.get("REDIS_PORT", fallback=6379)
 REDIS_DB = config.get("REDIS_DB", fallback=1)
 REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
-REDIS_AUTH_URL = config.get('REDIS_AUTH_URL', fallback=REDIS_URL)
+REDIS_AUTH_URL = config.get("REDIS_AUTH_URL", fallback=REDIS_URL)
 
 ### Session and Auth Backends:
 REDIS_SESSION_DB = config.get("SESSION_DB", fallback=0)
-CACHE_PREFIX = config.get('CACHE_PREFIX', fallback='navigator')
-SESSION_PREFIX = f'{CACHE_PREFIX}_session'
+CACHE_PREFIX = config.get("CACHE_PREFIX", fallback="navigator")
+SESSION_PREFIX = f"{CACHE_PREFIX}_session"
 
 # Basic Authentication
-SECRET_KEY = config.get('AUTH_SECRET_KEY')
+SECRET_KEY = config.get("AUTH_SECRET_KEY")
 if not SECRET_KEY:
     fernet_key = fernet.Fernet.generate_key()
     SECRET_KEY = base64.urlsafe_b64decode(fernet_key)
 
-AUTH_SESSION_OBJECT = config.get(
-    "AUTH_SESSION_OBJECT", fallback="session"
-)
+AUTH_SESSION_OBJECT = config.get("AUTH_SESSION_OBJECT", fallback="session")
 AUTH_DEFAULT_ISSUER = "urn:Navigator"
-AUTH_DEFAULT_SCHEME = 'Bearer'
-AUTH_TOKEN_ISSUER = config.get('AUTH_TOKEN_ISSUER', fallback='Navigator')
+AUTH_DEFAULT_SCHEME = "Bearer"
+AUTH_TOKEN_ISSUER = config.get("AUTH_TOKEN_ISSUER", fallback="Navigator")
 AUTH_PWD_DIGEST = config.get("AUTH_PWD_DIGEST", fallback="sha256")
 AUTH_PWD_ALGORITHM = config.get("AUTH_PWD_ALGORITHM", fallback="pbkdf2_sha256")
 AUTH_PWD_LENGTH = config.get("AUTH_PWD_LENGTH", fallback=32)
 AUTH_JWT_ALGORITHM = config.get("JWT_ALGORITHM", fallback="HS256")
 AUTH_PWD_SALT_LENGTH = config.get("AUTH_PWD_SALT_LENGTH", fallback=6)
-AUTH_USERNAME_ATTRIBUTE = config.get(
-    'AUTH_USERNAME_ATTRIBUTE', fallback='username'
-)
+AUTH_USERNAME_ATTRIBUTE = config.get("AUTH_USERNAME_ATTRIBUTE", fallback="username")
 
 ## Django Auth Backend:
-DJANGO_SESSION_DB = config.get('DJANGO_SESSION_DB', fallback=REDIS_SESSION_DB)
+DJANGO_SESSION_DB = config.get("DJANGO_SESSION_DB", fallback=REDIS_SESSION_DB)
 DJANGO_SESSION_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{DJANGO_SESSION_DB}"
-DJANGO_SESSION_PREFIX = config.get('DJANGO_SESSION_PREFIX', fallback=f'{CACHE_PREFIX}_session')
+DJANGO_SESSION_PREFIX = config.get(
+    "DJANGO_SESSION_PREFIX", fallback=f"{CACHE_PREFIX}_session"
+)
 
 DJANGO_USER_MAPPING = {
     "groups": "groups",
@@ -211,20 +190,18 @@ AUTH_TOKEN_SECRET = config.get("AUTH_TOKEN_SECRET", fallback=PARTNER_KEY)
 
 ### Azure Authentication
 # Microsoft Azure
-AZURE_ADFS_CLIENT_ID = config.get('AZURE_ADFS_CLIENT_ID')
-AZURE_ADFS_CLIENT_SECRET = config.get('AZURE_ADFS_CLIENT_SECRET')
-AZURE_ADFS_TENANT_ID = config.get('AZURE_ADFS_TENANT_ID', fallback='common')
-AZURE_ADFS_SECRET = config.get('AZURE_ADFS_SECRET')
-AZURE_ADFS_DOMAIN = config.get(
-    'AZURE_ADFS_DOMAIN', fallback='contoso.onmicrosoft.com')
+AZURE_ADFS_CLIENT_ID = config.get("AZURE_ADFS_CLIENT_ID")
+AZURE_ADFS_CLIENT_SECRET = config.get("AZURE_ADFS_CLIENT_SECRET")
+AZURE_ADFS_TENANT_ID = config.get("AZURE_ADFS_TENANT_ID", fallback="common")
+AZURE_ADFS_SECRET = config.get("AZURE_ADFS_SECRET")
+AZURE_ADFS_DOMAIN = config.get("AZURE_ADFS_DOMAIN", fallback="contoso.onmicrosoft.com")
 
 default_scopes = "User.Read,User.Read.All,User.ReadBasic.All,openid"
 AZURE_ADFS_SCOPES = [
-    e.strip()
-    for e in list(config.get("AZURE_ADFS_SCOPES", fallback="").split(","))
+    e.strip() for e in list(config.get("AZURE_ADFS_SCOPES", fallback="").split(","))
 ]
 
-PREFERRED_AUTH_SCHEME = config.get('PREFERRED_AUTH_SCHEME', fallback='https')
+PREFERRED_AUTH_SCHEME = config.get("PREFERRED_AUTH_SCHEME", fallback="https")
 # ADFS SSO
 ADFS_SERVER = config.get("ADFS_SERVER")
 ADFS_CLIENT_ID = config.get("ADFS_CLIENT_ID")
@@ -249,10 +226,10 @@ AZURE_SESSION_TIMEOUT = config.get("AZURE_SESSION_TIMEOUT", fallback=120)
 ADFS_CLAIM_MAPPING = config.get("ADFS_CLAIM_MAPPING", fallback=adfs_mapping)
 
 # Okta
-OKTA_CLIENT_ID = config.get('OKTA_CLIENT_ID')
-OKTA_CLIENT_SECRET = config.get('OKTA_CLIENT_SECRET')
-OKTA_DOMAIN = config.get('OKTA_DOMAIN')
-OKTA_APP_NAME = config.get('OKTA_APP_NAME')
+OKTA_CLIENT_ID = config.get("OKTA_CLIENT_ID")
+OKTA_CLIENT_SECRET = config.get("OKTA_CLIENT_SECRET")
+OKTA_DOMAIN = config.get("OKTA_DOMAIN")
+OKTA_APP_NAME = config.get("OKTA_APP_NAME")
 
 # GOOGLE
 GOOGLE_CLIENT_ID = config.get("GOOGLE_CLIENT_ID")
@@ -268,6 +245,6 @@ GITHUB_CLIENT_ID = config.get("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = config.get("GITHUB_CLIENT_SECRET")
 
 try:
-    from settings.settings import * # pylint: disable=W0614,W0401
+    from settings.settings import *  # pylint: disable=W0614,W0401
 except ImportError as ex:
     print(ex)

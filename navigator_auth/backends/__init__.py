@@ -25,5 +25,5 @@ __all__ = (
     "OktaAuth",
     "ADFSAuth",
     "AzureAuth",
-    'GithubAuth'
+    "GithubAuth",
 )

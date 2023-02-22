@@ -1,18 +1,10 @@
-from typing import (
-    Optional,
-    Tuple
-)
+from typing import Optional, Tuple
 from collections.abc import Coroutine
 import jwt
 from aiohttp import web
 from navconfig import config
-from navigator_session import (
-    SESSION_USER_PROPERTY
-)
-from navigator.conf import (
-    SECRET_KEY,
-    CREDENTIALS_REQUIRED
-)
+from navigator_session import SESSION_USER_PROPERTY
+from navigator.conf import SECRET_KEY, CREDENTIALS_REQUIRED
 from .abstract import base_middleware
 
 
@@ -22,7 +14,7 @@ class jwt_middleware(base_middleware):
         user_fn: Coroutine,
         user_property: str = SESSION_USER_PROPERTY,
         exclude_routes: Optional[Tuple] = tuple(),
-        jwt_algorithm: str = 'HS256'
+        jwt_algorithm: str = "HS256",
     ):
         """
         Simple Middleware to decrypt JWT tokens and return the payload to a
@@ -49,7 +41,7 @@ class jwt_middleware(base_middleware):
         self.jwt_algorithm = jwt_algorithm
 
         if exclude_routes is None:
-            self.exclude_routes = config.get('EXCLUDED_ROUTES', tuple())
+            self.exclude_routes = config.get("EXCLUDED_ROUTES", tuple())
         else:
             self.exclude_routes = exclude_routes
         # user property
@@ -61,29 +53,23 @@ class jwt_middleware(base_middleware):
             if await self.valid_routes(request):
                 return await handler(request)
             try:
-                token, _ = self.get_authorization_header(request, scheme = 'Bearer')
+                token, _ = self.get_authorization_header(request, scheme="Bearer")
             except KeyError:
                 token = None
             if CREDENTIALS_REQUIRED is True:
                 if not token:
                     raise web.HTTPForbidden(
-                        reason='Token Auth: Invalid authorization Token',
+                        reason="Token Auth: Invalid authorization Token",
                     )
                 try:
                     # process token:
                     payload = jwt.decode(
-                        token,
-                        SECRET_KEY,
-                        algorithms=[self.jwt_algorithm]
+                        token, SECRET_KEY, algorithms=[self.jwt_algorithm]
                     )
                     if not payload:
-                        raise web.HTTPForbidden(
-                            reason="Invalid authorization Token"
-                        )
-                except (jwt.DecodeError) as err:
-                    raise web.HTTPBadRequest(
-                        reason=f"JWT: Invalid Token: {err}"
-                    )
+                        raise web.HTTPForbidden(reason="Invalid authorization Token")
+                except jwt.DecodeError as err:
+                    raise web.HTTPBadRequest(reason=f"JWT: Invalid Token: {err}")
                 except jwt.ExpiredSignatureError as err:
                     raise web.HTTPBadRequest(
                         reason=f"JWT: Expired Token or bad signature: {err}"
@@ -99,15 +85,16 @@ class jwt_middleware(base_middleware):
                         request.user = user
                         print(user)
                     else:
-                        raise web.HTTPForbidden(
-                            reason='Access Restricted'
-                        )
+                        raise web.HTTPForbidden(reason="Access Restricted")
                 except Exception as err:
                     raise web.HTTPBadRequest(
-                        reason=f'Token Auth: Exception on Callable Return {err!s}'
+                        reason=f"Token Auth: Exception on Callable Return {err!s}"
                     )
             return await handler(request)
+
         return middleware
+
+
 # async def jwt_middleware(app, handler):
 #     async def middleware(request):
 #         request.user = None

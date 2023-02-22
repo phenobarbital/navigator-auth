@@ -3,10 +3,7 @@ Various kinds of Application Responses.
 
 TODO: add FileResponse or JSONResponse or SSEResponse (server-side).
 """
-from typing import (
-    Any,
-    Optional
-)
+from typing import Any, Optional
 from aiohttp import web
 from aiohttp.web_exceptions import (
     HTTPNoContent,
@@ -16,6 +13,7 @@ from .libs.json import json_encoder, json_decoder
 DEFAULT_JSON_ENCODER = json_encoder
 DEFAULT_JSON_DECODER = json_decoder
 
+
 def Response(
     content: Any = None,
     text: Optional[str] = "",
@@ -24,16 +22,12 @@ def Response(
     headers: dict = None,
     content_type: str = "text/plain",
     charset: Optional[str] = "utf-8",
-    ) -> web.Response:
+) -> web.Response:
     """
     Response.
     Web Response Definition for Navigator
     """
-    response = {
-        "content_type": content_type,
-        "charset": charset,
-        "status": status
-    }
+    response = {"content_type": content_type, "charset": charset, "status": status}
     if headers:
         response["headers"] = headers
     if isinstance(content, str) or text is not None:
@@ -43,7 +37,9 @@ def Response(
     return web.Response(**response)
 
 
-def NoContent(headers: dict = None, content_type: str = "application/json") -> web.Response:
+def NoContent(
+    headers: dict = None, content_type: str = "application/json"
+) -> web.Response:
     response = {
         "content_type": content_type,
     }
@@ -60,7 +56,7 @@ def HTMLResponse(
     body: Any = None,
     status: int = 200,
     headers: dict = None,
-    ) -> web.Response:
+) -> web.Response:
     """
     Sending response in HTML.
     """
@@ -69,19 +65,19 @@ def HTMLResponse(
         "text": text,
         "body": body,
         "headers": headers,
-        "content_type": 'text/html',
-        "status": status
+        "content_type": "text/html",
+        "status": status,
     }
     return Response(**response)
 
 
 def JSONResponse(
-        content: Any,
-        status: int = 200,
-        headers: Optional[dict] = None,
-        reason: Optional[str] = None,
-        content_type: str = "application/json"
-    ) -> web.Response:
+    content: Any,
+    status: int = 200,
+    headers: Optional[dict] = None,
+    reason: Optional[str] = None,
+    content_type: str = "application/json",
+) -> web.Response:
     """
     JSONResponse.
      Sending responses using JSON.
@@ -90,7 +86,7 @@ def JSONResponse(
         "content_type": content_type,
         "status": status,
         "dumps": json_encoder,
-        "reason": reason
+        "reason": reason,
     }
     if headers:
         response["headers"] = headers
