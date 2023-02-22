@@ -45,6 +45,7 @@ from .exceptions import (
 from .handlers import handler_routes
 
 ## Responses
+from .libs.json import JSONContent
 from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
 from .storages.redis import RedisStorage
@@ -94,6 +95,8 @@ class AuthHandler:
         self._session = SessionHandler(
             storage="redis", use_cookie=True
         )  # pylint: disable=E1123
+        ### JSON encoder
+        self._json = JSONContent()
 
     @property
     def session(self):
@@ -179,7 +182,7 @@ class AuthHandler:
                 obj = getattr(module, bkname)
                 b.append(obj)
             except ImportError as ex:
-                raise Exception(
+                raise RuntimeError(
                     f"Error loading Authz Middleware {backend}: {ex}"
                 ) from ex
         return b
@@ -210,25 +213,40 @@ class AuthHandler:
             try:
                 backend = self.backends[method]
             except KeyError as ex:
-                raise web.HTTPUnauthorized(
-                    reason=f"Unacceptable Auth Method {method}",
-                    content_type="application/json",
+                raise self.Unauthorized(
+                    reason=f"Unacceptable Auth Method: {method}"
                 ) from ex
             try:
                 userdata = await backend.authenticate(request)
                 if not userdata:
-                    raise web.HTTPForbidden(reason="User was not authenticated")
+                    raise self.ForbiddenAccess(
+                        reason="User was not authenticated"
+                    )
             except UserNotFound as err:
-                raise web.HTTPForbidden(reason=f"{err.message}")
-            except (Forbidden, FailedAuth) as err:
-                raise web.HTTPForbidden(reason=f"{err.message}")
+                raise self.Unauthorized(
+                    reason=f"User Doesn't exists: {err.message}",
+                    exception=err
+                )
+            except Forbidden as err:
+                raise self.ForbiddenAccess(
+                    reason=f"{err.message}"
+                )
+            except FailedAuth as err:
+                raise self.ForbiddenAccess(
+                    reason="Failed Authentication",
+                    exception=err
+                )
             except InvalidAuth as err:
                 logging.exception(err)
-                raise web.HTTPForbidden(reason=f"{err.message}")
-            except UserNotFound as err:
-                raise web.HTTPForbidden(reason=f"User Doesn't exists: {err.message}")
+                raise self.ForbiddenAccess(
+                    reason=f"{err.message}",
+                    exception=err
+                )
             except Exception as err:
-                raise web.HTTPInternalServerError(reason=f"{err.message}")
+                raise self.auth_error(
+                    reason=f"Auth Exception: {err}",
+                    exception=err
+                )
         else:
             # second: if no backend declared, will iterate over all backends
             userdata = None
@@ -241,10 +259,15 @@ class AuthHandler:
                 except (AuthException, UserNotFound, InvalidAuth, FailedAuth) as err:
                     continue
                 except Exception as err:
-                    raise web.HTTPClientError(reason=err) from err
+                    raise self.auth_error(
+                        reason=f"Auth Exception: {err}",
+                        exception=err
+                    )
         # if not userdata, then raise an not Authorized
         if not userdata:
-            raise web.HTTPForbidden(reason="Login Failure in all Auth Methods.")
+            raise self.ForbiddenAccess(
+                reason="Login Failure in all Auth Methods."
+            )
         else:
             # at now: create the user-session
             try:
@@ -253,8 +276,9 @@ class AuthHandler:
                     request, userdata, response=response
                 )
             except Exception as err:
-                raise web.HTTPUnauthorized(
-                    reason=f"Error Creating User Session: {err.message}"
+                raise self.Unauthorized(
+                    reason=f"Error Creating User Session: {err.message}",
+                    exception=err
                 ) from err
             return response
 
@@ -461,20 +485,22 @@ class AuthHandler:
             "X-AUTH": message,
         }
         if exception:
-            headers['X-ERROR'] = exception
+            headers['X-ERROR'] = str(exception)
         return headers
 
     def auth_error(
         self,
         reason: dict = None,
         exception: Exception = None,
-        status: int = 403,
+        status: int = 400,
         headers: dict = None,
         content_type: str = 'application/json',
         **kwargs,
-    ) -> web.Response:
+    ) -> web.HTTPError:
         if headers:
             headers = {**self.default_headers(message=str(reason), exception=exception), **headers}
+        else:
+            headers = self.default_headers(message=str(reason), exception=exception)
         # TODO: process the exception object
         response_obj = {}
         if exception:
@@ -489,7 +515,8 @@ class AuthHandler:
             # args["content_type"] = "application/json"
             args["reason"] = self._json.dumps(response_obj)
         else:
-            args["reason"] = reason
+            response_obj['reason'] = reason
+            args["reason"] = self._json.dumps(response_obj)
         # defining the error
         if status == 400:  # bad request
             obj = web.HTTPBadRequest(**args)

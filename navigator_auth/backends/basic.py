@@ -55,27 +55,43 @@ class BasicAuth(BaseAuthBackend):
         try:
             search = {self.username_attribute: login}
             user = await self.get_user(**search)
+        except ValidationError as ex:
+            raise InvalidAuth(
+                f"Invalid User Information: {ex.payload}"
+            ) from ex
         except UserNotFound as err:
-            raise UserNotFound(f"User {login} doesn't exists: {err}") from err
+            raise UserNotFound(
+                f"User {login} doesn't exists: {err}"
+            ) from err
         except Exception as err:
-            raise Exception from err
+            raise InvalidAuth(
+                f"Unknown Exception: {err}"
+            ) from err
         try:
             # later, check the password
             pwd = user[self.pwd_atrribute]
         except KeyError as ex:
-            raise InvalidAuth("Missing Password attr on User Account") from ex
-        except Exception as err:  # pylint: disable=W0703
-            logging.error(err)
+            raise InvalidAuth(
+                "Missing Password attr on User Account"
+            ) from ex
+        except (ValidationError, TypeError, ValueError) as ex:
+            raise InvalidAuth(
+                "Invalid credentials on User Account"
+            ) from ex
         try:
             if self.check_password(pwd, password):
                 # return the user Object
                 return user
             else:
-                raise FailedAuth("Basic Auth: Invalid Credentials")
-        except InvalidAuth as err:
+                raise FailedAuth(
+                    "Basic Auth: Invalid Credentials"
+                )
+        except FailedAuth:
             raise
         except Exception as err:
-            raise Exception from err
+            raise InvalidAuth(
+                f"Unknown Password Error: {err}"
+            ) from err
 
     def set_password(
         self,
@@ -100,7 +116,9 @@ class BasicAuth(BaseAuthBackend):
         try:
             algorithm, iterations, salt, _ = current_password.split("$", 3)
         except ValueError as ex:
-            raise InvalidAuth(f"Basic Auth: Invalid Password: {ex}") from ex
+            raise InvalidAuth(
+                f"Basic Auth: Invalid Password: {ex}"
+            ) from ex
         assert algorithm == AUTH_PWD_ALGORITHM
         compare_hash = self.set_password(
             password,
@@ -108,7 +126,12 @@ class BasicAuth(BaseAuthBackend):
             salt=salt,
             token_num=AUTH_PWD_SALT_LENGTH,
         )
-        return secrets.compare_digest(current_password, compare_hash)
+        try:
+            return secrets.compare_digest(current_password, compare_hash)
+        except (TypeError, ValueError)  as ex:
+            raise InvalidAuth(
+                f"Basic Auth: Invalid Credentials: {ex}"
+            ) from ex
 
     async def get_payload(self, request):
         ctype = request.content_type
@@ -147,11 +170,17 @@ class BasicAuth(BaseAuthBackend):
         try:
             user, pwd = await self.get_payload(request)
         except Exception as err:
-            raise AuthException(err, status=400) from err
+            raise AuthException(
+                str(err),
+                status=400
+            ) from err
         if not pwd and not user:
-            raise InvalidAuth("Basic Auth: Invalid Credentials", status=401)
+            raise InvalidAuth(
+                "Basic Auth: Invalid Credentials",
+                status=401
+            )
         else:
-            # making validation
+            # making validations
             try:
                 user = await self.validate_user(login=user, password=pwd)
             except (FailedAuth, UserNotFound):  # pylint: disable=W0706
