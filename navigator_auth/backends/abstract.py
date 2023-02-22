@@ -1,4 +1,5 @@
 import asyncio
+from typing import Union
 from collections.abc import Callable, Iterable
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
@@ -157,7 +158,9 @@ class BaseAuthBackend(ABC):
             self.logger.debug(f"User Created > {usr.username}")
             return usr
         except Exception as err:
-            raise Exception(err) from err
+            raise InvalidAuth(
+                f"Unable to created Session User: {err}"
+            ) from err
 
     def get_userdata(self, user=None):
         userdata = {}
@@ -177,6 +180,64 @@ class BaseAuthBackend(ABC):
         """Base configuration for Auth Backends, need to be extended
         to create Session Object."""
         self._app = app
+
+    def auth_error(
+        self,
+        reason: dict = None,
+        exception: Exception = None,
+        status: int = 400,
+        headers: dict = None,
+        content_type: str = 'application/json',
+        **kwargs,
+    ) -> web.HTTPError:
+        if headers:
+            headers = {**self.default_headers(message=str(reason), exception=exception), **headers}
+        else:
+            headers = self.default_headers(message=str(reason), exception=exception)
+        # TODO: process the exception object
+        response_obj = {}
+        if exception:
+            response_obj["error"] = str(exception)
+        args = {
+            "content_type": content_type,
+            "headers": headers,
+            **kwargs
+        }
+        if isinstance(reason, dict):
+            response_obj = {**response_obj, **reason}
+            # args["content_type"] = "application/json"
+            args["reason"] = self._json.dumps(response_obj)
+        else:
+            response_obj['reason'] = reason
+            args["reason"] = self._json.dumps(response_obj)
+        # defining the error
+        if status == 400:  # bad request
+            obj = web.HTTPBadRequest(**args)
+        elif status == 401:  # unauthorized
+            obj = web.HTTPUnauthorized(**args)
+        elif status == 403:  # forbidden
+            obj = web.HTTPForbidden(**args)
+        elif status == 404:  # not found
+            obj = web.HTTPNotFound(**args)
+        elif status == 406: # Not acceptable
+            obj = web.HTTPNotAcceptable(**args)
+        elif status == 412:
+            obj = web.HTTPPreconditionFailed(**args)
+        elif status == 428:
+            obj = web.HTTPPreconditionRequired(**args)
+        else:
+            obj = web.HTTPBadRequest(**args)
+        return obj
+
+    def ForbiddenAccess(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
+        return self.auth_error(
+            reason=reason, **kwargs, status=403
+        )
+
+    def Unauthorized(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
+        return self.auth_error(
+            reason=reason, **kwargs, status=401
+        )
 
     async def remember(
         self, request: web.Request, identity: str, userdata: dict, user: Identity
@@ -198,7 +259,9 @@ class BaseAuthBackend(ABC):
                     pass
                 request["session"] = session
             except Exception as err:
-                raise web.HTTPForbidden(reason=f"Error Creating User Session: {err!s}")
+                raise web.HTTPForbidden(
+                    reason=f"Error Creating User Session: {err!s}"
+                )
             # to allowing request.user.is_authenticated
         except Exception as err:  # pylint: disable=W0703
             self.logger.exception(err)

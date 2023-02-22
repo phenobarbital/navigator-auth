@@ -3,6 +3,7 @@
 Navigator Authentication using an API Token for partners.
 description: Single API Token Authentication
 """
+from collections.abc import Callable, Awaitable
 import jwt
 import orjson
 from aiohttp import web
@@ -152,39 +153,47 @@ class APIKeyAuth(BaseAuthBackend):
     async def check_credentials(self, request):
         pass
 
-    async def auth_middleware(self, app, handler):
-        async def middleware(request):
-            request.user = None
-            # avoid check system routes
-            try:
-                if isinstance(request.match_info.route, SystemRoute):  # eg. 404
-                    return await handler(request)
-            except Exception as err:  # pylint: disable=W0703
-                self.logger.error(err)
-            try:
-                if request.get("authenticated", False) is True:
-                    # already authenticated
-                    return await handler(request)
-            except KeyError:
-                pass
-            # self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
-            try:
-                userdata = await self.authenticate(request)
-                if userdata:
-                    request["authenticated"] = True
-                    request[self.session_key_property] = userdata["user_id"]
-            except InvalidAuth as err:
-                raise web.HTTPForbidden(reason=f"API Key: {err.message!s}")
-            except AuthException as err:
-                if AUTH_CREDENTIALS_REQUIRED is True:
-                    self.logger.error(f"Invalid authorization token: {err!r}")
-                    raise web.HTTPForbidden(
-                        reason=f"API Key: Invalid authorization Key: {err!r}"
-                    )
-            except Exception as err:
-                if AUTH_CREDENTIALS_REQUIRED is True:
-                    self.logger.exception(f"Error on API Key Middleware: {err}")
-                    raise web.HTTPBadRequest(reason=f"API Auth Error: {err}")
-            return await handler(request)
-
-        return middleware
+    @web.middleware
+    async def auth_middleware(
+        self,
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
+        request.user = None
+        # avoid check system routes
+        try:
+            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
+                return await handler(request)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.error(err)
+        try:
+            if request.get("authenticated", False) is True:
+                # already authenticated
+                return await handler(request)
+        except KeyError:
+            pass
+        try:
+            userdata = await self.authenticate(request)
+            if userdata:
+                request["authenticated"] = True
+                request[self.session_key_property] = userdata["user_id"]
+        except InvalidAuth as err:
+            raise self.Unauthorized(
+                reason=f"API Key: {err.message!s}",
+                exception=err
+            )
+        except AuthException as err:
+            if AUTH_CREDENTIALS_REQUIRED is True:
+                self.logger.error(f"Invalid authorization token: {err!r}")
+                raise self.Unauthorized(
+                    reason=f"API Key: Invalid authorization Key: {err!r}",
+                    exception=err
+                )
+        except Exception as err:
+            if AUTH_CREDENTIALS_REQUIRED is True:
+                self.logger.exception(f"Error on API Key Middleware: {err}")
+                raise self.auth_error(
+                    reason="API Auth Error",
+                    exception=err
+                ) from err
+        return await handler(request)

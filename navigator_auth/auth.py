@@ -611,7 +611,7 @@ class AuthHandler:
             raise self.Unauthorized(reason=err.message)
         except AuthExpired as err:
             logging.error("Auth Middleware: Auth Credentials were expired")
-            raise self.Unauthorized(reason=err.message)
+            raise self.Unauthorized(reason=err.message, exception=err)
         except FailedAuth as err:
             raise self.ForbiddenAccess(reason=err.message, exception=err)
         except AuthException as err:

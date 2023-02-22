@@ -107,7 +107,9 @@ class DjangoAuth(BaseAuthBackend):
             async with aioredis.Redis(connection_pool=self._pool) as redis:
                 result = await redis.get(f"{DJANGO_SESSION_PREFIX}:{key}")
             if not result:
-                raise Exception("Django Auth: non-existing Session")
+                raise AuthException(
+                    "Django Auth: non-existing Session"
+                )
             data = base64.b64decode(result)
             session_data = data.decode("utf-8").split(":", 1)
             user = orjson.loads(session_data[1])
@@ -213,72 +215,78 @@ class DjangoAuth(BaseAuthBackend):
                 logging.exception(f"DjangoAuth: Authentication Error: {err}")
                 return False
 
+    @web.middleware
     async def auth_middleware(
         self,
-        app: web.Application,
+        request: web.Request,
         handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
     ) -> web.StreamResponse:
         """
         Basic Auth Middleware.
         Description: Basic Authentication for NoAuth, Basic, Token and Django.
         """
-
-        @web.middleware
-        async def middleware(request: web.Request) -> web.StreamResponse:
-            # avoid authorization backend on excluded methods:
-            if request.method == hdrs.METH_OPTIONS:
-                return await handler(request)
-            # avoid authorization on exclude list
-            if request.path in exclude_list:
-                return await handler(request)
-            # avoid check system routes
-            try:
-                if isinstance(request.match_info.route, SystemRoute):  # eg. 404
-                    return await handler(request)
-            except Exception as err:  # pylint: disable=W0703
-                self.logger.error(err)
-            ## Already Authenticated
-            try:
-                if request.get("authenticated", False) is True:
-                    return await handler(request)
-            except KeyError:
-                pass
-            self.logger.debug(":: DJANGO MIDDLEWARE ::")
-            try:
-                _, payload = decode_token(request)
-                if payload:
-                    ## check if user has a session:
-                    # load session information
-                    session = await get_session(
-                        request, payload, new=False, ignore_cookie=True
-                    )
-                    if not session and AUTH_CREDENTIALS_REQUIRED is True:
-                        raise web.HTTPUnauthorized(
-                            reason="There is no Session for User or Authentication is missing"
-                        )
-                    try:
-                        request.user = await self.get_session_user(session)
-                        request["authenticated"] = True
-                    except Exception as ex:  # pylint: disable=W0703
-                        self.logger.error(f"Missing User Object from Session: {ex}")
-                else:
-                    if AUTH_CREDENTIALS_REQUIRED is True:
-                        raise web.HTTPUnauthorized(
-                            reason="There is no Session for User or Authentication is missing"
-                        )
-            except Forbidden as err:
-                self.logger.error("Auth Middleware: Access Denied")
-                raise web.HTTPUnauthorized(reason=err.message)
-            except (AuthExpired, FailedAuth) as err:
-                self.logger.error("Django Auth: Auth Credentials were expired")
-                raise web.HTTPUnauthorized(reason=err.message)
-            except AuthException as err:
-                self.logger.error("Django Auth: Invalid Signature or secret")
-                raise web.HTTPForbidden(reason=err.message)
-            except Exception as err:  # pylint: disable=W0703
-                self.logger.error(f"Bad Request: {err!s}")
-                if AUTH_CREDENTIALS_REQUIRED is True:
-                    raise web.HTTPBadRequest(reason=f"Auth Error: {err!s}")
+        # avoid authorization backend on excluded methods:
+        if request.method == hdrs.METH_OPTIONS:
             return await handler(request)
-
-        return middleware
+        # avoid authorization on exclude list
+        if request.path in exclude_list:
+            return await handler(request)
+        # avoid check system routes
+        try:
+            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
+                return await handler(request)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.error(err)
+        ## Already Authenticated
+        try:
+            if request.get("authenticated", False) is True:
+                return await handler(request)
+        except KeyError:
+            pass
+        self.logger.debug(":: DJANGO MIDDLEWARE ::")
+        try:
+            _, payload = decode_token(request)
+            if payload:
+                ## check if user has a session:
+                # load session information
+                session = await get_session(
+                    request, payload, new=False, ignore_cookie=True
+                )
+                if not session and AUTH_CREDENTIALS_REQUIRED is True:
+                    raise self.Unauthorized(
+                        reason="There is no Session for User or Authentication is missing"
+                    )
+                try:
+                    request.user = await self.get_session_user(session)
+                    request["authenticated"] = True
+                except Exception as ex:  # pylint: disable=W0703
+                    self.logger.error(
+                        f"Missing User Object from Session: {ex}"
+                    )
+            else:
+                if AUTH_CREDENTIALS_REQUIRED is True:
+                    raise self.Unauthorized(
+                        reason="There is no Session for User or Authentication is missing"
+                    )
+        except Forbidden as err:
+            self.logger.error("Auth Middleware: Access Denied")
+            raise self.ForbiddenAccess(reason=err.message)
+        except AuthExpired as err:
+            self.logger.error("Django Auth: Auth Credentials were expired")
+            raise self.Unauthorized(reason=err.message)
+        except FailedAuth as err:
+            raise self.Unauthorized(
+                reason=f"{err.message}",
+                exception=err
+            )
+        except AuthException as err:
+            self.logger.error("Django Auth: Invalid Signature or secret")
+            raise self.ForbiddenAccess(reason=err.message)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.error(f"Bad Request: {err!s}")
+            if AUTH_CREDENTIALS_REQUIRED is True:
+                raise self.auth_error(
+                    reason="Authentication Error",
+                    exception=err
+                )
+        return await handler(request)

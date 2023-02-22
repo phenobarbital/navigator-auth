@@ -3,6 +3,7 @@
 Navigator Authentication using an API Token for partners.
 description: Single API Token Authentication
 """
+from collections.abc import Callable, Awaitable
 from typing import List
 import jwt
 from aiohttp import web, hdrs
@@ -156,73 +157,79 @@ class TokenAuth(BaseAuthBackend):
             self.logger.exception(err)
             return False
 
-    async def auth_middleware(self, app, handler):
-        async def middleware(request):
-            # avoid authorization backend on excluded methods:
-            if request.method == hdrs.METH_OPTIONS:
-                return await handler(request)
-            # avoid check system routes
-            try:
-                if isinstance(request.match_info.route, SystemRoute):  # eg. 404
-                    return await handler(request)
-            except Exception as err:  # pylint: disable=W0703
-                self.logger.error(err)
-            request.user = None
-            try:
-                if request.get("authenticated", False) is True:
-                    # already authenticated
-                    return await handler(request)
-            except KeyError:
-                pass
-            # self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
-            tenant, jwt_token = await self.get_payload(request)
-            if not tenant:
-                return await handler(request)
-            if jwt_token:
-                try:
-                    payload = jwt.decode(
-                        jwt_token,
-                        AUTH_TOKEN_SECRET,
-                        algorithms=[AUTH_JWT_ALGORITHM],
-                        leeway=30,
-                    )
-                    self.logger.debug(f"Decoded Token: {payload!s}")
-                    result = await self.check_token_info(request, tenant, payload)
-                    if result:
-                        request["authenticated"] = True
-                        try:
-                            request[self.session_key_property] = payload["name"]
-                            # TRUE because if data doesnt exists, returned
-                            session = await get_session(
-                                request, payload, new=True, ignore_cookie=True
-                            )
-                            session["grants"] = result["grants"]
-                            session["partner"] = result["partner"]
-                            session["tenant"] = tenant
-                        except (AttributeError, KeyError, TypeError) as err:
-                            self.logger.warning(f"Error loading Token Session {err}")
-                        try:
-                            request.user = session.decode("user")
-                            request.user.is_authenticated = True
-                        except (AttributeError, KeyError):
-                            pass
-                except jwt.exceptions.ExpiredSignatureError as err:
-                    self.logger.error(f"TokenAuth: token expired: {err!s}")
-                    raise web.HTTPForbidden(reason=f"TokenAuth: token expired: {err!s}")
-                except jwt.exceptions.InvalidSignatureError as err:
-                    self.logger.error(f"Invalid Credentials: {err!r}")
-                    raise web.HTTPForbidden(
-                        reason=f"TokenAuth: Invalid or missing Credentials: {err!r}"
-                    )
-                except jwt.exceptions.DecodeError as err:
-                    self.logger.error(f"Invalid authorization token: {err!r}")
-                    raise web.HTTPForbidden(
-                        reason=f"TokenAuth: Invalid authorization token: {err!r}"
-                    )
-                except Exception as err:
-                    if AUTH_CREDENTIALS_REQUIRED is True:
-                        self.logger.exception(f"Error on Token Middleware: {err}")
-                        raise web.HTTPBadRequest(reason=f"Authentication Error: {err}")
+    @web.middleware
+    async def auth_middleware(
+        self,
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
+        """
+        Token Auth Middleware.
+        Description: Token Middleware.
+        """
+        # avoid authorization backend on excluded methods:
+        if request.method == hdrs.METH_OPTIONS:
             return await handler(request)
-
-        return middleware
+        # avoid check system routes
+        try:
+            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
+                return await handler(request)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.error(err)
+        request.user = None
+        try:
+            if request.get("authenticated", False) is True:
+                # already authenticated
+                return await handler(request)
+        except KeyError:
+            pass
+        # self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
+        tenant, jwt_token = await self.get_payload(request)
+        if not tenant:
+            return await handler(request)
+        if jwt_token:
+            try:
+                payload = jwt.decode(
+                    jwt_token,
+                    AUTH_TOKEN_SECRET,
+                    algorithms=[AUTH_JWT_ALGORITHM],
+                    leeway=30,
+                )
+                self.logger.debug(f"Decoded Token: {payload!s}")
+                result = await self.check_token_info(request, tenant, payload)
+                if result:
+                    request["authenticated"] = True
+                    try:
+                        request[self.session_key_property] = payload["name"]
+                        # TRUE because if data doesnt exists, returned
+                        session = await get_session(
+                            request, payload, new=True, ignore_cookie=True
+                        )
+                        session["grants"] = result["grants"]
+                        session["partner"] = result["partner"]
+                        session["tenant"] = tenant
+                    except (AttributeError, KeyError, TypeError) as err:
+                        self.logger.warning(f"Error loading Token Session {err}")
+                    try:
+                        request.user = session.decode("user")
+                        request.user.is_authenticated = True
+                    except (AttributeError, KeyError):
+                        pass
+            except jwt.exceptions.ExpiredSignatureError as err:
+                self.logger.error(f"TokenAuth: token expired: {err!s}")
+                raise web.HTTPForbidden(reason=f"TokenAuth: token expired: {err!s}")
+            except jwt.exceptions.InvalidSignatureError as err:
+                self.logger.error(f"Invalid Credentials: {err!r}")
+                raise web.HTTPForbidden(
+                    reason=f"TokenAuth: Invalid or missing Credentials: {err!r}"
+                )
+            except jwt.exceptions.DecodeError as err:
+                self.logger.error(f"Invalid authorization token: {err!r}")
+                raise web.HTTPForbidden(
+                    reason=f"TokenAuth: Invalid authorization token: {err!r}"
+                )
+            except Exception as err:
+                if AUTH_CREDENTIALS_REQUIRED is True:
+                    self.logger.exception(f"Error on Token Middleware: {err}")
+                    raise web.HTTPBadRequest(reason=f"Authentication Error: {err}")
+        return await handler(request)
