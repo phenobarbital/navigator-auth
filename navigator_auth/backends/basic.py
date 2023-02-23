@@ -13,14 +13,15 @@ from navigator_auth.exceptions import (
     AuthException,
     FailedAuth,
     UserNotFound,
-    InvalidAuth
+    InvalidAuth,
 )
 from navigator_auth.conf import (
     AUTH_PWD_DIGEST,
     AUTH_PWD_ALGORITHM,
     AUTH_PWD_LENGTH,
-    AUTH_PWD_SALT_LENGTH
+    AUTH_PWD_SALT_LENGTH,
 )
+
 # Authenticated Entity
 from navigator_auth.identities import AuthUser
 from .abstract import BaseAuthBackend
@@ -40,37 +41,43 @@ class BasicAuth(BaseAuthBackend):
     user_attribute: str = "user"
     pwd_atrribute: str = "password"
     _ident: AuthUser = BasicUser
-    _description: str = 'Basic User/Password authentication'
-    _service_name: str = 'basic'
+    _description: str = "Basic User/Password authentication"
+    _service_name: str = "basic"
 
     async def on_startup(self, app: web.Application):
-        """Used to initialize Backend requirements.
-        """
+        """Used to initialize Backend requirements."""
 
     async def on_cleanup(self, app: web.Application):
-        """Used to cleanup and shutdown any db connection.
-        """
+        """Used to cleanup and shutdown any db connection."""
 
     async def validate_user(self, login: str = None, password: str = None):
         # get the user based on Model
         try:
             search = {self.username_attribute: login}
             user = await self.get_user(**search)
+        except ValidationError as ex:
+            raise InvalidAuth(
+                f"Invalid User Information: {ex.payload}"
+            ) from ex
         except UserNotFound as err:
             raise UserNotFound(
                 f"User {login} doesn't exists: {err}"
             ) from err
         except Exception as err:
-            raise Exception from err
+            raise InvalidAuth(
+                f"Unknown Exception: {err}"
+            ) from err
         try:
             # later, check the password
             pwd = user[self.pwd_atrribute]
         except KeyError as ex:
             raise InvalidAuth(
-                'Missing Password attr on User Account'
+                "Missing Password attr on User Account"
             ) from ex
-        except Exception as err: # pylint: disable=W0703
-            logging.error(err)
+        except (ValidationError, TypeError, ValueError) as ex:
+            raise InvalidAuth(
+                "Invalid credentials on User Account"
+            ) from ex
         try:
             if self.check_password(pwd, password):
                 # return the user Object
@@ -79,17 +86,19 @@ class BasicAuth(BaseAuthBackend):
                 raise FailedAuth(
                     "Basic Auth: Invalid Credentials"
                 )
-        except InvalidAuth as err:
+        except FailedAuth:
             raise
         except Exception as err:
-            raise Exception from err
+            raise InvalidAuth(
+                f"Unknown Password Error: {err}"
+            ) from err
 
     def set_password(
         self,
         password: str,
         token_num: int = 6,
         iterations: int = 80000,
-        salt: str = None
+        salt: str = None,
     ):
         if not salt:
             salt = secrets.token_hex(token_num)
@@ -108,16 +117,21 @@ class BasicAuth(BaseAuthBackend):
             algorithm, iterations, salt, _ = current_password.split("$", 3)
         except ValueError as ex:
             raise InvalidAuth(
-                f'Basic Auth: Invalid Password: {ex}'
+                f"Basic Auth: Invalid Password: {ex}"
             ) from ex
         assert algorithm == AUTH_PWD_ALGORITHM
         compare_hash = self.set_password(
             password,
             iterations=int(iterations),
             salt=salt,
-            token_num=AUTH_PWD_SALT_LENGTH
+            token_num=AUTH_PWD_SALT_LENGTH,
         )
-        return secrets.compare_digest(current_password, compare_hash)
+        try:
+            return secrets.compare_digest(current_password, compare_hash)
+        except (TypeError, ValueError)  as ex:
+            raise InvalidAuth(
+                f"Basic Auth: Invalid Credentials: {ex}"
+            ) from ex
 
     async def get_payload(self, request):
         ctype = request.content_type
@@ -126,9 +140,13 @@ class BasicAuth(BaseAuthBackend):
                 user = request.query.get(self.username_attribute, None)
                 password = request.query.get(self.pwd_atrribute, None)
                 return [user, password]
-            except Exception: # pylint: disable=W0703
+            except Exception:  # pylint: disable=W0703
                 return [None, None]
-        elif ctype in ("multipart/mixed", "multipart/form-data", "application/x-www-form-urlencoded"):
+        elif ctype in (
+            "multipart/mixed",
+            "multipart/form-data",
+            "application/x-www-form-urlencoded",
+        ):
             data = await request.post()
             if len(data) > 0:
                 user = data.get(self.username_attribute, None)
@@ -142,67 +160,59 @@ class BasicAuth(BaseAuthBackend):
                 user = data[self.username_attribute]
                 password = data[self.pwd_atrribute]
                 return [user, password]
-            except Exception: # pylint: disable=W0703
+            except Exception:  # pylint: disable=W0703
                 return [None, None]
         else:
             return [None, None]
 
     async def authenticate(self, request):
-        """ Authenticate, refresh or return the user credentials."""
+        """Authenticate, refresh or return the user credentials."""
         try:
             user, pwd = await self.get_payload(request)
         except Exception as err:
-            raise AuthException(err, status=400) from err
+            raise AuthException(
+                str(err),
+                status=400
+            ) from err
         if not pwd and not user:
             raise InvalidAuth(
                 "Basic Auth: Invalid Credentials",
                 status=401
             )
         else:
-            # making validation
+            # making validations
             try:
                 user = await self.validate_user(login=user, password=pwd)
-            except (FailedAuth, UserNotFound): # pylint: disable=W0706
+            except (FailedAuth, UserNotFound):  # pylint: disable=W0706
                 raise
             except (ValidationError, InvalidAuth) as err:
-                raise InvalidAuth(
-                    str(err), status=401
-                ) from err
+                raise InvalidAuth(str(err), status=401) from err
             except Exception as err:
-                raise AuthException(
-                    str(err), status=500
-                ) from err
+                raise AuthException(str(err), status=500) from err
             try:
                 userdata = self.get_userdata(user)
                 username = user[self.username_attribute]
                 uid = user[self.userid_attribute]
                 userdata[self.username_attribute] = username
                 userdata[self.session_key_property] = username
-                usr = await self.create_user(
-                    userdata[AUTH_SESSION_OBJECT]
-                )
+                usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
                 usr.id = uid
                 usr.set(self.username_attribute, username)
                 payload = {
                     self.user_property: user[self.userid_attribute],
                     self.username_attribute: username,
                     "user_id": uid,
-                    self.session_key_property: username
+                    self.session_key_property: username,
                 }
                 # Create the User session and returned.
                 token = self.create_jwt(data=payload)
                 usr.access_token = token
                 ### saving User data into session:
-                await self.remember(
-                    request, username, userdata, usr
-                )
-                return {
-                    "token": token,
-                    **userdata
-                }
-            except Exception as err: # pylint: disable=W0703
-                logging.exception(f'BasicAuth: Authentication Error: {err}')
+                await self.remember(request, username, userdata, usr)
+                return {"token": token, **userdata}
+            except Exception as err:  # pylint: disable=W0703
+                logging.exception(f"BasicAuth: Authentication Error: {err}")
                 return False
 
     async def check_credentials(self, request):
-        """ Using for check the user credentials to the backend."""
+        """Using for check the user credentials to the backend."""

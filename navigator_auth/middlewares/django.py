@@ -1,13 +1,9 @@
 import base64
-from typing import (
-    Optional
-)
+from typing import Optional
 from collections.abc import Coroutine
 import json
 from aiohttp import web
-from navigator.conf import (
-    SESSION_PREFIX
-)
+from navigator.conf import SESSION_PREFIX
 
 from .abstract import base_middleware
 
@@ -16,7 +12,7 @@ class django_middleware(base_middleware):
     def __init__(
         self,
         user_fn: Optional[Coroutine] = None,
-        protected_routes: Optional[tuple] = tuple()
+        protected_routes: Optional[tuple] = tuple(),
     ):
         """
         Extract an user Session from Django using a Middleware.
@@ -36,7 +32,7 @@ class django_middleware(base_middleware):
         sessionid = request.headers.get("x-sessionid", None)
         if not sessionid:
             raise web.HTTPBadRequest(
-                reason='Django Middleware: use Header different from X-Sessionid is not available'
+                reason="Django Middleware: use Header different from X-Sessionid is not available"
             )
         return sessionid
 
@@ -49,10 +45,10 @@ class django_middleware(base_middleware):
                 sessionid = self.get_authorization_header(request)
             except Exception:
                 sessionid = None
-            if self.path_protected(request): # is a protected site.
+            if self.path_protected(request):  # is a protected site.
                 if not sessionid:
                     raise web.HTTPForbidden(
-                        reason='Django Middleware: Invalid authorization Token',
+                        reason="Django Middleware: Invalid authorization Token",
                     )
                 try:
                     redis = app["redis"]
@@ -64,27 +60,22 @@ class django_middleware(base_middleware):
                     data = base64.b64decode(payload)
                     session_data = data.decode("utf-8").split(":", 1)
                     user = json.loads(session_data[1])
-                    data = {
-                        "key": sessionid,
-                        "session_id": session_data[0],
-                        **user
-                    }
+                    data = {"key": sessionid, "session_id": session_data[0], **user}
                     try:
                         user = await self._fn(data, request)
                         if user:
                             request[self.user_property] = user
                             request.user = user
                         else:
-                            raise web.HTTPForbidden(
-                                reason='Access Restricted'
-                            )
+                            raise web.HTTPForbidden(reason="Access Restricted")
                     except Exception as err:
                         raise web.HTTPBadRequest(
-                            reason=f'Exception on Callable called by {__name__!s} {err!s}'
+                            reason=f"Exception on Callable called by {__name__!s} {err!s}"
                         )
                 except Exception as err:
                     raise web.HTTPBadRequest(
-                        reason=f'Django Middleware: Error decoding: {err!s}'
+                        reason=f"Django Middleware: Error decoding: {err!s}"
                     )
             return await handler(request)
+
         return middleware

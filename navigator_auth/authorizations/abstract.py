@@ -20,8 +20,10 @@ class AuthorizationPolicy(ABC):
         or 'None' if no user exists related to the identity.
         """
 
+
 class BaseAuthzHandler(ABC):
-    """ Abstract handler for Authorization Middleware."""
+    """Abstract handler for Authorization Middleware."""
+
     @abstractmethod
     async def check_authorization(self, request: web.Request) -> bool:
         pass

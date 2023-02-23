@@ -1,4 +1,5 @@
 import asyncio
+from typing import Union
 from collections.abc import Callable, Iterable
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
@@ -15,14 +16,14 @@ from navigator_session import (
     AUTH_SESSION_OBJECT,
     SESSION_TIMEOUT,
     SESSION_KEY,
-    SESSION_USER_PROPERTY
+    SESSION_USER_PROPERTY,
 )
 from navigator_auth.exceptions import (
     AuthException,
     UserNotFound,
     InvalidAuth,
     FailedAuth,
-    AuthExpired
+    AuthExpired,
 )
 from navigator_auth.conf import (
     AUTH_DEFAULT_ISSUER,
@@ -31,15 +32,16 @@ from navigator_auth.conf import (
     AUTH_JWT_ALGORITHM,
     USER_MAPPING,
     AUTH_CREDENTIALS_REQUIRED,
-    SECRET_KEY
+    SECRET_KEY,
 )
-
+from navigator_auth.libs.json import json_encoder
 # Authenticated Identity
 from navigator_auth.identities import Identity, AuthBackend
 
 
 class BaseAuthBackend(ABC):
     """Abstract Base for Authentication."""
+
     user_attribute: str = "user"
     password_attribute: str = "password"
     userid_attribute: str = "user_id"
@@ -50,10 +52,9 @@ class BaseAuthBackend(ABC):
     _service: str = None
     _ident: Identity = Identity
     _info: AuthBackend = None
-    _description: str = 'Abstract Backend'
-    _service_name: str = 'abstract'
+    _description: str = "Abstract Backend"
+    _service_name: str = "abstract"
     _external_auth: bool = False
-
 
     def __init__(
         self,
@@ -64,7 +65,7 @@ class BaseAuthBackend(ABC):
     ):
         self._service = self.__class__.__name__
         self._session = None
-        self._app: web.Application = None # reference for Application
+        self._app: web.Application = None  # reference for Application
         # force using of credentials
         self.credentials_required: bool = AUTH_CREDENTIALS_REQUIRED
         self._credentials = None
@@ -90,17 +91,15 @@ class BaseAuthBackend(ABC):
         # starts the Executor
         self.executor = ThreadPoolExecutor(max_workers=1)
         # logger
-        self.logger = logging.getLogger(f'Auth.{self._service}')
+        self.logger = logging.getLogger(f"Auth.{self._service}")
         ## Backend Info:
         self._info = AuthBackend()
         self._info.name = self._service
-        self._info.uri = '/api/v1/login'
+        self._info.uri = "/api/v1/login"
         self._info.description = self._description
         self._info.icon = f"/static/auth/icons/{self._service_name}.png"
         self._info.external = self._external_auth
-        self._info.headers = {
-            "x-auth-method": self._service
-        }
+        self._info.headers = {"x-auth-method": self._service}
 
     def get_backend_info(self):
         return self._info
@@ -111,13 +110,11 @@ class BaseAuthBackend(ABC):
 
     @abstractmethod
     async def on_startup(self, app: web.Application):
-        """Used to initialize Backend requirements.
-        """
+        """Used to initialize Backend requirements."""
 
     @abstractmethod
     async def on_cleanup(self, app: web.Application):
-        """Used to cleanup and shutdown any db connection.
-        """
+        """Used to cleanup and shutdown any db connection."""
 
     def get_authmodel(self, model: str):
         try:
@@ -138,7 +135,7 @@ class BaseAuthBackend(ABC):
         user = None
         error = None
         try:
-            db = self._app['authdb']
+            db = self._app["authdb"]
             async with await db.acquire() as conn:
                 self.user_model.Meta.connection = conn
                 user = await self.user_model.get(**search)
@@ -149,27 +146,23 @@ class BaseAuthBackend(ABC):
         except Exception as e:
             error = e
             self.logger.error(f"Error getting User {search!s}")
-            raise UserNotFound(
-                f"Error getting User {search!s}: {e!s}"
-            ) from e
+            raise UserNotFound(f"Error getting User {search!s}: {e!s}") from e
         # if not exists, return error of missing
         if not user:
-            raise UserNotFound(
-                f"User {search!s} doesn't exists: {error}"
-            )
+            raise UserNotFound(f"User {search!s} doesn't exists: {error}")
         return user
 
     async def create_user(self, userdata) -> Identity:
         try:
-            usr = self._ident(
-                data=userdata
-            )
-            self.logger.debug(f'User Created > {usr.username}')
+            usr = self._ident(data=userdata)
+            self.logger.debug(f"User Created > {usr.username}")
             return usr
         except Exception as err:
-            raise Exception(err) from err
+            raise InvalidAuth(
+                f"Unable to created Session User: {err}"
+            ) from err
 
-    def get_userdata(self, user = None):
+    def get_userdata(self, user=None):
         userdata = {}
         for name, item in self.user_mapping.items():
             if name != self.password_attribute:
@@ -177,12 +170,10 @@ class BaseAuthBackend(ABC):
                     userdata[name] = user[item]
                 except AttributeError:
                     self.logger.warning(
-                        f'Error on User Data: asking for a non existing attribute: {item}'
+                        f"Error on User Data: asking for a non existing attribute: {item}"
                     )
         if AUTH_SESSION_OBJECT:
-            return {
-                AUTH_SESSION_OBJECT: userdata
-            }
+            return {AUTH_SESSION_OBJECT: userdata}
         return userdata
 
     def configure(self, app, router):
@@ -190,13 +181,75 @@ class BaseAuthBackend(ABC):
         to create Session Object."""
         self._app = app
 
+    def default_headers(self, message: str, exception: BaseException = None) -> dict:
+        headers = {
+            "X-AUTH": message,
+        }
+        if exception:
+            headers['X-ERROR'] = str(exception)
+        return headers
+
+    def auth_error(
+        self,
+        reason: dict = None,
+        exception: Exception = None,
+        status: int = 400,
+        headers: dict = None,
+        content_type: str = 'application/json',
+        **kwargs,
+    ) -> web.HTTPError:
+        if headers:
+            headers = {**self.default_headers(message=str(reason), exception=exception), **headers}
+        else:
+            headers = self.default_headers(message=str(reason), exception=exception)
+        # TODO: process the exception object
+        response_obj = {}
+        if exception:
+            response_obj["error"] = str(exception)
+        args = {
+            "content_type": content_type,
+            "headers": headers,
+            **kwargs
+        }
+        if isinstance(reason, dict):
+            response_obj = {**response_obj, **reason}
+            # args["content_type"] = "application/json"
+            args["reason"] = json_encoder(response_obj)
+        else:
+            response_obj['reason'] = reason
+            args["reason"] = json_encoder(response_obj)
+        # defining the error
+        if status == 400:  # bad request
+            obj = web.HTTPBadRequest(**args)
+        elif status == 401:  # unauthorized
+            obj = web.HTTPUnauthorized(**args)
+        elif status == 403:  # forbidden
+            obj = web.HTTPForbidden(**args)
+        elif status == 404:  # not found
+            obj = web.HTTPNotFound(**args)
+        elif status == 406: # Not acceptable
+            obj = web.HTTPNotAcceptable(**args)
+        elif status == 412:
+            obj = web.HTTPPreconditionFailed(**args)
+        elif status == 428:
+            obj = web.HTTPPreconditionRequired(**args)
+        else:
+            obj = web.HTTPBadRequest(**args)
+        return obj
+
+    def ForbiddenAccess(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
+        return self.auth_error(
+            reason=reason, **kwargs, status=403
+        )
+
+    def Unauthorized(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
+        return self.auth_error(
+            reason=reason, **kwargs, status=401
+        )
+
     async def remember(
-            self,
-            request: web.Request,
-            identity: str,
-            userdata: dict,
-            user: Identity
-        ):
+        self, request: web.Request, identity: str, userdata: dict, user: Identity
+    ):
         """
         Saves User Identity into request Object and session.
         """
@@ -206,26 +259,23 @@ class BaseAuthBackend(ABC):
             request.user = user
             try:
                 session = await new_session(request, userdata)
-                user.is_authenticated = True # if session, then, user is authenticated.
+                user.is_authenticated = True  # if session, then, user is authenticated.
                 session[self.session_key_property] = identity
                 try:
-                    session['user'] = session.encode(user)
+                    session["user"] = session.encode(user)
                 except RuntimeError:
                     pass
-                request['session'] = session
+                request["session"] = session
             except Exception as err:
                 raise web.HTTPForbidden(
                     reason=f"Error Creating User Session: {err!s}"
                 )
             # to allowing request.user.is_authenticated
-        except Exception as err: # pylint: disable=W0703
+        except Exception as err:  # pylint: disable=W0703
             self.logger.exception(err)
 
     def create_jwt(
-        self,
-        issuer: str = None,
-        expiration: int = None,
-        data: dict = None
+        self, issuer: str = None, expiration: int = None, data: dict = None
     ) -> str:
         """Creation of JWT tokens based on basic parameters.
         issuer: for default, urn:Navigator
@@ -256,10 +306,16 @@ class BaseAuthBackend(ABC):
 
     @abstractmethod
     async def check_credentials(self, request):
-        """ Authenticate against user credentials (token, user/password)."""
+        """Authenticate against user credentials (token, user/password)."""
 
-    def threaded_function(self, func: Callable, evt: asyncio.AbstractEventLoop = None, threaded: bool = True):
+    def threaded_function(
+        self,
+        func: Callable,
+        evt: asyncio.AbstractEventLoop = None,
+        threaded: bool = True,
+    ):
         """Wraps a Function into an Executor Thread."""
+
         @wraps(func)
         async def _wrap(*args, loop: asyncio.AbstractEventLoop = None, **kwargs):
             result = None
@@ -270,17 +326,16 @@ class BaseAuthBackend(ABC):
             try:
                 if threaded:
                     fn = partial(func, *args, **kwargs)
-                    result = await loop.run_in_executor(
-                        self.executor, fn
-                    )
+                    result = await loop.run_in_executor(self.executor, fn)
                 else:
                     result = await func(*args, **kwargs)
                 return result
-            except Exception as err: # pylint: disable=W0703
+            except Exception as err:  # pylint: disable=W0703
                 self.logger.exception(err)
+
         return _wrap
 
-    async def get_session_user(self, session: Iterable, name: str = 'user') -> Iterable:
+    async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:
         try:
             if session:
                 user = session.decode(name)
@@ -288,9 +343,7 @@ class BaseAuthBackend(ABC):
                     user.is_authenticated = True
             return user
         except (AttributeError, RuntimeError) as ex:
-            logging.warning(
-                f'NAV: Unable to decode User session: {ex}'
-            )
+            logging.warning(f"NAV: Unable to decode User session: {ex}")
 
 
 def decode_token(request, issuer: str = None):
@@ -302,19 +355,11 @@ def decode_token(request, issuer: str = None):
         issuer = AUTH_DEFAULT_ISSUER
     if "Authorization" in request.headers:
         try:
-            scheme, _id = (
-                request.headers.get(hdrs.AUTHORIZATION).strip().split(" ", 1)
-            )
+            scheme, _id = request.headers.get(hdrs.AUTHORIZATION).strip().split(" ", 1)
         except ValueError as e:
-            raise AuthException(
-                "Invalid Authentication Header",
-                status=400
-            ) from e
+            raise AuthException("Invalid Authentication Header", status=400) from e
         if scheme != AUTH_DEFAULT_SCHEME:
-            raise AuthException(
-                "Invalid Authentication Scheme",
-                status=400
-            )
+            raise AuthException("Invalid Authentication Scheme", status=400)
         try:
             tenant, jwt_token = _id.split(":")
         except (TypeError, ValueError, AttributeError):
@@ -331,25 +376,14 @@ def decode_token(request, issuer: str = None):
             logging.debug(f"Decoded Token: {payload!s}")
             return [tenant, payload]
         except jwt.exceptions.ExpiredSignatureError as err:
-            raise AuthExpired(
-                f"Credentials Expired: {err!s}"
-            ) from err
+            raise AuthExpired(f"Credentials Expired: {err!s}") from err
         except jwt.exceptions.InvalidSignatureError as err:
-            raise AuthExpired(
-                f"Signature Failed or Expired: {err!s}"
-            ) from err
+            raise AuthExpired(f"Signature Failed or Expired: {err!s}") from err
         except jwt.exceptions.DecodeError as err:
-            raise FailedAuth(
-                f"Token Decoding Error: {err}"
-            ) from err
+            raise FailedAuth(f"Token Decoding Error: {err}") from err
         except jwt.exceptions.InvalidTokenError as err:
-            raise InvalidAuth(
-                f"Invalid authorization token {err!s}"
-            ) from err
+            raise InvalidAuth(f"Invalid authorization token {err!s}") from err
         except Exception as err:
-            raise AuthException(
-                str(err),
-                status=501
-            ) from err
+            raise AuthException(str(err), status=501) from err
     else:
         return [tenant, payload]

@@ -15,11 +15,7 @@ class AuthStorage(ABC):
     _shutdown_: Optional[Callable] = None
 
     def __init__(
-        self,
-        driver: str = "pg",
-        dsn: str = "",
-        params: dict = None,
-        **kwargs
+        self, driver: str = "pg", dsn: str = "", params: dict = None, **kwargs
     ):
         self.driver = driver
         self.params = params
@@ -35,23 +31,16 @@ class AuthStorage(ABC):
         """configure.
         Configure Connection Handler to connect on App initialization.
         """
-        app.on_startup.append(
-            self.startup
-        )
-        app.on_shutdown.append(
-            self.shutdown
-        )
-        app.on_cleanup.append(
-            self.cleanup
-        )
+        app.on_startup.append(self.startup)
+        app.on_shutdown.append(self.shutdown)
+        app.on_cleanup.append(self.cleanup)
 
     def is_connected(self) -> bool:
         return bool(self.conn.is_connected())
 
     @abstractmethod
     async def cleanup(self, app: web.Application):
-        """Called when application ends.
-        """
+        """Called when application ends."""
 
     async def startup(self, app: web.Application) -> None:
         try:
@@ -61,7 +50,7 @@ class AuthStorage(ABC):
                     dsn=self._dsn,
                     params=self.params,
                     timeout=self.timeout,
-                    **self.kwargs
+                    **self.kwargs,
                 )
                 await self.conn.connect()
             else:
@@ -70,16 +59,14 @@ class AuthStorage(ABC):
                     dsn=self._dsn,
                     params=self.params,
                     timeout=self.timeout,
-                    **self.kwargs
+                    **self.kwargs,
                 )
                 await self.conn.connection()
-            logging.debug(f'Starting Auth DB driver={self.driver} On: {app}')
+            logging.debug(f"Starting Auth DB driver={self.driver} On: {app}")
             app[self.name] = self.conn
         except (ProviderError, DriverError) as ex:
-            raise RuntimeError(
-                f"Error creating DB {self.driver}: {ex}"
-            ) from ex
+            raise RuntimeError(f"Error creating DB {self.driver}: {ex}") from ex
 
     async def shutdown(self, app: web.Application) -> None:
-        logging.debug(f'Closing Auth DB on App: {app!r}')
+        logging.debug(f"Closing Auth DB on App: {app!r}")
         await self.conn.close()

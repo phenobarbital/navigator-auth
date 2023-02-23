@@ -20,10 +20,11 @@ from navigator_auth.conf import (
     AUTH_CREDENTIALS_REQUIRED,
     PARTNER_KEY,
     CYPHER_TYPE,
-    exclude_list
+    exclude_list,
 )
 from .abstract import BaseAuthBackend, decode_token
 from .basic import BasicUser
+
 
 class TrocToken(BaseAuthBackend):
     """TROC authentication Header."""
@@ -31,8 +32,8 @@ class TrocToken(BaseAuthBackend):
     user_attribute: str = "user"
     username_attribute: str = "email"
     _ident: BasicUser = BasicUser
-    _description: str = 'Partnership Token authentication'
-    _service_name: str = 'troctoken'
+    _description: str = "Partnership Token authentication"
+    _service_name: str = "troctoken"
 
     def __init__(
         self,
@@ -52,13 +53,11 @@ class TrocToken(BaseAuthBackend):
         self.cypher: Cipher = None
 
     async def on_startup(self, app: web.Application):
-        """Used to initialize Backend requirements.
-        """
+        """Used to initialize Backend requirements."""
         self.cypher = Cipher(PARTNER_KEY, type=CYPHER_TYPE)
 
     async def on_cleanup(self, app: web.Application):
-        """Used to cleanup and shutdown any db connection.
-        """
+        """Used to cleanup and shutdown any db connection."""
 
     async def validate_user(self, login: str = None):
         # get the user based on Model
@@ -67,9 +66,7 @@ class TrocToken(BaseAuthBackend):
             user = await self.get_user(**search)
             return user
         except UserNotFound as err:
-            raise UserNotFound(
-                f"User {login} doesn't exists"
-            ) from err
+            raise UserNotFound(f"User {login} doesn't exists") from err
         except Exception as err:
             self.logger.exception(err)
             raise
@@ -92,41 +89,30 @@ class TrocToken(BaseAuthBackend):
             else:
                 try:
                     token = request.query.get("auth", None)
-                except Exception as e: # pylint: disable=W0703
+                except Exception as e:  # pylint: disable=W0703
                     print(e)
                     return None
-        except Exception as err: # pylint: disable=W0703
+        except Exception as err:  # pylint: disable=W0703
             self.logger.exception(f"TrocAuth: Error getting payload: {err}")
             return None
         return token
 
     async def authenticate(self, request):
-        """ Authenticate, refresh or return the user credentials."""
+        """Authenticate, refresh or return the user credentials."""
         try:
             token = await self.get_payload(request)
         except Exception as err:
-            raise AuthException(
-                str(err), status=400
-            ) from err
+            raise AuthException(str(err), status=400) from err
         if not token:
-            raise InvalidAuth(
-                "Missing Credentials",
-                status=401
-            )
+            raise InvalidAuth("Missing Credentials", status=401)
         else:
             # getting user information
             # TODO: making the validation of token and expiration
             try:
-                data = orjson.loads(
-                    self.cypher.decode(token)
-                )
-                self.logger.debug(
-                    f'TrocToken: Decoded User data: {data!r}'
-                )
+                data = orjson.loads(self.cypher.decode(token))
+                self.logger.debug(f"TrocToken: Decoded User data: {data!r}")
             except Exception as err:
-                raise InvalidAuth(
-                    f"Invalid Token: {err!s}", status=401
-                ) from err
+                raise InvalidAuth(f"Invalid Token: {err!s}", status=401) from err
             # making validation
             try:
                 username = data[self.username_attribute]
@@ -145,16 +131,15 @@ class TrocToken(BaseAuthBackend):
                 try:
                     # merging both session objects
                     userdata[AUTH_SESSION_OBJECT] = {
-                        **userdata[AUTH_SESSION_OBJECT], **data
+                        **userdata[AUTH_SESSION_OBJECT],
+                        **data,
                     }
-                except Exception as err: # pylint: disable=W0703
+                except Exception as err:  # pylint: disable=W0703
                     self.logger.exception(err)
                 uid = user[self.username_attribute]
                 username = user[self.username_attribute]
                 userdata[self.session_key_property] = uid
-                usr = await self.create_user(
-                    userdata[AUTH_SESSION_OBJECT]
-                )
+                usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
                 usr.id = uid
                 usr.set(self.username_attribute, username)
                 payload = {
@@ -165,94 +150,81 @@ class TrocToken(BaseAuthBackend):
                 token = self.create_jwt(data=payload)
                 usr.access_token = token
                 # saving user-data into request:
-                await self.remember(
-                    request, uid, userdata, usr
-                )
-                return {
-                    "token": token,
-                    **userdata
-                }
-            except Exception as err: # pylint: disable=W0703
-                self.logger.exception(f'TROC Auth: Authentication Error: {err}')
+                await self.remember(request, uid, userdata, usr)
+                return {"token": token, **userdata}
+            except Exception as err:  # pylint: disable=W0703
+                self.logger.exception(f"TROC Auth: Authentication Error: {err}")
                 return False
 
     async def check_credentials(self, request):
-        """ Authentication and create a session."""
+        """Authentication and create a session."""
         return True
 
-
+    @web.middleware
     async def auth_middleware(
-            self,
-            app: web.Application,
-            handler: Callable[[web.Request], Awaitable[web.StreamResponse]]
-        ) -> web.StreamResponse:
-            """
-                Basic Auth Middleware.
-                Description: Basic Authentication for NoAuth, Basic, Token and Django.
-            """
-            @web.middleware
-            async def middleware(request: web.Request) -> web.StreamResponse:
-                # avoid authorization backend on excluded methods:
-                if request.method == hdrs.METH_OPTIONS:
-                    return await handler(request)
-                # avoid authorization on exclude list
-                if request.path in exclude_list:
-                    return await handler(request)
-                # avoid check system routes
-                try:
-                    if isinstance(request.match_info.route, SystemRoute):  # eg. 404
-                        return await handler(request)
-                except Exception as err: # pylint: disable=W0703
-                    self.logger.error(err)
-                ## Already Authenticated
-                try:
-                    if request.get('authenticated', False) is True:
-                        return await handler(request)
-                except KeyError:
-                    pass
-                self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
-                try:
-                    _, payload = decode_token(request)
-                    if payload:
-                        ## check if user has a session:
-                        # load session information
-                        session = await get_session(request, payload, new=False, ignore_cookie=True)
-                        if not session and AUTH_CREDENTIALS_REQUIRED is True:
-                            raise web.HTTPUnauthorized(
-                                reason="There is no Session for User or Authentication is missing"
-                            )
-                        try:
-                            request.user = await self.get_session_user(session)
-                            request['authenticated'] = True
-                        except Exception as ex: # pylint: disable=W0703
-                            self.logger.error(
-                                f'Missing User Object from Session: {ex}'
-                            )
-                    else:
-                        if AUTH_CREDENTIALS_REQUIRED is True:
-                            raise web.HTTPUnauthorized(
-                                reason="There is no Session for User or Authentication is missing"
-                            )
-                except (Forbidden) as err:
-                    self.logger.error('TROC Auth: Access Denied')
-                    raise web.HTTPUnauthorized(
-                        reason=err.message
-                    )
-                except (AuthExpired, FailedAuth) as err:
-                    self.logger.error('TROC Auth: Auth Credentials were expired')
-                    raise web.HTTPUnauthorized(
-                        reason=err.message
-                    )
-                except AuthException as err:
-                    self.logger.error('Auth Middleware: Invalid Signature or secret')
-                    raise web.HTTPForbidden(
-                        reason=err.message
-                    )
-                except Exception as err: # pylint: disable=W0703
-                    self.logger.error(f"Bad Request: {err!s}")
-                    if AUTH_CREDENTIALS_REQUIRED is True:
-                        raise web.HTTPBadRequest(
-                            reason=f"Auth Error: {err!s}"
-                        )
+        self,
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
+        """
+        Partner Auth Middleware.
+        Description: Basic Authentication for Partner Token Auth.
+        """
+        # avoid authorization backend on excluded methods:
+        if request.method == hdrs.METH_OPTIONS:
+            return await handler(request)
+        # avoid authorization on exclude list
+        if request.path in exclude_list:
+            return await handler(request)
+        # avoid check system routes
+        try:
+            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
                 return await handler(request)
-            return middleware
+        except Exception:  # pylint: disable=W0703
+            #self.logger.error(err)
+            pass
+        ## Already Authenticated
+        try:
+            if request.get("authenticated", False) is True:
+                return await handler(request)
+        except KeyError:
+            pass
+        self.logger.debug(f"MIDDLEWARE: {self.__class__.__name__}")
+        try:
+            _, payload = decode_token(request)
+            if payload:
+                ## check if user has a session:
+                # load session information
+                session = await get_session(
+                    request, payload, new=False, ignore_cookie=True
+                )
+                if not session and AUTH_CREDENTIALS_REQUIRED is True:
+                    raise self.Unauthorized(
+                        reason="There is no Session for User or Authentication is missing"
+                    )
+                try:
+                    request.user = await self.get_session_user(session)
+                    request["authenticated"] = True
+                except Exception as ex:  # pylint: disable=W0703
+                    self.logger.error(f"Missing User Object from Session: {ex}")
+            else:
+                if AUTH_CREDENTIALS_REQUIRED is True:
+                    raise self.Unauthorized(
+                        reason="There is no Session for User or Authentication is missing"
+                    )
+        except Forbidden as err:
+            self.logger.error("TROC Auth: Access Denied")
+            raise self.ForbiddenAccess(reason=err.message)
+        except AuthExpired as err:
+            self.logger.error("TROC Auth: Auth Credentials were expired")
+            raise self.Unauthorized(reason=err.message)
+        except FailedAuth as err:
+            raise self.ForbiddenAccess(reason=err.message)
+        except AuthException as err:
+            self.logger.error("Auth Middleware: Invalid Signature or secret")
+            raise self.ForbiddenAccess(reason=err.message)
+        except Exception as err:  # pylint: disable=W0703
+            # self.logger.error(f"Bad Request: {err!s}")
+            if AUTH_CREDENTIALS_REQUIRED is True:
+                raise web.HTTPBadRequest(reason=f"Auth Error: {err!s}")
+        return await handler(request)

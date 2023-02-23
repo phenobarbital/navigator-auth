@@ -3,10 +3,7 @@
 Abstract Model to any Oauth2 or external Auth Support.
 """
 import asyncio
-from typing import (
-    Any,
-    Optional
-)
+from typing import Any, Optional
 from collections.abc import Callable
 import importlib
 from abc import abstractmethod
@@ -14,12 +11,10 @@ from urllib.parse import urlparse, parse_qs
 from requests.models import PreparedRequest
 import aiohttp
 from aiohttp import web, hdrs
-from aiohttp.client import (
-    ClientTimeout,
-    ClientSession
-)
+from aiohttp.client import ClientTimeout, ClientSession
 from datamodel.exceptions import ValidationError
 from navconfig.logging import logging
+from navigator_session import AUTH_SESSION_OBJECT
 from navigator_auth.identities import AuthUser
 from navigator_auth.exceptions import UserNotFound
 from navigator_auth.conf import (
@@ -29,7 +24,7 @@ from navigator_auth.conf import (
     AUTH_MISSING_ACCOUNT,
     AUTH_SUCCESSFUL_CALLBACKS,
     PREFERRED_AUTH_SCHEME,
-    exclude_list
+    exclude_list,
 )
 from .abstract import BaseAuthBackend
 
@@ -50,6 +45,7 @@ class ExternalAuth(BaseAuthBackend):
 
     is an abstract base to any External Auth backend, as Oauth2 or OpenId.
     """
+
     user_attribute: str = "user"
     username_attribute: str = "username"
     pwd_atrribute: str = "password"
@@ -60,7 +56,6 @@ class ExternalAuth(BaseAuthBackend):
     _callbacks: Optional[list[Callable]] = None
     _external_auth: bool = True
 
-
     def __init__(
         self,
         user_attribute: str = None,
@@ -68,16 +63,11 @@ class ExternalAuth(BaseAuthBackend):
         password_attribute: str = None,
         **kwargs,
     ):
-        super().__init__(
-            user_attribute,
-            userid_attribute,
-            password_attribute,
-            **kwargs
-        )
-        self.base_url: str = ''
-        self.authorize_uri: str = ''
-        self.userinfo_uri: str = ''
-        self._token_uri: str = ''
+        super().__init__(user_attribute, userid_attribute, password_attribute, **kwargs)
+        self.base_url: str = ""
+        self.authorize_uri: str = ""
+        self.userinfo_uri: str = ""
+        self._token_uri: str = ""
         self.login_failed_uri = AUTH_LOGIN_FAILED_URI
         self.redirect_uri = "{domain}/auth/{service}/callback/"
         self.finish_redirect_url = None
@@ -94,7 +84,7 @@ class ExternalAuth(BaseAuthBackend):
             "*",
             f"/api/v1/auth/{self._service_name}/",
             self.authenticate,
-            name=f"{self._service_name}_api_login"
+            name=f"{self._service_name}_api_login",
         )
         self._info.uri = f"/api/v1/auth/{self._service_name}/"
         ## added to excluded list:
@@ -105,7 +95,7 @@ class ExternalAuth(BaseAuthBackend):
             "GET",
             f"/auth/{self._service_name}/login",
             self.authenticate,
-            name=f"{self._service_name}_alt_login"
+            name=f"{self._service_name}_alt_login",
         )
         exclude_list.append(f"/auth/{self._service_name}/login")
         # finish login (callback)
@@ -113,7 +103,7 @@ class ExternalAuth(BaseAuthBackend):
             "GET",
             f"/auth/{self._service_name}/callback/",
             self.auth_callback,
-            name=f"{self._service_name}_complete_login"
+            name=f"{self._service_name}_complete_login",
         )
         exclude_list.append(f"/auth/{self._service_name}/callback/")
         # logout process
@@ -121,21 +111,20 @@ class ExternalAuth(BaseAuthBackend):
             "GET",
             f"/api/v1/auth/{self._service_name}/logout",
             self.logout,
-            name=f"{self._service_name}_api_logout"
+            name=f"{self._service_name}_api_logout",
         )
         router.add_route(
             "GET",
             f"/auth/{self._service_name}/logout",
             self.finish_logout,
-            name=f"{self._service_name}_complete_logout"
+            name=f"{self._service_name}_complete_logout",
         )
         super(ExternalAuth, self).configure(app, router)
 
     async def on_startup(self, app: web.Application):
-        """Used to initialize Backend requirements.
-        """
+        """Used to initialize Backend requirements."""
         ## geting User Model for saving users:
-        if AUTH_MISSING_ACCOUNT == 'create':
+        if AUTH_MISSING_ACCOUNT == "create":
             self._user_model = self.get_authmodel(AUTH_USER_MODEL)
         else:
             self._user_model = None
@@ -149,9 +138,8 @@ class ExternalAuth(BaseAuthBackend):
     def get_successful_callbacks(self) -> list[Callable]:
         fns = []
         for fn in self._success_callbacks:
-
             try:
-                pkg, module = fn.rsplit('.', 1)
+                pkg, module = fn.rsplit(".", 1)
                 mod = importlib.import_module(pkg)
                 obj = getattr(mod, module)
                 fns.append(obj)
@@ -164,27 +152,25 @@ class ExternalAuth(BaseAuthBackend):
     def get_domain(self, request: web.Request) -> str:
         uri = urlparse(str(request.url))
         domain_url = f"{PREFERRED_AUTH_SCHEME}://{uri.netloc}"
-        logging.debug(f'DOMAIN: {domain_url}')
+        logging.debug(f"DOMAIN: {domain_url}")
         return domain_url
 
     def get_finish_redirect_url(self, request: web.Request) -> str:
         domain_url = self.get_domain(request)
         print(request.query.items())
         try:
-            redirect_url = request.query['redirect_url']
+            redirect_url = request.query["redirect_url"]
         except (TypeError, KeyError):
             redirect_url = AUTH_REDIRECT_URI
-        print('NEW REDIRECT URL ', redirect_url)
         if not bool(urlparse(redirect_url).netloc):
             redirect_url = f"{domain_url}{redirect_url}"
-        print('NEW REDIRECT URL ', redirect_url)
         self.finish_redirect_url = redirect_url
 
     def redirect(self, uri: str):
         """redirect.
-            Making the redirection to External Auth Page.
+        Making the redirection to External Auth Page.
         """
-        logging.debug(f'{self.__class__.__name__} URI: {uri}')
+        logging.debug(f"{self.__class__.__name__} URI: {uri}")
         return web.HTTPFound(uri)
 
     def prepare_url(self, url: str, params: dict = None):
@@ -192,36 +178,29 @@ class ExternalAuth(BaseAuthBackend):
         req.prepare_url(url, params)
         return req.url
 
-    def home_redirect(self, request: web.Request, token: str = None, token_type: str = 'Bearer'):
-        headers = {
-            "x-authenticated": 'true'
-        }
+    def home_redirect(
+        self, request: web.Request, token: str = None, token_type: str = "Bearer"
+    ):
+        headers = {"x-authenticated": "true"}
         params = {}
         if token:
             headers["x-auth-token"] = token
             headers["x-auth-token-type"] = token_type
-            params = {
-                "token" : token, "type":  token_type
-            }
+            params = {"token": token, "type": token_type}
         url = self.prepare_url(self.finish_redirect_url, params)
         return web.HTTPFound(url, headers=headers)
 
-    def failed_redirect(self, request: web.Request, error: str = 'ERROR_UNKNOWN '):
-        headers = {
-            "x-authenticated": 'false'
-        }
-        params = {
-            "error" : error
-        }
+    def failed_redirect(self, request: web.Request, error: str = "ERROR_UNKNOWN "):
+        headers = {"x-authenticated": "false"}
+        params = {"error": error}
         # url = self.prepare_url(self.login_failed_uri, params)
         url = self.prepare_url(self.finish_redirect_url, params)
-    
-        return web.HTTPFound(url, headers=headers)
 
+        return web.HTTPFound(url, headers=headers)
 
     @abstractmethod
     async def authenticate(self, request: web.Request):
-        """ Authenticate, refresh or return the user credentials."""
+        """Authenticate, refresh or return the user credentials."""
 
     @abstractmethod
     async def auth_callback(self, request: web.Request):
@@ -248,9 +227,9 @@ class ExternalAuth(BaseAuthBackend):
         """
         # User ID:
         userid = userdata[self.userid_attribute]
-        userdata['id'] = userid
+        userdata["id"] = userid
         userdata[self.session_key_property] = userid
-        userdata['auth_method'] = self._service_name
+        userdata["auth_method"] = self._service_name
         for key, val in self._user_mapping.items():
             try:
                 userdata[key] = userdata[val]
@@ -259,12 +238,8 @@ class ExternalAuth(BaseAuthBackend):
         return (userdata, userid)
 
     async def validate_user_info(
-            self,
-            request: web.Request,
-            user_id: Any,
-            userdata: Any,
-            token: str
-        ) -> dict:
+        self, request: web.Request, user_id: Any, userdata: Any, token: str
+    ) -> dict:
         data = None
         user = None
         # then, if everything is ok with user data, can we validate from model:
@@ -274,17 +249,16 @@ class ExternalAuth(BaseAuthBackend):
             login = userdata[self.user_attribute]
         try:
             search = {self.username_attribute: login}
+            self.logger.debug(f'USER SEARCH > {search}')
             user = await self.get_user(**search)
         except UserNotFound as err:
-            if AUTH_MISSING_ACCOUNT == 'ignore':
+            if AUTH_MISSING_ACCOUNT == "ignore":
                 pass
-            elif AUTH_MISSING_ACCOUNT == 'raise':
-                raise UserNotFound(
-                    f"User {login} doesn't exists: {err}"
-                ) from err
-            elif AUTH_MISSING_ACCOUNT == 'create':
+            elif AUTH_MISSING_ACCOUNT == "raise":
+                raise UserNotFound(f"User {login} doesn't exists: {err}") from err
+            elif AUTH_MISSING_ACCOUNT == "create":
                 # can create an user using userdata:
-                self.logger.info(f'Creating new User: {login}')
+                self.logger.info(f"Creating new User: {login}")
                 await self.create_external_user(userdata)
                 try:
                     user = await self.get_user(**search)
@@ -305,33 +279,24 @@ class ExternalAuth(BaseAuthBackend):
             }
             await self.auth_successful_callback(request, user, **args)
         try:
-            user = await self.create_user(
-                userdata
-            )
+            userinfo = self.get_userdata(user)
+            ### merging userdata and userinfo:
+            userinfo = {**userinfo, **userdata}
+            user = await self.create_user(userinfo)
             try:
                 user.username = userdata[self.username_attribute]
             except KeyError:
                 user.username = user_id
-            user.token = token # issued token:
-            payload = {
-                "user_id": user_id,
-                **userdata
-            }
+            user.token = token  # issued token:
+            payload = {"user_id": user_id, **userdata}
             # saving Auth data.
-            await self.remember(
-                request, user_id, userdata, user
-            )
+            await self.remember(request, user_id, userinfo, user)
             # Create the User session.
             jwt_token = self.create_jwt(data=payload)
-            data = {
-                "token": jwt_token,
-                "access_token": token,
-                **userdata
-            }
+            data = {"token": jwt_token, "access_token": token, **userdata}
+            return data
         except Exception as err:
             logging.exception(err)
-        finally:
-            return data
 
     @abstractmethod
     async def check_credentials(self, request: web.Request):
@@ -346,28 +311,28 @@ class ExternalAuth(BaseAuthBackend):
         return self.request(url, method=hdrs.METH_POST, **kwargs)
 
     async def request(
-            self,
-            url: str,
-            method: str ='get',
-            token: str = None,
-            token_type: str = 'Bearer',
-            **kwargs
-        ) -> web.Response:
+        self,
+        url: str,
+        method: str = "get",
+        token: str = None,
+        token_type: str = "Bearer",
+        **kwargs,
+    ) -> web.Response:
         """
         request.
             connect to an http source using aiohttp
         """
         timeout = ClientTimeout(total=120)
-        if 'headers' in kwargs:
-            headers = kwargs['headers'].copy()
-            del kwargs['headers']
+        if "headers" in kwargs:
+            headers = kwargs["headers"].copy()
+            del kwargs["headers"]
         else:
             headers = {}
         if token:
             headers["Authorization"] = f"{token_type} {token}"
-        if 'content-type' not in headers:
-            headers['content-type'] = 'application/json'
-            headers['Accept'] = 'application/json'
+        if "content-type" not in headers:
+            headers["content-type"] = "application/json"
+            headers["Accept"] = "application/json"
         response = None
         async with ClientSession(trust_env=True) as client:
             async with client.request(
@@ -376,9 +341,9 @@ class ExternalAuth(BaseAuthBackend):
                 headers=headers,
                 timeout=timeout,
                 allow_redirects=True,
-                **kwargs
+                **kwargs,
             ) as response:
-                logging.debug(f'{url} with response: {response.status}, {response!s}')
+                logging.debug(f"{url} with response: {response.status}, {response!s}")
                 if response.status == 200:
                     try:
                         return await response.json()
@@ -387,14 +352,11 @@ class ExternalAuth(BaseAuthBackend):
                         return parse_qs(resp.decode("utf-8"))
                 else:
                     resp = await response.read()
-                    raise Exception(f'Error getting Session Information: {resp}')
+                    raise Exception(f"Error getting Session Information: {resp}")
 
     async def auth_successful_callback(
-            self,
-            request: web.Request,
-            user: Callable,
-            **kwargs
-        ) -> None:
+        self, request: web.Request, user: Callable, **kwargs
+    ) -> None:
         coro = []
         for fn in self._callbacks:
             func = self.call_successful_callbacks(request, fn, user, **kwargs)
@@ -402,25 +364,19 @@ class ExternalAuth(BaseAuthBackend):
         try:
             await asyncio.gather(*coro, return_exceptions=True)
         except Exception as ex:
-            self.logger.exception(
-                f"Auth Callback Error: {ex}"
-            )
+            self.logger.exception(f"Auth Callback Error: {ex}")
 
     async def call_successful_callbacks(
-        self,
-        request: web.Request,
-        fn: Callable,
-        user: Callable,
-        **kwargs
-        ) -> None:
+        self, request: web.Request, fn: Callable, user: Callable, **kwargs
+    ) -> None:
         # start here:
-        print(':: Calling the Successful Callback :: ', fn)
+        print(":: Calling the Successful Callback :: ", fn)
         try:
             await fn(request, user, self._user_model, **kwargs)
         except Exception as e:
             self.logger.exception(
                 f"Auth Callback: Error callig Callback Function: {fn}, {e!s}",
-                stack_info=False
+                stack_info=False,
             )
 
     async def create_external_user(self, userdata: dict) -> Callable:
@@ -430,7 +386,7 @@ class ExternalAuth(BaseAuthBackend):
         Args:
             userdata (dict): user attributes
         """
-        db = self._app['authdb']
+        db = self._app["authdb"]
         try:
             login = userdata[self.username_attribute]
         except KeyError:
@@ -452,17 +408,11 @@ class ExternalAuth(BaseAuthBackend):
                         await user.insert()
                         return user
                     else:
-                        raise UserNotFound(
-                            f"Cannot create User {login}"
-                        )
+                        raise UserNotFound(f"Cannot create User {login}")
                 except ValidationError as ex:
                     self.logger.error(f"Invalid User Information {login!s}")
                     print(ex.payload)
-                    raise UserNotFound(
-                        f"Cannot create User {login}: {ex}"
-                    ) from ex
+                    raise UserNotFound(f"Cannot create User {login}: {ex}") from ex
         except Exception as e:
             self.logger.error(f"Error getting User {login}")
-            raise UserNotFound(
-                f"Error getting User {login}: {e!s}"
-            ) from e
+            raise UserNotFound(f"Error getting User {login}: {e!s}") from e

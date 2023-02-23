@@ -8,7 +8,7 @@ from aiohttp.abc import AbstractView
 from aiohttp.web_exceptions import (
     HTTPMethodNotAllowed,
     HTTPNoContent,
-    HTTPNotImplemented
+    HTTPNotImplemented,
 )
 import aiohttp_cors
 from aiohttp_cors import CorsViewMixin
@@ -16,13 +16,20 @@ from navconfig.logging import logging, loglevel
 from navigator_auth.libs.json import JSONContent, json_encoder, json_decoder
 
 
-
 DEFAULT_JSON_ENCODER = json_encoder
 DEFAULT_JSON_DECODER = json_decoder
 
 
 class BaseHandler(CorsViewMixin):
-    _allowed = ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", )
+    _allowed = (
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+        "HEAD",
+    )
 
     cors_config = {
         "*": aiohttp_cors.ResourceOptions(
@@ -35,7 +42,7 @@ class BaseHandler(CorsViewMixin):
         CorsViewMixin.__init__(self)
         self._loop = asyncio.get_event_loop()
         self._json: Callable = JSONContent()
-        self.logger = logging.getLogger('navigator')
+        self.logger = logging.getLogger("navigator")
         self.logger.setLevel(loglevel)
         self.post_init(self, *args, **kwargs)
 
@@ -65,9 +72,14 @@ class BaseHandler(CorsViewMixin):
         content_type: str = "application/json",
         **kwargs,
     ) -> web.Response:
-        if not headers: # TODO: set to default headers.
+        if not headers:  # TODO: set to default headers.
             headers = {}
-        args = {"status": status, "content_type": content_type, "headers": headers, **kwargs}
+        args = {
+            "status": status,
+            "content_type": content_type,
+            "headers": headers,
+            **kwargs,
+        }
         if isinstance(response, dict):
             args["text"] = self._json.dumps(response)
         else:
@@ -75,23 +87,19 @@ class BaseHandler(CorsViewMixin):
         return web.Response(**args)
 
     def json_response(
-            self,
-            content: Any,
-            reason: str = None,
-            headers: dict = None,
-            status: int = 200,
-        ) -> web.Response:
+        self,
+        content: Any,
+        reason: str = None,
+        headers: dict = None,
+        status: int = 200,
+    ) -> web.Response:
         """json_response.
 
         Return a JSON-based Web Response.
         """
-        if not headers: # TODO: set to default headers.
+        if not headers:  # TODO: set to default headers.
             headers = {}
-        response_obj = {
-            "status": status,
-            "dumps": json_encoder,
-            "reason": reason
-        }
+        response_obj = {"status": status, "dumps": json_encoder, "reason": reason}
         if headers:
             response_obj["headers"] = headers
         return web.json_response(content, **response_obj)
@@ -125,7 +133,7 @@ class BaseHandler(CorsViewMixin):
             args = {
                 "text": self._json.dumps(response_obj),
                 "reason": reason,
-                "content_type": content_type
+                "content_type": content_type,
             }
             obj = web.HTTPInternalServerError(**args)
         else:
@@ -161,7 +169,7 @@ class BaseHandler(CorsViewMixin):
             obj = web.HTTPForbidden(**response_obj)
         elif status == 404:  # not found
             obj = web.HTTPNotFound(**response_obj)
-        elif status == 406: # Not acceptable
+        elif status == 406:  # Not acceptable
             obj = web.HTTPNotAcceptable(**response_obj)
         elif status == 412:
             obj = web.HTTPPreconditionFailed(**response_obj)
@@ -176,7 +184,7 @@ class BaseHandler(CorsViewMixin):
         response: dict = None,
         headers: dict = None,
         content_type: str = "application/json",
-        **kwargs # pylint: disable=W0613
+        **kwargs,  # pylint: disable=W0613
     ) -> web.Response:
         response_obj = {
             "text": self._json.dumps(response),
@@ -235,10 +243,10 @@ class BaseHandler(CorsViewMixin):
             if request.body_exists:
                 body = await request.read()
                 body = body.decode("ascii")
-        except Exception: # pylint: disable=W0703
+        except Exception:  # pylint: disable=W0703
             pass
         finally:
-            return body # pylint: disable=W0150
+            return body  # pylint: disable=W0150
 
     async def json_data(self, request: web.Request = None):
         if not request:
@@ -304,7 +312,6 @@ class BaseHandler(CorsViewMixin):
 
 
 class BaseView(web.View, BaseHandler, AbstractView):
-
     cors_config = {
         "*": aiohttp_cors.ResourceOptions(
             allow_credentials=True,
@@ -322,7 +329,7 @@ class BaseView(web.View, BaseHandler, AbstractView):
             try:
                 return await self.get_json(self.request)
             except JSONDecodeError as ex:
-                logging.exception(f'Empty or Wrong POST Data, {ex}')
+                logging.exception(f"Empty or Wrong POST Data, {ex}")
                 return None
         try:
             params = await self.request.post()
@@ -339,4 +346,4 @@ class BaseView(web.View, BaseHandler, AbstractView):
                         except (KeyError, ValueError):
                             pass
         finally:
-            return params # pylint: disable=W0150
+            return params  # pylint: disable=W0150

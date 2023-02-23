@@ -15,8 +15,9 @@ from navigator_auth.conf import (
 
 from .oauth import OauthAuth
 
+
 async def is_token_valid(token, issuer, client_id):
-    jwt_verifier = JWTVerifier(issuer, client_id, 'api://default')
+    jwt_verifier = JWTVerifier(issuer, client_id, "api://default")
     try:
         await jwt_verifier.verify_access_token(token)
         return True
@@ -25,7 +26,7 @@ async def is_token_valid(token, issuer, client_id):
 
 
 async def is_id_token_valid(token, issuer, client_id, nonce):
-    jwt_verifier = JWTVerifier(issuer, client_id, 'api://default')
+    jwt_verifier = JWTVerifier(issuer, client_id, "api://default")
     try:
         await jwt_verifier.verify_id_token(token, nonce=nonce)
         return True
@@ -38,15 +39,16 @@ class OktaAuth(OauthAuth):
 
     Description: Authentication Backend using Third-party Okta Service.
     """
+
     user_attribute: str = "user"
     username_attribute: str = "email"
     userid_attribute: str = "sub"
     pwd_atrribute: str = "password"
     _service_name: str = "okta"
-    _description: str = 'Okta Authentication'
+    _description: str = "Okta Authentication"
 
     def configure(self, app, router):
-        super(OktaAuth, self).configure(app, router) # first, configure parents
+        super(OktaAuth, self).configure(app, router)  # first, configure parents
 
         # auth paths.
         self.base_url = f"https://{OKTA_DOMAIN}/"
@@ -57,37 +59,39 @@ class OktaAuth(OauthAuth):
         self._introspection_uri = f"https://{OKTA_DOMAIN}/oauth2/default/v1/introspect"
 
     async def get_credentials(self, request: web.Request):
-        APP_STATE = 'ApplicationState'
-        self.nonce = 'SampleNonce'
+        APP_STATE = "ApplicationState"
+        self.nonce = "SampleNonce"
         domain_url = self.get_domain(request)
-        self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
+        self.redirect_uri = self.redirect_uri.format(
+            domain=domain_url, service=self._service_name
+        )
         qs = {
             "client_id": f"{OKTA_CLIENT_ID}",
             # "client_secret": f"{OKTA_CLIENT_SECRET}",
             "redirect_uri": self.redirect_uri,
-            'scope': "openid email profile",
-            'state': APP_STATE,
-            'nonce': self.nonce,
-            'response_type': 'code',
-            'response_mode': 'query',
+            "scope": "openid email profile",
+            "state": APP_STATE,
+            "nonce": self.nonce,
+            "response_type": "code",
+            "response_mode": "query",
         }
         return qs
 
     async def auth_callback(self, request: web.Request):
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
         domain_url = self.get_domain(request)
-        self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
+        self.redirect_uri = self.redirect_uri.format(
+            domain=domain_url, service=self._service_name
+        )
         code = request.query.get("code")
         if not code:
-            response = {
-                "message": "Auth Error: Okta Code not accessible"
-            }
+            response = {"message": "Auth Error: Okta Code not accessible"}
             return web.json_response(response, status=403)
         # B.- processing the code
         query_params = {
-            'grant_type': 'authorization_code',
-            'code': code,
-            'redirect_uri': self.redirect_uri
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": self.redirect_uri,
         }
         query_params = requests.compat.urlencode(query_params)
         try:
@@ -96,10 +100,7 @@ class OktaAuth(OauthAuth):
                 headers=headers,
                 data=query_params,
                 timeout=60,
-                auth=(
-                    OKTA_CLIENT_ID,
-                    OKTA_CLIENT_SECRET
-                ),
+                auth=(OKTA_CLIENT_ID, OKTA_CLIENT_SECRET),
             ).json()
         except Exception as err:
             response = {
@@ -108,24 +109,20 @@ class OktaAuth(OauthAuth):
             return web.json_response(response, status=403)
         # Get tokens and validate
         if not exchange.get("token_type"):
-            response = {
-                "message": "Okta: Unsupported token type. Should be 'Bearer'."
-            }
+            response = {"message": "Okta: Unsupported token type. Should be 'Bearer'."}
             return web.json_response(response, status=403)
         # user data
         access_token = exchange["access_token"]
         id_token = exchange["id_token"]
 
         if not await is_token_valid(access_token, self._issuer, OKTA_CLIENT_ID):
-            response = {
-                "message": "Okta: Access Token Invalid."
-            }
+            response = {"message": "Okta: Access Token Invalid."}
             return web.json_response(response, status=403)
 
-        if not await is_id_token_valid(id_token, self._issuer, OKTA_CLIENT_ID, self.nonce):
-            response = {
-                "message": "Okta: ID Token Invalid."
-            }
+        if not await is_id_token_valid(
+            id_token, self._issuer, OKTA_CLIENT_ID, self.nonce
+        ):
+            response = {"message": "Okta: ID Token Invalid."}
             return web.json_response(response, status=403)
 
         # Authorization flow successful, get userinfo and login user
@@ -133,12 +130,12 @@ class OktaAuth(OauthAuth):
             data = requests.get(
                 self.userinfo_uri,
                 timeout=60,
-                headers={'Authorization': f'Bearer {access_token}'}
+                headers={"Authorization": f"Bearer {access_token}"},
             ).json()
             userdata, uid = self.build_user_info(data)
             # get user data
             data = await self.validate_user_info(request, uid, userdata, access_token)
-            return self.home_redirect(request, token=data['token'], token_type='Bearer')
+            return self.home_redirect(request, token=data["token"], token_type="Bearer")
         except Exception as err:
             logging.exception(f"Okta Auth Error: {err}")
             return self.redirect(uri=self.login_failed_uri)
@@ -150,5 +147,5 @@ class OktaAuth(OauthAuth):
         pass
 
     async def check_credentials(self, request):
-        """ Authentication and create a session."""
+        """Authentication and create a session."""
         return True

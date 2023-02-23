@@ -4,17 +4,17 @@ Oauth is a Abstract Class with basic functionalities for all Oauth2 backends.
 """
 from abc import abstractmethod
 from aiohttp import web
-from navigator_auth.exceptions import (
-    AuthException
-)
+from navigator_auth.exceptions import AuthException
 from .external import ExternalAuth
+
 
 class OauthAuth(ExternalAuth):
     """OauthAuth.
 
     Description: Abstract Class for all Oauth2 backends.
     """
-    _auth_code: str = 'code'
+
+    _auth_code: str = "code"
     _external_auth: bool = True
 
     @abstractmethod
@@ -22,10 +22,12 @@ class OauthAuth(ExternalAuth):
         pass
 
     async def authenticate(self, request: web.Request):
-        """ Authenticate, refresh or return the user credentials."""
+        """Authenticate, refresh or return the user credentials."""
         try:
             domain_url = self.get_domain(request)
-            self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
+            self.redirect_uri = self.redirect_uri.format(
+                domain=domain_url, service=self._service_name
+            )
             # Build the URL
             params = await self.get_credentials(request)
             url = self.prepare_url(self.authorize_uri, params)
@@ -45,7 +47,5 @@ class OauthAuth(ExternalAuth):
         except KeyError:
             code = None
         if not code:
-            raise RuntimeError(
-                f"Auth Error: {self._service_name} Code not accessible"
-            )
+            raise RuntimeError(f"Auth Error: {self._service_name} Code not accessible")
         return code

@@ -4,14 +4,16 @@ from navigator_auth.models import Organization, OrganizationUser
 from navigator_auth.conf import AUTH_ORGANIZATION_MODEL, AUTH_USER_ORGANIZATION_MODEL
 from .model import ModelHandler
 
+
 class OrganizationHandler(ModelHandler):
     model: Any = Organization
     model_name: str = AUTH_ORGANIZATION_MODEL
-    name: str = 'Organization'
-    pk: str = 'org_id'
+    name: str = "Organization"
+    pk: str = "org_id"
+
 
 class UserOrganizationHandler(ModelHandler):
     model: BaseModel = OrganizationUser
     model_name: str = AUTH_USER_ORGANIZATION_MODEL
-    name: str = 'User Organization'
-    pk: list = ['org_id', 'user_id']
+    name: str = "User Organization"
+    pk: list = ["org_id", "user_id"]

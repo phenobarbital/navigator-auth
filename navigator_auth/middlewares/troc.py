@@ -4,17 +4,9 @@ This token use a RNC algorithm to create a token-based authorization
 for Navigator.
 """
 from aiohttp import web
-from typing import (
-    Optional,
-    Coroutine,
-    Tuple
-)
+from typing import Optional, Coroutine, Tuple
 from navigator.libs.cypher import Cipher
-from navigator.conf import (
-    PARTNER_KEY,
-    CYPHER_TYPE,
-    PARTNER_SESSION_TIMEOUT
-)
+from navigator.conf import PARTNER_KEY, CYPHER_TYPE, PARTNER_SESSION_TIMEOUT
 from .abstract import base_middleware
 
 # TODO: add expiration logic when read the token
@@ -25,7 +17,7 @@ class troctoken_middleware(base_middleware):
     def __init__(
         self,
         user_fn: Optional[Coroutine] = None,
-        protected_routes: Optional[Tuple] = tuple()
+        protected_routes: Optional[Tuple] = tuple(),
     ):
         """
         Check if an Auth Token was provided and returns based on
@@ -52,27 +44,19 @@ class troctoken_middleware(base_middleware):
             except Exception as err:
                 print(err)
                 token = None
-            if self.path_protected(request): # is a protected site.
+            if self.path_protected(request):  # is a protected site.
                 if not token:
                     raise web.HTTPForbidden(
-                        reason='Invalid authorization Token',
+                        reason="Invalid authorization Token",
                     )
                 try:
-                    payload = CIPHER.decode(
-                        passphrase=token
-                    )
+                    payload = CIPHER.decode(passphrase=token)
                     if not payload:
-                        raise web.HTTPForbidden(
-                            reason="Invalid authorization Token"
-                        )
+                        raise web.HTTPForbidden(reason="Invalid authorization Token")
                 except ValueError as err:
-                    raise web.HTTPUnauthorized(
-                        reason="Token Decryption Error"
-                    )
+                    raise web.HTTPUnauthorized(reason="Token Decryption Error")
                 except Exception as err:
-                    raise web.HTTPBadRequest(
-                        reason=f"Token Decryption Error: {err}"
-                    )
+                    raise web.HTTPBadRequest(reason=f"Token Decryption Error: {err}")
                 try:
                     user = await self._fn(payload, request)
                     if user:
@@ -80,12 +64,11 @@ class troctoken_middleware(base_middleware):
                         request.user = user
                         print(user)
                     else:
-                        raise web.HTTPForbidden(
-                            reason='Access Restricted'
-                        )
+                        raise web.HTTPForbidden(reason="Access Restricted")
                 except Exception as err:
                     raise web.HTTPBadRequest(
-                        reason=f'Exception on Callable called by {__name__!s} {err!s}'
+                        reason=f"Exception on Callable called by {__name__!s} {err!s}"
                     )
             return await handler(request)
+
         return middleware

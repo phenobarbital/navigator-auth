@@ -8,4 +8,4 @@ from .version import __author__, __description__, __title__, __version__, get_ve
 from .auth import AuthHandler
 
 
-__all__ = ('AuthHandler', )
+__all__ = ("AuthHandler",)

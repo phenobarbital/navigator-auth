@@ -16,8 +16,6 @@ class authz_allow_hosts(BaseAuthzHandler):
         origin = request.host if request.host else request.headers["origin"]
         for key in ALLOWED_HOSTS:
             if fnmatch.fnmatch(origin, key):
-                logging.debug(
-                    f'Authorization based on ALLOW HOST {key}'
-                )
+                logging.debug(f"Authorization based on ALLOW HOST {key}")
                 return True
         return False
