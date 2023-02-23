@@ -14,6 +14,7 @@ from aiohttp import web, hdrs
 from aiohttp.client import ClientTimeout, ClientSession
 from datamodel.exceptions import ValidationError
 from navconfig.logging import logging
+from navigator_session import AUTH_SESSION_OBJECT
 from navigator_auth.identities import AuthUser
 from navigator_auth.exceptions import UserNotFound
 from navigator_auth.conf import (
@@ -161,10 +162,8 @@ class ExternalAuth(BaseAuthBackend):
             redirect_url = request.query["redirect_url"]
         except (TypeError, KeyError):
             redirect_url = AUTH_REDIRECT_URI
-        print("NEW REDIRECT URL ", redirect_url)
         if not bool(urlparse(redirect_url).netloc):
             redirect_url = f"{domain_url}{redirect_url}"
-        print("NEW REDIRECT URL ", redirect_url)
         self.finish_redirect_url = redirect_url
 
     def redirect(self, uri: str):
@@ -250,6 +249,7 @@ class ExternalAuth(BaseAuthBackend):
             login = userdata[self.user_attribute]
         try:
             search = {self.username_attribute: login}
+            self.logger.debug(f'USER SEARCH > {search}')
             user = await self.get_user(**search)
         except UserNotFound as err:
             if AUTH_MISSING_ACCOUNT == "ignore":
@@ -263,7 +263,9 @@ class ExternalAuth(BaseAuthBackend):
                 try:
                     user = await self.get_user(**search)
                 except UserNotFound as ex:
-                    raise UserNotFound(f"User {login} doesn't exists: {ex}") from ex
+                    raise UserNotFound(
+                        f"User {login} doesn't exists: {ex}"
+                    ) from ex
             else:
                 raise RuntimeError(
                     f"Auth: Invalid config for AUTH_MISSING_ACCOUNT: {AUTH_MISSING_ACCOUNT}"
@@ -273,11 +275,14 @@ class ExternalAuth(BaseAuthBackend):
             args = {
                 "username_attribute": self.username_attribute,
                 "userid_attribute": self.userid_attribute,
-                "userdata": userdata,
+                "userdata": userdata
             }
             await self.auth_successful_callback(request, user, **args)
         try:
-            user = await self.create_user(userdata)
+            userinfo = self.get_userdata(user)
+            ### merging userdata and userinfo:
+            userinfo = {**userinfo, **userdata}
+            user = await self.create_user(userinfo)
             try:
                 user.username = userdata[self.username_attribute]
             except KeyError:
@@ -285,14 +290,13 @@ class ExternalAuth(BaseAuthBackend):
             user.token = token  # issued token:
             payload = {"user_id": user_id, **userdata}
             # saving Auth data.
-            await self.remember(request, user_id, userdata, user)
+            await self.remember(request, user_id, userinfo, user)
             # Create the User session.
             jwt_token = self.create_jwt(data=payload)
             data = {"token": jwt_token, "access_token": token, **userdata}
+            return data
         except Exception as err:
             logging.exception(err)
-        finally:
-            return data
 
     @abstractmethod
     async def check_credentials(self, request: web.Request):

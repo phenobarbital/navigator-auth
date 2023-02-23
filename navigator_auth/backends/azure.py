@@ -18,7 +18,7 @@ from navigator_auth.conf import (
     AZURE_SESSION_TIMEOUT,
     REDIS_AUTH_URL,
 )
-from navigator_auth.libs.json import json_encoder
+from navigator_auth.libs.json import json_encoder, json_decoder
 from .external import ExternalAuth
 
 
@@ -54,8 +54,9 @@ class AzureAuth(ExternalAuth):
     Authentication Backend for Microsoft Online Services.
     """
 
-    user_attribute: str = "id"
-    username_attribute: str = "userPrincipalName"
+    user_attribute: str = "username"
+    # username_attribute: str = "userPrincipalName"
+    username_attribute: str = "username"
     userid_attribute: str = "id"
     pwd_atrribute: str = "password"
     _service_name: str = "azure"
@@ -65,6 +66,7 @@ class AzureAuth(ExternalAuth):
         "given_name": "givenName",
         "family_name": "surname",
         "name": "displayName",
+        "phone": "mobilePhone"
     }
     _description: str = "Microsoft Azure Authentication"
 
@@ -106,7 +108,7 @@ class AzureAuth(ExternalAuth):
             ):
                 data = await request.post()
                 if len(data) > 0:
-                    user = data.get(self.username_attribute, None)
+                    user = data.get(self.user_attribute, None)
                     password = data.get(self.pwd_atrribute, None)
                     return [user, password]
                 else:
@@ -114,7 +116,7 @@ class AzureAuth(ExternalAuth):
             elif ctype == "application/json":
                 try:
                     data = await request.json()
-                    user = data[self.username_attribute]
+                    user = data[self.user_attribute]
                     password = data[self.pwd_atrribute]
                     return [user, password]
                 except Exception:
@@ -185,7 +187,7 @@ class AzureAuth(ExternalAuth):
                 client_info = {}
                 if "client_info" in result:
                     # It happens when client_info and profile are in request
-                    client_info = orjson.loads(decode_part(result["client_info"]))
+                    client_info = json_decoder(decode_part(result["client_info"]))
                 try:
                     if "access_token" in result:
                         access_token = result["access_token"]
@@ -257,19 +259,13 @@ class AzureAuth(ExternalAuth):
             # SCOPE = ["https://graph.microsoft.com/.default"]
             try:
                 state = auth_response["state"]
-            except Exception as err:
-                # raise AuthException(
-                #     f'Azure: Wrong authentication Callback, State: {err}'
-                # ) from err
+            except Exception:
                 return self.failed_redirect(request, error="ERROR_CONFIGURATION")
             try:
                 async with aioredis.Redis(connection_pool=self._pool) as redis:
                     result = await redis.get(f"azure_auth_{state}")
                     flow = orjson.loads(result)
-            except Exception as err:
-                # raise AuthException(
-                #     f'Azure: Error reading Flow State from Cache: {err}'
-                # )  from err
+            except Exception:
                 return self.failed_redirect(request, error="ERROR_RATE_LIMIT_EXCEEDED")
             app = self.get_msal_app()
             try:
@@ -301,12 +297,8 @@ class AzureAuth(ExternalAuth):
                         data = await self.validate_user_info(
                             request, uid, userdata, access_token
                         )
-                        print("DATA AZURE >> ", userdata)
                     except Exception as err:
-                        logging.exception("Azure: Error getting User information")
-                        # raise web.HTTPForbidden(
-                        #     reason=f"Azure: Error with User Information: {err}"
-                        # ) from err
+                        logging.exception(f"Azure: Error getting User information: {err}")
                         return self.failed_redirect(
                             request, error="ERROR_RESOURCE_NOT_FOUND"
                         )
@@ -319,22 +311,14 @@ class AzureAuth(ExternalAuth):
                     desc = result["error_description"]
                     message = f"Azure {error}: {desc}"
                     logging.exception(message)
-                    # raise web.HTTPForbidden(
-                    #     reason=message
-                    # )
                     return self.failed_redirect(request, error="ERROR_CONFIGURATION")
                 else:
-                    # raise web.HTTPForbidden(
-                    #     reason="Azure: Invalid Response from Server."
-                    # )
                     return self.failed_redirect(request, error="ERROR_CONFIGURATION")
             except Exception as err:
                 logging.exception(err)
-                # return self.redirect(uri=self.login_failed_uri)
                 return self.failed_redirect(request, error="ERROR_INVALID_REQUEST")
         except Exception as err:
             logging.exception(err)
-            # return self.redirect(uri=self.login_failed_uri)
             return self.failed_redirect(request, error="ERROR_UNKNOWN")
 
     async def logout(self, request):

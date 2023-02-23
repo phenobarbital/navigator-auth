@@ -180,8 +180,9 @@ class TrocToken(BaseAuthBackend):
         try:
             if isinstance(request.match_info.route, SystemRoute):  # eg. 404
                 return await handler(request)
-        except Exception as err:  # pylint: disable=W0703
-            self.logger.error(err)
+        except Exception:  # pylint: disable=W0703
+            #self.logger.error(err)
+            pass
         ## Already Authenticated
         try:
             if request.get("authenticated", False) is True:
@@ -223,7 +224,7 @@ class TrocToken(BaseAuthBackend):
             self.logger.error("Auth Middleware: Invalid Signature or secret")
             raise self.ForbiddenAccess(reason=err.message)
         except Exception as err:  # pylint: disable=W0703
-            self.logger.error(f"Bad Request: {err!s}")
+            # self.logger.error(f"Bad Request: {err!s}")
             if AUTH_CREDENTIALS_REQUIRED is True:
                 raise web.HTTPBadRequest(reason=f"Auth Error: {err!s}")
         return await handler(request)

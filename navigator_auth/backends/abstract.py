@@ -34,7 +34,7 @@ from navigator_auth.conf import (
     AUTH_CREDENTIALS_REQUIRED,
     SECRET_KEY,
 )
-
+from navigator_auth.libs.json import json_encoder
 # Authenticated Identity
 from navigator_auth.identities import Identity, AuthBackend
 
@@ -181,6 +181,14 @@ class BaseAuthBackend(ABC):
         to create Session Object."""
         self._app = app
 
+    def default_headers(self, message: str, exception: BaseException = None) -> dict:
+        headers = {
+            "X-AUTH": message,
+        }
+        if exception:
+            headers['X-ERROR'] = str(exception)
+        return headers
+
     def auth_error(
         self,
         reason: dict = None,
@@ -206,10 +214,10 @@ class BaseAuthBackend(ABC):
         if isinstance(reason, dict):
             response_obj = {**response_obj, **reason}
             # args["content_type"] = "application/json"
-            args["reason"] = self._json.dumps(response_obj)
+            args["reason"] = json_encoder(response_obj)
         else:
             response_obj['reason'] = reason
-            args["reason"] = self._json.dumps(response_obj)
+            args["reason"] = json_encoder(response_obj)
         # defining the error
         if status == 400:  # bad request
             obj = web.HTTPBadRequest(**args)

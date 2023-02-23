@@ -12,7 +12,6 @@ async def last_login(request: web.Request, user: Model, usermodel: Model, **kwar
     print("::: Calling last Login ::: ")
     logging.debug(f"User was logged in: {user.username}")
     # making a connection, then, saving the last login to user.
-    db = None
     args = {
         "user_id": user["user_id"]
     }
@@ -21,7 +20,7 @@ async def last_login(request: web.Request, user: Model, usermodel: Model, **kwar
         async with await db.connection() as conn:
             usermodel.Meta.set_connection(conn)
             u = await usermodel.get(**args)
-            u.last_login = datetime.now()
+            u.last_login = datetime.utcnow()
             await u.update()
     except Exception as e:
         logging.exception(e, stack_info=True)
@@ -47,13 +46,14 @@ async def saving_troc_user(request: web.Request, user: Model, usermodel: Model, 
         async with await db.connection() as conn:
             userinfo = await conn.fetch_one(sql)
             userattr = {}
-            for key, val in userinfo.items():
-                userdata[key] = val
-                userattr[key] = val
-            usermodel.Meta.set_connection(conn)
-            u = await usermodel.get(**args)
-            u.attributes = userattr
-            await u.update()
+            if userinfo:
+                for key, val in userinfo.items():
+                    userdata[key] = val
+                    userattr[key] = val
+                usermodel.Meta.set_connection(conn)
+                u = await usermodel.get(**args)
+                u.attributes = userattr
+                await u.update()
     except Exception as e:
         logging.exception(e, stack_info=True)
     finally:
