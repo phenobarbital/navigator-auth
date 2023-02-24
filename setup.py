@@ -122,7 +122,7 @@ setup(
         "msal==1.20.0",
         "aiogoogle==5.1.0",
         "okta-jwt-verifier==0.2.3",
-        "python-slugify==7.0.0",
+        "python-slugify==8.0.1",
         "aiohttp_cors>=0.7.0",
         "navigator-session>=0.3.3",
         "pendulum==2.1.2"
