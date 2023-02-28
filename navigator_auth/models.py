@@ -84,6 +84,21 @@ class Organization(Model):
             self.org_slug = slugify(self.organization)
 
 
+class OrganizationClient(Model):
+    client_id: Client = Column(required=True, primary_key=True)
+    org_id: Client = Column(required=True, primary_key=True)
+    attributes: dict = Column(required=False, default_factory=dict)
+    created_at: datetime = Column(required=False, default=datetime.now())
+    updated_at: datetime = Column(required=False, default=datetime.now())
+    created_by: str = Column(required=False)
+
+    class Meta:
+        name = "organization_clients"
+        schema = AUTH_DB_SCHEMA
+        strict = True
+        frozen = False
+
+
 class ProgramCategory(Model):
     program_cat_id: int = Column(
         required=False, primary_key=True, db_default="auto", repr=False
