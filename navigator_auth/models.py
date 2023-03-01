@@ -27,8 +27,6 @@ class Text(str):
 
 
 ## Create a TENANT as Main Level.
-
-
 class Client(Model):
     """Highest hierarchy level."""
 

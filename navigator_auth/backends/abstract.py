@@ -260,6 +260,8 @@ class BaseAuthBackend(ABC):
             try:
                 session = await new_session(request, userdata)
                 user.is_authenticated = True  # if session, then, user is authenticated.
+                print(' USER ======== ')
+                print(user)
                 session[self.session_key_property] = identity
                 try:
                     session["user"] = session.encode(user)
