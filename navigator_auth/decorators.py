@@ -93,7 +93,9 @@ def allowed_groups(groups: list, content_type: str = "application/json") -> Call
             else:
                 request = args[-1]
             if request is None:
-                raise ValueError(f"web.Request was not found in arguments. {handler!s}")
+                raise ValueError(
+                    f"web.Request was not found in arguments. {handler!s}"
+                )
             if request.get("authenticated", False) is False:
                 # check credentials:
                 raise web.HTTPUnauthorized(

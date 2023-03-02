@@ -11,7 +11,6 @@ from aiohttp.web_urldispatcher import SystemRoute
 from navigator_session import get_session
 from navigator_auth.exceptions import AuthException, InvalidAuth
 from navigator_auth.conf import (
-    AUTH_CREDENTIALS_REQUIRED,
     AUTH_JWT_ALGORITHM,
     AUTH_TOKEN_ISSUER,
     AUTH_TOKEN_SECRET,
@@ -228,8 +227,10 @@ class TokenAuth(BaseAuthBackend):
                 raise web.HTTPForbidden(
                     reason=f"TokenAuth: Invalid authorization token: {err!r}"
                 )
-            except Exception as err:
-                if AUTH_CREDENTIALS_REQUIRED is True:
-                    self.logger.exception(f"Error on Token Middleware: {err}")
-                    raise web.HTTPBadRequest(reason=f"Authentication Error: {err}")
+            except AuthException as err:
+                self.logger.error("TokenAuth: Authentication failed.")
+                raise self.Unauthorized(
+                    reason="TokenAuth: Authentication failed.",
+                    exception=err
+                )
         return await handler(request)
