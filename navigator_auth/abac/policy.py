@@ -31,4 +31,4 @@ class Policy:
         self.effect = effect
         self.environment = environment
         self.method = method
-        self.priority = priority
+        self.priority = priority if priority else 0

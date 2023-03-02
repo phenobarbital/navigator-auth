@@ -1,9 +1,6 @@
-from aiohttp import web, hdrs
+from aiohttp import web
 from navigator_session import get_session
-from navigator_auth.conf import AUTH_SESSION_OBJECT
-from navigator_auth.exceptions import (
-    Forbidden, Unauthorized
-)
+from .errors import PreconditionFailed, AccessDenied
 from .policy import PolicyEffect
 from .pdp import PDP
 
@@ -17,12 +14,19 @@ class Guardian:
     def __init__(self, pdp: PDP):
         self.pdp = pdp
 
+    def is_authenticated(self, request: web.Request):
+        if request.get("authenticated", False) is False:
+            # check credentials:
+            raise AccessDenied(
+                reason="User not authenticated."
+            )
+
     async def get_user(self, request: web.Request) -> tuple:
         try:
             session = await get_session(request, new=False)
         except RuntimeError as ex:
-            self._logger.error('QS: User Session system is not installed.')
-            raise Unauthorized(
+            self._logger.error('NAV User Session system is not installed.')
+            raise PreconditionFailed(
                reason="Missing User session for validating Access.",
                exception=ex
             ) from ex
@@ -39,27 +43,43 @@ class Guardian:
         Args:
             request (web.Request): _description_
 
-        Returns:
-            PolicyEffect: ALLOW or DENY Resource.
+        Raises:
+            web.HTTPUnauthorized: Access is Denied.
         """
-        if request.get("authenticated", False) is False:
-            # check credentials:
-            return PolicyEffect.DENY
+        self.is_authenticated(request=request)
         session, user = await self.get_user(request)
+        return self.pdp.authorize(
+            request=request,
+            session=session,
+            user=user
+        )
 
-    async def has_permission(self, request: web.Request, permission: list):
+    async def has_permission(self, request: web.Request, permissions: list):
         """has_permission.
 
             Check if user has the permission to access this resource.
         Args:
             request (web.Request): Web Request.
-            permission (list): List of requested permissions.
+            permissions (list): List of requested permissions.
 
-        Returns:
-            PolicyEffect: ALLOW or DENY Resource.
+        Raises:
+            web.HTTPUnauthorized: Access is Denied.
         """
+        self.is_authenticated(request=request)
+        session, user = await self.get_user(request)
+        return await self.pdp.has_permission(
+            request=request,
+            permission=permissions,
+            session=session,
+            user=user
+        )
 
-    async def allowed_groups(self, request: web.Request, groups: list, effect: PolicyEffect = PolicyEffect.ALLOW):
+    async def allowed_groups(
+            self,
+            request: web.Request,
+            groups: list,
+            effect: PolicyEffect = PolicyEffect.ALLOW
+        ):
         """allowed_groups.
 
             Check if user is belong to any permitted groups.
@@ -70,35 +90,13 @@ class Guardian:
 
         Raises:
             web.HTTPUnauthorized: Access is Denied.
-
-        Returns:
-            PolicyEffect: ALLOW or DENY Resource.
         """
-        if request.get("authenticated", False) is False:
-            # check credentials:
-            return PolicyEffect.DENY
+        self.is_authenticated(request=request)
         session, user = await self.get_user(request)
-        try:
-            userinfo = session[AUTH_SESSION_OBJECT]
-        except KeyError:
-            member = False
-        if "groups" in userinfo:
-            member = bool(not set(userinfo["groups"]).isdisjoint(groups))
-        else:
-            for group in user.groups:
-                if group.group in groups:
-                    member = True
-                    break
-        if member is True:
-            ## TODO: Return an ABAC Response (allow/deny with )
-            return effect
-        else:
-            ## TODO migrate to a custom response.
-            raise web.HTTPUnauthorized(
-                reason="Access Denied",
-                headers={
-                    hdrs.CONTENT_TYPE: 'application/json',
-                    hdrs.CONNECTION: "keep-alive",
-                },
-            )
-            # return PolicyEffect.DENY
+        return await self.pdp.allowed_groups(
+            request=request,
+            session=session,
+            user=user,
+            groups=groups,
+            effect=effect
+        )

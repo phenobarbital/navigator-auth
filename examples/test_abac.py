@@ -10,6 +10,7 @@ class ExampleView(BaseView):
     async def get(self):
         guardian = self.request.app['security']
         response = await guardian.authorize(request=self.request)
+        print('RESPONSE ', response)
         return self.response('GET METHOD')
 
     async def post(self):
@@ -19,7 +20,7 @@ class ExampleView(BaseView):
 
     async def put(self):
         guardian = self.request.app['security']
-        # await guardian.has_permission(request=self.request, permissions=['add_widget'])
+        await guardian.has_permission(request=self.request, permissions=['add_widget'])
         return self.response('PUT METHOD')
 
     async def delete(self):
@@ -52,7 +53,7 @@ policy = Policy(
     priority=0
 )
 
-# Create policy decision point
+# Create a policy decision point
 pdp = PDP()
 pdp.add_policy(policy)
 
@@ -63,13 +64,13 @@ walmart = Policy(
     groups=['walmart'],
     context={
         "department": "Walmart",
-        # "department": rules.NotIn('Flexroc')
     }
 )
 pdp.add_policy(walmart)
 
 app = web.Application()
 
+### Also creates a PEP (Policy Enforcing Point)
 app['security'] = Guardian(pdp=pdp)
 
 # create a new instance of Auth System

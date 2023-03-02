@@ -483,7 +483,6 @@ class AuthHandler:
     def default_headers(self, message: str, exception: BaseException = None) -> dict:
         headers = {
             "X-AUTH": message,
-            # "Content-Type": "application/json; charset=utf-8"
         }
         if exception:
             headers['X-ERROR'] = str(exception)
