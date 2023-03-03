@@ -6,14 +6,18 @@ from .policy import Policy
 from .policy import PolicyEffect
 from .errors import PreconditionFailed, Unauthorized, AccessDenied
 from .context import EvalContext
+from .guardian import Guardian
+from .storages.abstract import AbstractStorage
 
 class PDP:
     """ABAC Policy Decision Point implementation.
     """
-    def __init__(self, policies: Optional[List[Policy]] = None):
+    def __init__(self, storage: AbstractStorage, policies: Optional[List[Policy]] = None):
         self._policies: list = []
-        if policies:
+        if isinstance(policies, list):
             self._policies = policies
+        ### Loading an Storage and registering for Load Policies.
+        self.storage = storage
 
     def add_policy(self, policy: Policy):
         self._policies.append(policy)
@@ -79,3 +83,41 @@ class PDP:
             raise AccessDenied(
                 "Access Denied"
             )
+
+    async def on_startup(self, app: web.Application):
+        """Signal Handler for loading Policies from Storage.
+        """
+        policies = await self.storage.load_policies()
+        for policy in policies:
+            if policy['effect'] == 'ALLOW':
+                policy['effect'] = PolicyEffect.ALLOW
+            else:
+                policy['effect'] = PolicyEffect.DENY
+            p = Policy(**policy)
+            print('POLICY ', p)
+            self._policies.append(p)
+        self._policies.sort(key=lambda policy: policy.priority)
+
+    async def on_shutdown(self, app: web.Application):
+        await self.storage.close()
+
+    def setup(self, app: web.Application):
+        if isinstance(app, web.Application):
+            self.app = app # register the app into the Extension
+        elif hasattr(app, "get_app"):
+            self.app = app.get_app()
+        else:
+            raise TypeError(
+                f"Invalid type for Application Setup: {app}:{type(app)}"
+            )
+        ### Also creates a PEP (Policy Enforcing Point)
+        self.app['security'] = Guardian(pdp=self)
+
+        # startup operations over storage backend
+        self.app.on_startup.append(
+            self.on_startup
+        )
+        # cleanup operations over storage backend
+        self.app.on_shutdown.append(
+            self.on_shutdown
+        )

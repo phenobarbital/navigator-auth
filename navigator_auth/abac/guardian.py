@@ -1,8 +1,9 @@
+from collections.abc import Callable
 from aiohttp import web
 from navigator_session import get_session
 from .errors import PreconditionFailed, AccessDenied
 from .policy import PolicyEffect
-from .pdp import PDP
+
 
 class Guardian:
     """Guardian.
@@ -11,7 +12,7 @@ class Guardian:
 
     Given a PDP it can decide via several methods if an inquiry is allowed or not.
     """
-    def __init__(self, pdp: PDP):
+    def __init__(self, pdp: Callable):
         self.pdp = pdp
 
     def is_authenticated(self, request: web.Request):

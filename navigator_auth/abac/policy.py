@@ -43,9 +43,10 @@ class Policy:
             method: Optional[Union[list, str]] = None,
             environment: Optional[list] = None,
             description: str = None,
-            priority: int = None
+            priority: int = None,
+            **kwargs
     ):
-        self.name = name if name else uuid.uuid1()
+        self.name = name if name else uuid.uuid1().hex
         self.actions = actions
         if type(resource) == str:  # pylint: disable=C0123
             self.resources = list(Exp(resource))
@@ -64,6 +65,8 @@ class Policy:
         else:
             self.method = method
         self.priority = priority if priority else 0
+        ### any other attributes so far
+        self.attributes = kwargs
 
     def __str__(self) -> str:
         return f"<{type(self).__name__}({self.name}, {self.resources!r})>"
