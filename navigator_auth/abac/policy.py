@@ -13,6 +13,7 @@ class PolicyEffect(Enum):
 class PolicyResponse:
     effect: PolicyEffect
     response: str
+    rule: str
 
 class Exp:
     def __init__(self, value):
@@ -58,7 +59,10 @@ class Policy:
         self.groups = groups
         self.effect = effect
         self.environment = environment
-        self.method = method
+        if isinstance(method, str):
+            self.method = list(method)
+        else:
+            self.method = method
         self.priority = priority if priority else 0
 
     def __str__(self) -> str:
@@ -75,20 +79,20 @@ class Policy:
             ## first: check by resource context
             if resource.value.match(ctx.path):
                 fit_result = True
-            ## second: match a request method:
-            if self.method:
-                if self.method == ctx.method:
-                    fit_result = True
-            ## third: check if user of session has contexts attributes required:
-            fit_context = False
-            if self.context_attrs:
-                for a in self.context_attrs:
-                    if a in ctx.user_keys:
-                        fit_context = True
-                    if a in ctx.session_keys:
-                        fit_context = True
-                if not fit_context: # this policy is enforcing over Context Attributes.
-                    fit_result = False
+        ## second: match a request method:
+        if self.method:
+            if ctx.method in self.method:
+                fit_result = True
+        ## third: check if user of session has contexts attributes required:
+        fit_context = False
+        if self.context_attrs:
+            for a in self.context_attrs:
+                if a in ctx.user_keys:
+                    fit_context = True
+                if a in ctx.session_keys:
+                    fit_context = True
+            if not fit_context: # this policy is enforcing over Context Attributes.
+                fit_result = False
         return fit_result
 
     async def allowed(self, ctx: EvalContext) -> bool:
@@ -98,13 +102,15 @@ class Policy:
                 ### allowed by groups:
                 return PolicyResponse(
                     effect=self.effect,
-                    response=f"Declared by Policy {self.name} with effect: {self.effect}"
+                    response=f"Declared by Policy {self.name} with effect: {self.effect}",
+                    rule=self.name
                 )
         if not self.context:
             ## there is no contexts to match with this resource, return default:
             return PolicyResponse(
                     effect=self.effect,
-                    response=f"Default by Policy {self.name} with effect: {self.effect}"
+                    response=f"Default by Policy {self.name} with effect: {self.effect}",
+                    rule=self.name
                 )
         else:
             is_allowed = False
@@ -118,10 +124,12 @@ class Policy:
             if is_allowed is True:
                 return PolicyResponse(
                     effect=self.effect,
-                    response=f"Access by {self.name} with effect: {self.effect}"
+                    response=f"Access by {self.name} with effect: {self.effect}",
+                    rule=self.name
                 )
         ### default return False
         return PolicyResponse(
             effect=PolicyEffect.DENY,
-            response=f"Unauthorized by Policy {self.name}"
+            response=f"Unauthorized by Policy {self.name}",
+            rule=self.name
         )
