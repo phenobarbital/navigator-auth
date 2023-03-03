@@ -27,9 +27,12 @@ class ExampleView(BaseView):
         return self.response('DELETE METHOD')
 
 
+## TODO: making a decorator for classes and functions.
 @groups_protected(groups=['superuser'])
 class TestView(BaseView):
     async def get(self):
+        guardian = self.request.app['security']
+        await guardian.authorize(request=self.request)
         return self.response('GET TEST VIEW')
 
     async def post(self):
@@ -41,14 +44,14 @@ class TestView(BaseView):
     async def delete(self):
         return self.response('DELETE  TEST VIEW')
 
-## TODO: making a decorator for classes and functions.
+
 
 ## Creating a basic Policy
 policy = Policy(
     'avoid_example_delete',
     effect=PolicyEffect.DENY,
     description="Avoid using DELETE method",
-    resource="/api/v1/example/",
+    resource=["/api/v1/example/"],
     method='DELETE',
     priority=0
 )
@@ -58,12 +61,12 @@ pdp = PDP()
 pdp.add_policy(policy)
 
 walmart = Policy(
-    'allow_access_walmart',
-    description="Allow all users identified with Walmart to enter",
-    resource="/walmart/*",
-    groups=['walmart'],
+    'allow_access_test',
+    description="Allow all users identified with Test to enter",
+    resource=["/api/v1/test/*"],
+    groups=['superuser'],
     context={
-        "department": "Walmart",
+        "username": "jlara@trocglobal.com",
     }
 )
 pdp.add_policy(walmart)

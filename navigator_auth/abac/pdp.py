@@ -5,6 +5,7 @@ from navigator_auth.conf import AUTH_SESSION_OBJECT
 from .policy import Policy
 from .policy import PolicyEffect
 from .errors import PreconditionFailed, Unauthorized, AccessDenied
+from .context import EvalContext
 
 class PDP:
     """ABAC Policy Decision Point implementation.
@@ -28,14 +29,17 @@ class PDP:
             user: Any = None,
             effect: PolicyEffect = PolicyEffect.ALLOW
         ):
+        ctx = EvalContext(request, user, session)
         # Filter policies that fit Inquiry by its attributes.
-        filtered = [p for p in self._policies]
-        print('POLICIES > ', filtered)
+        filtered = [p for p in self._policies if p.fits(ctx)]
         # no policies -> deny access!
         if len(filtered) == 0:
             raise PreconditionFailed(
                 "No Matching Policies were found, deny access."
             )
+        # we have policies - all of them should have allow effect, otherwise -> deny access!
+        for policy in filtered:
+            print(policy)
         ## return default effect:
         return effect
 

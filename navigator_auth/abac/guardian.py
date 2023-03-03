@@ -48,7 +48,7 @@ class Guardian:
         """
         self.is_authenticated(request=request)
         session, user = await self.get_user(request)
-        return self.pdp.authorize(
+        return await self.pdp.authorize(
             request=request,
             session=session,
             user=user
