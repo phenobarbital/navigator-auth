@@ -502,7 +502,9 @@ class AuthHandler:
         else:
             headers = self.default_headers(message=str(reason), exception=exception)
         # TODO: process the exception object
-        response_obj = {}
+        response_obj = {
+            "status": status
+        }
         if exception:
             response_obj["error"] = str(exception)
         args = {
@@ -513,10 +515,10 @@ class AuthHandler:
         if isinstance(reason, dict):
             response_obj = {**response_obj, **reason}
             # args["content_type"] = "application/json"
-            args["reason"] = self._json.dumps(response_obj)
+            args["body"] = self._json.dumps(response_obj)
         else:
             response_obj['reason'] = reason
-            args["reason"] = self._json.dumps(response_obj)
+            args["body"] = self._json.dumps(response_obj)
         # defining the error
         if status == 400:  # bad request
             obj = web.HTTPBadRequest(**args)
@@ -620,11 +622,4 @@ class AuthHandler:
                 reason="Auth Middleware: Invalid Signature, secret or authentication failed.",
                 exception=err
             )
-        except Exception as err:  # pylint: disable=W0703
-            logging.error(f"Bad Request: {err!s}")
-            if AUTH_CREDENTIALS_REQUIRED is True:
-                raise self.auth_error(
-                    reason="Authentication Error",
-                    exception=err
-                )
         return await handler(request)

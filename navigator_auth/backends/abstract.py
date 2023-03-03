@@ -262,10 +262,10 @@ class BaseAuthBackend(ABC):
                 user.is_authenticated = True  # if session, then, user is authenticated.
                 session[self.session_key_property] = identity
                 try:
-                    session["user"] = session.encode(user)
-                except RuntimeError:
-                    pass
-                request["session"] = session
+                    # session["user"] = session.encode(user)
+                    await session.save_encoded_data(request, 'user', user)
+                except RuntimeError as ex:
+                    print('Error Saving User ', ex)
             except Exception as err:
                 raise web.HTTPForbidden(
                     reason=f"Error Creating User Session: {err!s}"

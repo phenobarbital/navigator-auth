@@ -221,10 +221,6 @@ class TrocToken(BaseAuthBackend):
         except FailedAuth as err:
             raise self.ForbiddenAccess(reason=err.message)
         except AuthException as err:
-            self.logger.error("Auth Middleware: Invalid Signature or secret")
+            self.logger.error("Auth Middleware: Invalid Signature or Authentication Failed")
             raise self.ForbiddenAccess(reason=err.message)
-        except Exception as err:  # pylint: disable=W0703
-            # self.logger.error(f"Bad Request: {err!s}")
-            if AUTH_CREDENTIALS_REQUIRED is True:
-                raise web.HTTPBadRequest(reason=f"Auth Error: {err!s}")
         return await handler(request)
