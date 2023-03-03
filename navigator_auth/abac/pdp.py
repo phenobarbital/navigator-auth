@@ -29,7 +29,11 @@ class PDP:
             user: Any = None,
             effect: PolicyEffect = PolicyEffect.ALLOW
         ):
-        ctx = EvalContext(request, user, session)
+        try:
+            userinfo = session[AUTH_SESSION_OBJECT]
+        except KeyError:
+            userinfo = None
+        ctx = EvalContext(request, user, userinfo)
         # Filter policies that fit Inquiry by its attributes.
         filtered = [p for p in self._policies if p.fits(ctx)]
         # no policies -> deny access!
@@ -38,8 +42,13 @@ class PDP:
                 "No Matching Policies were found, deny access."
             )
         # we have policies - all of them should have allow effect, otherwise -> deny access!
+        answer = False
         for policy in filtered:
-            print(policy)
+            answer = await policy.allowed(ctx)
+            if answer.effect == PolicyEffect.DENY:
+                raise Unauthorized(
+                    f"Access Denied: {answer.response}"
+                )
         ## return default effect:
         return effect
 

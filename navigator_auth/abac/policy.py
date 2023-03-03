@@ -1,4 +1,5 @@
 from typing import Union, Optional
+from dataclasses import dataclass
 import uuid
 import re
 from enum import Enum
@@ -7,6 +8,11 @@ from .context import EvalContext
 class PolicyEffect(Enum):
     ALLOW = 1, 'allow'
     DENY = 0, 'deny'
+
+@dataclass
+class PolicyResponse:
+    effect: PolicyEffect
+    response: str
 
 class Exp:
     def __init__(self, value):
@@ -69,13 +75,53 @@ class Policy:
             ## first: check by resource context
             if resource.value.match(ctx.path):
                 fit_result = True
-            ## second: check if user of session has contexts attributes required:
+            ## second: match a request method:
+            if self.method:
+                if self.method == ctx.method:
+                    fit_result = True
+            ## third: check if user of session has contexts attributes required:
             fit_context = False
-            for a in self.context_attrs:
-                if a in ctx.user_keys:
-                    fit_context = True
-                if a in ctx.session_keys:
-                    fit_context = True
-            if not fit_context: # this policy is enforcing over Context Attributes.
-                fit_result = False
+            if self.context_attrs:
+                for a in self.context_attrs:
+                    if a in ctx.user_keys:
+                        fit_context = True
+                    if a in ctx.session_keys:
+                        fit_context = True
+                if not fit_context: # this policy is enforcing over Context Attributes.
+                    fit_result = False
         return fit_result
+
+    async def allowed(self, ctx: EvalContext) -> bool:
+        ## first: check groups or contexts:
+        if self.groups:
+            if bool(not set(ctx.session["groups"]).isdisjoint(self.groups)):
+                ### allowed by groups:
+                return PolicyResponse(
+                    effect=self.effect,
+                    response=f"Declared by Policy {self.name} with effect: {self.effect}"
+                )
+        if not self.context:
+            ## there is no contexts to match with this resource, return default:
+            return PolicyResponse(
+                    effect=self.effect,
+                    response=f"Default by Policy {self.name} with effect: {self.effect}"
+                )
+        else:
+            is_allowed = False
+            ### check attributes
+            for a in self.context_attrs:
+                att = self.context[a]
+                if att == getattr(ctx.user, a, None):
+                    is_allowed = True
+                if att == getattr(ctx.session, a, None):
+                    is_allowed = True
+            if is_allowed is True:
+                return PolicyResponse(
+                    effect=self.effect,
+                    response=f"Access by {self.name} with effect: {self.effect}"
+                )
+        ### default return False
+        return PolicyResponse(
+            effect=PolicyEffect.DENY,
+            response=f"Unauthorized by Policy {self.name}"
+        )

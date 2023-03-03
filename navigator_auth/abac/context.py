@@ -10,7 +10,7 @@ class EvalContext(dict, MutableMapping):
 
     Build The Evaluation Context from Request and User Data.
     """
-    def __init__(self, request: web.Request, user: Any, session: Any = None, *args, **kwargs):
+    def __init__(self, request: web.Request, user: Any, session: Any, *args, **kwargs):
         ## initialize the mutable mapping:
         self.store = dict()
         self.store['ip_addr'] = request.remote
@@ -28,7 +28,10 @@ class EvalContext(dict, MutableMapping):
         else:
             self.store['user_keys'] = user.__dict__.keys()
         self.store['session'] = session
-        self.store['session_keys'] = session.__dict__.keys()
+        if isinstance(session, dict):
+            self.store['session_keys'] = list(session.keys())
+        else:
+            self.store['session_keys'] = session.__dict__.keys()
         self.update(*args, **kwargs)
         self._columns = list(self.store.keys())
 

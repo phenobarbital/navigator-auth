@@ -24,6 +24,8 @@ class ExampleView(BaseView):
         return self.response('PUT METHOD')
 
     async def delete(self):
+        guardian = self.request.app['security']
+        response = await guardian.authorize(request=self.request)
         return self.response('DELETE METHOD')
 
 
@@ -49,10 +51,13 @@ class TestView(BaseView):
 ## Creating a basic Policy
 policy = Policy(
     'avoid_example_delete',
-    effect=PolicyEffect.DENY,
-    description="Avoid using DELETE method",
+    effect=PolicyEffect.ALLOW,
+    description="Avoid using DELETE method except by Jesus Lara",
     resource=["/api/v1/example/"],
     method='DELETE',
+    context={
+        "username": "jlara@trocglobal.com",
+    },
     priority=0
 )
 
