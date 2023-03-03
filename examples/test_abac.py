@@ -50,8 +50,6 @@ class TestView(BaseView):
 
 class WalmartView(BaseView):
     async def get(self):
-        guardian = self.request.app['security']
-        await guardian.authorize(request=self.request)
         return self.response('GET WALMART VIEW')
 
     async def post(self):
@@ -61,8 +59,6 @@ class WalmartView(BaseView):
         return self.response('PUT  WALMART VIEW')
 
     async def delete(self):
-        guardian = self.request.app['security']
-        response = await guardian.authorize(request=self.request)
         return self.response('DELETE  WALMART VIEW')
 
 # ## Creating a basic Policy

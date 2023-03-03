@@ -8,6 +8,7 @@ from .errors import PreconditionFailed, Unauthorized, AccessDenied
 from .context import EvalContext
 from .guardian import Guardian
 from .storages.abstract import AbstractStorage
+from .middleware import abac_middleware
 
 class PDP:
     """ABAC Policy Decision Point implementation.
@@ -56,7 +57,7 @@ class PDP:
                     f"Access Denied: {answer.response}"
                 )
         ## return default effect:
-        return effect
+        return answer
 
     async def allowed_groups(
             self,
@@ -96,7 +97,6 @@ class PDP:
             else:
                 policy['effect'] = PolicyEffect.DENY
             p = Policy(**policy)
-            print('POLICY ', p)
             self._policies.append(p)
         self._policies.sort(key=lambda policy: policy.priority)
 
@@ -124,3 +124,7 @@ class PDP:
         self.app.on_shutdown.append(
             self.on_shutdown
         )
+        # the backend add a middleware to the app
+        mdl = self.app.middlewares
+        # add the middleware for this backend Authentication
+        mdl.append(abac_middleware)
