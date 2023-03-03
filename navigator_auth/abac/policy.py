@@ -56,7 +56,7 @@ class Policy:
                 self.resources.append(Exp(r))
         self.description = description
         self.context = context if context else {}
-        self.context_attrs = self.context.keys()
+        self.context_attrs = list(self.context.keys())
         self.groups = groups
         self.effect = effect
         self.environment = environment
@@ -80,34 +80,41 @@ class Policy:
         fit_result = False
         for resource in self.resources:
             ## first: check by resource context
-            if resource.value.match(ctx.path):
-                fit_result = True
-        ## second: match a request method:
-        if self.method:
-            if ctx.method in self.method:
-                fit_result = True
-        ## third: check if user of session has contexts attributes required:
-        fit_context = False
-        if self.context_attrs:
-            for a in self.context_attrs:
-                if a in ctx.user_keys:
-                    fit_context = True
-                if a in ctx.session_keys:
-                    fit_context = True
-            if not fit_context: # this policy is enforcing over Context Attributes.
-                fit_result = False
+            if resource.value.match(ctx.path) is not None:
+                ## second: check if match a request method:
+                if self.method:
+                    if ctx.method in self.method:
+                        fit_result = True
+                else:
+                    fit_result = True
+
+        if fit_result:
+            ## third: check if user of session has contexts attributes required:
+            fit_context = False
+            if self.context_attrs:
+                for a in self.context_attrs:
+                    if a in ctx.user_keys:
+                        fit_context = True
+                    if a in ctx.session_keys:
+                        fit_context = True
+                if not fit_context and not fit_result:
+                    # this policy is enforcing over Context Attributes.
+                    fit_result = False
         return fit_result
 
     async def allowed(self, ctx: EvalContext) -> bool:
         ## first: check groups or contexts:
         if self.groups:
-            if bool(not set(ctx.session["groups"]).isdisjoint(self.groups)):
-                ### allowed by groups:
-                return PolicyResponse(
-                    effect=self.effect,
-                    response=f"Declared by Policy {self.name} with effect: {self.effect}",
-                    rule=self.name
-                )
+            try:
+                if bool(not set(ctx.session["groups"]).isdisjoint(self.groups)):
+                    ### allowed by groups:
+                    return PolicyResponse(
+                        effect=self.effect,
+                        response=f"Declared by Policy {self.name} with effect: {self.effect}",
+                        rule=self.name
+                    )
+            except KeyError:
+                pass
         if not self.context:
             ## there is no contexts to match with this resource, return default:
             return PolicyResponse(

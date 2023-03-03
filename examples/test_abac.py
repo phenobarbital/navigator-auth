@@ -47,6 +47,24 @@ class TestView(BaseView):
     async def delete(self):
         return self.response('DELETE  TEST VIEW')
 
+
+class WalmartView(BaseView):
+    async def get(self):
+        guardian = self.request.app['security']
+        await guardian.authorize(request=self.request)
+        return self.response('GET WALMART VIEW')
+
+    async def post(self):
+        return self.response('POST  WALMART VIEW')
+
+    async def put(self):
+        return self.response('PUT  WALMART VIEW')
+
+    async def delete(self):
+        guardian = self.request.app['security']
+        response = await guardian.authorize(request=self.request)
+        return self.response('DELETE  WALMART VIEW')
+
 # ## Creating a basic Policy
 # policy = Policy(
 #     'avoid_example_delete',
@@ -87,6 +105,7 @@ pdp.setup(app)
 
 app.router.add_view("/api/v1/example/", ExampleView)
 app.router.add_view("/api/v1/test/", TestView)
+app.router.add_view("/walmart/", WalmartView)
 
 if __name__ == '__main__':
     try:

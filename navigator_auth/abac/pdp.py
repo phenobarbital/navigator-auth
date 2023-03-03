@@ -40,6 +40,8 @@ class PDP:
         ctx = EvalContext(request, user, userinfo)
         # Filter policies that fit Inquiry by its attributes.
         filtered = [p for p in self._policies if p.fits(ctx)]
+
+        print('FILTERED POLICIES > ', filtered)
         # no policies -> deny access!
         if len(filtered) == 0:
             raise PreconditionFailed(
@@ -112,7 +114,8 @@ class PDP:
             )
         ### Also creates a PEP (Policy Enforcing Point)
         self.app['security'] = Guardian(pdp=self)
-
+        ## and the PDP itself:
+        self.app['abac'] = self
         # startup operations over storage backend
         self.app.on_startup.append(
             self.on_startup
