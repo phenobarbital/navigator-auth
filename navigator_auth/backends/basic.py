@@ -20,6 +20,7 @@ from navigator_auth.conf import (
     AUTH_PWD_ALGORITHM,
     AUTH_PWD_LENGTH,
     AUTH_PWD_SALT_LENGTH,
+    AUTH_USER_MODEL
 )
 
 # Authenticated Entity
@@ -46,6 +47,10 @@ class BasicAuth(BaseAuthBackend):
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements."""
+        ## Using Startup for detecting and loading functions.
+        if self._success_callbacks:
+            self._user_model = self.get_authmodel(AUTH_USER_MODEL)
+            self.get_successful_callbacks()
 
     async def on_cleanup(self, app: web.Application):
         """Used to cleanup and shutdown any db connection."""
@@ -209,6 +214,15 @@ class BasicAuth(BaseAuthBackend):
                 usr.access_token = token
                 ### saving User data into session:
                 await self.remember(request, username, userdata, usr)
+                ### check if any callbacks exists:
+                if user and self._callbacks:
+                    # construir e invocar callbacks para actualizar data de usuario
+                    args = {
+                        "username_attribute": self.username_attribute,
+                        "userid_attribute": self.userid_attribute,
+                        "userdata": userdata
+                    }
+                    await self.auth_successful_callback(request, user, **args)
                 return {"token": token, **userdata}
             except Exception as err:  # pylint: disable=W0703
                 logging.exception(f"BasicAuth: Authentication Error: {err}")

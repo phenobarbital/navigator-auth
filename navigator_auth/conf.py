@@ -130,7 +130,9 @@ if mapping is not None:
     try:
         USER_MAPPING = orjson.loads(mapping)
     except orjson.JSONDecodeError:
-        logging.exception("Auth: Invalid User Mapping on *AUTH_USER_MAPPING*")
+        logging.exception(
+            "Auth: Invalid User Mapping on *AUTH_USER_MAPPING*"
+        )
 
 ## Redis Session:
 REDIS_HOST = config.get("REDIS_HOST", fallback="localhost")

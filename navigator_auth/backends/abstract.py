@@ -1,5 +1,5 @@
 import asyncio
-from typing import Union
+from typing import Union, Optional
 from collections.abc import Callable, Iterable
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
@@ -33,6 +33,7 @@ from navigator_auth.conf import (
     USER_MAPPING,
     AUTH_CREDENTIALS_REQUIRED,
     SECRET_KEY,
+    AUTH_SUCCESSFUL_CALLBACKS
 )
 from navigator_auth.libs.json import json_encoder
 # Authenticated Identity
@@ -55,6 +56,8 @@ class BaseAuthBackend(ABC):
     _description: str = "Abstract Backend"
     _service_name: str = "abstract"
     _external_auth: bool = False
+    _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
+    _callbacks: Optional[list[Callable]] = None
 
     def __init__(
         self,
@@ -307,6 +310,47 @@ class BaseAuthBackend(ABC):
     @abstractmethod
     async def check_credentials(self, request):
         """Authenticate against user credentials (token, user/password)."""
+
+    def get_successful_callbacks(self) -> list[Callable]:
+        fns = []
+        for fn in self._success_callbacks:
+            try:
+                pkg, module = fn.rsplit(".", 1)
+                mod = importlib.import_module(pkg)
+                obj = getattr(mod, module)
+                fns.append(obj)
+            except ImportError as e:
+                raise RuntimeError(
+                    f"Auth Callback: Error getting Callback Function: {fn}, {e!s}"
+                ) from e
+        self._callbacks = fns
+
+    async def auth_successful_callback(
+        self, request: web.Request, user: Callable, **kwargs
+    ) -> None:
+        coro = []
+        for fn in self._callbacks:
+            func = self.call_successful_callbacks(request, fn, user, **kwargs)
+            coro.append(asyncio.create_task(func))
+        try:
+            await asyncio.gather(*coro, return_exceptions=True)
+        except Exception as ex:  # pylint: disable=W0718
+            self.logger.exception(
+                f"Auth Callback Error: {ex}", stack_info=True
+            )
+
+    async def call_successful_callbacks(
+        self, request: web.Request, fn: Callable, user: Callable, **kwargs
+    ) -> None:
+        # start here:
+        print(":: Calling the Successful Callback :: ", fn)
+        try:
+            await fn(request, user, self._user_model, **kwargs)
+        except Exception as e:
+            self.logger.exception(
+                f"Auth Callback: Error callig Callback Function: {fn}, {e!s}",
+                stack_info=False,
+            )
 
     def threaded_function(
         self,
