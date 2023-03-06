@@ -382,3 +382,22 @@ class UserPermission(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+
+class UserAttributes(Model):
+    """Example of Extending User Model for adding more properties"""
+    user_id: User = Column(required=True, primary_key=True)
+    department_code: str = Column(required=False)
+    position_id: str = Column(required=False)
+    associate_id: str = Column(required=False)
+    associate_oid: str = Column(required=False)
+    attributes: Optional[dict] = Column(required=False, default_factory=dict)
+    location_code: str = Column(required=False)
+    job_code: str = Column(required=False)
+    created_at: datetime = Column(required=False, default=datetime.now())
+
+
+    class Meta:
+        name = "user_attributes"
+        schema = AUTH_DB_SCHEMA
+        strict = True
+        connection = None

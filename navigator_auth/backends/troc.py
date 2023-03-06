@@ -2,6 +2,7 @@
 
 Troc Authentication using RNC algorithm.
 """
+from typing import Optional
 from collections.abc import Awaitable, Callable
 from aiohttp import web, hdrs
 from aiohttp.web_urldispatcher import SystemRoute
@@ -17,10 +18,12 @@ from navigator_auth.exceptions import (
     UserNotFound,
 )
 from navigator_auth.conf import (
+    AUTH_USER_MODEL,
     AUTH_CREDENTIALS_REQUIRED,
     PARTNER_KEY,
     CYPHER_TYPE,
     exclude_list,
+    AUTH_SUCCESSFUL_CALLBACKS
 )
 from .abstract import BaseAuthBackend, decode_token
 from .basic import BasicUser
@@ -34,6 +37,8 @@ class TrocToken(BaseAuthBackend):
     _ident: BasicUser = BasicUser
     _description: str = "Partnership Token authentication"
     _service_name: str = "troctoken"
+    _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
+    _callbacks: Optional[list[Callable]] = None
 
     def __init__(
         self,
@@ -55,6 +60,10 @@ class TrocToken(BaseAuthBackend):
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements."""
         self.cypher = Cipher(PARTNER_KEY, type=CYPHER_TYPE)
+        ## Using Startup for detecting and loading functions.
+        if self._success_callbacks:
+            self._user_model = self.get_authmodel(AUTH_USER_MODEL)
+            self.get_successful_callbacks()
 
     async def on_cleanup(self, app: web.Application):
         """Used to cleanup and shutdown any db connection."""
@@ -101,6 +110,7 @@ class TrocToken(BaseAuthBackend):
         """Authenticate, refresh or return the user credentials."""
         try:
             token = await self.get_payload(request)
+            print('TOKEN TROC: > ', token)
         except Exception as err:
             raise AuthException(str(err), status=400) from err
         if not token:
@@ -151,6 +161,15 @@ class TrocToken(BaseAuthBackend):
                 usr.access_token = token
                 # saving user-data into request:
                 await self.remember(request, uid, userdata, usr)
+                ### check if any callbacks exists:
+                if user and self._callbacks:
+                    # construir e invocar callbacks para actualizar data de usuario
+                    args = {
+                        "username_attribute": self.username_attribute,
+                        "userid_attribute": self.userid_attribute,
+                        "userdata": userdata
+                    }
+                    await self.auth_successful_callback(request, user, **args)
                 return {"token": token, **userdata}
             except Exception as err:  # pylint: disable=W0703
                 self.logger.exception(f"TROC Auth: Authentication Error: {err}")

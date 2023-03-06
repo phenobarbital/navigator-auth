@@ -212,7 +212,7 @@ class AuthHandler:
         if method:
             try:
                 backend = self.backends[method]
-            except KeyError as ex:
+            except (TypeError, KeyError) as ex:
                 raise self.Unauthorized(
                     reason=f"Unacceptable Auth Method: {method}"
                 ) from ex

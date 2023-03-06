@@ -2,6 +2,7 @@ from collections.abc import Awaitable, Callable
 from aiohttp import web, hdrs
 from aiohttp.web_urldispatcher import SystemRoute
 from navconfig.logging import logging
+from navigator_auth.conf import exclude_list
 
 
 @web.middleware
@@ -22,6 +23,9 @@ async def abac_middleware(
             return await handler(request)
     except Exception as err:  # pylint: disable=W0703
         logging.error(err)
+    # avoid authorization on exclude list
+    if request.path in exclude_list:
+        return await handler(request)
     logging.debug(' == ABAC MIDDLEWARE == ')
     ### get Guardian:
     try:
