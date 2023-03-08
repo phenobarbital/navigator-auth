@@ -1,8 +1,8 @@
 [build-system]
 requires = [
-    'setuptools >= 47',
-    'wheel == 0.38.4',
-    'Cython==0.29.32'
+    'setuptools==67.5.1',
+    'Cython==0.29.33',
+    'wheel==0.38.4',
 ]
 
 build-backend = "setuptools.build_meta"
@@ -13,13 +13,14 @@ author = "Jesus Lara Gimenez"
 author-email = "jesuslarag@gmail.com"
 home-page = "https://github.com/phenobarbital/navigator-auth"
 classifiers=[
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Intended Audience :: System Administrators",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python",
   "Typing :: Typed",
   "Environment :: Web Environment",
@@ -32,7 +33,7 @@ classifiers=[
   "License :: OSI Approved :: BSD License",
 ]
 description-file = "README.md"
-requires-python = ">=3.8.0"
+requires-python = ">=3.9.0"
 
 [tool.pytest.ini_options]
 addopts = [

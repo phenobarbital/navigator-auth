@@ -106,16 +106,16 @@ setup(
     license=__license__,
     setup_requires=[
         "wheel==0.38.4",
-        "Cython==0.29.32",
+        "Cython==0.29.33",
         "asyncio==3.4.3"
     ],
     install_requires=[
         "PyNaCl==1.5.0",
-        "aiohttp==3.8.3",
+        "aiohttp==3.8.4",
         "uvloop==0.17.0",
         "asyncio==3.4.3",
-        "asyncdb>=2.1.38",
-        "navconfig[default]>=1.0.15",
+        "asyncdb>=2.2.0",
+        "navconfig[default]>=1.1.0",
         "PyJWT==2.6.0",
         "pycryptodome==3.15.0",
         "rncryptor==3.3.0",
@@ -127,14 +127,7 @@ setup(
         "navigator-session>=0.3.3",
         "pendulum==2.1.2"
     ],
-    tests_require=[
-        'pytest>=6.0.0',
-        'pytest-asyncio==0.20.3',
-        'pytest-xdist==2.5.0',
-        'pytest-assume==2.4.3'
-    ],
     ext_modules=cythonize(extensions),
-    test_suite='tests',
     project_urls={  # Optional
         "Source": "https://github.com/phenobarbital/navigator-auth",
         "Funding": "https://paypal.me/phenobarbital",
