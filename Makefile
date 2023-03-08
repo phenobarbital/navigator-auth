@@ -2,6 +2,10 @@ venv:
 	python3.10 -m venv .venv
 	echo 'run `source .venv/bin/activate` to start develop Navigator-Auth'
 
+install:
+	pip install wheel==0.38.4
+	pip install -e .
+
 setup:
 	pip install wheel==0.38.4
 	pip install -e .
