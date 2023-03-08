@@ -119,7 +119,7 @@ setup(
         "PyJWT==2.6.0",
         "pycryptodome==3.17",
         "rncryptor==3.3.0",
-        "msal==1.20.0",
+        "msal==1.21.0",
         "aiogoogle==5.2.0",
         "okta-jwt-verifier==0.2.3",
         "python-slugify==8.0.1",
