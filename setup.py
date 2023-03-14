@@ -105,7 +105,7 @@ setup(
     packages=find_packages(exclude=['contrib', 'docs', 'tests','settings','resources']),
     license=__license__,
     setup_requires=[
-        "wheel==0.38.4",
+        "wheel==0.40.0",
         "Cython==0.29.33",
         "asyncio==3.4.3"
     ],
