@@ -401,3 +401,22 @@ class UserAttributes(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+
+
+class UserAccount(Model):
+    """Social Accounts from User"""
+    account_id: UUID = Column(
+        required=False, primary_key=True, db_default="auto", repr=False
+    )
+    user_id: User = Column(required=True)
+    provider: str = Column(required=True)
+    uid: str = Column(required=False)
+    address: str = Column(required=False)
+    account: Optional[dict] = Column(required=False, default_factory=dict)
+    created_at: datetime = Column(required=False, default=datetime.now())
+
+    class Meta:
+        name = "user_accounts"
+        schema = AUTH_DB_SCHEMA
+        strict = True
+        connection = None
