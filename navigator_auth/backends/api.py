@@ -164,8 +164,8 @@ class APIKeyAuth(BaseAuthBackend):
         try:
             if isinstance(request.match_info.route, SystemRoute):  # eg. 404
                 return await handler(request)
-        except Exception as err:  # pylint: disable=W0703
-            self.logger.error(err)
+        except Exception:  # pylint: disable=W0703
+            pass
         try:
             if request.get("authenticated", False) is True:
                 # already authenticated
