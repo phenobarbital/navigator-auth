@@ -1,14 +1,23 @@
 from typing import List, Optional, Any
 from aiohttp import web
+from navconfig.logging import logger
 from navigator_session import SessionData
 from navigator_auth.conf import AUTH_SESSION_OBJECT
-from .policy import Policy
-from .policy import PolicyEffect
+from .policies import Policy
+from .policies import PolicyEffect
 from .errors import PreconditionFailed, Unauthorized, AccessDenied
 from .context import EvalContext
 from .guardian import Guardian
 from .storages.abstract import AbstractStorage
 from .middleware import abac_middleware
+
+
+async def find_deny_policy(ctx, policies):
+    for policy in policies:
+        answer = await policy.allowed(ctx)
+        if answer.effect == PolicyEffect.DENY:
+            return answer
+    return None
 
 class PDP:
     """ABAC Policy Decision Point implementation.
@@ -19,6 +28,7 @@ class PDP:
             self._policies = policies
         ### Loading an Storage and registering for Load Policies.
         self.storage = storage
+        self.logger = logger
 
     def add_policy(self, policy: Policy):
         self._policies.append(policy)
@@ -38,11 +48,11 @@ class PDP:
             userinfo = session[AUTH_SESSION_OBJECT]
         except KeyError:
             userinfo = None
-        ctx = EvalContext(request, user, userinfo)
+        ctx = EvalContext(request, user, userinfo, session)
         # Filter policies that fit Inquiry by its attributes.
         filtered = [p for p in self._policies if p.fits(ctx)]
 
-        print('FILTERED POLICIES > ', filtered)
+        self.logger.debug(f'FILTERED POLICIES > {filtered!r}')
         # no policies -> deny access!
         if len(filtered) == 0:
             raise PreconditionFailed(
@@ -50,6 +60,14 @@ class PDP:
             )
         # we have policies - all of them should have allow effect, otherwise -> deny access!
         answer = False
+        # try:
+        #     answer = await find_deny_policy(ctx, filtered)
+        #     if answer is not None:
+        #         raise Unauthorized(
+        #             f"Access Denied: {answer.response}"
+        #         )
+        # except StopAsyncIteration:
+        #     pass
         for policy in filtered:
             answer = await policy.allowed(ctx)
             if answer.effect == PolicyEffect.DENY:

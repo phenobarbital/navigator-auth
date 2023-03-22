@@ -34,7 +34,8 @@ async def abac_middleware(
         logging.info(
             f"Access based on Authorize response: {response!r}"
         )
-    except (TypeError, KeyError):
+    except (TypeError, KeyError) as ex:
+        print(ex)
         ### there is no ABAC access backend enabled:
         logging.warning(
             'ABAC Warning: there is no backend installed on this system.'

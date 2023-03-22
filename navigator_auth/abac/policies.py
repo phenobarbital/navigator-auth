@@ -61,7 +61,7 @@ class Policy:
         self.effect = effect
         self.environment = environment
         if isinstance(method, str):
-            self.method = list(method)
+            self.method = [method]
         else:
             self.method = method
         self.priority = priority if priority else 0
@@ -91,29 +91,24 @@ class Policy:
         if fit_result:
             ## third: check if user of session has contexts attributes required:
             fit_context = False
-            if self.context_attrs:
-                for a in self.context_attrs:
-                    if a in ctx.user_keys:
-                        fit_context = True
-                    if a in ctx.session_keys:
-                        fit_context = True
-                if not fit_context and not fit_result:
-                    # this policy is enforcing over Context Attributes.
-                    fit_result = False
+            fit_context = any(a in ctx.user_keys or a in ctx.userinfo_keys for a in self.context_attrs)
+            if not fit_context and not fit_result:
+                # this policy is enforcing over Context Attributes.
+                fit_result = False
         return fit_result
 
     async def allowed(self, ctx: EvalContext) -> bool:
         ## first: check groups or contexts:
         if self.groups:
             try:
-                if bool(not set(ctx.session["groups"]).isdisjoint(self.groups)):
+                if bool(not set(ctx.userinfo["groups"]).isdisjoint(self.groups)):
                     ### allowed by groups:
                     return PolicyResponse(
                         effect=self.effect,
                         response=f"Declared by Policy {self.name} with effect: {self.effect}",
                         rule=self.name
                     )
-            except KeyError:
+            except (KeyError, TypeError):
                 pass
         if not self.context:
             ## there is no contexts to match with this resource, return default:
@@ -125,18 +120,33 @@ class Policy:
         else:
             is_allowed = False
             ### check attributes
-            for a in self.context_attrs:
-                att = self.context[a]
-                if att == getattr(ctx.user, a, None):
-                    is_allowed = True
-                if att == getattr(ctx.session, a, None):
-                    is_allowed = True
-            if is_allowed is True:
-                return PolicyResponse(
-                    effect=self.effect,
-                    response=f"Access by {self.name} with effect: {self.effect}",
-                    rule=self.name
-                )
+            if self.context_attrs:
+                for a in self.context_attrs:
+                    att = self.context[a]
+                    try:
+                        if att == getattr(ctx.user, a, None):
+                            is_allowed = True
+                    except TypeError:
+                        pass
+                    val = getattr(ctx.userinfo, a, ctx.userinfo.get(a, None))
+                    if att == val:
+                        is_allowed = True
+                    try:
+                        val = getattr(ctx.session, a, None)
+                        if isinstance(att, list):
+                            if val in att:
+                                is_allowed = True
+                        else:
+                            if att == val:
+                                is_allowed = True
+                    except (KeyError, TypeError):
+                        pass
+                if is_allowed is True:
+                    return PolicyResponse(
+                        effect=self.effect,
+                        response=f"Access by {self.name} with effect: {self.effect}",
+                        rule=self.name
+                    )
         ### default return False
         return PolicyResponse(
             effect=PolicyEffect.DENY,
