@@ -81,9 +81,6 @@ def PreconditionFailed(reason: Union[str, dict], **kwargs) -> web.HTTPError:
     )
 
 def AccessDenied(reason: Union[str, dict], **kwargs) -> web.HTTPError:
-    logger.error(
-        reason
-    )
     return auth_error(
         reason=reason, **kwargs, status=403
     )

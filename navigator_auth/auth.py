@@ -568,8 +568,8 @@ class AuthHandler:
         try:
             if isinstance(request.match_info.route, SystemRoute):  # eg. 404
                 return await handler(request)
-        except Exception as err:  # pylint: disable=W0703
-            logging.error(err)
+        except Exception:  # pylint: disable=W0703
+            pass
         ### Authorization backends:
         for backend in self._authz_backends:
             if await backend.check_authorization(request):
