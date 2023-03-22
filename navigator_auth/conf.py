@@ -20,6 +20,7 @@ HOSTS = [e.strip() for e in list(config.get("HOSTS", fallback="localhost").split
 
 ## Default Domain
 DOMAIN = config.get("DOMAIN", fallback="dev.local")
+ENVIRONMENT = config.get('ENVIRONMENT', fallback='development')
 
 ### DATABASE INFORMATION:
 AUTH_DB_SCHEMA = config.get("AUTH_DB_SCHEMA", fallback="auth")
@@ -245,6 +246,18 @@ GOOGLE_API_SCOPES = [
 ## Github Support:
 GITHUB_CLIENT_ID = config.get("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = config.get("GITHUB_CLIENT_SECRET")
+
+## Audit Backend
+# this is the backend for saving task executions
+ENABLE_AUDIT_LOG = config.getboolean('ENABLE_AUDIT_LOG', fallback=True)
+AUDIT_BACKEND = config.get('AUDIT_BACKEND', fallback='influx')
+AUDIT_CREDENTIALS = {
+    "host": config.get('INFLUX_HOST', fallback='localhost'),
+    "port": config.get('INFLUX_PORT', fallback=8086),
+    "bucket": config.get('INFLUX_DATABASE', fallback='navigator_audit'),
+    "org": config.get('INFLUX_ORG', fallback='navigator'),
+    "token": config.get('INFLUX_TOKEN')
+}
 
 try:
     from settings.settings import *  # pylint: disable=W0614,W0401

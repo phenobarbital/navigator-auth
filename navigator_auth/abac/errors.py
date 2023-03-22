@@ -1,5 +1,6 @@
-from typing import Union, Optional
+from typing import Union, Optional, Any
 from aiohttp import web, hdrs
+from navconfig.logging import logger
 from navigator_auth.libs.json import json_encoder
 
 def default_headers(message: str, exception: BaseException = None) -> dict:
@@ -73,19 +74,24 @@ def auth_error(
         obj = web.HTTPBadRequest(**args)
     return obj
 
+def PreconditionFailed(reason: Union[str, dict], **kwargs) -> web.HTTPError:
+    msg = f"Error: Some preconditions failed: {reason}"
+    return auth_error(
+        reason=msg, **kwargs, status=428
+    )
 
 def AccessDenied(reason: Union[str, dict], **kwargs) -> web.HTTPError:
+    logger.error(
+        reason
+    )
     return auth_error(
         reason=reason, **kwargs, status=403
     )
 
 def Unauthorized(reason: Union[str, dict], **kwargs) -> web.HTTPError:
+    logger.error(
+        reason
+    )
     return auth_error(
         reason=reason, **kwargs, status=401
-    )
-
-def PreconditionFailed(reason: Union[str, dict], **kwargs) -> web.HTTPError:
-    msg = f"Error: Some preconditions failed: {reason}"
-    return auth_error(
-        reason=msg, **kwargs, status=428
     )

@@ -104,7 +104,7 @@ policy2 = Policy(
 )
 policy3 = Policy(
     'login_denied_on_wednesdays',
-    effect=PolicyEffect.ALLOW,
+    effect=PolicyEffect.DENY,
     description="All users, except superUsers has denied access on Wednesdays",
     resource=["/epson/"],
     context={
