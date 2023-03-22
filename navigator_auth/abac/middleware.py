@@ -21,8 +21,8 @@ async def abac_middleware(
     try:
         if isinstance(request.match_info.route, SystemRoute):  # eg. 404
             return await handler(request)
-    except Exception as err:  # pylint: disable=W0703
-        logging.error(err)
+    except Exception:  # pylint: disable=W0703
+        pass
     # avoid authorization on exclude list
     if request.path in exclude_list:
         return await handler(request)
