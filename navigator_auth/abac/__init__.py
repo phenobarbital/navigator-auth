@@ -1,7 +1,7 @@
 """ABAC Proof of Concept.
 """
 
-from .policy import Policy, PolicyEffect
+from .policies import Policy, PolicyEffect
 
 
 __all__ = ['Policy', 'PolicyEffect']

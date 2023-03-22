@@ -2,7 +2,7 @@ from collections.abc import Callable
 from aiohttp import web
 from navigator_session import get_session
 from .errors import PreconditionFailed, AccessDenied
-from .policy import PolicyEffect
+from .policies import PolicyEffect
 
 
 class Guardian:
