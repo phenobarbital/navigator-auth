@@ -268,9 +268,7 @@ class AzureAuth(ExternalAuth):
                     result = await redis.get(f"azure_auth_{state}")
                     flow = orjson.loads(result)
             except Exception:
-                return self.failed_redirect(
-                    request, error="ERROR_RATE_LIMIT_EXCEEDED"
-                )
+                return self.failed_redirect(request, error="ERROR_RATE_LIMIT_EXCEEDED", message="ERROR_RATE_LIMIT_EXCEEDED")
             app = self.get_msal_app()
             try:
                 result = app.acquire_token_by_auth_code_flow(
@@ -306,7 +304,7 @@ class AzureAuth(ExternalAuth):
                             f"Azure: Error getting User information: {err}"
                         )
                         return self.failed_redirect(
-                            request, error="ERROR_RESOURCE_NOT_FOUND"
+                            request, error="ERROR_RESOURCE_NOT_FOUND", message=f"Azure: Error getting User information: {err}"
                         )
                     # Redirect User to HOME
                     return self.home_redirect(
@@ -318,7 +316,8 @@ class AzureAuth(ExternalAuth):
                     message = f"Azure {error}: {desc}"
                     logging.exception(message)
                     return self.failed_redirect(
-                        request, error="AUTHENTICATION_ERROR"
+                        request, error="AUTHENTICATION_ERROR",
+                        message="Failed to generate session token"
                     )
                 else:
                     return self.failed_redirect(
