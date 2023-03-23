@@ -260,13 +260,13 @@ class AzureAuth(ExternalAuth):
             try:
                 state = auth_response["state"]
             except Exception:
-                return self.failed_redirect(request, error="ERROR_CONFIGURATION")
+                return self.failed_redirect(request, error="ERROR_CONFIGURATION", message="ERROR_RATE_LIMIT_EXCEEDED")
             try:
                 async with aioredis.Redis(connection_pool=self._pool) as redis:
                     result = await redis.get(f"azure_auth_{state}")
                     flow = orjson.loads(result)
             except Exception:
-                return self.failed_redirect(request, error="ERROR_RATE_LIMIT_EXCEEDED")
+                return self.failed_redirect(request, error="ERROR_RATE_LIMIT_EXCEEDED", message="ERROR_RATE_LIMIT_EXCEEDED")
             app = self.get_msal_app()
             try:
                 result = app.acquire_token_by_auth_code_flow(
@@ -300,7 +300,7 @@ class AzureAuth(ExternalAuth):
                     except Exception as err:
                         logging.exception(f"Azure: Error getting User information: {err}")
                         return self.failed_redirect(
-                            request, error="ERROR_RESOURCE_NOT_FOUND"
+                            request, error="ERROR_RESOURCE_NOT_FOUND", message=f"Azure: Error getting User information: {err}"
                         )
                     # Redirect User to HOME
                     return self.home_redirect(
@@ -311,15 +311,15 @@ class AzureAuth(ExternalAuth):
                     desc = result["error_description"]
                     message = f"Azure {error}: {desc}"
                     logging.exception(message)
-                    return self.failed_redirect(request, error="ERROR_CONFIGURATION")
+                    return self.failed_redirect(request, error="ERROR_CONFIGURATION", message=message)
                 else:
-                    return self.failed_redirect(request, error="ERROR_CONFIGURATION")
+                    return self.failed_redirect(request, error="ERROR_CONFIGURATION", message="Failed to generate session token")
             except Exception as err:
                 logging.exception(err)
-                return self.failed_redirect(request, error="ERROR_INVALID_REQUEST")
+                return self.failed_redirect(request, error="ERROR_INVALID_REQUEST", message=err)
         except Exception as err:
             logging.exception(err)
-            return self.failed_redirect(request, error="ERROR_UNKNOWN")
+            return self.failed_redirect(request, error="ERROR_UNKNOWN", message=err)
 
     async def logout(self, request):
         pass
