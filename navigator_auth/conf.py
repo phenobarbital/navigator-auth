@@ -87,6 +87,8 @@ AUTH_USER_ORGANIZATION_MODEL = config.get("AUTH_USER_ORGANIZATION_MODEL", fallba
 
 AUTH_PERMISSION_MODEL = config.get("AUTH_PERMISSION_MODEL", fallback=None)
 
+AUTH_USER_IDENTITY_MODEL = config.get("AUTH_USER_IDENTITY_MODEL", fallback=None)
+
 ALLOWED_HOSTS = [
     e.strip()
     for e in list(
