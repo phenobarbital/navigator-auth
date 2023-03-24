@@ -45,6 +45,7 @@ excluded_default = [
     "/logout",
     "/signin",
     "/signout",
+    "/login/callback"
 ]
 new_excluded = [
     e.strip() for e in list(config.get("ROUTES_EXCLUDED", fallback="").split(","))
