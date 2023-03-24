@@ -4,7 +4,7 @@ from .permissions import PermissionHandler
 from .users import UserHandler, UserSession
 from .program import ProgramCatHandler, ProgramHandler, ProgramClientHandler
 from .groups import GroupHandler, GroupPermissionHandler, UserGroupHandler
-from .userattrs import UserAccountHandler
+from .userattrs import UserAccountHandler, UserIdentityHandler
 
 ## TODO migration of login/logout handlers:
 
@@ -102,6 +102,13 @@ def handler_routes(router) -> None:
     )
     router.add_view(
         r"/api/v1/user_accounts{meta:\:?.*}", UserAccountHandler, name="api_auth_useraccount"
+    )
+    # User Account:
+    router.add_view(
+        r"/api/v1/user_identity/{id:.*}", UserIdentityHandler, name="api_auth_useridentity_id"
+    )
+    router.add_view(
+        r"/api/v1/user_identity{meta:\:?.*}", UserIdentityHandler, name="api_auth_useridentity"
     )
     ### User Session Methods:
     usr = UserSession()

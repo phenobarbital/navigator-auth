@@ -211,15 +211,40 @@ class User(Model):
 
 
 class UserIdentity(Model):
-    user_id: User = Column(required=True)
-    auth_provider: str = Column(required=True, default="BasicAuth")
-    uid: str = Column(required=True, comment="User Id on Auth Backend")
-    auth_data: Optional[dict] = Column(required=False, default_factory=dict)
-    attributes: Optional[dict] = Column(required=False, default_factory=dict)
-    created_at: datetime = Column(required=False, default=datetime.now())
+    identity_id: UUID = Column(required=False, primary_key=True, db_default="auto", repr=False)
+    display_name: str = Column(required=False)
+    title: str = Column(required=False)
+    nickname: str = Column(required=False)
+    email: str = Column(required=False)
+    phone: str = Column(required=False)
+    short_bio: Text = Column(required=False)
+    avatar: str = Column(required=False)
+    user_id: User = Column(required=True, fk="user_id|username", api="users", label="User")
+    auth_provider: str = Column(required=False)
+    auth_data: Optional[dict] = Column(required=False, repr=False)
+    attributes: Optional[dict] = Column(required=False, repr=False)
+    created_at: datetime = Column(required=False, default=datetime.now(), repr=False)
 
     class Meta:
         name = "user_identities"
+        schema = AUTH_DB_SCHEMA
+        strict = True
+        connection = None
+
+class VwUserIdentity(Model):
+    identity_id: UUID = Column(required=False, primary_key=True, db_default="auto", repr=False)
+    display_name: str = Column(required=False)
+    title: str = Column(required=False)
+    nickname: str = Column(required=False)
+    email: str = Column(required=False)
+    phone: str = Column(required=False)
+    short_bio: Text = Column(required=False)
+    avatar: str = Column(required=False)
+    user_id: User = Column(required=True, fk="user_id|username", api="users", label="User")
+    accounts: Optional[dict] = Column(required=False, default_factory=dict)
+
+    class Meta:
+        name = "vw_user_identities"
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
