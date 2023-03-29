@@ -3,6 +3,7 @@ Model Handler: Abstract Model for managing Model with Views.
 """
 from typing import Union, Optional, Any
 import importlib
+from aiohttp import web
 from datamodel import BaseModel
 from datamodel.exceptions import ValidationError
 from asyncdb.exceptions import DriverError, ProviderError, NoDataFound, StatementError
@@ -72,6 +73,21 @@ class ModelHandler(BaseView):
             )
         return data
 
+    async def _post_get(self, result: Any, fields: list[str] = None) -> web.Response:
+        """_post_get.
+
+        Extensible for post-processing the GET response.
+        """
+        if not result:
+            return self.no_content()
+        else:
+            if fields is not None:
+                ## filtering result to returning only fields asked:
+                result = {}
+                for field in fields:
+                    result[field] = getattr(result, field, None)
+            return self.json_response(content=result)
+
     async def session(self):
         self._session = None
         try:
@@ -108,8 +124,6 @@ class ModelHandler(BaseView):
     async def get(self):
         """Getting Client information."""
         session = await self.session()
-        if not session:
-            return self.error(reason="Unauthorized", status=403)
         ## getting all clients:
         params = self.match_parameters(self.request)
         try:
@@ -123,6 +137,12 @@ class ModelHandler(BaseView):
         db = self.request.app["authdb"]
         ## getting first the id from params or data:
         args = {}
+        qp = self.query_parameters(request=self.request)
+        try:
+            fields = qp['fields'].split(',')
+            del qp['fields']
+        except KeyError:
+            fields = None
         if isinstance(self.pk, str):
             try:
                 objid = params[self.pk]
@@ -162,14 +182,16 @@ class ModelHandler(BaseView):
                     self.error(exception=error, status=403)
                 if not result:
                     self.error(exception=error, status=403)
-                return self.json_response(content=result)
+                return await self._post_get(result, fields=fields)
         else:
-            # TODO: add FILTER method
             try:
                 async with await db.acquire() as conn:
                     self.model.Meta.connection = conn
-                    result = await self.model.all()
-                    return self.json_response(content=result)
+                    if qp:
+                        result = await self.model.filter(**qp)
+                    else:
+                        result = await self.model.all()
+                    return await self._post_get(result, fields=fields)
             except ValidationError as ex:
                 error = {
                     "error": f"Unable to load {self.name} info from Database",
