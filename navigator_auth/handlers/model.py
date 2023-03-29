@@ -82,10 +82,19 @@ class ModelHandler(BaseView):
             return self.no_content()
         else:
             if fields is not None:
-                ## filtering result to returning only fields asked:
-                result = {}
-                for field in fields:
-                    result[field] = getattr(result, field, None)
+                if isinstance(result, list):
+                    new = []
+                    for r in result:
+                        row = {}
+                        for field in fields:
+                            row[field] = getattr(r, field, None)
+                        new.append(row)
+                    result = new
+                else:
+                    ## filtering result to returning only fields asked:
+                    result = {}
+                    for field in fields:
+                        result[field] = getattr(result, field, None)
             return self.json_response(content=result)
 
     async def session(self):
