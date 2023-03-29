@@ -1,7 +1,7 @@
 """
 Model Handler: Abstract Model for managing Model with Views.
 """
-from typing import Union
+from typing import Union, Optional, Any
 import importlib
 from datamodel import BaseModel
 from datamodel.exceptions import ValidationError
@@ -38,15 +38,54 @@ class ModelHandler(BaseView):
             ## Using fallback Model
             return self.model
 
-    async def session(self):
-        session = None
+    async def get_userid(self, session, idx: str = 'user_id') -> int:
+        if not session:
+            self.error(
+                reason="Unauthorized",
+                status=403
+            )
         try:
-            session = await get_session(self.request)
+            if 'session' in session:
+                return session['session'][idx]
+            else:
+                return session[idx]
+        except KeyError:
+            self.error(reason="Unauthorized", status=403)
+
+    async def _get_data(self, session: Optional[Any] = None) -> Any:
+        """_get_data.
+
+        Get and pre-processing POST data before use it.
+        """
+        data = {}
+        try:
+            data = await self.json_data()
+            for name, column in self.model.get_columns().items():
+                ### if a function with name _get_{column name} exists
+                ### then that function is called for getting the field value
+                if hasattr(self, f'_get_{name}'):
+                    fn = getattr(self, f'_get_{name}')
+                    data[name] = await fn(value=data.get(name, None), column=column, data=data)
+        except (TypeError, ValueError, AttributeError):
+            self.error(
+                reason=f"Invalid {self.name} Data", status=400
+            )
+        return data
+
+    async def session(self):
+        self._session = None
+        try:
+            self._session = await get_session(self.request)
         except (ValueError, RuntimeError) as err:
             return self.critical(
                 reason="Error Decoding Session", request=self.request, exception=err
             )
-        return session
+        if not self._session:
+            self.error(
+                response={"message": "Unauthorized"},
+                status=403
+            )
+        return self._session
 
     async def head(self):
         """Getting Client information."""
@@ -80,17 +119,13 @@ class ModelHandler(BaseView):
                 return self.json_response(content=response)
         except KeyError:
             pass
-        try:
-            data = await self.json_data()
-        except (TypeError, ValueError, AuthException):
-            data = None
         ## validate directly with model:
         db = self.request.app["authdb"]
         ## getting first the id from params or data:
         args = {}
         if isinstance(self.pk, str):
             try:
-                objid = data[self.pk]
+                objid = params[self.pk]
             except (TypeError, KeyError):
                 try:
                     objid = params["id"]
@@ -157,13 +192,8 @@ class ModelHandler(BaseView):
     async def put(self):
         """Creating Model information."""
         session = await self.session()
-        if not session:
-            return self.error(reason="Unauthorized", status=403)
         ### get session Data:
-        try:
-            data = await self.json_data()
-        except (TypeError, ValueError, AuthException):
-            return self.error(reason=f"Invalid {self.name} Data", status=403)
+        data = await self._get_data(session=session)
         ## validate directly with model:
         try:
             resultset = self.model(**data)  # pylint: disable=E1102
@@ -195,8 +225,6 @@ class ModelHandler(BaseView):
     async def patch(self):
         """Patch an existing Client or retrieve the column names."""
         session = await self.session()
-        if not session:
-            return self.error(reason="Unauthorized", status=403)
         ### get session Data:
         params = self.match_parameters()
         try:
@@ -206,10 +234,8 @@ class ModelHandler(BaseView):
                 return self.json_response(content=fields)
         except KeyError:
             pass
-        try:
-            data = await self.json_data()
-        except (TypeError, ValueError, AuthException):
-            return self.error(reason=f"Invalid {self.name} Data", status=403)
+        ### get session Data:
+        data = await self._get_data(session=session)
         ## validate directly with model:
         ## getting first the id from params or data:
         args = {}
@@ -261,14 +287,9 @@ class ModelHandler(BaseView):
     async def post(self):
         """Create or Update a Client."""
         session = await self.session()
-        if not session:
-            return self.error(reason="Unauthorized", status=403)
         ### get session Data:
         params = self.match_parameters()
-        try:
-            data = await self.json_data()
-        except (TypeError, ValueError, AuthException):
-            return self.error(reason=f"Invalid {self.name} Data", status=403)
+        data = await self._get_data(session=session)
         ## validate directly with model:
         ## getting first the id from params or data:
         args = {}
@@ -347,16 +368,16 @@ class ModelHandler(BaseView):
     async def delete(self):
         """Delete a Client."""
         session = await self.session()
-        if not session:
-            self.error(reason="Unauthorized", status=403)
         ### get session Data:
         params = self.match_parameters()
         try:
-            data = await self.json_data()
+            data = await self._get_data(session=session)
         except AuthException:
             data = None
         except (TypeError, ValueError):
-            self.error(reason=f"Invalid {self.name} Data", status=403)
+            self.error(
+                reason=f"Invalid {self.name} Data", status=406
+            )
         ## getting first the id from params or data:
         args = {}
         if isinstance(self.pk, str):

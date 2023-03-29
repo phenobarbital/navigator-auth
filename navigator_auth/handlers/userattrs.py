@@ -1,20 +1,50 @@
 from typing import Any
+from asyncdb.exceptions import (
+    NoDataFound,
+    StatementError
+)
+from datamodel.exceptions import ValidationError
+from asyncdb.exceptions import DriverError
+from navigator_session import get_session, AUTH_SESSION_OBJECT
+from navigator_auth.exceptions import AuthException
 from navigator_auth.models import (
     UserAccount, UserIdentity, VwUserIdentity
 )
-from navigator_session import get_session, AUTH_SESSION_OBJECT
-from navigator_auth.exceptions import AuthException
-from datamodel.exceptions import ValidationError
-from asyncdb.exceptions import DriverError, ProviderError, NoDataFound, StatementError
-from .model import ModelHandler
 from navigator_auth.conf import (
     AUTH_USER_IDENTITY_MODEL
 )
+from .model import ModelHandler
+
 
 class UserAccountHandler(ModelHandler):
     model: Any = UserAccount
-    name: str = "User Accounts"
+    name: str = "User Account"
     pk: str = "account_id"
+
+    async def _get_address(self, value, column, data):
+        db = self.request.app['authdb']
+        try:
+            userid = data['uid']
+        except KeyError:
+            return self.error(
+                reason=f"Invalid User ID for {self.name}", status=410
+            )
+        try:
+            provider = data['provider']
+        except KeyError:
+            provider = None
+        if provider:
+            try:
+                async with await db.acquire() as conn:
+                    qry = f"SELECT social_url FROM auth.social_networks WHERE social_network = '{provider}'"
+                    result = await conn.fetchval(qry, column='social_url')
+                    return result.format(uid=userid)
+            except DriverError:
+                pass
+            except Exception as ex:
+                self.logger.error(str(ex))
+        return None
+
 
 class UserIdentityHandler(ModelHandler):
     model: Any = UserIdentity
@@ -37,7 +67,7 @@ class UserIdentityHandler(ModelHandler):
             user_id = session[AUTH_SESSION_OBJECT]["user_id"]
         except (KeyError, TypeError):
             user_id = None
-            
+
         args = {}
         if isinstance(self.pk, str):
             try:
@@ -83,7 +113,7 @@ class UserIdentityHandler(ModelHandler):
                     filter = {
                                 "user_id": user_id
                             }
-                    
+
                     UserIdentity = await VwUserIdentity.filter(**filter)
                     if not UserIdentity:
                         headers = {
@@ -101,7 +131,7 @@ class UserIdentityHandler(ModelHandler):
                 except Exception as err:
                     print(err)
                 return self.error(exception=err, status=500)
-    
+
     async def put(self):
         """Creating Model information."""
         session = await self.session()
@@ -145,5 +175,3 @@ class UserIdentityHandler(ModelHandler):
                 "payload": str(ex),
             }
             return self.error(exception=error, status=406)
-
-        

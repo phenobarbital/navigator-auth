@@ -199,7 +199,6 @@ class BaseHandler(CorsViewMixin):
 
     def not_allowed(
         self,
-        request: web.Request = None,
         response: dict = None,
         headers: dict = None,
         allowed: dict = None,
