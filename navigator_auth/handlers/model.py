@@ -6,7 +6,7 @@ import importlib
 from aiohttp import web
 from datamodel import BaseModel
 from datamodel.exceptions import ValidationError
-from asyncdb.exceptions import DriverError, ProviderError, NoDataFound, StatementError
+from asyncdb.exceptions import DriverError, ProviderError, NoDataFound, StatementError, ModelError
 from navigator_session import get_session
 from navigator_auth.exceptions import AuthException
 from .base import BaseView
@@ -187,6 +187,12 @@ class ModelHandler(BaseView):
                 error = {"error": f"{self.name} was not Found"}
                 try:
                     result = await self.model.get(**args)
+                except ModelError as ex:
+                    error = {
+                        "error": f"Missing Info for Model {self.name}",
+                        "payload": str(ex)
+                    }
+                    return self.error(response=error, status=400)
                 except NoDataFound:
                     self.error(exception=error, status=403)
                 if not result:
@@ -201,6 +207,12 @@ class ModelHandler(BaseView):
                     else:
                         result = await self.model.all()
                     return await self._post_get(result, fields=fields)
+            except ModelError as ex:
+                error = {
+                    "error": f"Missing Info for Model {self.name}",
+                    "payload": str(ex)
+                }
+                return self.error(response=error, status=400)
             except ValidationError as ex:
                 error = {
                     "error": f"Unable to load {self.name} info from Database",
@@ -233,6 +245,12 @@ class ModelHandler(BaseView):
                 resultset.Meta.connection = conn
                 result = await resultset.insert()
                 return self.json_response(content=result, status=201)
+        except ModelError as ex:
+            error = {
+                "error": f"Missing Info for Model {self.name}",
+                "payload": str(ex)
+            }
+            return self.error(response=error, status=400)
         except ValidationError as ex:
             error = {
                 "error": f"Unable to insert {self.name} info",
@@ -300,6 +318,12 @@ class ModelHandler(BaseView):
                 self.model.Meta.connection = conn
                 try:
                     result = await self.model.get(**args)
+                except ModelError as ex:
+                    error = {
+                        "error": f"Missing Info for Model {self.name}",
+                        "payload": str(ex)
+                    }
+                    return self.error(response=error, status=400)
                 except NoDataFound:
                     headers = {"x-error": f"{self.name} was not Found"}
                     self.no_content(headers=headers)
@@ -355,7 +379,7 @@ class ModelHandler(BaseView):
                 error = {"error": f"{self.name} was not Found"}
                 try:
                     result = await self.model.get(**args)
-                except NoDataFound:
+                except (NoDataFound, ModelError):
                     # create new Record
                     result = None
                 if not result:
@@ -363,6 +387,12 @@ class ModelHandler(BaseView):
                         resultset = self.model(**data)  # pylint: disable=E1102
                         result = await resultset.insert()
                         return self.json_response(content=result, status=201)
+                    except ModelError as ex:
+                        error = {
+                            "error": f"Missing Info for Model {self.name}",
+                            "payload": str(ex)
+                        }
+                        return self.error(response=error, status=400)
                     except ValidationError as ex:
                         error = {
                             "error": f"Unable to insert {self.name} info",
@@ -383,6 +413,12 @@ class ModelHandler(BaseView):
                     resultset.Meta.connection = conn
                     result = await resultset.insert()  # TODO: migrate to use save()
                     return self.json_response(content=result, status=201)
+            except ModelError as ex:
+                error = {
+                    "error": f"Missing Info for Model {self.name}",
+                    "payload": str(ex)
+                }
+                return self.error(response=error, status=400)
             except ValidationError as ex:
                 error = {
                     "error": f"Unable to insert {self.name} info",
