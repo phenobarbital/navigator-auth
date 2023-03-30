@@ -115,8 +115,6 @@ class ModelHandler(BaseView):
     async def head(self):
         """Getting Client information."""
         session = await self.session()
-        if not session:
-            return self.error(reason="Unauthorized", status=403)
         ## calculating resource:
         response = self.model.schema(as_dict=True)
         columns = list(response["properties"].keys())
@@ -192,11 +190,11 @@ class ModelHandler(BaseView):
                         "error": f"Missing Info for Model {self.name}",
                         "payload": str(ex)
                     }
-                    return self.error(response=error, status=400)
+                    return self.error(reason=error, status=400)
                 except NoDataFound:
-                    self.error(exception=error, status=403)
+                    self.error(reason=error, status=404)
                 if not result:
-                    self.error(exception=error, status=403)
+                    self.error(reason=error, status=404)
                 return await self._post_get(result, fields=fields)
         else:
             try:
@@ -212,25 +210,25 @@ class ModelHandler(BaseView):
                     "error": f"Missing Info for Model {self.name}",
                     "payload": str(ex)
                 }
-                return self.error(response=error, status=400)
+                return self.error(reason=error, status=400)
             except ValidationError as ex:
                 error = {
                     "error": f"Unable to load {self.name} info from Database",
                     "payload": ex.payload,
                 }
-                return self.critical(reason=error, statu=501)
+                return self.critical(reason=error, status=501)
             except TypeError as ex:
                 error = {
                     "error": f"Invalid payload for {self.name}",
                     "payload": str(ex),
                 }
-                return self.error(exception=error, statu=406)
+                return self.error(reason=error, status=406)
             except (DriverError, ProviderError, RuntimeError):
                 error = {
                     "error": "Database Error",
                     "payload": str(ex),
                 }
-                return self.critical(reason=error, statu=500)
+                return self.critical(reason=error, status=500)
 
     async def put(self):
         """Creating Model information."""
@@ -250,7 +248,7 @@ class ModelHandler(BaseView):
                 "error": f"Missing Info for Model {self.name}",
                 "payload": str(ex)
             }
-            return self.error(response=error, status=400)
+            return self.error(reason=error, status=400)
         except ValidationError as ex:
             error = {
                 "error": f"Unable to insert {self.name} info",
@@ -263,13 +261,13 @@ class ModelHandler(BaseView):
                 "error": f"Record already exists for {self.name}",
                 "payload": str(ex),
             }
-            return self.error(exception=error, status=412)
+            return self.error(reason=error, status=412)
         except (TypeError, AttributeError, ValueError) as ex:
             error = {
                 "error": f"Invalid payload for {self.name}",
                 "payload": str(ex),
             }
-            return self.error(exception=error, status=406)
+            return self.error(reason=error, status=406)
 
     async def patch(self):
         """Patch an existing Client or retrieve the column names."""
@@ -323,7 +321,7 @@ class ModelHandler(BaseView):
                         "error": f"Missing Info for Model {self.name}",
                         "payload": str(ex)
                     }
-                    return self.error(response=error, status=400)
+                    return self.error(reason=error, status=400)
                 except NoDataFound:
                     headers = {"x-error": f"{self.name} was not Found"}
                     self.no_content(headers=headers)
@@ -337,7 +335,7 @@ class ModelHandler(BaseView):
                 data = await result.update()
                 return self.json_response(content=data, status=202)
         else:
-            self.error(reason=f"Invalid {self.name} Data to Patch", status=403)
+            self.error(reason=f"Invalid {self.name} Data to Patch", status=400)
 
     async def post(self):
         """Create or Update a Client."""
@@ -392,7 +390,7 @@ class ModelHandler(BaseView):
                             "error": f"Missing Info for Model {self.name}",
                             "payload": str(ex)
                         }
-                        return self.error(response=error, status=400)
+                        return self.error(reason=error, status=400)
                     except ValidationError as ex:
                         error = {
                             "error": f"Unable to insert {self.name} info",
@@ -418,7 +416,7 @@ class ModelHandler(BaseView):
                     "error": f"Missing Info for Model {self.name}",
                     "payload": str(ex)
                 }
-                return self.error(response=error, status=400)
+                return self.error(reason=error, status=400)
             except ValidationError as ex:
                 error = {
                     "error": f"Unable to insert {self.name} info",

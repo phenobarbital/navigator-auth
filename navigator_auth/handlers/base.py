@@ -149,6 +149,8 @@ class BaseHandler(CorsViewMixin):
         status: int = 400,
         **kwargs,
     ) -> web.Response:
+        if isinstance(reason, dict):
+            reason = self._json.dumps(reason)
         response_obj = {
             "reason": reason if reason else str(exception),
             "content_type": content_type,
@@ -158,8 +160,10 @@ class BaseHandler(CorsViewMixin):
             response_obj["headers"] = headers
         if isinstance(exception, dict):
             response_obj["text"] = self._json.dumps(exception)
-        else:
+        elif exception is not None:
             response_obj["text"] = str(exception)
+        else:
+            response_obj["text"] = reason
         # defining the error
         if status == 400:  # bad request
             obj = web.HTTPBadRequest(**response_obj)
