@@ -218,7 +218,7 @@ class UserIdentity(Model):
     email: str = Column(required=False)
     phone: str = Column(required=False)
     short_bio: Text = Column(required=False)
-    avatar: str = Column(required=False)
+    avatar: Text = Column(required=False)
     user_id: User = Column(required=True, fk="user_id|username", api="users", label="User")
     auth_provider: str = Column(required=False)
     auth_data: Optional[dict] = Column(required=False, repr=False)
@@ -239,7 +239,7 @@ class VwUserIdentity(Model):
     email: str = Column(required=False)
     phone: str = Column(required=False)
     short_bio: Text = Column(required=False)
-    avatar: str = Column(required=False)
+    avatar: Text = Column(required=False)
     user_id: User = Column(required=True, fk="user_id|username", api="users", label="User")
     accounts: Optional[dict] = Column(required=False, default_factory=dict)
 
@@ -436,9 +436,9 @@ class UserAccount(Model):
     user_id: User = Column(required=True)
     provider: str = Column(required=True)
     uid: str = Column(required=False)
-    address: str = Column(required=False)
+    address: str = Column(required=False, repr=False)
     account: Optional[dict] = Column(required=False, default_factory=dict)
-    created_at: datetime = Column(required=False, default=datetime.now())
+    created_at: datetime = Column(required=False, default=datetime.now(), repr=False)
 
     class Meta:
         name = "user_accounts"
