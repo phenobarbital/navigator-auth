@@ -55,8 +55,8 @@ class UserAccountHandler(ModelHandler):
         except KeyError:
             pass
         try:
-            session = await get_session(self.request)
-            user_id = session[AUTH_SESSION_OBJECT]["user_id"]
+            session = await self.session()
+            user_id = await self.get_userid(session=session)
         except (KeyError, TypeError):
             user_id = None
 
@@ -126,10 +126,7 @@ class UserAccountHandler(ModelHandler):
 
     async def put(self):
         session = await self.session()
-        try:
-            user_id = session[AUTH_SESSION_OBJECT]["user_id"]
-        except (KeyError, TypeError):
-            user_id = None
+        user_id = await self.get_userid(session=session)
         try:
             data = await self.json_data()
             data['user_id'] = user_id
@@ -250,15 +247,8 @@ class UserIdentityHandler(ModelHandler):
                     return self.error(exception=err, status=500)
 
     async def put(self):
-        """Creating Model information."""
         session = await self.session()
-        if not session:
-            return self.error(reason="Unauthorized", status=403)
-        ### get session Data:
-        try:
-            user_id = session[AUTH_SESSION_OBJECT]["user_id"]
-        except (KeyError, TypeError):
-            user_id = None
+        user_id = await self.get_userid(session=session)
         try:
             data = await self.json_data()
             data['user_id'] = user_id
