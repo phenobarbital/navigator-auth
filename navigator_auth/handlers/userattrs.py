@@ -21,6 +21,9 @@ class UserAccountHandler(ModelHandler):
     name: str = "User Account"
     pk: str = "account_id"
 
+    async def _get_user_id(self, value, column, data):
+        return await self.get_userid(session=self._session)
+
     async def _get_address(self, value, column, data):
         db = self.request.app['authdb']
         try:
@@ -123,42 +126,6 @@ class UserAccountHandler(ModelHandler):
                 except Exception as err:
                     print(err)
                     return self.error(exception=err, status=500)
-
-    async def put(self):
-        session = await self.session()
-        user_id = await self.get_userid(session=session)
-        try:
-            data = await self.json_data()
-            data['user_id'] = user_id
-        except (TypeError, ValueError, AuthException):
-            return self.error(reason=f"Invalid {self.name} Data", status=403)
-        ## validate directly with model:
-        try:
-            resultset = self.model(**data)  # pylint: disable=E1102
-            db = self.request.app["authdb"]
-            async with await db.acquire() as conn:
-                resultset.Meta.connection = conn
-                result = await resultset.insert()
-                return self.json_response(content=result, status=201)
-        except ValidationError as ex:
-            error = {
-                "error": f"Unable to insert {self.name} info",
-                "payload": ex.payload,
-            }
-            return self.error(reason=error, status=406)
-        except StatementError as ex:
-            # UniqueViolation, already exists:
-            error = {
-                "error": f"Record already exists for {self.name}",
-                "payload": str(ex),
-            }
-            return self.error(exception=error, status=412)
-        except (TypeError, AttributeError, ValueError) as ex:
-            error = {
-                "error": f"Invalid payload for {self.name}",
-                "payload": str(ex),
-            }
-            return self.error(exception=error, status=406)
 
 
 class UserIdentityHandler(ModelHandler):
