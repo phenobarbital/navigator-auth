@@ -21,6 +21,9 @@ class UserAccountHandler(ModelHandler):
     name: str = "User Account"
     pk: str = "account_id"
 
+    async def _get_user_id(self, value, column, data):
+        return await self.get_userid(session=self._session)
+
     async def _get_address(self, value, column, data):
         db = self.request.app['authdb']
         try:
@@ -45,12 +48,94 @@ class UserAccountHandler(ModelHandler):
                 self.logger.error(str(ex))
         return None
 
+    async def get(self):
+        db = self.request.app["database"]
+        params = self.match_parameters(self.request)
+        try:
+            if params["meta"] == ":meta":
+                response = self.model.schema(as_dict=True)
+                return self.json_response(content=response)
+        except KeyError:
+            pass
+        try:
+            session = await self.session()
+            user_id = await self.get_userid(session=session)
+        except (KeyError, TypeError):
+            user_id = None
+
+        args = {}
+        if isinstance(self.pk, str):
+            try:
+                objid = params["id"]
+            except KeyError:
+                objid = None
+            if objid:
+                args = {self.pk: objid}
+        elif isinstance(self.pk, list):
+            try:
+                paramlist = params["id"].split("/")
+                if len(paramlist) != len(self.pk):
+                    return self.error(
+                        reason=f"Invalid Number of URL elements for PK: {self.pk}, {paramlist!r}",
+                        status=410,
+                    )
+                args = {}
+                for key in self.pk:
+                    args[key] = paramlist.pop(0)
+            except KeyError:
+                pass
+        else:
+            return self.error(
+                reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410
+            )
+        if args:
+            # get data for specific client:
+            async with await db.acquire() as conn:
+                self.model.Meta.connection = conn
+                # look for this client, after, save changes
+                error = {"error": f"{self.name} was not Found"}
+                try:
+                    result = await self.model.get(**args)
+                except NoDataFound:
+                    self.error(exception=error, status=403)
+                if not result:
+                    self.error(exception=error, status=403)
+                return self.json_response(content=result)
+        else:
+            async with await db.acquire() as conn:
+                self.model.Meta.connection = conn
+                
+                try:
+                    filter = {
+                                "user_id": user_id
+                            }
+
+                    UserAccounts = await self.model.filter(**filter)
+                    if not UserAccounts:
+                        headers = {
+                            "X-STATUS": "EMPTY",
+                            "X-MESSAGE": "UserAccounts not Found",
+                        }
+                        data = {"message": "No Content"}
+                        code = 204
+
+                        return self.response(response=data, headers=headers, status=code)
+                    else:
+                        headers = {"x-status": "OK", "x-message": "User Account Data"}
+                        return self.json_response(content=UserAccounts, headers=headers, status=200)
+                except Exception as err:
+                    print(err)
+                    return self.error(exception=err, status=500)
+
 
 class UserIdentityHandler(ModelHandler):
     model: Any = UserIdentity
     model_name: str = AUTH_USER_IDENTITY_MODEL
     name: str = "User Identity"
     pk: str = "identity_id"
+
+    async def _get_user_id(self, value, column, data):
+        return await self.get_userid(session=self._session)
 
     async def get(self):
         db = self.request.app["database"]
@@ -126,52 +211,7 @@ class UserIdentityHandler(ModelHandler):
                         return self.response(response=data, headers=headers, status=code)
                     else:
                         headers = {"x-status": "OK", "x-message": "User Identity Data"}
-                        print(UserIdentity)
                         return self.json_response(content=UserIdentity, headers=headers, status=200)
                 except Exception as err:
                     print(err)
-                return self.error(exception=err, status=500)
-
-    async def put(self):
-        """Creating Model information."""
-        session = await self.session()
-        if not session:
-            return self.error(reason="Unauthorized", status=403)
-        ### get session Data:
-        try:
-            user_id = session[AUTH_SESSION_OBJECT]["user_id"]
-        except (KeyError, TypeError):
-            user_id = None
-        try:
-            data = await self.json_data()
-            data['user_id'] = user_id
-        except (TypeError, ValueError, AuthException):
-            return self.error(reason=f"Invalid {self.name} Data", status=403)
-        ## validate directly with model:
-        try:
-            print(data)
-            resultset = self.model(**data)  # pylint: disable=E1102
-            db = self.request.app["authdb"]
-            async with await db.acquire() as conn:
-                resultset.Meta.connection = conn
-                result = await resultset.insert()
-                return self.json_response(content=result, status=201)
-        except ValidationError as ex:
-            error = {
-                "error": f"Unable to insert {self.name} info",
-                "payload": ex.payload,
-            }
-            return self.error(reason=error, status=406)
-        except StatementError as ex:
-            # UniqueViolation, already exists:
-            error = {
-                "error": f"Record already exists for {self.name}",
-                "payload": str(ex),
-            }
-            return self.error(exception=error, status=412)
-        except (TypeError, AttributeError, ValueError) as ex:
-            error = {
-                "error": f"Invalid payload for {self.name}",
-                "payload": str(ex),
-            }
-            return self.error(exception=error, status=406)
+                    return self.error(exception=err, status=500)
