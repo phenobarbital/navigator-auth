@@ -125,11 +125,7 @@ class UserAccountHandler(ModelHandler):
                     return self.error(exception=err, status=500)
 
     async def put(self):
-        """Creating Model information."""
         session = await self.session()
-        if not session:
-            return self.error(reason="Unauthorized", status=403)
-        ### get session Data:
         try:
             user_id = session[AUTH_SESSION_OBJECT]["user_id"]
         except (KeyError, TypeError):
