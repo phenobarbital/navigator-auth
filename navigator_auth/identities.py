@@ -12,6 +12,10 @@ class AuthBackend(BaseModel):
     external: bool = Column(required=True, default=False)
     headers: dict = Column(required=False, default_factory=dict)
 
+    class Meta:
+        strict = True
+        frozen = False
+
 
 class Group(BaseModel):
     """Group.
@@ -31,9 +35,9 @@ Guest = Group(group="guest")
 
 
 class Organization(BaseModel):
-    org_id: str
-    organization: str
-    slug: str
+    org_id: str = Column(required=True)
+    organization: str = Column(required=True)
+    slug: str = Column(required=False)
 
     def __post_init__(self) -> None:
         super(Organization, self).__post_init__()
@@ -46,9 +50,9 @@ class Organization(BaseModel):
 
 
 class Program(BaseModel):
-    program_id: int
-    program_name: str
-    program_slug: str
+    program_id: int = Column(required=True)
+    program_name: str = Column(required=True)
+    program_slug: str = Column(required=False)
 
     def __post_init__(self) -> None:
         super(Program, self).__post_init__()
@@ -70,9 +74,9 @@ class Identity(BaseModel):
     auth_method: str = None
     access_token: Optional[str] = None
     enabled: bool = Column(required=True, default=True)
-    data: InitVar = Column(required=False, default_factory=dict)
+    data: InitVar = {}
     is_authenticated: bool = Column(equired=False, default=False)
-    userdata: dict = Column(required=False, default_factory={})
+    userdata: dict = Column(required=False, default_factory=dict)
 
     def __post_init__(self, data):  # pylint: disable=W0221
         self.userdata = data
