@@ -3,7 +3,7 @@ include LICENSE
 include CHANGES.rst
 include README.md
 include Makefile
-graft navigator_session
+graft navigator_auth
 graft docs
 graft tests
 global-exclude *.pyc

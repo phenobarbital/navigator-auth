@@ -77,7 +77,7 @@ setup(
     name="navigator-auth",
     py_modules=['navigator_auth'],
     version=__version__,
-    python_requires=">=3.8.0",
+    python_requires=">=3.9.14",
     url="https://github.com/phenobarbital/navigator-auth",
     description=__description__,
     keywords=['asyncio', 'auth', 'aioredis', 'aiohttp', 'authz', 'authentication', 'authorization'],
@@ -102,10 +102,10 @@ setup(
     ],
     author=__author__,
     author_email=__author_email__,
-    packages=find_packages(exclude=['contrib', 'docs', 'tests','settings','resources']),
+    packages=find_packages(exclude=['contrib', 'docs', 'tests','settings','resources', "examples"]),
     license=__license__,
     setup_requires=[
-        "wheel==0.38.4",
+        "wheel==0.40.0",
         "Cython==0.29.33",
         "asyncio==3.4.3"
     ],
