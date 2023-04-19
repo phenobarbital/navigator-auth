@@ -57,6 +57,12 @@ AUTH_CREDENTIALS_REQUIRED = config.getboolean(
     "AUTH_CREDENTIALS_REQUIRED", fallback=True
 )
 
+# what happen when a user doesn't exists?
+# possible values are: create (user is created), raise (a UserDoesntExists exception raises)
+# and ignore, session is created but user is missing.
+AUTH_MISSING_ACCOUNT = config.get("AUTH_MISSING_ACCOUNT", fallback="create")
+# List of function callbacks called (in order) when a user is
+
 # AsyncDB Model representing a User Record.
 AUTH_USER_MODEL = config.get("AUTH_USER_MODEL", fallback="navigator_auth.models.User")
 # User View can represent a more complex user View used for getting User Data.
