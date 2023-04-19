@@ -347,8 +347,8 @@ class UserGroup(Model):
 
 
 class ProgramGroup(Model):
-    program_id: Program = Column(required=True, primary_key=True)
-    group_id: Group = Column(required=True, primary_key=True)
+    program_id: Program = Column(required=True, primary_key=True, fk="user_id|username", api="users", label="User")
+    group_id: Group = Column(required=True, primary_key=True, fk="group_id|group_name", api="groups", label="Group")
     created_at: datetime = Column(required=False, default=datetime.now())
     created_by: str = Column(required=False)
 

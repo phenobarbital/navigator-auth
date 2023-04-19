@@ -4,6 +4,7 @@ from navigator_auth.models import (
     Program,
     ProgramAttribute,
     ProgramClient,
+    ProgramGroup
 )
 from navigator_auth.conf import (
     AUTH_PROGRAM_MODEL,
@@ -38,3 +39,10 @@ class ProgramClientHandler(ModelHandler):
     model_name: str = AUTH_PROGRAM_CLIENT_MODEL
     name: str = "Program Client"
     pk: list = ["program_id", "client_id"]
+
+
+class ProgramGroupHandler(ModelHandler):
+    model: Any = ProgramGroup
+    model_name: str = None
+    name: str = "Program Groups"
+    pk: list = ["program_id", "group_id"]

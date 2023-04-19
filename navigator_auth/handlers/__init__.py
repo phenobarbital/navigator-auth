@@ -2,7 +2,7 @@ from .clients import ClientHandler
 from .orgs import OrganizationHandler, UserOrganizationHandler
 from .permissions import PermissionHandler
 from .users import UserHandler, UserSession
-from .program import ProgramCatHandler, ProgramHandler, ProgramClientHandler
+from .program import ProgramCatHandler, ProgramHandler, ProgramClientHandler, ProgramGroupHandler
 from .groups import GroupHandler, GroupPermissionHandler, UserGroupHandler
 from .userattrs import UserAccountHandler, UserIdentityHandler
 
@@ -109,6 +109,13 @@ def handler_routes(router) -> None:
     )
     router.add_view(
         r"/api/v1/user_identity{meta:\:?.*}", UserIdentityHandler, name="api_auth_useridentity"
+    )
+    ## Program Group:
+    router.add_view(
+        r"/api/v1/program_groups/{id:.*}", ProgramGroupHandler, name="api_auth_programgroup_id"
+    )
+    router.add_view(
+        r"/api/v1/program_groups{meta:\:?.*}", ProgramGroupHandler, name="api_auth_programgroup"
     )
     ### User Session Methods:
     usr = UserSession()
