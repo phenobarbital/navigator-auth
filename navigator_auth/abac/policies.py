@@ -131,45 +131,64 @@ class Policy:
         return all(matches)
 
     def evaluate(self, ctx: EvalContext, environ: Environment) -> bool:
-        # Check if user belongs to any allowed groups
+        """
+        Evaluates the policy against the provided context and environment.
+
+        :param ctx: The evaluation context, containing user, userinfo, and session information.
+        :param environ: The environment information, such as the current time and date.
+        :return: A PolicyResponse instance, indicating whether access is allowed or denied.
+        """
+        # Check if the user belongs to any of the allowed groups
         groups_condition = False
         if self.groups:
             try:
                 if bool(not set(ctx.userinfo["groups"]).isdisjoint(self.groups)):
-                    ### allowed by groups:
+                    # User is in at least one allowed group
                     groups_condition = True
             except (KeyError, TypeError, ValueError):
                 pass
         else:
+            # No groups specified in the policy, so this condition is true by default
             groups_condition = True
+
+        # Check if the user is listed in the allowed subjects
         subject_condition = False
         if self.subject:
             if ctx.userinfo['username'] in self.subject:
                 subject_condition = True
         else:
+            # No subjects specified in the policy, so this condition is true by default
             subject_condition = True
-        # Check if current environment matches the environment policy
+
+        # Check if the current environment matches the policy's environment requirements
         environment_condition = False
         if self.environment:
             if self.evaluate_environment(environ):
                 environment_condition = True
         else:
+            # No environment requirements in the policy, so this condition is true by default
             environment_condition = True
-        # Check if other contexts match the context rules in Policy Attributes
+
+        # Check if the other contexts match the policy's attribute requirements
         context_condition = False
         if self.context:
-            ### check attributes
             if self.context_attrs:
                 for a in self.context_attrs:
                     att = self.context[a]
+
+                    # Check user object attributes
                     try:
                         if att == getattr(ctx.user, a, None):
                             context_condition = True
                     except TypeError:
                         pass
+
+                    # Check userinfo attributes
                     val = getattr(ctx.userinfo, a, ctx.userinfo.get(a, None))
                     if att == val:
                         context_condition = True
+
+                    # Check session attributes
                     try:
                         val = getattr(ctx.session, a, None)
                         if isinstance(att, list):
@@ -181,7 +200,9 @@ class Policy:
                     except (KeyError, TypeError):
                         pass
         else:
+            # No context requirements in the policy, so this condition is true by default
             context_condition = True
+
         # If all conditions are true, set is_allowed to True
         if groups_condition and environment_condition and context_condition and subject_condition:
             return PolicyResponse(
@@ -189,7 +210,8 @@ class Policy:
                 response=f"Access {self.effect} by {self.name}",
                 rule=self.name
             )
-        ### default return False
+
+        # Default return: access denied
         return PolicyResponse(
             effect=PolicyEffect.DENY,
             response=f"Unauthorized by Policy {self.name}",

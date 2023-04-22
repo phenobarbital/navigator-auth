@@ -7,7 +7,7 @@ from navigator_auth.abac.storages.pg import pgStorage
 from navigator_auth.abac.policies import Policy, PolicyEffect
 # from navigator_auth.abac.conditions import NOT
 from navigator_auth.conf import default_dsn
-
+from itertools import chain
 
 class ExampleView(BaseView):
     async def get(self):
@@ -140,16 +140,23 @@ policy5 = Policy(
 policy6 = Policy(
     'only_for_jesus',
     effect=PolicyEffect.ALLOW,
-    description="This resource will be used only for Jesus between 9 at 22",
+    description="This resource will be used only for Jesus between 9 at 24 monday to saturday",
     subject=['jlara@trocglobal.com'],
     resource=["uri:/private/"],
     environment={
-        # "hour": range(9, 24)
+        "hour": list(chain(range(9, 24), range(1))),
         "day_of_week": range(0, 6)
     }
 )
 
-
+policy7 = Policy(
+    'clone_dashboard',
+    effect=PolicyEffect.ALLOW,
+    description="Grant Clone dashboards to superusers and adv_users",
+    action=['clone_dashboard'],
+    resource=["dashboard:"],
+    groups=['superuser', 'adv_users'],
+)
 # pdp.add_policy(policy)
 # walmart = Policy(
 #     'allow_access_test',
