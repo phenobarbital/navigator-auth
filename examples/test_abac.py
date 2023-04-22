@@ -85,7 +85,7 @@ policy1 = Policy(
     'avoid_example_put',
     effect=PolicyEffect.ALLOW,
     description="Avoid using PUT method except by Jesus Lara",
-    resource=["/api/v1/example/"],
+    resource=["uri:/api/v1/example/"],
     method='PUT',
     context={
         "username": "jlara@trocglobal.com",
@@ -96,7 +96,7 @@ policy2 = Policy(
     'allow_consultants',
     effect=PolicyEffect.ALLOW,
     description='Allow Access to this resource only to consultants',
-    resource=["/epson/"],
+    resource=["uri:/epson/"],
     method=['POST', 'PUT'],
     context={
         "title": "Consultant",
@@ -106,7 +106,7 @@ policy3 = Policy(
     'login_denied_on_wednesdays',
     effect=PolicyEffect.DENY,
     description="All users, except superUsers has denied access on Wednesdays",
-    resource=["/epson/"],
+    resource=["uri:/epson/"],
     context={
         "dow": [3]
     },
@@ -118,7 +118,7 @@ policy4 = Policy(
     'allow_access_epson_to_epson_users',
     effect=PolicyEffect.ALLOW,
     description="All Epson Users has access to this resource",
-    resource=["/epson/"],
+    resource=["uri:/epson/"],
     groups=[
         'epson', 'superuser'
     ]
@@ -127,8 +127,8 @@ policy4 = Policy(
 policy5 = Policy(
     'allow_access_tm_to_tm_users',
     effect=PolicyEffect.ALLOW,
-    description="All TM Users has access to this resource",
-    resource=["/trendmicro/"],
+    description="All TM Users (and superusers) has access to this resource",
+    resource=["uri:/trendmicro/"],
     context={
         "programs": ['trendmicro']
     },
@@ -136,6 +136,20 @@ policy5 = Policy(
         'trendmicro', 'superuser'
     ]
 )
+
+policy6 = Policy(
+    'only_for_jesus',
+    effect=PolicyEffect.ALLOW,
+    description="This resource will be used only for Jesus between 9 at 22",
+    subject=['jlara@trocglobal.com'],
+    resource=["uri:/private/"],
+    environment={
+        # "hour": range(9, 24)
+        "day_of_week": range(0, 6)
+    }
+)
+
+
 # pdp.add_policy(policy)
 # walmart = Policy(
 #     'allow_access_test',
@@ -166,6 +180,7 @@ pdp.add_policy(policy2)
 pdp.add_policy(policy3)
 pdp.add_policy(policy4)
 pdp.add_policy(policy5)
+pdp.add_policy(policy6)
 pdp.setup(app)
 
 
@@ -174,6 +189,8 @@ app.router.add_view("/api/v1/test/", TestView)
 app.router.add_view("/walmart/", WalmartView)
 app.router.add_view("/epson/", EpsonView)
 app.router.add_view("/trendmicro/", TmView)
+app.router.add_view("/private/", TmView)
+
 
 if __name__ == '__main__':
     try:

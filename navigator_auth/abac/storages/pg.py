@@ -18,6 +18,6 @@ class pgStorage(DBStorage):
             result, error = await conn.query(policy_table)
             if error:
                 raise ConfigError(
-                    "ABAC: Error loading policies: {error}"
+                    f"ABAC: Error loading policies: {error}"
                 )
         return result

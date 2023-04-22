@@ -1,7 +1,5 @@
 from typing import Any
 from collections.abc import MutableMapping, Iterator
-import time
-from datetime import datetime
 from aiohttp import web
 from datamodel import BaseModel
 
@@ -16,10 +14,6 @@ class EvalContext(dict, MutableMapping):
         self.store['ip_addr'] = request.remote
         self.store['method'] = request.method
         self.store['referer'] = request.headers.get('referer', None)
-        self.store['time'] = time.time()
-        dow = datetime.today().weekday()
-        self.store['dow'] = dow
-        self.store['day_of_week'] = dow
         self.store['path_qs'] = request.path_qs
         self.store['path'] = request.path
         self.store['headers'] = request.headers
