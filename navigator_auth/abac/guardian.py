@@ -5,7 +5,7 @@ from navigator.views import BaseHandler
 from navigator_session import get_session
 from .errors import PreconditionFailed, AccessDenied
 from .policies import PolicyEffect
-
+from .decorators import groups_protected
 
 class Guardian:
     """Guardian.
@@ -188,6 +188,26 @@ class PEP(BaseHandler):
         except (ValueError, KeyError):
             self.critical(
                 reason="ABAC System is not Installed."
+            )
+
+    @groups_protected(groups=['superuser'])
+    async def reload(self, request: web.Request) -> web.Response:
+        guardian = self.get_guardian(request)
+        ## reload policies:
+        await guardian.pdp.reload_policies()
+        policies = guardian.pdp.policies()
+        if len(policies) > 0:
+            msg = {
+                "message": "Policy PDP reloaded from Storage",
+                "policies": f"{len(policies)} policies"
+            }
+            return self.json_response(
+                response=msg,
+                status=202
+            )
+        else:
+            self.critical(
+                reason="ABAC Failed to reload Policies"
             )
 
     async def authorize(self, request: web.Request) -> web.Response:

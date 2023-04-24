@@ -33,6 +33,9 @@ class PDP:
         self.logger = logger
         self._auditlog = AuditLog()
 
+    def policies(self):
+        return self._policies
+
     def add_policy(self, policy: Policy):
         self._policies.append(policy)
         self.sorted_policies()
@@ -40,9 +43,9 @@ class PDP:
     def sorted_policies(self):
         self._policies.sort(key=lambda policy: policy.priority)
 
-    async def on_startup(self, app: web.Application):
-        """Signal Handler for loading Policies from Storage.
-        """
+
+    async def _load_policies(self):
+        # Load policies from storage
         policies = await self.storage.load_policies()
         for policy in policies:
             try:
@@ -58,11 +61,27 @@ class PDP:
                 p = Policy(**policy)
             elif policy_type == 'file':
                 p = FilePolicy(**policy)
+            elif policy_type == 'object':
+                p = ObjectPolicy(**policy)
             self._policies.append(p)
         self._policies.sort(key=lambda policy: policy.priority)
 
+
+    async def on_startup(self, app: web.Application):
+        """Signal Handler for loading Policies from Storage.
+        """
+        # Call the _load_policies function
+        await self._load_policies()
+
     async def on_shutdown(self, app: web.Application):
         await self.storage.close()
+
+    async def reload_policies(self):
+        # Clear the current list of policies
+        self._policies = []
+
+        # Call the _load_policies function
+        await self._load_policies()
 
     def setup(self, app: web.Application):
         if isinstance(app, web.Application):
@@ -91,7 +110,13 @@ class PDP:
         mdl.append(abac_middleware)
         ### create the API endpoint for this ABAC
         pep = PEP()
+        self.app.router.add_get(
+            "/api/v1/abac/reload", pep.reload
+        )
         self.app.router.add_post(
+            "/api/v1/abac/authorize", pep.authorize
+        )
+        self.app.router.add_get(
             "/api/v1/abac/authorize", pep.authorize
         )
         self.app.router.add_post(
