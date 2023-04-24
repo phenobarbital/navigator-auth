@@ -5,6 +5,11 @@ from navconfig.logging import logging
 from navigator_auth.conf import exclude_list
 
 
+exceptions = (
+    "/api/v1/abac/authorize",
+    "/api/v1/abac/is_allowed",
+)
+
 @web.middleware
 async def abac_middleware(
     request: web.Request,
@@ -25,6 +30,8 @@ async def abac_middleware(
         pass
     # avoid authorization on exclude list
     if request.path in exclude_list:
+        return await handler(request)
+    if request.path in exceptions:
         return await handler(request)
     logging.debug(' == ABAC MIDDLEWARE == ')
     ### get Guardian:

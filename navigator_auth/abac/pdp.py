@@ -1,13 +1,13 @@
-from typing import List, Optional, Any
+from typing import List, Optional, Union, Any
+import asyncio
 from aiohttp import web
 from navconfig.logging import logger
 from navigator_session import SessionData
 from navigator_auth.conf import AUTH_SESSION_OBJECT
-from .policies import Policy
-from .policies import PolicyEffect
-from .errors import PreconditionFailed, Unauthorized, AccessDenied
+from .policies import Exp, Policy, ObjectPolicy, FilePolicy, PolicyEffect, Environment
+from .errors import PreconditionFailed, AccessDenied
 from .context import EvalContext
-from .guardian import Guardian
+from .guardian import Guardian, PEP
 from .storages.abstract import AbstractStorage
 from .audit import AuditLog
 from .middleware import abac_middleware
@@ -20,6 +20,7 @@ async def find_deny_policy(ctx, policies):
             return answer
     return None
 
+
 class PDP:
     """ABAC Policy Decision Point implementation.
     """
@@ -30,7 +31,7 @@ class PDP:
         ### Loading an Storage and registering for Load Policies.
         self.storage = storage
         self.logger = logger
-        self.auditlog = AuditLog()
+        self._auditlog = AuditLog()
 
     def add_policy(self, policy: Policy):
         self._policies.append(policy)
@@ -38,6 +39,64 @@ class PDP:
 
     def sorted_policies(self):
         self._policies.sort(key=lambda policy: policy.priority)
+
+    async def on_startup(self, app: web.Application):
+        """Signal Handler for loading Policies from Storage.
+        """
+        policies = await self.storage.load_policies()
+        for policy in policies:
+            try:
+                policy_type = policy['policy_type']
+                del policy['policy_type']
+            except KeyError:
+                policy_type = 'policy'
+            if policy['effect'] == 'ALLOW':
+                policy['effect'] = PolicyEffect.ALLOW
+            else:
+                policy['effect'] = PolicyEffect.DENY
+            if policy_type == 'policy':
+                p = Policy(**policy)
+            elif policy_type == 'file':
+                p = FilePolicy(**policy)
+            self._policies.append(p)
+        self._policies.sort(key=lambda policy: policy.priority)
+
+    async def on_shutdown(self, app: web.Application):
+        await self.storage.close()
+
+    def setup(self, app: web.Application):
+        if isinstance(app, web.Application):
+            self.app = app # register the app into the Extension
+        elif hasattr(app, "get_app"):
+            self.app = app.get_app()
+        else:
+            raise TypeError(
+                f"Invalid type for Application Setup: {app}:{type(app)}"
+            )
+        ### Also creates a PEP (Policy Enforcing Point) on backend
+        self.app['security'] = Guardian(pdp=self)
+        ## and the PDP itself:
+        self.app['abac'] = self
+        # startup operations over storage backend
+        self.app.on_startup.append(
+            self.on_startup
+        )
+        # cleanup operations over storage backend
+        self.app.on_shutdown.append(
+            self.on_shutdown
+        )
+        # the backend add a middleware to the app
+        mdl = self.app.middlewares
+        # add the middleware for this backend Authentication
+        mdl.append(abac_middleware)
+        ### create the API endpoint for this ABAC
+        pep = PEP()
+        self.app.router.add_post(
+            "/api/v1/abac/authorize", pep.authorize
+        )
+        self.app.router.add_post(
+            "/api/v1/abac/is_allowed", pep.is_allowed
+        )
 
     async def authorize(
             self,
@@ -51,12 +110,10 @@ class PDP:
         except KeyError:
             userinfo = None
         ctx = EvalContext(request, user, userinfo, session)
-
         # Get filtered policies based on targets from storage
         # Filter policies that fit Inquiry by its attributes.
-        filtered = [p for p in self._policies if p.fits(ctx)]
-
-        self.logger.debug(f'FILTERED POLICIES > {filtered!r}')
+        filtered = [p for p in self._policies if type(p) == Policy and p.fits(ctx)]
+        self.logger.verbose(f'FILTERED POLICIES > {filtered!r}')
         # no policies -> deny access!
         if len(filtered) == 0:
             raise PreconditionFailed(
@@ -64,26 +121,28 @@ class PDP:
             )
         # we have policies - all of them should have allow effect, otherwise -> deny access!
         answer = False
-        # try:
-        #     answer = await find_deny_policy(ctx, filtered)
-        #     if answer is not None:
-        #         raise Unauthorized(
-        #             f"Access Denied: {answer.response}"
-        #         )
-        # except StopAsyncIteration:
-        #     pass
         for policy in filtered:
-            answer = await policy.allowed(ctx)
-            if answer.effect == PolicyEffect.DENY:
-                ## Audit Log
-                await self.auditlog.log(answer, PolicyEffect(answer.effect).name, user)
-                raise Unauthorized(
-                    f"Access Denied: {answer.response}"
-                )
-        ## Audit Log
-        await self.auditlog.log(answer, PolicyEffect(answer.effect).name , user)
-        ## return default effect:
+            self.logger.notice(f'Policy: {policy}')
+            #answer = await policy.allowed(ctx)
+            answer = await asyncio.to_thread(policy.evaluate, ctx, Environment())
+            if answer.effect == effect:
+                await self.auditlog(answer, user)
+                ## return default effect:
+                return answer
+        if answer and answer.effect == PolicyEffect.DENY:
+            ## Audit Log
+            await self.auditlog(answer, user)
+            raise AccessDenied(
+                f"Access Denied: {answer.response}"
+            )
         return answer
+
+    ## Audit Log
+    async def auditlog(self, answer, user):
+        try:
+            await self._auditlog.log(answer, PolicyEffect(answer.effect).name, user)
+        except Exception as exc:
+            self.logger.warning(f'Error saving policy Log: {exc}')
 
     async def allowed_groups(
             self,
@@ -106,7 +165,7 @@ class PDP:
                     break
         if member is True:
             ## TODO: Return an ABAC Response (allow/deny with )
-            # await self.auditlog.log(answer, PolicyEffect(effect).name , user)
+            # await self.auditlog(answer, PolicyEffect(effect).name , user)
             return effect
         else:
             ## TODO migrate to a custom response.
@@ -115,44 +174,141 @@ class PDP:
                 "Access Denied"
             )
 
-    async def on_startup(self, app: web.Application):
-        """Signal Handler for loading Policies from Storage.
-        """
-        policies = await self.storage.load_policies()
-        for policy in policies:
-            if policy['effect'] == 'ALLOW':
-                policy['effect'] = PolicyEffect.ALLOW
-            else:
-                policy['effect'] = PolicyEffect.DENY
-            p = Policy(**policy)
-            self._policies.append(p)
-        self._policies.sort(key=lambda policy: policy.priority)
-
-    async def on_shutdown(self, app: web.Application):
-        await self.storage.close()
-
-    def setup(self, app: web.Application):
-        if isinstance(app, web.Application):
-            self.app = app # register the app into the Extension
-        elif hasattr(app, "get_app"):
-            self.app = app.get_app()
-        else:
-            raise TypeError(
-                f"Invalid type for Application Setup: {app}:{type(app)}"
+    async def filter_files(
+            self,
+            request: web.Request,
+            files: list[str],
+            session: SessionData = None,
+            user: Any = None
+        ):
+        try:
+            userinfo = session[AUTH_SESSION_OBJECT]
+        except KeyError:
+            userinfo = None
+        ctx = EvalContext(request, user, userinfo, session)
+        ctx.objects = files
+        # Get filtered policies based on targets from storage
+        # Filter policies that fit Inquiry by its attributes.
+        filtered = [p for p in self._policies if type(p) == FilePolicy and p.fits(ctx)]  # pylint: disable=C0123
+        self.logger.verbose(f'FILTERED POLICIES > {filtered!r}')
+        # no policies -> deny access!
+        if len(filtered) == 0:
+            raise PreconditionFailed(
+                "No Matching Policies were found, Deny access."
             )
-        ### Also creates a PEP (Policy Enforcing Point)
-        self.app['security'] = Guardian(pdp=self)
-        ## and the PDP itself:
-        self.app['abac'] = self
-        # startup operations over storage backend
-        self.app.on_startup.append(
-            self.on_startup
-        )
-        # cleanup operations over storage backend
-        self.app.on_shutdown.append(
-            self.on_shutdown
-        )
-        # the backend add a middleware to the app
-        mdl = self.app.middlewares
-        # add the middleware for this backend Authentication
-        mdl.append(abac_middleware)
+        _files = set(files)
+        denied_files_set = set()
+        for policy in filtered:
+            self.logger.notice(f'Filter Policy: {policy}')
+            #answer = await policy.allowed(ctx)
+            files_allowed = await asyncio.to_thread(policy.filter_files, ctx, Environment())
+            files_allowed_set = set(files_allowed)
+            if policy.effect == PolicyEffect.ALLOW:
+                _files = _files.intersection(files_allowed_set)
+            elif policy.effect == PolicyEffect.DENY:
+                denied_files = set(ctx.objects).difference(files_allowed_set)
+                denied_files_set = denied_files_set.union(denied_files)
+        final_allowed_files = list(_files.difference(denied_files_set))
+        return final_allowed_files
+
+
+    async def is_allowed(
+            self,
+            request: web.Request,
+            session: SessionData = None,
+            user: Any = None,
+            **kwargs
+        ):
+        try:
+            userinfo = session[AUTH_SESSION_OBJECT]
+        except KeyError:
+            userinfo = None
+        ctx = EvalContext(request, user, userinfo, session)
+        # Get filtered policies based on targets from storage
+        # Filter policies that fit Inquiry by its attributes.
+        obj = kwargs.get('resource', None)
+        if obj:
+            if isinstance(obj, str):
+                ctx.objects = Exp(obj)
+            else:
+                ctx.objects = [Exp(r) for r in obj]
+            filtered = [
+                p for p in self._policies if isinstance(p, ObjectPolicy) and p.fits(ctx)
+            ]
+        else:
+            filtered = [p for p in self._policies if p.fits(ctx)]
+        self.logger.verbose(f'FILTERED ALLOWED POLICIES > {filtered!r}')
+        # no policies -> deny access!
+        if len(filtered) == 0:
+            raise PreconditionFailed(
+                "No Matching Policies were found, Deny access."
+            )
+        # we have policies - all of them should have allow, otherwise -> deny access
+        answer = False
+        for policy in filtered:
+            self.logger.notice(f'Allowed Policy: {policy!r}')
+            answer = await asyncio.to_thread(
+                policy.is_allowed,
+                ctx,
+                Environment(),
+                **kwargs
+            )
+            if answer.effect == PolicyEffect.ALLOW:
+                await self.auditlog(answer, user)
+                ## return default effect:
+                return answer
+        ## Audit Log
+        await self.auditlog(answer, user)
+        return answer
+
+
+    async def filter_obj(
+            self,
+            request: web.Request,
+            objects: Union[str, list],
+            _type: str,
+            session: SessionData = None,
+            user: Any = None,
+            effect: PolicyEffect = PolicyEffect.ALLOW
+        ):
+        try:
+            userinfo = session[AUTH_SESSION_OBJECT]
+        except KeyError:
+            userinfo = None
+        ctx = EvalContext(request, user, userinfo, session)
+        if not isinstance(objects, list):
+            objects = [objects]
+        ctx.objects = objects
+        ctx.objectype = _type
+        # Get filtered policies based on targets from storage
+        # Filter policies that fit Inquiry by its attributes.
+        filtered = [p for p in self._policies if hasattr(p, '_filter') and p.fits(ctx)]
+        self.logger.verbose(f'FILTERED POLICIES > {filtered!r}')
+        # no policies -> deny access!
+        if len(filtered) == 0:
+            raise PreconditionFailed(
+                "No Matching Policies were found, Deny access."
+            )
+        # we have policies - all of them should have allow, otherwise -> deny access
+        answer = False
+        for policy in filtered:
+            self.logger.notice(f'Policy: {policy!r}')
+            #answer = await policy.allowed(ctx)
+            answer = await asyncio.to_thread(
+                policy._filter,
+                objects,
+                _type,
+                ctx,
+                Environment()
+            )
+            if answer.effect == effect:
+                await self.auditlog(answer, user)
+                ## return default effect:
+                return answer
+        if answer and answer.effect == PolicyEffect.DENY:
+            ## Audit Log
+            await self.auditlog(answer, user)
+            raise AccessDenied(
+                f"Access Denied: {answer.response}"
+            )
+        return answer

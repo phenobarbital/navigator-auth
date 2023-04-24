@@ -1,5 +1,7 @@
+from typing import List
 from collections.abc import Callable
 from aiohttp import web
+from navigator.views import BaseHandler
 from navigator_session import get_session
 from .errors import PreconditionFailed, AccessDenied
 from .policies import PolicyEffect
@@ -42,7 +44,7 @@ class Guardian:
 
             Check if user has access based on PDP Policies.
         Args:
-            request (web.Request): _description_
+            request (web.Request): Web Request.
 
         Raises:
             web.HTTPUnauthorized: Access is Denied.
@@ -53,6 +55,22 @@ class Guardian:
             request=request,
             session=session,
             user=user
+        )
+
+    async def filter_files(self, files: List[str], request: web.Request):
+        """filter_files.
+
+            Retrieve filtered list of files with permissions.
+        Args:
+            request (web.Request): Web Request.
+        """
+        self.is_authenticated(request=request)
+        session, user = await self.get_user(request)
+        return await self.pdp.filter_files(
+            request=request,
+            session=session,
+            user=user,
+            files=files
         )
 
     async def has_permission(self, request: web.Request, permissions: list):
@@ -87,7 +105,7 @@ class Guardian:
         Args:
             request (web.Request): Web request.
             groups (list): List of allowed groups.
-            effect (PolicyEffect, optional): Effect to be applied, Defaults to PolicyEffect.ALLOW.
+            effect (PolicyEffect): Effect to be applied, Defaults to PolicyEffect.ALLOW.
 
         Raises:
             web.HTTPUnauthorized: Access is Denied.
@@ -101,3 +119,158 @@ class Guardian:
             groups=groups,
             effect=effect
         )
+
+    async def is_allowed(
+            self,
+            request: web.Request,
+            **kwargs
+        ):
+        """is_allowed.
+
+            Check if user is allowed to access some object resources and return
+            (in response) the list of allowed objects.
+        Args:
+            request (web.Request): Web request.
+            objects (list): List of objects to be evaluated.
+            objtype (str): kind of object to be evaluated (default=file)
+        Raises:
+            web.HTTPUnauthorized: Access is Denied.
+        """
+        self.is_authenticated(request=request)
+        session, user = await self.get_user(request)
+        _type = type
+        return await self.pdp.is_allowed(
+            request=request,
+            session=session,
+            user=user,
+            **kwargs
+        )
+
+
+    async def filter(
+            self,
+            request: web.Request,
+            objects: list,
+            type: str = 'file',
+            effect: PolicyEffect = PolicyEffect.ALLOW
+        ):
+        """filter.
+
+            Check if user is allowed to access some object resources and return filtered
+            list of resources. (in response) the list of allowed objects.
+        Args:
+            request (web.Request): Web request.
+            objects (list): List of objects to be evaluated.
+            objtype (str): kind of object to be evaluated (default=file)
+            effect (PolicyEffect, optional): Effect to be applied,
+              Defaults to PolicyEffect.ALLOW.
+
+        Raises:
+            web.HTTPUnauthorized: Access is Denied.
+        """
+        self.is_authenticated(request=request)
+        session, user = await self.get_user(request)
+        return await self.pdp.filter_obj(
+            request=request,
+            session=session,
+            user=user,
+            objects=objects,
+            _type=type,
+            effect=effect
+        )
+
+
+class PEP(BaseHandler):
+
+    def get_guardian(self, request: web.Request):
+        try:
+            return request.app['security']
+        except (ValueError, KeyError):
+            self.critical(
+                reason="ABAC System is not Installed."
+            )
+
+    async def authorize(self, request: web.Request) -> web.Response:
+        """authorize.
+
+            Check if user has access based on PDP Policies.
+        Args:
+            request (web.Request): Web Request.
+
+        Raises:
+            web.HTTPUnauthorized: Access is Denied.
+        """
+        guardian = self.get_guardian(request)
+        policy = await guardian.authorize(request=request)
+        if policy.effect:
+            msg = {
+                "message": "Access Granted",
+                "response": policy.response,
+                "policy": policy.rule
+            }
+            return self.json_response(
+                response=msg,
+                status=202
+            )
+        else:
+            msg = {
+                "error": "Access Denied",
+                "response": policy.response,
+                "policy": policy.rule
+            }
+            return self.json_response(
+                response=msg,
+                status=403
+            )
+
+
+    async def is_allowed(self, request: web.Request) -> web.Response:
+        """is_allowed.
+
+            Check if user has access based on PDP Policies.
+        Args:
+            request (web.Request): Web Request.
+
+        Raises:
+            web.HTTPUnauthorized: Access is Denied.
+        """
+        guardian = self.get_guardian(request)
+        data = await self.data(request)
+        try:
+            actions = data['actions']
+        except KeyError:
+            self.error(
+                reason="IS_ALLOWED Method requires *actions* list on request",
+                status=401
+            )
+        args = {
+            "actions": actions,
+            "request": request
+        }
+        try:
+            args['resource'] = data['resource']
+        except KeyError:
+            pass
+        policy = await guardian.is_allowed(
+            **args
+        )
+        if policy.effect:
+            msg = {
+                "message": f"Action(s) {actions!s} Granted",
+                "response": policy.response,
+                "policy": policy.rule
+            }
+            return self.json_response(
+                response=msg,
+                status=202
+            )
+        else:
+            msg = {
+                "error": "Access Denied",
+                "response": policy.response,
+                "policy": policy.rule
+            }
+            return self.json_response(
+                response=msg,
+                status=403
+            )

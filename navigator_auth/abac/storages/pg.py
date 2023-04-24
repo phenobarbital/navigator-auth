@@ -12,12 +12,14 @@ class pgStorage(DBStorage):
 
     async def load_policies(self):
         policy_table = """
-        SELECT policy_id, name, resource, actions, method, effect, groups, context, environment, description, priority, org_id, client_id
+        SELECT policy_id, policy_type, name, resource, actions, method, effect, groups,
+        context, environment, description, objects, objects_attr, priority, org_id,
+        client_id
         FROM auth.policies;"""
         async with self.connection() as conn:
             result, error = await conn.query(policy_table)
             if error:
                 raise ConfigError(
-                    "ABAC: Error loading policies: {error}"
+                    f"ABAC: Error loading policies: {error}"
                 )
         return result

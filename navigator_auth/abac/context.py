@@ -1,7 +1,5 @@
 from typing import Any
 from collections.abc import MutableMapping, Iterator
-import time
-from datetime import datetime
 from aiohttp import web
 from datamodel import BaseModel
 
@@ -10,16 +8,20 @@ class EvalContext(dict, MutableMapping):
 
     Build The Evaluation Context from Request and User Data.
     """
-    def __init__(self, request: web.Request, user: Any, userinfo: Any, session: Any, *args, **kwargs):
+    def __init__(
+        self,
+        request: web.Request,
+        user: Any,
+        userinfo: Any,
+        session: Any,
+        *args,
+        **kwargs
+    ):
         ## initialize the mutable mapping:
         self.store = dict()
         self.store['ip_addr'] = request.remote
         self.store['method'] = request.method
         self.store['referer'] = request.headers.get('referer', None)
-        self.store['time'] = time.time()
-        dow = datetime.today().weekday()
-        self.store['dow'] = dow
-        self.store['day_of_week'] = dow
         self.store['path_qs'] = request.path_qs
         self.store['path'] = request.path
         self.store['headers'] = request.headers
@@ -49,7 +51,7 @@ class EvalContext(dict, MutableMapping):
 
     def set(self, key, value) -> None:
         self.store[key] = value
-        if not key in self._columns:
+        if key not in self._columns:
             self._columns.append(key)
 
     ### Section: Simple magic methods
@@ -76,7 +78,7 @@ class EvalContext(dict, MutableMapping):
 
     def __setitem__(self, key, value):
         self.store[key] = value
-        if not key in self._columns:
+        if key not in self._columns:
             self._columns.append(key)
 
     def __getattr__(self, key):

@@ -223,7 +223,7 @@ class ModelHandler(BaseView):
                     "payload": str(ex),
                 }
                 return self.error(reason=error, status=406)
-            except (DriverError, ProviderError, RuntimeError):
+            except (DriverError, ProviderError, RuntimeError) as ex:
                 error = {
                     "error": "Database Error",
                     "payload": str(ex),
