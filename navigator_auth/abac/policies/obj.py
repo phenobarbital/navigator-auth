@@ -145,20 +145,30 @@ class ObjectPolicy(AbstractPolicy):
             # Actions are covered by policy
             # Check if the requested directory matches any of the policy's resources
             for obj in ctx.objects:
-                if any(res.match(f"{obj!s}") for res in self.resources):
-                    # Requested directory is covered by policy
+                # Check for positive matches
+                positive_match = any(
+                    res.match(f"{obj!s}") for res in self.resources
+                    if not res.is_negative()
+                )
 
-                    # Check if the user belongs to a group that has permission
-                    user_groups = ctx.userinfo.get('groups', [])
-                    if set(user_groups).intersection(self.groups):
-                        # User belongs to a group with permission, return a
-                        # PolicyResponse with the same effect as policy_response
-                        return PolicyResponse(
-                            effect=response.effect,
-                            response=f"{response.effect} by FilePolicy {self.name}",
-                            actions=actions,
-                            rule=self.name
-                        )
+                # Check for negative matches
+                negative_match = any(
+                    res.match(f"{obj!s}") for res in self.resources if res.is_negative()
+                )
+                if positive_match and not negative_match:
+                    # Requested directory is covered by policy
+                    # # Check if the user belongs to a group that has permission
+                    # if self.groups:
+                    #     user_groups = ctx.userinfo.get('groups', [])
+                    #     if set(user_groups).intersection(self.groups):
+                    #         # User belongs to a group with permission, return a
+                    # PolicyResponse with the same effect as policy_response
+                    return PolicyResponse(
+                        effect=response.effect,
+                        response=f"{response.effect} by FilePolicy {self.name}",
+                        actions=actions,
+                        rule=self.name
+                    )
 
         # Actions are not covered by policy, return a PolicyResponse with effect DENY
         return PolicyResponse(

@@ -5,7 +5,7 @@ from navigator_auth import AuthHandler
 from navigator_auth.abac.pdp import PDP
 from navigator_auth.abac.decorators import groups_protected
 from navigator_auth.abac.storages.pg import pgStorage
-from navigator_auth.abac.policies import Policy, PolicyEffect, FilePolicy
+from navigator_auth.abac.policies import Policy, PolicyEffect, FilePolicy, ObjectPolicy
 # from navigator_auth.abac.conditions import NOT
 from navigator_auth.conf import default_dsn
 
@@ -174,14 +174,29 @@ policy6 = Policy(
     }
 )
 
-policy7 = FilePolicy(
+policy7 = ObjectPolicy(
     'clone_dashboard',
     effect=PolicyEffect.ALLOW,
     description="Clone dashboards can only by superusers and adv_users",
     actions=['dashboard.clone'],
-    resource=["dashboard:*"],
+    resource=["dashboard:*", "dashboard:!12345678"],
     groups=['superuser', 'adv_users'],
+    priority=3
+
 )
+cloning_jesus = ObjectPolicy(
+    'clone_dashboard_jesus',
+    effect=PolicyEffect.ALLOW,
+    description="This dashboard can be cloned only by Jesus",
+    actions=['dashboard.clone'],
+    resource=["dashboard:12345678"],
+    context={
+        "username": "jlara@trocglobal.com"
+    },
+    priority=2
+)
+
+
 
 policy8 = Policy(
     name='example grant',
@@ -279,6 +294,7 @@ pdp.add_policy(files_policy)
 pdp.add_policy(files2_policy)
 pdp.add_policy(files3_policy)
 pdp.add_policy(directory_policy)
+pdp.add_policy(cloning_jesus)
 
 walmart = Policy(
     'access_walmart',
