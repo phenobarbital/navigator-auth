@@ -8,6 +8,7 @@ from navigator_auth.conf import exclude_list
 exceptions = (
     "/api/v1/abac/authorize",
     "/api/v1/abac/is_allowed",
+    "/api/v1/abac/reload"
 )
 
 @web.middleware
