@@ -1,26 +1,34 @@
-from typing import Union, Optional, List
-import uuid
+from abc import ABC, abstractmethod
+from typing import Union, Optional
 import logging
+import uuid
 import re
 from enum import Enum
 from datamodel.libs.mapping import ClassDict
-from .context import EvalContext
+from ..context import EvalContext
 from .environment import Environment
+
 
 class PolicyEffect(Enum):
     ALLOW = 1, 'allow'
     DENY = 0, 'deny'
 
+    def __bool__(self):
+        return bool(self.value[0])
+
+
 class PolicyResponse(ClassDict):
     effect: PolicyEffect
     response: str
     rule: str
+    actions: list[str]
+
 
 class Exp:
     def __init__(self, value):
         try:
             self.resource_type, self.raw_value = value.split(':', 1)
-        except ValueError:
+        except (ValueError, TypeError):
             self.resource_type = 'uri'
             self.raw_value = value
         self.is_regex = False
@@ -32,7 +40,8 @@ class Exp:
             self.value = value
 
     def __str__(self) -> str:
-        return f"<{type(self).__name__}({self.resource_type}: {self.value!r})>"
+        return self.raw_value
+        # return f"<{type(self).__name__}({self.resource_type}: {self.value!r})>"
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__}({self.resource_type}: {self.value!r})>"
@@ -45,18 +54,20 @@ class Exp:
         else:
             return self.raw_value == value
 
-class Policy:
+
+class AbstractPolicy(ABC):
     def __init__(
             self,
             name: str = None,
             actions: list = None,
             resource: Union[list,str] = None,
             effect: PolicyEffect = PolicyEffect.ALLOW,
-            subject: Optional[List[str]] = None,
+            subject: Optional[list[str]] = None,
             groups: Optional[list] = None,
             context: Optional[dict] = None,
             method: Optional[Union[list, str]] = None,
             environment: Optional[Environment] = None,
+            objects: Optional[dict] = None,
             description: str = None,
             priority: int = None,
             **kwargs
@@ -65,8 +76,10 @@ class Policy:
         self.actions = actions
         if type(resource) == str:  # pylint: disable=C0123
             self.resources = list(Exp(resource))
-        else:
+        elif isinstance(resource, list):
             self.resources = [Exp(r) for r in resource]
+        else:
+            self.resources = None
         self.description = description
         self.context = context if context else {}
         self.context_attrs = list(self.context.keys())
@@ -83,6 +96,8 @@ class Policy:
         else:
             self.subject = subject
         self.priority = priority if priority else 0
+        ### Objects:
+        self.objects = objects
         ### any other attributes so far
         self.attributes = kwargs
 
@@ -92,9 +107,16 @@ class Policy:
     def __repr__(self) -> str:
         return f"<{type(self).__name__}({self.name})>"
 
+    @abstractmethod
+    def _fits_policy(self, ctx: EvalContext) -> bool:
+        """Internal Method for checking if Policy fits the Context."""
+
     def fits(self, ctx: EvalContext) -> bool:
         ## firstly evaluates the resources:
         fit_result = False
+        if not self.resources:
+            ### applicable to any resource:
+            return True
         for resource in self.resources:
             ## first: check by resource context
             if resource.resource_type == "uri":
@@ -105,16 +127,15 @@ class Policy:
                             fit_result = True
                     else:
                         fit_result = True
-            elif resource.resource_type == "file":
-                # ... handle file resources ...
-                pass
-            elif resource.resource_type == "app":
-                # ... handle app resources ...
-                pass
+            else:
+                # ... handle application (Extensible) resources ...
+                fit_result = self._fits_policy(ctx)
         if fit_result is True:
             ## third: check if user of session has contexts attributes required:
             fit_context = False
-            fit_context = any(a in ctx.user_keys or a in ctx.userinfo_keys for a in self.context_attrs)
+            fit_context = any(
+                a in ctx.user_keys or a in ctx.userinfo_keys for a in self.context_attrs
+            )
             if not fit_context and not fit_result:
                 # this policy is enforcing over Context Attributes.
                 fit_result = False
@@ -130,90 +151,31 @@ class Policy:
         )
         return all(matches)
 
+    @abstractmethod
     def evaluate(self, ctx: EvalContext, environ: Environment) -> bool:
         """
         Evaluates the policy against the provided context and environment.
 
-        :param ctx: The evaluation context, containing user, userinfo, and session information.
+        :param ctx: The evaluation context, containing user, userinfo, and session
+           information.
         :param environ: The environment information, such as the current time and date.
-        :return: A PolicyResponse instance, indicating whether access is allowed or denied.
+        :return: A PolicyResponse instance, indicating whether access is allowed or
+           denied.
         """
-        # Check if the user belongs to any of the allowed groups
-        groups_condition = False
-        if self.groups:
-            try:
-                if bool(not set(ctx.userinfo["groups"]).isdisjoint(self.groups)):
-                    # User is in at least one allowed group
-                    groups_condition = True
-            except (KeyError, TypeError, ValueError):
-                pass
-        else:
-            # No groups specified in the policy, so this condition is true by default
-            groups_condition = True
+        pass
 
-        # Check if the user is listed in the allowed subjects
-        subject_condition = False
-        if self.subject:
-            if ctx.userinfo['username'] in self.subject:
-                subject_condition = True
-        else:
-            # No subjects specified in the policy, so this condition is true by default
-            subject_condition = True
-
-        # Check if the current environment matches the policy's environment requirements
-        environment_condition = False
-        if self.environment:
-            if self.evaluate_environment(environ):
-                environment_condition = True
-        else:
-            # No environment requirements in the policy, so this condition is true by default
-            environment_condition = True
-
-        # Check if the other contexts match the policy's attribute requirements
-        context_condition = False
-        if self.context:
-            if self.context_attrs:
-                for a in self.context_attrs:
-                    att = self.context[a]
-
-                    # Check user object attributes
-                    try:
-                        if att == getattr(ctx.user, a, None):
-                            context_condition = True
-                    except TypeError:
-                        pass
-
-                    # Check userinfo attributes
-                    val = getattr(ctx.userinfo, a, ctx.userinfo.get(a, None))
-                    if att == val:
-                        context_condition = True
-
-                    # Check session attributes
-                    try:
-                        val = getattr(ctx.session, a, None)
-                        if isinstance(att, list):
-                            if val in att:
-                                context_condition = True
-                        else:
-                            if att == val:
-                                context_condition = True
-                    except (KeyError, TypeError):
-                        pass
-        else:
-            # No context requirements in the policy, so this condition is true by default
-            context_condition = True
-
-        # If all conditions are true, set is_allowed to True
-        if groups_condition and environment_condition and context_condition and subject_condition:
-            return PolicyResponse(
-                effect=self.effect,
-                response=f"Access {self.effect} by {self.name}",
-                rule=self.name
-            )
-
-        # Default return: access denied
-        return PolicyResponse(
-            effect=PolicyEffect.DENY,
-            response=f"Unauthorized by Policy {self.name}",
-            rule=self.name
-        )
+    @abstractmethod
+    def is_allowed(
+            self,
+            ctx: EvalContext,
+            env: Environment
+    ) -> PolicyResponse:
+        """
+        Evaluates the policy against the provided context and environment.
+        :param ctx: The evaluation context, containing user, userinfo, and session
+           information.
+        :param env: The environment information, such as the current time and date.
+        :return: A PolicyResponse instance, indicating whether access is allowed or
+           denied.
+        """
+        pass
