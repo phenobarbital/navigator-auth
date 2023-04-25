@@ -77,10 +77,12 @@ class AbstractPolicy(ABC):
             objects: Optional[dict] = None,
             description: str = None,
             priority: int = None,
+            enforcing: bool = False,
             **kwargs
     ):
         self.name = name if name else uuid.uuid1().hex
         self.actions = actions
+        self.enforcing: bool = enforcing
         if type(resource) == str:  # pylint: disable=C0123
             self.resources = list(Exp(resource))
         elif isinstance(resource, list):

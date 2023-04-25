@@ -45,7 +45,7 @@ class ADFSAuth(ExternalAuth):
     username_attribute: str = "username"
     pwd_atrribute: str = "password"
     version = "v1.0"
-    _user_mapping: dict = {
+    user_mapping: dict = {
         "user_id": "upn",
         "email": "email",
         "given_name": "given_name",

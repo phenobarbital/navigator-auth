@@ -8,6 +8,7 @@ from .policies import Exp, Policy, ObjectPolicy, FilePolicy, PolicyEffect, Envir
 from .errors import PreconditionFailed, AccessDenied
 from .context import EvalContext
 from .guardian import Guardian, PEP
+from .policyhandler import PolicyHandler
 from .storages.abstract import AbstractStorage
 from .audit import AuditLog
 from .middleware import abac_middleware
@@ -122,6 +123,17 @@ class PDP:
         self.app.router.add_post(
             "/api/v1/abac/is_allowed", pep.is_allowed
         )
+        ## Policy Handler:
+        self.app.router.add_view(
+            r"/api/v1/abac/policies/{id:.*}", PolicyHandler,
+            name="api_abac_policies_id"
+        )
+        self.app.router.add_view(
+            r"/api/v1/abac/policies/{meta:\:?.*}", PolicyHandler,
+            name="api_abac_policies"
+        )
+        ## end
+        self.logger.debug(' == ABAC is Started == ')
 
     async def authorize(
             self,
@@ -150,6 +162,11 @@ class PDP:
             self.logger.notice(f'Policy: {policy}')
             #answer = await policy.allowed(ctx)
             answer = await asyncio.to_thread(policy.evaluate, ctx, Environment())
+            if policy.enforcing is True:
+                # This policy will be enforced and return is mandatory.
+                await self.auditlog(answer, user)
+                ## return default effect:
+                return answer
             if answer.effect == effect:
                 await self.auditlog(answer, user)
                 ## return default effect:
@@ -278,6 +295,10 @@ class PDP:
                 Environment(),
                 **kwargs
             )
+            if policy.enforcing is True:
+                # This policy will be enforced and return is mandatory.
+                await self.auditlog(answer, user)
+                return answer
             if answer.effect == PolicyEffect.ALLOW:
                 await self.auditlog(answer, user)
                 ## return default effect:
@@ -318,7 +339,6 @@ class PDP:
         answer = False
         for policy in filtered:
             self.logger.notice(f'Policy: {policy!r}')
-            #answer = await policy.allowed(ctx)
             answer = await asyncio.to_thread(
                 policy._filter,
                 objects,

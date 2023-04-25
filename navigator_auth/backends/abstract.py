@@ -38,7 +38,7 @@ from navigator_auth.conf import (
 from navigator_auth.libs.json import json_encoder
 # Authenticated Identity
 from navigator_auth.identities import Identity, AuthBackend
-
+from navigator_auth.backends.attributes import DomainAttribute
 
 class BaseAuthBackend(ABC):
     """Abstract Base for Authentication."""
@@ -47,6 +47,7 @@ class BaseAuthBackend(ABC):
     password_attribute: str = "password"
     userid_attribute: str = "user_id"
     username_attribute: str = AUTH_USERNAME_ATTRIBUTE
+    user_mapping: dict = None
     session_key_property: str = SESSION_KEY
     scheme: str = "Bearer"
     session_timeout: int = int(SESSION_TIMEOUT)
@@ -90,7 +91,8 @@ class BaseAuthBackend(ABC):
         # getting User and Group Models
         self.user_model: Model = kwargs["user_model"]
         # user mapping
-        self.user_mapping = USER_MAPPING
+        if not self.user_mapping:
+            self.user_mapping = USER_MAPPING
         # starts the Executor
         self.executor = ThreadPoolExecutor(max_workers=1)
         # logger
@@ -103,6 +105,8 @@ class BaseAuthBackend(ABC):
         self._info.icon = f"/static/auth/icons/{self._service_name}.png"
         self._info.external = self._external_auth
         self._info.headers = {"x-auth-method": self._service}
+        ## Custom User Attributes:
+        self._user_attributes = kwargs.get("user_attributes", {})
 
     def get_backend_info(self):
         return self._info
@@ -165,16 +169,44 @@ class BaseAuthBackend(ABC):
                 f"Unable to created Session User: {err}"
             ) from err
 
-    def get_userdata(self, user=None):
-        userdata = {}
-        for name, item in self.user_mapping.items():
-            if name != self.password_attribute:
+    def get_user_mapping(
+        self,
+        user: dict,
+        userdata: dict,
+        default_mapping: bool = False
+    ) -> dict:
+        if default_mapping is True:
+            mapping = USER_MAPPING
+        else:
+            mapping = self.user_mapping
+        for key, val in mapping.items():
+            if key != self.password_attribute:
                 try:
-                    userdata[name] = user[item]
-                except AttributeError:
+                    userdata[key] = user[val]
+                except (KeyError, AttributeError):
                     self.logger.warning(
-                        f"Error on User Data: asking for a non existing attribute: {item}"
+                        f"Error UserData: asking for a non existing attribute: {key}"
                     )
+        return userdata
+
+    def get_userdata(self, user: dict, default_mapping: bool = False, **kwargs) -> dict:
+        userdata = {}
+        userdata = self.get_user_mapping(
+            user=user,
+            userdata=userdata,
+            default_mapping=default_mapping
+        )
+        ### getting custom user attributes.
+        for obj in self._user_attributes:
+            try:
+                attr = obj()
+                key, value = attr(user=user, userdata=userdata, **kwargs)
+                if key:
+                    userdata[key] = value
+            except (KeyError, AttributeError):
+                self.logger.warning(
+                    f"Error UserData: asking for a non existing attribute: {key}"
+                )
         if AUTH_SESSION_OBJECT:
             return {AUTH_SESSION_OBJECT: userdata}
         return userdata

@@ -91,7 +91,7 @@ class BasicAuth(BaseAuthBackend):
                 raise FailedAuth(
                     "Basic Auth: Invalid Credentials"
                 )
-        except FailedAuth:
+        except (InvalidAuth, FailedAuth, UserNotFound):
             raise
         except Exception as err:
             raise InvalidAuth(
@@ -121,6 +121,10 @@ class BasicAuth(BaseAuthBackend):
         try:
             algorithm, iterations, salt, _ = current_password.split("$", 3)
         except ValueError as ex:
+            if str(ex).startswith('not enough values to unpack'):
+                raise InvalidAuth(
+                    "Invalid Password: user password doesn't match algorithm requirements"
+                ) from ex
             raise InvalidAuth(
                 f"Basic Auth: Invalid Password: {ex}"
             ) from ex
