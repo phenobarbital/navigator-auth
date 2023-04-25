@@ -37,6 +37,11 @@ class Guardian:
             user = session.decode('user')
         except KeyError:
             user = None
+        except AttributeError as ex:
+            self._logger.error(
+                f"User is not authenticated: {ex}"
+            )
+            user = None
         return (session, user)
 
     async def authorize(self, request: web.Request):
