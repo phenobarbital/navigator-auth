@@ -28,6 +28,7 @@ from .conf import (
     AUTHENTICATION_BACKENDS,
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,
+    USER_ATTRIBUTES,
     default_dsn,
     REDIS_AUTH_URL,
     logging,
@@ -81,6 +82,7 @@ class AuthHandler:
         args = {
             "scheme": self.auth_scheme,
             "user_model": user_model,
+            "user_attributes": self.get_user_attributes(USER_ATTRIBUTES),
             **kwargs,
         }
         # get the authentication backends (all of the list)
@@ -169,6 +171,22 @@ class AuthHandler:
                 b.append(authz_hosts())
             elif backend == "allow_hosts":
                 b.append(authz_allow_hosts())
+        return b
+
+    def get_user_attributes(self, attributes: Iterable) -> tuple:
+        b = []
+        for attribute in attributes:
+            try:
+                parts = attribute.split(".")
+                bkname = parts[-1]
+                classpath = ".".join(parts[:-1])
+                module = importlib.import_module(classpath, package=bkname)
+                obj = getattr(module, bkname)
+                b.append(obj)
+            except ImportError as ex:
+                raise RuntimeError(
+                    f"Error loading Authz User Attribute {attribute}: {ex}"
+                ) from ex
         return b
 
     def get_authorization_middlewares(self, backends: Iterable) -> tuple:

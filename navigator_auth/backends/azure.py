@@ -60,7 +60,8 @@ class AzureAuth(ExternalAuth):
     userid_attribute: str = "id"
     pwd_atrribute: str = "password"
     _service_name: str = "azure"
-    _user_mapping: dict = {
+    user_mapping: dict = {
+        "userid": "id",
         "email": "mail",
         "username": "userPrincipalName",
         "given_name": "givenName",
@@ -268,7 +269,11 @@ class AzureAuth(ExternalAuth):
                     result = await redis.get(f"azure_auth_{state}")
                     flow = orjson.loads(result)
             except Exception:
-                return self.failed_redirect(request, error="ERROR_RATE_LIMIT_EXCEEDED", message="ERROR_RATE_LIMIT_EXCEEDED")
+                return self.failed_redirect(
+                    request,
+                    error="ERROR_RATE_LIMIT_EXCEEDED",
+                    message="ERROR_RATE_LIMIT_EXCEEDED"
+                )
             app = self.get_msal_app()
             try:
                 result = app.acquire_token_by_auth_code_flow(
@@ -304,11 +309,16 @@ class AzureAuth(ExternalAuth):
                             f"Azure: Error getting User information: {err}"
                         )
                         return self.failed_redirect(
-                            request, error="ERROR_RESOURCE_NOT_FOUND", message=f"Azure: Error getting User information: {err}"
+                            request, error="ERROR_RESOURCE_NOT_FOUND",
+                            message=f"Azure: Error getting User information: {err}"
                         )
                     # Redirect User to HOME
+                    try:
+                        token = data["token"]
+                    except (KeyError, TypeError):
+                        token = None
                     return self.home_redirect(
-                        request, token=data["token"], token_type=token_type
+                        request, token=token, token_type=token_type
                     )
                 elif "error" in result:
                     error = result["error"]

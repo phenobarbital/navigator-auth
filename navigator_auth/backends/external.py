@@ -50,7 +50,7 @@ class ExternalAuth(BaseAuthBackend):
     username_attribute: str = "username"
     pwd_atrribute: str = "password"
     _service_name: str = "service"
-    _user_mapping: dict = {}
+    user_mapping: dict = {}
     _ident: AuthUser = OauthUser
     _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
     _callbacks: Optional[list[Callable]] = None
@@ -229,11 +229,9 @@ class ExternalAuth(BaseAuthBackend):
         userdata["id"] = userid
         userdata[self.session_key_property] = userid
         userdata["auth_method"] = self._service_name
-        for key, val in self._user_mapping.items():
-            try:
-                userdata[key] = userdata[val]
-            except KeyError:
-                pass
+        userdata = self.get_user_mapping(
+            user=userdata, userdata=userdata
+        )
         return (userdata, userid)
 
     async def validate_user_info(
@@ -278,7 +276,7 @@ class ExternalAuth(BaseAuthBackend):
             }
             await self.auth_successful_callback(request, user, **args)
         try:
-            userinfo = self.get_userdata(user)
+            userinfo = self.get_userdata(user, default_mapping=True)
             ### merging userdata and userinfo:
             userinfo = {**userinfo, **userdata}
             user = await self.create_user(userinfo)

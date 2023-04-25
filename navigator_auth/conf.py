@@ -144,6 +144,13 @@ if mapping is not None:
             "Auth: Invalid User Mapping on *AUTH_USER_MAPPING*"
         )
 
+### Custom User Attributes:
+# FILTERS: functions called on "filter" process.
+USER_ATTRIBUTES = [
+    "navigator_auth.backends.attributes.DomainAttribute"
+]
+
+
 ## Redis Session:
 REDIS_HOST = config.get("REDIS_HOST", fallback="localhost")
 REDIS_PORT = config.get("REDIS_PORT", fallback=6379)
