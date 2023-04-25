@@ -35,7 +35,10 @@ class EvalContext(dict, MutableMapping):
         if isinstance(userinfo, dict):
             self.store['userinfo_keys'] = list(userinfo.keys())
         else:
-            self.store['userinfo_keys'] = userinfo.__dict__.keys()
+            try:
+                self.store['userinfo_keys'] = userinfo.__dict__.keys()
+            except AttributeError:
+                self.store['userinfo_keys'] = []
         self.store['session'] = session
         self.update(*args, **kwargs)
         self._columns = list(self.store.keys())
