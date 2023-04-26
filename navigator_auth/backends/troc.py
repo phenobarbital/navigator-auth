@@ -224,6 +224,8 @@ class TrocToken(BaseAuthBackend):
                 try:
                     request.user = await self.get_session_user(session)
                     request["authenticated"] = True
+                except UnboundLocalError:
+                    pass
                 except Exception as ex:  # pylint: disable=W0703
                     self.logger.error(f"Missing User Object from Session: {ex}")
             else:
