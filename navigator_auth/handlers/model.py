@@ -107,7 +107,7 @@ class ModelHandler(BaseView):
             )
         if not self._session:
             self.error(
-                response={"message": "Unauthorized"},
+                reason={"message": "Unauthorized"},
                 status=403
             )
         return self._session
