@@ -51,6 +51,20 @@ walmart_post = Policy(
 )
 pdp.add_policy(walmart_post)
 
+### add an Object Policy:
+cloning_jesus = ObjectPolicy(
+    'clone_dashboard_jesus',
+    effect=PolicyEffect.ALLOW,
+    description="This dashboard can be cloned only by Jesus",
+    actions=['dashboard:clone'],
+    resource=["urn:navigator:dashboard::[12345678,123456789]"],
+    context={
+        "username": "jlara@trocglobal.com"
+    },
+    priority=2
+)
+pdp.add_policy(cloning_jesus)
+
 ### configure PDP
 pdp.setup(app)
 
