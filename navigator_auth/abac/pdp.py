@@ -182,6 +182,7 @@ class PDP:
     ## Audit Log
     async def auditlog(self, answer, user):
         try:
+            self.logger.notice(f'Policy: {answer}')
             await self._auditlog.log(answer, PolicyEffect(answer.effect).name, user)
         except Exception as exc:
             self.logger.warning(f'Error saving policy Log: {exc}')

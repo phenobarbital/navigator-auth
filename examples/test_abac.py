@@ -6,7 +6,6 @@ from navigator_auth.abac.pdp import PDP
 from navigator_auth.abac.decorators import groups_protected
 from navigator_auth.abac.storages.pg import pgStorage
 from navigator_auth.abac.policies import Policy, PolicyEffect, FilePolicy, ObjectPolicy
-# from navigator_auth.abac.conditions import NOT
 from navigator_auth.conf import default_dsn
 
 
@@ -15,7 +14,6 @@ class ExampleView(BaseView):
         guardian = self.request.app['security']
         list_files = ["text1.txt", "text2.txt", "text3.txt", "text4.txt", "text5.txt"]
         response = await guardian.filter_files(files=list_files, request=self.request)
-        # response = await guardian.authorize(request=self.request)
         print('RESPONSE ', response)
         return self.json_response(response)
 
@@ -25,8 +23,8 @@ class ExampleView(BaseView):
         return self.response('POST METHOD')
 
     async def put(self):
-        #guardian = self.request.app['security']
-        #await guardian.has_permission(request=self.request, permissions=['add_widget'])
+        guardian = self.request.app['security']
+        await guardian.has_permission(request=self.request, permissions=['add_widget'])
         return self.response('PUT METHOD')
 
     async def delete(self):

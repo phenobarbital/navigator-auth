@@ -1,12 +1,12 @@
 from itertools import chain
 from aiohttp import web
 from navigator.views import BaseView
+from navigator_session import get_session
 from navigator_auth import AuthHandler
 from navigator_auth.abac.pdp import PDP
 from navigator_auth.abac.decorators import groups_protected
 from navigator_auth.abac.storages.pg import pgStorage
 from navigator_auth.abac.policies import Policy, PolicyEffect, FilePolicy, ObjectPolicy
-# from navigator_auth.abac.conditions import NOT
 from navigator_auth.conf import default_dsn
 
 app = web.Application()
@@ -67,6 +67,17 @@ pdp.add_policy(cloning_jesus)
 
 ### configure PDP
 pdp.setup(app)
+
+async def handle(request):
+    session = await get_session(request)
+    if session:
+        name = session.id
+    else:
+        name = request.match_info.get('name', "Anonymous")
+    text = "Hello, " + name
+    return web.Response(text=text)
+
+app.add_routes([web.get('/', handle), web.get('/{name}', handle)])
 
 if __name__ == '__main__':
     try:
