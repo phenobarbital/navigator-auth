@@ -126,9 +126,11 @@ class AbstractPolicy(ABC):
     def __repr__(self) -> str:
         return f"<{type(self).__name__}({self.name})>"
 
-    @abstractmethod
-    def _fits_policy(self, ctx: EvalContext) -> bool:
+    def _fits_policy(self, resource: Resource, ctx: EvalContext) -> bool:
         """Internal Method for checking if Policy fits the Context."""
+        if resource.match(ctx):
+            return True
+        return False
 
     def fits(self, ctx: EvalContext) -> bool:
         """This method evaluates if the policy matches the current EvalContext and request.
@@ -166,7 +168,7 @@ class AbstractPolicy(ABC):
                                 break
             else:
                 # ... handle application (Extensible) resources ...
-                fit_result = self._fits_policy(ctx)
+                fit_result = self._fits_policy(resource, ctx)
         if fit_result is True:
             ## third: check if user of session has contexts attributes required:
             fit_context = False

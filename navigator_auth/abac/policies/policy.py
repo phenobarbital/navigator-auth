@@ -82,6 +82,7 @@ class Policy(AbstractPolicy):
             context_condition = True
 
         # If all conditions are true, set is_allowed to True
+        # print('EVALUATION > ')
         # print(groups_condition, environment_condition, context_condition, subject_condition)
         if (groups_condition and environment_condition
             and context_condition and subject_condition):
@@ -96,10 +97,6 @@ class Policy(AbstractPolicy):
             response=f"Unauthorized by Policy {self.name}",
             rule=self.name
         )
-
-    def _fits_policy(self, ctx: EvalContext) -> bool:
-        """Internal Method for checking if Policy fits the Context."""
-        return True
 
     def is_allowed(
             self,

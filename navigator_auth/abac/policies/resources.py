@@ -39,19 +39,23 @@ class Resource:
             ## converting "resource_parts" to objects
             elements = []
             for el in self.resource_parts:
-                if (obj := is_parseable(el)):
-                    try:
-                        value = obj(el)
-                    except ValueError:
-                        value = el
-                    elements += value
-                else:
-                    try:
-                        val = re.compile(f'^{el}$')
-                        self.is_regex = True
-                        elements.append(val)
-                    except re.error:
-                        elements.append(el)
+                if el:
+                    if (obj := is_parseable(el)):
+                        try:
+                            value = obj(el)
+                        except ValueError:
+                            value = el
+                        elements += value
+                    else:
+                        try:
+                            val = re.compile(f'^{el}$')
+                            self.is_regex = True
+                            elements.append(val)
+                        except re.error:
+                            if el == '*':
+                                elements = el
+                            else:
+                                elements.append(el)
             self.resource_parts = elements
         try:
             self.value = re.compile(f'^{self.raw_value}$')
@@ -77,16 +81,37 @@ class Resource:
         else:
             return self.raw_value == value
 
-    def match_dashboard(self, value):
-        return True
+    def match_generic(self, ctx):
+        try:
+            value = ctx.get(self.resource_type)
+        except KeyError:
+            ### this resource doesn't match with any objects
+            return False
+        if isinstance(value, list):
+            # Check if there are any elements in 'value' that are not in
+            # the negated elements of resource_parts and are
+            # not in the non-negated elements of resource_parts
+            non_negated_elements = [elem for elem in self.resource_parts if not elem.startswith('!')]
+            negated_elements = [elem.lstrip('!') for elem in self.resource_parts if elem.startswith('!')]
+            if any(elem not in negated_elements and elem in non_negated_elements for elem in value):
+                return True
+            elif self.resource_parts == '*':
+                return True
+            else:
+                return False
+        if value in self.resource_parts:
+            return True
+
+        # Check if value matches any regex in self.resource_parts
+        for resource_part in self.resource_parts:
+            if isinstance(resource_part, re.Pattern) and resource_part.match(value):
+                return True
+        # If value is not in self.resource_parts and doesn't match any regex
+        return False
 
     def match(self, value):
         if self.resource_type == 'uri':
             return self.match_uri(value)
-        elif self.resource_type == 'dashboard':
-            return self.match_dashboard(value)
         else:
-            raise ValueError(
-                f"Unsupported resource subtype: {self.resource_subtype}"
-            )
+            return self.match_generic(value)
         return False
