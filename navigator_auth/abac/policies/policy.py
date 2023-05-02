@@ -1,5 +1,5 @@
 from typing import Union
-from .abstract import PolicyEffect, PolicyResponse, AbstractPolicy
+from .abstract import ActionKey, PolicyEffect, PolicyResponse, AbstractPolicy
 from ..context import EvalContext
 from .environment import Environment
 
@@ -121,9 +121,9 @@ class Policy(AbstractPolicy):
 
         # Convert action to a list if it's a single string
         if isinstance(action, str):
-            actions = [action]
+            actions = [ActionKey(action)]
         else:
-            actions = action
+            actions = [ActionKey(r) for r in action]
 
         # Check if the policy's actions cover the requested actions
         if self.actions and not set(actions).isdisjoint(self.actions):

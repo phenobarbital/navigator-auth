@@ -4,7 +4,7 @@ from aiohttp import web
 from navconfig.logging import logger
 from navigator_session import SessionData
 from navigator_auth.conf import AUTH_SESSION_OBJECT
-from .policies import Exp, Policy, ObjectPolicy, FilePolicy, PolicyEffect, Environment
+from .policies import Resource, ActionKey, Policy, ObjectPolicy, FilePolicy, PolicyEffect, Environment
 from .errors import PreconditionFailed, AccessDenied
 from .context import EvalContext
 from .guardian import Guardian, PEP
@@ -271,9 +271,9 @@ class PDP:
         obj = kwargs.get('resource', None)
         if obj:
             if isinstance(obj, str):
-                ctx.objects = Exp(obj)
+                ctx.objects = Resource(obj)
             else:
-                ctx.objects = [Exp(r) for r in obj]
+                ctx.objects = [Resource(r) for r in obj]
             filtered = [
                 p for p in self._policies if isinstance(p, ObjectPolicy) and p.fits(ctx)
             ]

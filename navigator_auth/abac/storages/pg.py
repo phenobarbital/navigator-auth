@@ -17,7 +17,7 @@ class pgStorage(DBStorage):
 
     async def load_policies(self):
         policy_table = """
-        SELECT policy_id, policy_type, name, resource, actions, method, effect, groups,
+        SELECT policy_id, policy_type, name, resource, actions, conditions, effect, groups,
         context, environment, description, enforcing, objects, objects_attr,
         priority, org_id, client_id
         FROM auth.policies WHERE enabled = TRUE;"""
