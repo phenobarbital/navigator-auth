@@ -1,5 +1,6 @@
 from typing import Union
 from .abstract import PolicyEffect, PolicyResponse, AbstractPolicy
+from .resources import Resource
 from ..context import EvalContext
 from .environment import Environment
 
@@ -9,9 +10,9 @@ class ObjectPolicy(AbstractPolicy):
 
     Generic Policy Applied to Objects (resource systems).
     """
-    def _fits_policy(self, ctx: EvalContext) -> bool:
+    def _fits_policy(self, resource: Resource, ctx: EvalContext) -> bool:
         """Internal Method for checking if Policy fits the Context."""
-        fit_result = False
+        fit_result = super()._fits_policy(resource, ctx)
         for resource in self.resources:
             objects = getattr(ctx, 'objects', [])
             for f in objects:
@@ -72,6 +73,13 @@ class ObjectPolicy(AbstractPolicy):
             if self.context_attrs:
                 for a in self.context_attrs:
                     att = self.context[a]
+                    ### check Context Object itself:
+                    try:
+                        if att == getattr(ctx, a, None):
+                            context_condition = True
+                    except TypeError:
+                        pass
+
                     # Check user object attributes
                     try:
                         if att == getattr(ctx.user, a, None):
@@ -100,6 +108,8 @@ class ObjectPolicy(AbstractPolicy):
             context_condition = True
 
         # If all conditions are true, set is_allowed to True
+        # print('EVALUATION > ')
+        # print(groups_condition, environment_condition, context_condition, subject_condition)
         if (groups_condition and environment_condition
             and context_condition and subject_condition):
             return PolicyResponse(
@@ -137,39 +147,36 @@ class ObjectPolicy(AbstractPolicy):
         response = self.evaluate(ctx, env)
 
         # Convert action to a list if it's a single string
-        if isinstance(actions, str):
-            actions = [actions]
+        if isinstance(action, str):
+            action = ActionKey(action)
 
         # Check if the policy's actions cover the requested actions
-        if self.actions and not set(actions).isdisjoint(self.actions):
+        _allowed = False
+        for act in self.actions:
+            if act == action:
+                _allowed = True
+                break
+        if _allowed:
             # Actions are covered by policy
-            # Check if the requested directory matches any of the policy's resources
+            # Check if the requested object matches any of the policy's resources
             for obj in ctx.objects:
                 # Check for positive matches
                 positive_match = any(
                     res.match(f"{obj!s}") for res in self.resources
                     if not res.is_negative()
                 )
-
                 # Check for negative matches
                 negative_match = any(
                     res.match(f"{obj!s}") for res in self.resources if res.is_negative()
                 )
                 if positive_match and not negative_match:
-                    # Requested directory is covered by policy
-                    # # Check if the user belongs to a group that has permission
-                    # if self.groups:
-                    #     user_groups = ctx.userinfo.get('groups', [])
-                    #     if set(user_groups).intersection(self.groups):
-                    #         # User belongs to a group with permission, return a
-                    # PolicyResponse with the same effect as policy_response
+                    # Requested object is covered by policy
                     return PolicyResponse(
                         effect=response.effect,
-                        response=f"{response.effect} by FilePolicy {self.name}",
+                        response=f"{response.effect} by ObjectPolicy {self.name}",
                         actions=actions,
                         rule=self.name
                     )
-
         # Actions are not covered by policy, return a PolicyResponse with effect DENY
         return PolicyResponse(
             effect=PolicyEffect.DENY,
@@ -199,14 +206,15 @@ class ObjectPolicy(AbstractPolicy):
         policy_response = self.evaluate(ctx, env)
         allowed_objects = []
         if policy_response.effect == PolicyEffect.DENY:
-            # Remove objects covered by police:
-            for f in objects:
-                if any(
-                    res.match(f) for res in self.resources if res.resource_type == _type
-                ):
-                    if self.effect == PolicyEffect.ALLOW:
-                        continue
-                allowed_objects.append(f)
+            if self.effect == PolicyEffect.ALLOW:
+                # Remove objects covered by police:
+                for f in objects:
+                    if any(
+                        res.match(f) for res in self.resources if res.resource_type == _type
+                    ):
+                        if self.effect == PolicyEffect.ALLOW:
+                            continue
+                    allowed_objects.append(f)
         else:
             # If the policy applies, filter the list based on the policy's context
             # allowed_files = files

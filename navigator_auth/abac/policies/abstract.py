@@ -92,7 +92,7 @@ class AbstractPolicy(ABC):
         if isinstance(actions, list):
             self.actions = [ActionKey(r) for r in actions]
         if type(resource) == str:  # pylint: disable=C0123
-            self.resources = list(Exp(resource))
+            self.resources = list(Resource(resource))
         elif isinstance(resource, list):
             self.resources = [Resource(r) for r in resource]
         else:
@@ -173,7 +173,7 @@ class AbstractPolicy(ABC):
             ## third: check if user of session has contexts attributes required:
             fit_context = False
             fit_context = any(
-                a in ctx.user_keys or a in ctx.userinfo_keys for a in self.context_attrs
+                a in ctx.user_keys or a in ctx.userinfo_keys or getattr(ctx, a, None) is not None for a in self.context_attrs
             )
             if not fit_context and not fit_result:
                 # this policy is enforcing over Context Attributes.

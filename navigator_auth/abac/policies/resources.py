@@ -38,7 +38,9 @@ class Resource:
         else:
             ## converting "resource_parts" to objects
             elements = []
+            # print(' EVAL ', self.resource_type, self.namespace, self.resource_parts)
             for el in self.resource_parts:
+                # print('EL > ', el)
                 if el:
                     if (obj := is_parseable(el)):
                         try:
@@ -57,9 +59,14 @@ class Resource:
                             else:
                                 elements.append(el)
             self.resource_parts = elements
+            if elements:
+                ## disable using raw value
+                self.raw_value = None
+                self.value = None
         try:
-            self.value = re.compile(f'^{self.raw_value}$')
-            self.is_regex = True
+            if self.raw_value is not None:
+                self.value = re.compile(f'^{self.raw_value}$')
+                self.is_regex = True
         except re.error:
             logging.warning(f'Resource {value} is not a Regular Expression.')
             self.value = self.raw_value
@@ -68,6 +75,8 @@ class Resource:
         return self.raw_value
 
     def __repr__(self) -> str:
+        if self.resource_parts:
+            return f"<{type(self).__name__}({self.resource_type}: {self.resource_parts!r})>"
         return f"<{type(self).__name__}({self.resource_type}: {self.value!r})>"
 
     def is_negative(self):
@@ -84,6 +93,8 @@ class Resource:
     def match_generic(self, ctx):
         try:
             value = ctx.get(self.resource_type)
+        except AttributeError:
+            value = ctx
         except KeyError:
             ### this resource doesn't match with any objects
             return False

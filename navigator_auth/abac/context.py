@@ -27,6 +27,13 @@ class EvalContext(dict, MutableMapping):
         self.store['path'] = request.path
         self.store['headers'] = request.headers
         self.store['url'] = request.rel_url
+        try:
+            self.store['is_authenticated'] = request.is_authenticated
+        except AttributeError:
+            if user is not None:
+                self.store['is_authenticated'] = True
+            else:
+                self.store['is_authenticated'] = False
         self.store['user'] = user
         if isinstance(user, BaseModel):
             self.store['user_keys'] = user.get_fields()

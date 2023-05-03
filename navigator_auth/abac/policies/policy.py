@@ -55,6 +55,12 @@ class Policy(AbstractPolicy):
             elif self.context_attrs:
                 for a in self.context_attrs:
                     att = self.context[a]
+                    ### check Context Object itself:
+                    try:
+                        if att == getattr(ctx, a, None):
+                            context_condition = True
+                    except TypeError:
+                        pass
 
                     # Check user object attributes
                     try:
@@ -121,16 +127,20 @@ class Policy(AbstractPolicy):
             action = ActionKey(action)
 
         # Check if the policy's actions cover the requested actions
+        _allowed = False
         for act in self.actions:
             if act == action:
-                # Actions are covered by policy, return a PolicyResponse with the same
-                # effect as policy_response
-                return PolicyResponse(
-                    effect=policy_response.effect,
-                    response=f"Access {policy_response.effect} by Policy {self.name}",
-                    actions=action,
-                    rule=self.name
-                )
+                _allowed = True
+                break
+        if _allowed:
+            # Actions are covered by policy, return a PolicyResponse with the same
+            # effect as policy_response
+            return PolicyResponse(
+                effect=policy_response.effect,
+                response=f"Access {policy_response.effect} by Policy {self.name}",
+                actions=action,
+                rule=self.name
+            )
         # Actions are not covered by policy, return a PolicyResponse with effect DENY
         return PolicyResponse(
             effect=PolicyEffect.DENY,
