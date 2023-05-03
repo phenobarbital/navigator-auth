@@ -108,7 +108,9 @@ class Policy(AbstractPolicy):
             self,
             ctx: EvalContext,
             env: Environment,
-            action: Union[str, ActionKey]
+            action: Union[str, ActionKey],
+            resource: list[dict] = None,
+            **kwargs
     ) -> PolicyResponse:
         """
         Determines if the requested action(s) is/are allowed by the policy.

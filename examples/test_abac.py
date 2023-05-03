@@ -1,6 +1,7 @@
 from itertools import chain
 from aiohttp import web
 from navigator.views import BaseView
+from navigator_session import get_session
 from navigator_auth import AuthHandler
 from navigator_auth.abac.pdp import PDP
 from navigator_auth.abac.decorators import groups_protected
@@ -11,11 +12,12 @@ from navigator_auth.conf import default_dsn
 
 class ExampleView(BaseView):
     async def get(self):
-        guardian = self.request.app['security']
-        list_files = ["text1.txt", "text2.txt", "text3.txt", "text4.txt", "text5.txt"]
-        response = await guardian.filter_files(files=list_files, request=self.request)
-        print('RESPONSE ', response)
-        return self.json_response(response)
+        # guardian = self.request.app['security']
+        # list_files = ["text1.txt", "text2.txt", "text3.txt", "text4.txt", "text5.txt"]
+        # response = await guardian.filter_files(files=list_files, request=self.request)
+        # print('RESPONSE ', response)
+        # return self.json_response(response)
+        return self.response('GET METHOD')
 
     async def post(self):
         guardian = self.request.app['security']
@@ -108,8 +110,10 @@ policy1 = Policy(
     'avoid_example_put',
     effect=PolicyEffect.ALLOW,
     description="Avoid using PUT method except by Jesus Lara",
-    resource=["uri:/api/v1/example/"],
-    method='PUT',
+    resource=["urn:uri:/api/v1/example/"],
+    conditions={
+        "method": ["PUT"]
+    },
     context={
         "username": "jlara@trocglobal.com",
     },
@@ -119,8 +123,10 @@ policy2 = Policy(
     'allow_consultants',
     effect=PolicyEffect.ALLOW,
     description='Allow Access to this resource only to consultants',
-    resource=["uri:/epson/"],
-    method=['POST', 'PUT'],
+    resource=["urn:uri:/epson/"],
+    conditions={
+        "method": ['POST', 'PUT'],
+    },
     context={
         "title": "Consultant",
     }
@@ -129,7 +135,7 @@ policy3 = Policy(
     'login_denied_on_wednesdays',
     effect=PolicyEffect.DENY,
     description="All users, except superUsers has denied access on Wednesdays",
-    resource=["uri:/epson/"],
+    resource=["urn:uri:/epson/"],
     context={
         "dow": [3]
     },
@@ -141,130 +147,106 @@ policy4 = Policy(
     'allow_access_epson_to_epson_users',
     effect=PolicyEffect.ALLOW,
     description="All Epson Users has access to this resource",
-    resource=["uri:/epson/"],
+    resource=["urn:uri:/epson.*$"],
     groups=[
         'epson', 'superuser'
     ]
 )
-
 policy5 = Policy(
-    'allow_access_tm_to_tm_users',
+    name='trendmicro_access',
+    description="Allowing access to trendmicro URI path for users with 'programs' attribute containing 'trendmicro' or belonging to 'trendmicro' or 'superuser' groups",
     effect=PolicyEffect.ALLOW,
-    description="All TM Users (and superusers) has access to this resource",
-    resource=["uri:/trendmicro/"],
-    context={
-        "programs": ['trendmicro']
+    resource=["urn:uri:/trendmicro.*$"],
+    conditions={
+        'programs': 'trendmicro',
     },
-    groups=[
-        'trendmicro', 'superuser'
-    ]
+    groups=['trendmicro', 'superusers'],
+    priority=1
 )
-
 policy6 = Policy(
     'only_for_jesus',
     effect=PolicyEffect.ALLOW,
     description="This resource will be used only for Jesus between 9 at 24 monday to saturday",
     subject=['jlara@trocglobal.com'],
-    resource=["uri:/private/"],
+    resource=["urn:uri:/private.*$"],
     environment={
         "hour": list(chain(range(9, 24), range(1))),
         "day_of_week": range(1, 6)
     }
 )
-
 policy7 = ObjectPolicy(
     'clone_dashboard',
     effect=PolicyEffect.ALLOW,
     description="Clone dashboards can only by superusers and adv_users",
-    actions=['dashboard.clone'],
-    resource=["dashboard:*", "dashboard:!12345678"],
+    actions=['dashboard:clone'],
+    resource=["urn:navigator:dashboard::*", "urn:navigator:dashboard::!12345678"],
     groups=['superuser', 'adv_users'],
     priority=3
-
+)
+policy8 = Policy(
+    name='example grant',
+    effect=PolicyEffect.ALLOW,
+    resource=['urn:uri:/api/v1/example/'],
+    description="Grant Access to this resource to all",
+    priority=7
 )
 cloning_jesus = ObjectPolicy(
     'clone_dashboard_jesus',
     effect=PolicyEffect.ALLOW,
     description="This dashboard can be cloned only by Jesus",
-    actions=['dashboard.clone'],
-    resource=["dashboard:12345678"],
+    actions=['dashboard:clone'],
+    resource=["urn:navigator:dashboard::12345678"],
     context={
         "username": "jlara@trocglobal.com"
     },
     priority=2
 )
 
-
-
-policy8 = Policy(
-    name='example grant',
-    effect=PolicyEffect.ALLOW,
-    resource=['uri:/api/v1/example/'],
-    description="Grant Access to this resource to all",
-    priority=7
-)
-
 # files_policy = FilePolicy(
 #     name='files_for_jlara',
 #     effect=PolicyEffect.ALLOW,
-#     resource=['uri:/api/v1/example/'],
-#     description="This policy allows access to specific files only for jlara@trocglobal.com",
+#     resource=["file:text1.txt", "file:text2.txt"],
+#     description="This policy allows access to files only for jlara@trocglobal.com",
 #     subject=['jlara@trocglobal.com'],
-#     objects={
-#         "files": ["text1.txt", "text2.txt"],
-#     },
-#     context={
+#     environment={
 #         "dow": [6]
 #     },
 #     objects_attr="files",
 #     priority=8
 # )
 
-files_policy = FilePolicy(
-    name='files_for_jlara',
-    effect=PolicyEffect.ALLOW,
-    resource=["file:text1.txt", "file:text2.txt"],
-    description="This policy allows access to files only for jlara@trocglobal.com",
-    subject=['jlara@trocglobal.com'],
-    environment={
-        "dow": [6]
-    },
-    objects_attr="files",
-    priority=8
-)
+# files2_policy = FilePolicy(
+#     name='file_denied_for_jlara',
+#     effect=PolicyEffect.DENY,
+#     resource=["file:text5.txt"],
+#     description="Deny Access to File 5 to jlara@trocglobal.com on sundays",
+#     subject=['jlara@trocglobal.com'],
+#     environment={
+#         "dow": [6]
+#     },
+#     priority=9
+# )
 
-files2_policy = FilePolicy(
-    name='file_denied_for_jlara',
-    effect=PolicyEffect.DENY,
-    resource=["file:text5.txt"],
-    description="Deny Access to File 5 to jlara@trocglobal.com on sundays",
-    subject=['jlara@trocglobal.com'],
-    environment={
-        "dow": [6]
-    },
-    priority=9
-)
+# files3_policy = FilePolicy(
+#     name='file_denied_for_jlara',
+#     effect=PolicyEffect.DENY,
+#     resource=["file:text1.txt"],
+#     description="Deny Access to File 1 to jlara@trocglobal.com",
+#     subject=['jlara@trocglobal.com'],
+#     priority=10
+# )
 
-files3_policy = FilePolicy(
-    name='file_denied_for_jlara',
-    effect=PolicyEffect.DENY,
-    resource=["file:text1.txt"],
-    description="Deny Access to File 1 to jlara@trocglobal.com",
-    subject=['jlara@trocglobal.com'],
-    priority=10
-)
-
-directory_policy = FilePolicy(
-    name='directories_restricted_to_superusers_consultants',
-    effect=PolicyEffect.ALLOW,
-    resource=["dir:restricted", "dir:private"],
-    description="Directories are restricted only to SuperUsers consultants",
-    groups=['superuser'],
-    context={
-        "title": "Consultant"
-    },
-    priority=11
-)
+# directory_policy = FilePolicy(
+#     name='directories_restricted_to_superusers_consultants',
+#     effect=PolicyEffect.ALLOW,
+#     resource=["dir:restricted", "dir:private"],
+#     description="Directories are restricted only to SuperUsers consultants",
+#     groups=['superuser'],
+#     context={
+#         "title": "Consultant"
+#     },
+#     priority=11
+# )
 
 app = web.Application()
 
@@ -288,16 +270,17 @@ pdp.add_policy(policy5)
 pdp.add_policy(policy6)
 pdp.add_policy(policy7)
 pdp.add_policy(policy8)
-pdp.add_policy(files_policy)
-pdp.add_policy(files2_policy)
-pdp.add_policy(files3_policy)
-pdp.add_policy(directory_policy)
 pdp.add_policy(cloning_jesus)
+
+#pdp.add_policy(directory_policy)
+#pdp.add_policy(files_policy)
+#pdp.add_policy(files2_policy)
+#pdp.add_policy(files3_policy)
 
 walmart = Policy(
     'access_walmart',
     description="Allow Walmart to All",
-    resource=["uri:/walmart/*"],
+    resource=["urn:uri:/walmart/*"],
     priority=0
 )
 pdp.add_policy(walmart)
@@ -305,25 +288,24 @@ walmart_post = Policy(
     'post_on_walmart',
     description="Allowing post actions to Superusers",
     effect=PolicyEffect.ALLOW,
-    actions=['walmart.create', 'walmart.update'],
-    resource=["uri:/walmart/*"],
+    actions=['walmart:create', 'walmart:update'],
+    resource=["urn:uri:/walmart/*"],
     groups=['superuser'],
     priority=1
 )
 pdp.add_policy(walmart_post)
 
 
-dir_creation = FilePolicy(
-    name='walmart_create_file',
-    effect=PolicyEffect.ALLOW,
-    actions=['file.create', 'file.edit', 'file.delete'],
-    resource=["dir:restricted", "dir:private"],
-    description="Only Superusers can create, edit or delete files",
-    groups=['superuser'],
-    priority=11
-)
-pdp.add_policy(dir_creation)
-
+# dir_creation = FilePolicy(
+#     name='walmart_create_file',
+#     effect=PolicyEffect.ALLOW,
+#     actions=['file.create', 'file.edit', 'file.delete'],
+#     resource=["dir:restricted", "dir:private"],
+#     description="Only Superusers can create, edit or delete files",
+#     groups=['superuser'],
+#     priority=11
+# )
+# pdp.add_policy(dir_creation)
 pdp.setup(app)
 
 
@@ -333,6 +315,18 @@ app.router.add_view("/walmart/", WalmartView)
 app.router.add_view("/epson/", EpsonView)
 app.router.add_view("/trendmicro/", TmView)
 app.router.add_view("/private/", TmView)
+
+async def handle(request):
+    session = await get_session(request)
+    if session:
+        name = session.id
+    else:
+        name = request.match_info.get('name', "Anonymous")
+    text = "Hello, " + name
+    return web.Response(text=text)
+
+app.add_routes([web.get('/', handle), web.get('/{name}', handle)])
+
 
 
 if __name__ == '__main__':

@@ -70,8 +70,13 @@ class Resource:
         except re.error:
             logging.warning(f'Resource {value} is not a Regular Expression.')
             self.value = self.raw_value
+        ##
+        if not self.resource_parts:
+            self.resource_parts = []
 
     def __str__(self) -> str:
+        if self.raw_value is None:
+            return ''
         return self.raw_value
 
     def __repr__(self) -> str:
@@ -110,12 +115,16 @@ class Resource:
                 return True
             else:
                 return False
-        if value in self.resource_parts:
+        if isinstance(self.resource_parts, list) and value in self.resource_parts:
             return True
 
         # Check if value matches any regex in self.resource_parts
         for resource_part in self.resource_parts:
-            if isinstance(resource_part, re.Pattern) and resource_part.match(value):
+            print('CHECK > ', resource_part, value)
+            val = value
+            if value is None:
+                val = ''
+            if isinstance(resource_part, re.Pattern) and resource_part.match(val):
                 return True
         # If value is not in self.resource_parts and doesn't match any regex
         return False

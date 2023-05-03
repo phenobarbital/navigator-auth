@@ -262,14 +262,14 @@ class PEP(BaseHandler):
         guardian = self.get_guardian(request)
         data = await self.data(request)
         try:
-            actions = data['actions']
+            action = data['action']
         except KeyError:
             self.error(
                 reason="IS_ALLOWED Method requires *actions* list on request",
                 status=401
             )
         args = {
-            "actions": actions,
+            "action": action,
             "request": request
         }
         try:

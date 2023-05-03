@@ -1,5 +1,5 @@
 from typing import Union
-from .abstract import PolicyEffect, PolicyResponse, AbstractPolicy
+from .abstract import ActionKey, PolicyEffect, PolicyResponse, AbstractPolicy
 from .resources import Resource
 from ..context import EvalContext
 from .environment import Environment
@@ -13,17 +13,17 @@ class ObjectPolicy(AbstractPolicy):
     def _fits_policy(self, resource: Resource, ctx: EvalContext) -> bool:
         """Internal Method for checking if Policy fits the Context."""
         fit_result = super()._fits_policy(resource, ctx)
-        for resource in self.resources:
-            objects = getattr(ctx, 'objects', [])
-            for f in objects:
-                object_type = getattr(ctx, 'objectype', None)
-                if object_type and object_type != resource.resource_type:
-                    # are not matching, return
-                    break
-                if resource.match(f'{f!s}') is not None:
-                    fit_result = True
-                    # if only one file is covered by this policy, exits
-                    break
+        # for resource in self.resources:
+        #     objects = getattr(ctx, 'objects', [])
+        #     for f in objects:
+        #         object_type = getattr(ctx, 'objectype', None)
+        #         if object_type and object_type != resource.resource_type:
+        #             # are not matching, return
+        #             break
+        #         if resource.match(f'{f!s}') is not None:
+        #             fit_result = True
+        #             # if only one file is covered by this policy, exits
+        #             break
         return fit_result
 
     def evaluate(self, ctx: EvalContext, environ: Environment) -> bool:
@@ -128,8 +128,8 @@ class ObjectPolicy(AbstractPolicy):
             self,
             ctx: EvalContext,
             env: Environment,
-            actions: Union[str, list[str]],
-            resource: list[dict],
+            action: Union[str, ActionKey],
+            resource: list[dict] = None,
             **kwargs
     ) -> PolicyResponse:
         """

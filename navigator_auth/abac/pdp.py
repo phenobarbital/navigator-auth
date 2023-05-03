@@ -270,6 +270,7 @@ class PDP:
         # Get filtered policies based on targets from storage
         # Filter policies that fit Inquiry by its attributes.
         obj = kwargs.get('resource', None)
+        print('RESOURCE > ', obj)
         if obj:
             if isinstance(obj, str):
                 ctx.objects = Resource(obj)
@@ -277,6 +278,7 @@ class PDP:
                 ctx.objects = [Resource(r) for r in obj]
             filtered = [
                 p for p in self._policies if isinstance(p, ObjectPolicy) and p.fits(ctx)
+                # p for p in self._policies if p.fits(ctx)
             ]
         else:
             filtered = [p for p in self._policies if p.fits(ctx)]
