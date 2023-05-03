@@ -114,17 +114,33 @@ def test_policy_creation():
     assert policy.actions == [ActionKey('article:view'), ActionKey('article:filter')]
 
 def test_policy_fits():
-    fits_result = policy.fits(dummy_context)
+    _payload = {
+        'request': mock_request,
+        'user': mock_user,
+        'userinfo': {
+            'username': 'jlara@trocglobal.com',
+            'email': 'jlara@trocglobal.com',
+            'groups': mock_user.groups
+        },
+        'session': {
+            'id': '1234567890',
+            'ip': '192.168.1.1'
+        }
+    }
+    evt = EvalContext(
+        **_payload
+    )
+    fits_result = policy.fits(evt)
     assert fits_result is True
     # check also if policy editor is allowed (for POST)
-    dummy_context.method = 'POST'
-    fits_result = post_policy.fits(dummy_context)
+    evt.method = 'POST'
+    fits_result = post_policy.fits(evt)
     assert fits_result is True
-    example_payload['userinfo']['groups'] = ['test_group']
-    fits_result = post_policy.fits(dummy_context)
+    # evt['userinfo']['groups'] = ['test_group']
+    fits_result = post_policy.fits(evt)
     assert fits_result is True
-    example_payload['userinfo']['groups'] = ['superuser']
-    fits_result = manage_policy.fits(dummy_context)
+    # evt['userinfo']['groups'] = ['superuser']
+    fits_result = manage_policy.fits(evt)
     assert fits_result is True
 
 

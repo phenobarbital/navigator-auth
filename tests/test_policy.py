@@ -10,7 +10,7 @@ policy = Policy(
     effect=PolicyEffect.ALLOW,
     description="This resource will be used only for Jesus between 9 at 24 monday to saturday",
     subject=['jlara@trocglobal.com'],
-    resource=["urn:uri:/private/"],
+    resource=["urn:uri:/private.*$"],
     environment={
         "hour": list(range(9, 25)) + [0],
         "day_of_week": list(range(1, 6))
