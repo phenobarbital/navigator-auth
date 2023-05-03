@@ -102,7 +102,7 @@ class Policy(AbstractPolicy):
             self,
             ctx: EvalContext,
             env: Environment,
-            action: Union[str, list[str]]
+            action: Union[str, ActionKey]
     ) -> PolicyResponse:
         """
         Determines if the requested action(s) is/are allowed by the policy.
@@ -118,21 +118,19 @@ class Policy(AbstractPolicy):
 
         # Convert action to a list if it's a single string
         if isinstance(action, str):
-            actions = [ActionKey(action)]
-        else:
-            actions = [ActionKey(r) for r in action]
+            action = ActionKey(action)
 
         # Check if the policy's actions cover the requested actions
-        if self.actions and not set(actions).isdisjoint(self.actions):
-            # Actions are covered by policy, return a PolicyResponse with the same
-            # effect as policy_response
-            return PolicyResponse(
-                effect=policy_response.effect,
-                response=f"Access {policy_response.effect} by Policy {self.name}",
-                actions=action,
-                rule=self.name
-            )
-
+        for act in self.actions:
+            if act == action:
+                # Actions are covered by policy, return a PolicyResponse with the same
+                # effect as policy_response
+                return PolicyResponse(
+                    effect=policy_response.effect,
+                    response=f"Access {policy_response.effect} by Policy {self.name}",
+                    actions=action,
+                    rule=self.name
+                )
         # Actions are not covered by policy, return a PolicyResponse with effect DENY
         return PolicyResponse(
             effect=PolicyEffect.DENY,

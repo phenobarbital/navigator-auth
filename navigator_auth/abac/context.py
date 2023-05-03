@@ -19,6 +19,7 @@ class EvalContext(dict, MutableMapping):
     ):
         ## initialize the mutable mapping:
         self.store = dict()
+        self.store['request'] = request
         self.store['ip_addr'] = request.remote
         self.store['method'] = request.method
         self.store['referer'] = request.headers.get('referer', None)
