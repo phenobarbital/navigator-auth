@@ -281,7 +281,7 @@ class PEP(BaseHandler):
         )
         if policy.effect:
             msg = {
-                "message": f"Action(s) {actions!s} Granted",
+                "message": f"Action(s) {action!s} Granted",
                 "response": policy.response,
                 "policy": policy.rule
             }
@@ -291,7 +291,7 @@ class PEP(BaseHandler):
             )
         else:
             msg = {
-                "error": "Access Denied",
+                "error": f"Access Denied: Action {action!s} not allowed",
                 "response": policy.response,
                 "policy": policy.rule
             }

@@ -13,17 +13,24 @@ class ObjectPolicy(AbstractPolicy):
     def _fits_policy(self, resource: Resource, ctx: EvalContext) -> bool:
         """Internal Method for checking if Policy fits the Context."""
         fit_result = super()._fits_policy(resource, ctx)
-        # for resource in self.resources:
-        #     objects = getattr(ctx, 'objects', [])
-        #     for f in objects:
-        #         object_type = getattr(ctx, 'objectype', None)
-        #         if object_type and object_type != resource.resource_type:
-        #             # are not matching, return
-        #             break
-        #         if resource.match(f'{f!s}') is not None:
-        #             fit_result = True
-        #             # if only one file is covered by this policy, exits
-        #             break
+        for resource in self.resources:
+            objects = getattr(ctx, 'objects', [])
+            for f in objects:
+                object_type = getattr(ctx, 'objectype', None)
+                if object_type and object_type != resource.resource_type:
+                    # are not matching, return
+                    break
+                else:
+                    if isinstance(f.value, list):
+                        for val in f.value:
+                            if resource.match(f'{val!s}') is not None:
+                                fit_result = True
+                                # if only one file is covered by this policy, exits
+                                break
+                    elif resource.match(f'{f.value!s}') is not None:
+                        fit_result = True
+                        # if only one file is covered by this policy, exits
+                        break
         return fit_result
 
     def evaluate(self, ctx: EvalContext, environ: Environment) -> bool:
@@ -160,21 +167,22 @@ class ObjectPolicy(AbstractPolicy):
             # Actions are covered by policy
             # Check if the requested object matches any of the policy's resources
             for obj in ctx.objects:
+                # print('OBJ > ', obj, type(obj))
                 # Check for positive matches
                 positive_match = any(
-                    res.match(f"{obj!s}") for res in self.resources
+                    res.match(obj.value) for res in self.resources
                     if not res.is_negative()
                 )
                 # Check for negative matches
                 negative_match = any(
-                    res.match(f"{obj!s}") for res in self.resources if res.is_negative()
+                    res.match(obj.value) for res in self.resources if res.is_negative()
                 )
                 if positive_match and not negative_match:
                     # Requested object is covered by policy
                     return PolicyResponse(
                         effect=response.effect,
                         response=f"{response.effect} by ObjectPolicy {self.name}",
-                        actions=actions,
+                        actions=action,
                         rule=self.name
                     )
         # Actions are not covered by policy, return a PolicyResponse with effect DENY

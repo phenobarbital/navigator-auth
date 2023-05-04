@@ -4,7 +4,16 @@ from aiohttp import web
 from navconfig.logging import logger
 from navigator_session import SessionData
 from navigator_auth.conf import AUTH_SESSION_OBJECT
-from .policies import Resource, ActionKey, Policy, ObjectPolicy, FilePolicy, PolicyEffect, Environment
+from .policies import (
+    Resource,
+    RequestResource,
+    ActionKey,
+    Policy,
+    ObjectPolicy,
+    FilePolicy,
+    PolicyEffect,
+    Environment
+)
 from .errors import PreconditionFailed, AccessDenied
 from .context import EvalContext
 from .guardian import Guardian, PEP
@@ -270,12 +279,15 @@ class PDP:
         # Get filtered policies based on targets from storage
         # Filter policies that fit Inquiry by its attributes.
         obj = kwargs.get('resource', None)
-        print('RESOURCE > ', obj)
         if obj:
             if isinstance(obj, str):
-                ctx.objects = Resource(obj)
+                ctx.objects = RequestResource(obj)
+            elif isinstance(obj, list):
+                ctx.objects = [RequestResource(r) for r in obj]
             else:
-                ctx.objects = [Resource(r) for r in obj]
+                raise ValueError(
+                    f"Invalid type for Resource: {obj}:{type(obj)}"
+                )
             filtered = [
                 p for p in self._policies if isinstance(p, ObjectPolicy) and p.fits(ctx)
                 # p for p in self._policies if p.fits(ctx)
