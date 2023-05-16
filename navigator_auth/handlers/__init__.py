@@ -1,80 +1,36 @@
-from .clients import ClientHandler
-from .orgs import OrganizationHandler, UserOrganizationHandler
 from .permissions import PermissionHandler
 from .users import UserHandler, UserSession
-from .program import ProgramCatHandler, ProgramHandler, ProgramClientHandler, ProgramGroupHandler
 from .groups import GroupHandler, GroupPermissionHandler, UserGroupHandler
 from .userattrs import UserAccountHandler, UserIdentityHandler
 
+
 ## TODO migration of login/logout handlers:
-
-
 def handler_routes(router) -> None:
-    ## Clients
-    router.add_view(r"/api/v1/clients/{id:.*}", ClientHandler, name="api_clients_id")
-    router.add_view(r"/api/v1/clients{meta:\:?.*}", ClientHandler, name="api_clients")
-    ## Organizations:
-    router.add_view(
-        r"/api/v1/organizations/{id:.*}",
-        OrganizationHandler,
-        name="api_organizations_id",
-    )
-    router.add_view(
-        r"/api/v1/organizations{meta:\:?.*}",
-        OrganizationHandler,
-        name="api_organizations",
-    )
-    router.add_view(
-        r"/api/v1/user_organizations/{id:.*}",
-        UserOrganizationHandler,
-        name="api_user_organizations_id",
-    )
-    router.add_view(
-        r"/api/v1/user_organizations{meta:\:?.*}",
-        UserOrganizationHandler,
-        name="api_user_organizations",
-    )
-    ### Programs:
-    router.add_view(r"/api/v1/programs/{id:.*}", ProgramHandler, name="api_programs_id")
-    router.add_view(
-        r"/api/v1/programs{meta:\:?.*}", ProgramHandler, name="api_programs"
-    )
-    router.add_view(
-        r"/api/v1/program_categories/{id:.*}",
-        ProgramCatHandler,
-        name="api_program_categories_id",
-    )
-    router.add_view(
-        r"/api/v1/program_categories{meta:\:?.*}",
-        ProgramCatHandler,
-        name="api_program_categories",
-    )
-    # Program Client:
-    router.add_view(
-        r"/api/v1/program_clients/{id:.*}",
-        ProgramClientHandler,
-        name="api_programs_clients_id",
-    )
-    router.add_view(
-        r"/api/v1/program_clients{meta:\:?.*}",
-        ProgramClientHandler,
-        name="api_programs_clients",
-    )
     ### Model permissions:
     router.add_view(
-        r"/api/v1/permissions/{id:.*}", PermissionHandler, name="api_permissions_id"
+        r"/api/v1/permissions/{id:.*}", PermissionHandler,
+        name="api_permissions_id"
     )
     router.add_view(
-        r"/api/v1/permissions{meta:\:?.*}", PermissionHandler, name="api_permissions"
+        r"/api/v1/permissions{meta:\:?.*}", PermissionHandler,
+        name="api_permissions"
     )
     ## Groups:
-    router.add_view(r"/api/v1/groups/{id:.*}", GroupHandler, name="api_groups_id")
-    router.add_view(r"/api/v1/groups{meta:\:?.*}", GroupHandler, name="api_groups")
     router.add_view(
-        r"/api/v1/user_groups/{id:.*}", UserGroupHandler, name="api_user_groups_id"
+        r"/api/v1/groups/{id:.*}", GroupHandler,
+        name="api_groups_id"
     )
     router.add_view(
-        r"/api/v1/user_groups{meta:\:?.*}", UserGroupHandler, name="api_user_groups"
+        r"/api/v1/groups{meta:\:?.*}", GroupHandler,
+        name="api_groups"
+    )
+    router.add_view(
+        r"/api/v1/user_groups/{id:.*}", UserGroupHandler,
+        name="api_user_groups_id"
+    )
+    router.add_view(
+        r"/api/v1/user_groups{meta:\:?.*}", UserGroupHandler,
+        name="api_user_groups"
     )
     router.add_view(
         r"/api/v1/group_permissions/{id:.*}",
@@ -87,35 +43,40 @@ def handler_routes(router) -> None:
         name="api_group_permissions",
     )
     ### User Methods:
-    router.add_view(r"/api/v1/users/{id:.*}", UserHandler, name="api_auth_users_id")
-    router.add_view(r"/api/v1/users{meta:\:?.*}", UserHandler, name="api_auth_users")
+    router.add_view(
+        r"/api/v1/users/{id:.*}", UserHandler,
+        name="api_auth_users_id"
+    )
+    router.add_view(
+        r"/api/v1/users{meta:\:?.*}", UserHandler,
+        name="api_auth_users"
+    )
     # User Group:
     router.add_view(
-        r"/api/v1/usergroups/{id:.*}", UserGroupHandler, name="api_auth_usergroups_id"
+        r"/api/v1/usergroups/{id:.*}", UserGroupHandler,
+        name="api_auth_usergroups_id"
     )
     router.add_view(
-        r"/api/v1/usergroups{meta:\:?.*}", UserGroupHandler, name="api_auth_usergroups"
-    )
-    # User Account:
-    router.add_view(
-        r"/api/v1/user_accounts/{id:.*}", UserAccountHandler, name="api_auth_useraccount_id"
-    )
-    router.add_view(
-        r"/api/v1/user_accounts{meta:\:?.*}", UserAccountHandler, name="api_auth_useraccount"
+        r"/api/v1/usergroups{meta:\:?.*}", UserGroupHandler,
+        name="api_auth_usergroups"
     )
     # User Account:
     router.add_view(
-        r"/api/v1/user_identity/{id:.*}", UserIdentityHandler, name="api_auth_useridentity_id"
+        r"/api/v1/user_accounts/{id:.*}", UserAccountHandler,
+        name="api_auth_useraccount_id"
     )
     router.add_view(
-        r"/api/v1/user_identity{meta:\:?.*}", UserIdentityHandler, name="api_auth_useridentity"
+        r"/api/v1/user_accounts{meta:\:?.*}", UserAccountHandler,
+        name="api_auth_useraccount"
     )
-    ## Program Group:
+    # User Account:
     router.add_view(
-        r"/api/v1/program_groups/{id:.*}", ProgramGroupHandler, name="api_auth_programgroup_id"
+        r"/api/v1/user_identity/{id:.*}", UserIdentityHandler,
+        name="api_auth_useridentity_id"
     )
     router.add_view(
-        r"/api/v1/program_groups{meta:\:?.*}", ProgramGroupHandler, name="api_auth_programgroup"
+        r"/api/v1/user_identity{meta:\:?.*}", UserIdentityHandler,
+        name="api_auth_useridentity"
     )
     ### User Session Methods:
     usr = UserSession()

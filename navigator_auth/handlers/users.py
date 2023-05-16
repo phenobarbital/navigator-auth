@@ -120,7 +120,7 @@ class UserSession(BaseHandler):
                     "username": user.username,
                     "timestamp": str(time.time()),
                 }
-                cipher = Cipher(PARTNER_KEY, type="RNC")
+                cipher = Cipher(PARTNER_KEY, ctype="RNC")
                 rnc = cipher.encode(self._json.dumps(data))
                 headers = {"x-status": "OK", "x-message": "Token Generated"}
                 response = {"token": rnc.upper()}
@@ -421,7 +421,7 @@ class UserHandler(BaseView):
                     "payload": str(ex),
                 }
                 return self.error(exception=error, statu=406)
-            except (DriverError, ProviderError, RuntimeError):
+            except (DriverError, ProviderError, RuntimeError) as ex:
                 error = {
                     "error": "Database Error",
                     "payload": str(ex),

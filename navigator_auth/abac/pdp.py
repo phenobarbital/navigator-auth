@@ -4,7 +4,16 @@ from aiohttp import web
 from navconfig.logging import logger
 from navigator_session import SessionData
 from navigator_auth.conf import AUTH_SESSION_OBJECT
-from .policies import Exp, Policy, ObjectPolicy, FilePolicy, PolicyEffect, Environment
+from .policies import (
+    Resource,
+    RequestResource,
+    ActionKey,
+    Policy,
+    ObjectPolicy,
+    FilePolicy,
+    PolicyEffect,
+    Environment
+)
 from .errors import PreconditionFailed, AccessDenied
 from .context import EvalContext
 from .guardian import Guardian, PEP
@@ -182,6 +191,7 @@ class PDP:
     ## Audit Log
     async def auditlog(self, answer, user):
         try:
+            self.logger.notice(f'Policy: {answer}')
             await self._auditlog.log(answer, PolicyEffect(answer.effect).name, user)
         except Exception as exc:
             self.logger.warning(f'Error saving policy Log: {exc}')
@@ -271,11 +281,16 @@ class PDP:
         obj = kwargs.get('resource', None)
         if obj:
             if isinstance(obj, str):
-                ctx.objects = Exp(obj)
+                ctx.objects = RequestResource(obj)
+            elif isinstance(obj, list):
+                ctx.objects = [RequestResource(r) for r in obj]
             else:
-                ctx.objects = [Exp(r) for r in obj]
+                raise ValueError(
+                    f"Invalid type for Resource: {obj}:{type(obj)}"
+                )
             filtered = [
                 p for p in self._policies if isinstance(p, ObjectPolicy) and p.fits(ctx)
+                # p for p in self._policies if p.fits(ctx)
             ]
         else:
             filtered = [p for p in self._policies if p.fits(ctx)]

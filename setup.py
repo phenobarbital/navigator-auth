@@ -1,9 +1,10 @@
 #!/usr/bin/env python
-"""Navigator-Session.
+"""Navigator-Auth.
 
-    Asynchronous library for managing user-specific data into a session object, used by Navigator.
+    Navigator-Auth is a python package that provides a simple way to authenticate using
+    several authentication mechanisms.
 See:
-https://github.com/phenobarbital/navigator-session
+https://github.com/phenobarbital/navigator-auth
 """
 import ast
 from os import path
@@ -67,6 +68,12 @@ extensions = [
     Extension(
         name='navigator_auth.libs.cipher',
         sources=['navigator_auth/libs/cipher.pyx'],
+        extra_compile_args=COMPILE_ARGS,
+        language="c++"
+    ),
+    Extension(
+        name='navigator_auth.libs.parser',
+        sources=['navigator_auth/libs/parser.pyx'],
         extra_compile_args=COMPILE_ARGS,
         language="c++"
     ),

@@ -1,5 +1,5 @@
 from typing import Union
-from .abstract import PolicyEffect, PolicyResponse, AbstractPolicy
+from .abstract import ActionKey, PolicyEffect, PolicyResponse, AbstractPolicy
 from ..context import EvalContext
 from .environment import Environment
 
@@ -55,6 +55,12 @@ class Policy(AbstractPolicy):
             elif self.context_attrs:
                 for a in self.context_attrs:
                     att = self.context[a]
+                    ### check Context Object itself:
+                    try:
+                        if att == getattr(ctx, a, None):
+                            context_condition = True
+                    except TypeError:
+                        pass
 
                     # Check user object attributes
                     try:
@@ -82,6 +88,7 @@ class Policy(AbstractPolicy):
             context_condition = True
 
         # If all conditions are true, set is_allowed to True
+        # print('EVALUATION > ')
         # print(groups_condition, environment_condition, context_condition, subject_condition)
         if (groups_condition and environment_condition
             and context_condition and subject_condition):
@@ -97,15 +104,13 @@ class Policy(AbstractPolicy):
             rule=self.name
         )
 
-    def _fits_policy(self, ctx: EvalContext) -> bool:
-        """Internal Method for checking if Policy fits the Context."""
-        return True
-
     def is_allowed(
             self,
             ctx: EvalContext,
             env: Environment,
-            action: Union[str, list[str]]
+            action: Union[str, ActionKey],
+            resource: list[dict] = None,
+            **kwargs
     ) -> PolicyResponse:
         """
         Determines if the requested action(s) is/are allowed by the policy.
@@ -121,12 +126,15 @@ class Policy(AbstractPolicy):
 
         # Convert action to a list if it's a single string
         if isinstance(action, str):
-            actions = [action]
-        else:
-            actions = action
+            action = ActionKey(action)
 
         # Check if the policy's actions cover the requested actions
-        if self.actions and not set(actions).isdisjoint(self.actions):
+        _allowed = False
+        for act in self.actions:
+            if act == action:
+                _allowed = True
+                break
+        if _allowed:
             # Actions are covered by policy, return a PolicyResponse with the same
             # effect as policy_response
             return PolicyResponse(
@@ -135,7 +143,6 @@ class Policy(AbstractPolicy):
                 actions=action,
                 rule=self.name
             )
-
         # Actions are not covered by policy, return a PolicyResponse with effect DENY
         return PolicyResponse(
             effect=PolicyEffect.DENY,

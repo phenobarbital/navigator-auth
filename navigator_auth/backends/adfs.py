@@ -177,7 +177,7 @@ class ADFSAuth(ExternalAuth):
             if "error" in exchange:
                 error = exchange.get("error")
                 desc = exchange.get("error_description")
-                message = f"Azure {error}: {desc}¡"
+                message = f"ADFS {error}: {desc}¡"
                 logging.exception(message)
                 raise web.HTTPForbidden(reason=message)
             else:

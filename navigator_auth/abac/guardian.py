@@ -262,14 +262,14 @@ class PEP(BaseHandler):
         guardian = self.get_guardian(request)
         data = await self.data(request)
         try:
-            actions = data['actions']
+            action = data['action']
         except KeyError:
             self.error(
                 reason="IS_ALLOWED Method requires *actions* list on request",
                 status=401
             )
         args = {
-            "actions": actions,
+            "action": action,
             "request": request
         }
         try:
@@ -281,7 +281,7 @@ class PEP(BaseHandler):
         )
         if policy.effect:
             msg = {
-                "message": f"Action(s) {actions!s} Granted",
+                "message": f"Action(s) {action!s} Granted",
                 "response": policy.response,
                 "policy": policy.rule
             }
@@ -291,7 +291,7 @@ class PEP(BaseHandler):
             )
         else:
             msg = {
-                "error": "Access Denied",
+                "error": f"Access Denied: Action {action!s} not allowed",
                 "response": policy.response,
                 "policy": policy.rule
             }

@@ -13,7 +13,11 @@ from aiohttp.web_exceptions import (
 import aiohttp_cors
 from aiohttp_cors import CorsViewMixin
 from navconfig.logging import logging, loglevel
-from navigator_auth.libs.json import JSONContent, json_encoder, json_decoder
+from navigator_auth.libs.json import (
+    JSONContent,
+    json_encoder,
+    json_decoder
+)
 
 
 DEFAULT_JSON_ENCODER = json_encoder

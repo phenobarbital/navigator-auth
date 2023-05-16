@@ -29,11 +29,16 @@ class FilePolicy(ObjectPolicy):
         response = self.evaluate(ctx, env)
 
         # Convert action to a list if it's a single string
-        if isinstance(actions, str):
-            actions = [actions]
+        if isinstance(action, str):
+            action = ActionKey(action)
 
         # Check if the policy's actions cover the requested actions
-        if self.actions and not set(actions).isdisjoint(self.actions):
+        _allowed = False
+        for act in self.actions:
+            if act == action:
+                _allowed = True
+                break
+        if _allowed:
             # Actions are covered by policy
             # Check if the requested directory matches any of the policy's resources
             for obj in ctx.objects:

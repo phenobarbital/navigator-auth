@@ -32,7 +32,7 @@ class User(Model):
     position_id: str = Column(required=False)
     group_id: list = Column(required=False)
     groups: list = Column(required=False)
-    # program_id: list = Column(required=False)
+    program_id: list = Column(required=False)
     programs: list = Column(required=False)
     created_at: datetime = Column(required=False)
     # date_joined: datetime = Column(required=False)
