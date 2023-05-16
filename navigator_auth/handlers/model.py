@@ -6,7 +6,13 @@ import importlib
 from aiohttp import web
 from datamodel import BaseModel
 from datamodel.exceptions import ValidationError
-from asyncdb.exceptions import DriverError, ProviderError, NoDataFound, StatementError, ModelError
+from asyncdb.exceptions import (
+    DriverError,
+    ProviderError,
+    NoDataFound,
+    StatementError,
+    ModelError
+)
 from navigator_session import get_session
 from navigator_auth.exceptions import AuthException
 from .base import BaseView
@@ -66,7 +72,11 @@ class ModelHandler(BaseView):
                 ### then that function is called for getting the field value
                 if hasattr(self, f'_get_{name}'):
                     fn = getattr(self, f'_get_{name}')
-                    data[name] = await fn(value=data.get(name, None), column=column, data=data)
+                    data[name] = await fn(
+                        value=data.get(name, None),
+                        column=column,
+                        data=data
+                    )
         except (TypeError, ValueError, AttributeError):
             self.error(
                 reason=f"Invalid {self.name} Data", status=400

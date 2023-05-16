@@ -26,6 +26,7 @@ ENVIRONMENT = config.get('ENVIRONMENT', fallback='development')
 AUTH_DB_SCHEMA = config.get("AUTH_DB_SCHEMA", fallback="auth")
 AUTH_USERS_TABLE = config.get("AUTH_USERS_TABLE", fallback="users")
 AUTH_USERS_VIEW = config.get("AUTH_USERS_VIEW", fallback="vw_users")
+AUTH_GROUPS_TABLE = config.get("AUTH_GROUPS_TABLE", fallback="groups")
 
 #### Main Database
 PG_USER = config.get("DBUSER")
@@ -58,7 +59,7 @@ AUTH_CREDENTIALS_REQUIRED = config.getboolean(
 )
 
 # what happen when a user doesn't exists?
-# possible values are: create (user is created), raise (a UserDoesntExists exception raises)
+# possible values are: create (user is created), raise (a UserDoesntExists raises)
 # and ignore, session is created but user is missing.
 AUTH_MISSING_ACCOUNT = config.get("AUTH_MISSING_ACCOUNT", fallback="create")
 # List of function callbacks called (in order) when a user is
@@ -77,19 +78,6 @@ AUTH_GROUP_MODEL = config.get(
 AUTH_USER_GROUP_MODEL = config.get(
     "AUTH_USER_GROUP_MODEL", fallback="navigator_auth.models.UserGroup"
 )
-
-### Other Models (clients, organizations and Programs):
-AUTH_CLIENT_MODEL = config.get("AUTH_CLIENT_MODEL", fallback=None)
-
-AUTH_PROGRAM_MODEL = config.get("AUTH_PROGRAM_MODEL", fallback=None)
-
-AUTH_PROGRAM_CLIENT_MODEL = config.get("AUTH_PROGRAM_CLIENT_MODEL", fallback=None)
-
-AUTH_PROGRAM_CATEGORY_MODEL = config.get("AUTH_PROGRAM_CATEGORY_MODEL", fallback=None)
-
-AUTH_ORGANIZATION_MODEL = config.get("AUTH_ORGANIZATION_MODEL", fallback=None)
-
-AUTH_USER_ORGANIZATION_MODEL = config.get("AUTH_USER_ORGANIZATION_MODEL", fallback=None)
 
 AUTH_PERMISSION_MODEL = config.get("AUTH_PERMISSION_MODEL", fallback=None)
 

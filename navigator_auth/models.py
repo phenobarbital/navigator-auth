@@ -9,12 +9,14 @@ from datetime import datetime, timedelta
 from enum import Enum
 import jwt
 from slugify import slugify
+from datamodel.types import Text
 from asyncdb.models import Model, Column
 from .libs.cipher import Cipher
 from .libs.json import json_encoder
 from .conf import (
     AUTH_DB_SCHEMA,
     AUTH_USERS_TABLE,
+    AUTH_GROUPS_TABLE,
     AUTH_DEFAULT_ISSUER,
     SECRET_KEY,
     AUTH_JWT_ALGORITHM,
@@ -22,149 +24,8 @@ from .conf import (
 )
 
 
-class Text(str):
-    """Base Definition for Big Text."""
-
-
-## Create a TENANT as Main Level.
-class Client(Model):
-    """Highest hierarchy level."""
-
-    client_id: int = Column(
-        required=False, primary_key=True, db_default="auto", repr=False
-    )
-    client: str = Column(required=True, max=254)
-    description: Text
-    auth_backends: list = Column(required=False)
-    attributes: dict = Column(required=False)
-    client_slug: str
-    subdomain_prefix: str
-    is_active: bool = Column(required=True, default=True)
-    created_at: datetime = Column(required=False, default=datetime.now())
-    updated_at: datetime = Column(required=False, default=datetime.now())
-    created_by: str = Column(required=False)
-
-    class Meta:
-        name = "clients"
-        schema = AUTH_DB_SCHEMA
-        strict = True
-        connection = None
-
-    def __post_init__(self) -> None:
-        super(Client, self).__post_init__()
-        if not self.client_slug:
-            self.client_slug = slugify(self.client)
-
-
-class Organization(Model):
-    org_id: int = Column(
-        required=False, primary_key=True, db_default="auto", repr=False
-    )
-    oid: UUID = Column(required=True, db_default="auto")
-    organization: str = Column(required=True, max=254)
-    description: Text
-    attributes: dict = Column(required=False, default_factory=dict)
-    org_slug: str = Column(required=True, max=254)
-    is_active: bool = Column(required=True, default=True)
-    created_at: datetime = Column(required=False, default=datetime.now())
-    updated_at: datetime = Column(required=False, default=datetime.now())
-    created_by: str = Column(required=False)
-
-    class Meta:
-        name = "organizations"
-        schema = AUTH_DB_SCHEMA
-        strict = True
-        frozen = False
-
-    def __post_init__(self) -> None:
-        super(Organization, self).__post_init__()
-        if not self.org_slug:
-            self.org_slug = slugify(self.organization)
-
-
-class OrganizationClient(Model):
-    client_id: Client = Column(required=True, primary_key=True)
-    org_id: Client = Column(required=True, primary_key=True)
-    attributes: dict = Column(required=False, default_factory=dict)
-    created_at: datetime = Column(required=False, default=datetime.now())
-    updated_at: datetime = Column(required=False, default=datetime.now())
-    created_by: str = Column(required=False)
-
-    class Meta:
-        name = "organization_clients"
-        schema = AUTH_DB_SCHEMA
-        strict = True
-        frozen = False
-
-
-class ProgramCategory(Model):
-    program_cat_id: int = Column(
-        required=False, primary_key=True, db_default="auto", repr=False
-    )
-    category: str = Column(required=True)
-
-    class Meta:
-        name = "program_categories"
-        schema = AUTH_DB_SCHEMA
-        strict = True
-        frozen = False
-
-
-class Program(Model):
-    program_id: int = Column(
-        required=False, primary_key=True, db_default="auto", repr=False
-    )
-    program_name: str
-    description: Text
-    attributes: dict = Column(required=False, default_factory=dict)
-    program_slug: str
-    program_cat_id: ProgramCategory = Column(required=True)
-    is_active: bool = Column(required=True, default=True)
-    created_at: datetime = Column(required=False, default=datetime.now())
-    updated_at: datetime = Column(required=False, default=datetime.now())
-    created_by: str = Column(required=False)
-
-    def __post_init__(self) -> None:
-        super(Program, self).__post_init__()
-        if not self.program_slug:
-            self.program_slug = slugify(self.program_name)
-
-    class Meta:
-        name = "programs"
-        description = "Modelo del programa"
-        schema = AUTH_DB_SCHEMA
-        strict = True
-        frozen = False
-
-
-class ProgramAttribute(Model):
-    program_id: Program = Column(required=True, primary_key=True)
-    attribute: str = Column(required=True, max=254, primary_key=True)
-    properties: dict = Column(required=False, default_factory=dict)
-    created_by: str = Column(required=False)
-
-    class Meta:
-        name = "program_attributes"
-        schema = AUTH_DB_SCHEMA
-        strict = True
-        frozen = False
-
-
-class ProgramClient(Model):
-    program_id: Program = Column(required=True, primary_key=True)
-    client_id: Client = Column(required=True, primary_key=True)
-    client_slug: str
-    program_slug: str
-    active: bool = Column(required=False, default=True)
-    created_at: datetime = Column(required=False, default=datetime.now())
-    created_by: str = Column(required=False)
-
-    class Meta:
-        name = "program_clients"
-        schema = AUTH_DB_SCHEMA
-        strict = True
-        frozen = False
-
+def auto_uuid():
+    return uuid4()
 
 class UserType(Enum):
     USER = 1  # , 'user'
@@ -200,8 +61,11 @@ class User(Model):
     attributes: Optional[dict] = Column(required=False, default_factory=dict)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
-    last_login: datetime = Column(required=False, readonly=True, default=datetime.now())
+    last_login: datetime = Column(
+        required=False, readonly=True, default=datetime.now()
+    )
     created_by: str = Column(required=False)
+    # program_id: int = Column(required=False)
 
     class Meta:
         name = AUTH_USERS_TABLE
@@ -211,7 +75,9 @@ class User(Model):
 
 
 class UserIdentity(Model):
-    identity_id: UUID = Column(required=False, primary_key=True, db_default="auto", repr=False)
+    identity_id: UUID = Column(
+        required=False, primary_key=True, db_default="auto", repr=False
+    )
     display_name: str = Column(required=False)
     title: str = Column(required=False)
     nickname: str = Column(required=False)
@@ -219,11 +85,15 @@ class UserIdentity(Model):
     phone: str = Column(required=False)
     short_bio: Text = Column(required=False)
     avatar: Text = Column(required=False)
-    user_id: User = Column(required=True, fk="user_id|username", api="users", label="User")
+    user_id: User = Column(
+        required=True, fk="user_id|username", api="users", label="User"
+    )
     auth_provider: str = Column(required=False)
     auth_data: Optional[dict] = Column(required=False, repr=False)
     attributes: Optional[dict] = Column(required=False, repr=False)
-    created_at: datetime = Column(required=False, default=datetime.now(), repr=False)
+    created_at: datetime = Column(
+        required=False, default=datetime.now(), repr=False
+    )
 
     class Meta:
         name = "user_identities"
@@ -232,7 +102,9 @@ class UserIdentity(Model):
         connection = None
 
 class VwUserIdentity(Model):
-    identity_id: UUID = Column(required=False, primary_key=True, db_default="auto", repr=False)
+    identity_id: UUID = Column(
+        required=False, primary_key=True, db_default="auto", repr=False
+    )
     display_name: str = Column(required=False)
     title: str = Column(required=False)
     nickname: str = Column(required=False)
@@ -240,7 +112,9 @@ class VwUserIdentity(Model):
     phone: str = Column(required=False)
     short_bio: Text = Column(required=False)
     avatar: Text = Column(required=False)
-    user_id: User = Column(required=True, fk="user_id|username", api="users", label="User")
+    user_id: User = Column(
+        required=True, fk="user_id|username", api="users", label="User"
+    )
     accounts: Optional[dict] = Column(required=False, default_factory=dict)
 
     class Meta:
@@ -248,10 +122,6 @@ class VwUserIdentity(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
-
-
-def auto_uuid():
-    return uuid4()
 
 
 class UserDevices(Model):
@@ -298,27 +168,11 @@ class UserDevices(Model):
         connection = None
 
 
-class OrganizationUser(Model):
-    org_id: Organization = Column(required=True)
-    user_id: User = Column(required=True)
-    properties: dict = Column(required=False, default_factory=dict)
-    created_at: datetime = Column(required=False, default=datetime.now())
-    updated_at: datetime = Column(required=False, default=datetime.now())
-    created_by: str = Column(required=False)
-
-    class Meta:
-        name = "organization_users"
-        schema = AUTH_DB_SCHEMA
-        strict = True
-        frozen = False
-
-
 class Group(Model):
     group_id: int = Column(
         required=True, primary_key=True, db_default="auto", repr=False
     )
     group_name: str = Column(required=True)
-    client_id: Optional[Client] = Column(required=False)
     is_active: bool = Column(required=True, default=True)
     description: Text = Column(required=False)
     created_at: datetime = Column(required=False, default=datetime.now())
@@ -326,7 +180,7 @@ class Group(Model):
     created_by: str = Column(required=False)
 
     class Meta:
-        name = "groups"
+        name = AUTH_GROUPS_TABLE
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
@@ -346,25 +200,10 @@ class UserGroup(Model):
         connection = None
 
 
-class ProgramGroup(Model):
-    gprogram_id: int = Column(required=True, primary_key=True, db_default="auto", repr=False)
-    program_id: Program = Column(required=True, primary_key=True, fk="user_id|username", api="users", label="User")
-    group_id: Group = Column(required=True, primary_key=True, fk="group_id|group_name", api="groups", label="Group")
-    created_at: datetime = Column(required=False, default=datetime.now())
-    created_by: str = Column(required=False)
-
-    class Meta:
-        name = "program_groups"
-        schema = AUTH_DB_SCHEMA
-        strict = True
-        connection = None
-
-
 class Permission(Model):
     permission_id: int = Column(required=True, primary_key=True, db_default="auto")
     permission: str = Column(required=False, max=254, label="Permission")
     description: str
-    program_id: Program = Column(required=True)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())
 
@@ -381,7 +220,7 @@ class Permission(Model):
 
 
 class GroupPermission(Model):
-    """Direct association between a permission and a Group (associated to a Program)."""
+    """Direct association between a permission and a Group."""
 
     group_id: Group = Column(required=True, primary_key=True)
     permission_id: Permission = Column(required=True, primary_key=True)
@@ -420,7 +259,6 @@ class UserAttributes(Model):
     location_code: str = Column(required=False)
     job_code: str = Column(required=False)
     created_at: datetime = Column(required=False, default=datetime.now())
-
 
     class Meta:
         name = "user_attributes"

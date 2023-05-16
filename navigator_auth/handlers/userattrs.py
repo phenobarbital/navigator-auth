@@ -1,12 +1,9 @@
 from typing import Any
 from asyncdb.exceptions import (
-    NoDataFound,
-    StatementError
+    NoDataFound
 )
-from datamodel.exceptions import ValidationError
 from asyncdb.exceptions import DriverError
 from navigator_session import get_session, AUTH_SESSION_OBJECT
-from navigator_auth.exceptions import AuthException
 from navigator_auth.models import (
     UserAccount, UserIdentity, VwUserIdentity
 )
@@ -49,7 +46,7 @@ class UserAccountHandler(ModelHandler):
         return None
 
     async def get(self):
-        db = self.request.app["database"]
+        db = self.request.app["authdb"]
         params = self.match_parameters(self.request)
         try:
             if params["meta"] == ":meta":
@@ -104,12 +101,11 @@ class UserAccountHandler(ModelHandler):
         else:
             async with await db.acquire() as conn:
                 self.model.Meta.connection = conn
-                
+
                 try:
                     filter = {
-                                "user_id": user_id
-                            }
-
+                        "user_id": user_id
+                    }
                     UserAccounts = await self.model.filter(**filter)
                     if not UserAccounts:
                         headers = {
@@ -119,10 +115,14 @@ class UserAccountHandler(ModelHandler):
                         data = {"message": "No Content"}
                         code = 204
 
-                        return self.response(response=data, headers=headers, status=code)
+                        return self.response(
+                            response=data, headers=headers, status=code
+                        )
                     else:
                         headers = {"x-status": "OK", "x-message": "User Account Data"}
-                        return self.json_response(content=UserAccounts, headers=headers, status=200)
+                        return self.json_response(
+                            content=UserAccounts, headers=headers, status=200
+                        )
                 except Exception as err:
                     print(err)
                     return self.error(exception=err, status=500)
@@ -138,7 +138,7 @@ class UserIdentityHandler(ModelHandler):
         return await self.get_userid(session=self._session)
 
     async def get(self):
-        db = self.request.app["database"]
+        db = self.request.app["authdb"]
         params = self.match_parameters(self.request)
         try:
             if params["meta"] == ":meta":
@@ -196,9 +196,8 @@ class UserIdentityHandler(ModelHandler):
                 VwUserIdentity.Meta.connection = conn
                 try:
                     filter = {
-                                "user_id": user_id
-                            }
-
+                        "user_id": user_id
+                    }
                     UserIdentity = await VwUserIdentity.filter(**filter)
                     if not UserIdentity:
                         headers = {
@@ -208,10 +207,14 @@ class UserIdentityHandler(ModelHandler):
                         data = {"message": "No Content"}
                         code = 204
 
-                        return self.response(response=data, headers=headers, status=code)
+                        return self.response(
+                            response=data, headers=headers, status=code
+                        )
                     else:
                         headers = {"x-status": "OK", "x-message": "User Identity Data"}
-                        return self.json_response(content=UserIdentity, headers=headers, status=200)
+                        return self.json_response(
+                            content=UserIdentity, headers=headers, status=200
+                        )
                 except Exception as err:
                     print(err)
                     return self.error(exception=err, status=500)
