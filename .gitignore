@@ -135,3 +135,4 @@ navigator_auth/libs/cipher.cpp
 navigator_auth/libs/json.cpp
 navigator_auth/libs/json.cpp
 resources/auth.py
+navigator_auth/libs/parser.cpp
