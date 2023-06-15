@@ -32,10 +32,10 @@ def decode_part(raw, encoding="utf-8"):
     based on `JWS specs <https://tools.ietf.org/html/rfc7515#appendix-C>`_.
     Args:
         raw (str): Data to be encoded-
-        encoding (str, optional): If you are going to decode the first 2 parts of a JWT, i.e. the header
-        or the payload, the default value "utf-8" would work fine.
+        encoding (str, optional): If you are going to decode the first 2 parts of a JWT
+        i.e. the header or the payload, the default value "utf-8" would work fine.
         If you are going to decode the last part i.e. the signature part,
-        it is a binary string so you should use `None` as encoding here. Defaults to "utf-8".
+        it is a binary string so you should use `None` as encoding here.
 
     Returns:
         str: part string decoded.

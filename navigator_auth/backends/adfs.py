@@ -160,7 +160,9 @@ class ADFSAuth(ExternalAuth):
                 f"ADFS: Invalid Callback response: {err}, payload: {auth_response}"
             ) from err
         # print(authorization_code, state, request_id)
-        logging.debug(f"Received authorization token: {authorization_code}")
+        logging.debug(
+            f"Received authorization token: {authorization_code}"
+        )
         # getting an Access Token
         query_params = {
             "code": authorization_code,

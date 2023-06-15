@@ -89,7 +89,7 @@ class ExternalAuth(BaseAuthBackend):
         self._info.uri = f"/api/v1/auth/{self._service_name}/"
         ## added to excluded list:
         exclude_list.append(f"/api/v1/auth/{self._service_name}/")
-        self.finish_redirect_url = AUTH_REDIRECT_URI
+        self.finish_redirect_url = None
         ## alt login
         router.add_route(
             "GET",
@@ -157,7 +157,7 @@ class ExternalAuth(BaseAuthBackend):
 
     def get_finish_redirect_url(self, request: web.Request) -> str:
         domain_url = self.get_domain(request)
-        print(request.query.items())
+        print('>>', request.query.items())
         try:
             redirect_url = request.query["redirect_url"]
         except (TypeError, KeyError):
@@ -182,6 +182,7 @@ class ExternalAuth(BaseAuthBackend):
         self, request: web.Request, token: str = None, token_type: str = "Bearer"
     ):
         headers = {"x-authenticated": "true"}
+        self.get_finish_redirect_url(request)
         params = {}
         if token:
             headers["x-auth-token"] = token
@@ -190,7 +191,13 @@ class ExternalAuth(BaseAuthBackend):
         url = self.prepare_url(self.finish_redirect_url, params)
         return web.HTTPFound(url, headers=headers)
 
-    def failed_redirect(self, request: web.Request, error: str = "ERROR_UNKNOWN", message: str = "ERROR_UNKNOWN"):
+    def failed_redirect(
+        self,
+        request: web.Request,
+        error: str = "ERROR_UNKNOWN",
+        message: str = "ERROR_UNKNOWN"
+    ):
+        self.get_finish_redirect_url(request)
         headers = {"x-message": message}
         params = {"error": error}
         url = self.prepare_url(self.finish_redirect_url, params)
