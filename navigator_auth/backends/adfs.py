@@ -94,7 +94,7 @@ class ADFSAuth(ExternalAuth):
             callback = ADFS_CALLBACK_REDIRECT_URL
             self.redirect_uri = "{domain}" + callback
         else:
-            callback = f"/auth/{self._service_name}/callback/"
+            callback = f"/auth/{self._service_name}/callback"
         # Login and Redirect Routes:
         router.add_route(
             "GET", login, self.authenticate, name=f"{self._service_name}_login"
@@ -148,6 +148,13 @@ class ADFSAuth(ExternalAuth):
         )
         try:
             auth_response = dict(request.rel_url.query.items())
+            if 'error' in auth_response:
+                logging.exception(
+                    f"ADFS: Error getting User information: {auth_response!r}"
+                )
+                raise web.HTTPForbidden(
+                    reason=f"ADFS: Unable to Authenticate: {auth_response!r}"
+                )
             print("SUCCESS RESPONSE : ", auth_response)
             authorization_code = auth_response["code"]
             state = auth_response[
@@ -155,12 +162,13 @@ class ADFSAuth(ExternalAuth):
             ]  # TODO: making validation with previous state
             request_id = auth_response["client-request-id"]
         except Exception as err:
-            print(err)
-            raise AuthException(
-                f"ADFS: Invalid Callback response: {err}, payload: {auth_response}"
+            raise web.HTTPForbidden(
+                reason=f"ADFS: Invalid Callback response: {err}: {auth_response}"
             ) from err
         # print(authorization_code, state, request_id)
-        logging.debug(f"Received authorization token: {authorization_code}")
+        logging.debug(
+            f"Received authorization token: {authorization_code}"
+        )
         # getting an Access Token
         query_params = {
             "code": authorization_code,
@@ -169,6 +177,7 @@ class ADFSAuth(ExternalAuth):
             "redirect_uri": self.redirect_uri,
             "scope": ADFS_SCOPES,
         }
+        logging.debug(f'Query Params: {query_params}')
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         try:
             exchange = await self.post(
