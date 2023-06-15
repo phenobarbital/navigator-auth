@@ -1,6 +1,6 @@
 """Token Auth Backend.
 
-Navigator Authentication using an API Token for partners.
+Navigator Authentication using an API Token.
 description: Single API Token Authentication
 """
 from collections.abc import Callable, Awaitable
