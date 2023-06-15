@@ -2,7 +2,7 @@ from .permissions import PermissionHandler
 from .users import UserHandler, UserSession
 from .groups import GroupHandler, GroupPermissionHandler, UserGroupHandler
 from .userattrs import UserAccountHandler, UserIdentityHandler
-
+from .partners import PartnerKeyHandler
 
 ## TODO migration of login/logout handlers:
 def handler_routes(router) -> None:
@@ -68,6 +68,15 @@ def handler_routes(router) -> None:
     router.add_view(
         r"/api/v1/user_accounts{meta:\:?.*}", UserAccountHandler,
         name="api_auth_useraccount"
+    )
+    # Partner Key Authentication Management
+    router.add_view(
+        r"/api/v1/partner/tokens/{id:.*}", PartnerKeyHandler,
+        name="api_auth_partnerkey_id"
+    )
+    router.add_view(
+        r"/api/v1/partner/tokens{meta:\:?.*}", PartnerKeyHandler,
+        name="api_auth_partnerkey"
     )
     # User Account:
     router.add_view(

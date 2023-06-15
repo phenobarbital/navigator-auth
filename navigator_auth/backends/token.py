@@ -4,7 +4,6 @@ Navigator Authentication using an API Token for partners.
 description: Single API Token Authentication
 """
 from collections.abc import Callable, Awaitable
-from typing import List
 import jwt
 from aiohttp import web, hdrs
 from aiohttp.web_urldispatcher import SystemRoute
@@ -16,6 +15,7 @@ from navigator_auth.conf import (
     AUTH_TOKEN_SECRET,
 )
 
+
 # Authenticated Entity
 from navigator_auth.identities import AuthUser, Program
 from .abstract import BaseAuthBackend
@@ -23,7 +23,7 @@ from .abstract import BaseAuthBackend
 
 class TokenUser(AuthUser):
     tenant: str
-    programs: List[Program]
+    programs: list[Program]
 
 
 class TokenAuth(BaseAuthBackend):
@@ -83,10 +83,12 @@ class TokenAuth(BaseAuthBackend):
             payload = jwt.decode(
                 token, AUTH_TOKEN_SECRET, algorithms=[AUTH_JWT_ALGORITHM], leeway=30
             )
-            # self.logger.debug(f"Decoded Token: {payload!s}")
+            self.logger.debug(f"Decoded Token: {payload!s}")
             data = await self.check_token_info(request, tenant, payload)
             if not data:
-                raise InvalidAuth(f"Invalid Session: {token!s}", status=401)
+                raise InvalidAuth(
+                    f"Invalid Session: {token!s}", status=401
+                )
             # getting user information
             # making validation
             try:
