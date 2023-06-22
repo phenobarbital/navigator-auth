@@ -18,7 +18,7 @@ class PostgresStorage(AuthStorage):
             "server_settings": {
                 "application_name": "NAV-AUTH",
                 "client_min_messages": "notice",
-                "max_parallel_workers": "48",
+                "max_parallel_workers": "64",
                 "jit": "off",
                 "statement_timeout": "36000",
                 "idle_in_transaction_session_timeout": "5min",

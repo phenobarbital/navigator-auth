@@ -29,13 +29,13 @@ AUTH_USERS_VIEW = config.get("AUTH_USERS_VIEW", fallback="vw_users")
 AUTH_GROUPS_TABLE = config.get("AUTH_GROUPS_TABLE", fallback="groups")
 
 #### Main Database
-PG_USER = config.get("DBUSER")
-PG_HOST = config.get("DBHOST", fallback="localhost")
-PG_PWD = config.get("DBPWD")
-PG_DATABASE = config.get("DBNAME", fallback="navigator")
-PG_PORT = config.get("DBPORT", fallback=5432)
+DBUSER = config.get("DBUSER")
+DBHOST = config.get("DBHOST", fallback="localhost")
+DBPWD = config.get("DBPWD")
+DBNAME = config.get("DBNAME", fallback="navigator")
+DBPORT = config.get("DBPORT", fallback=5432)
 
-default_dsn = f"postgres://{PG_USER}:{PG_PWD}@{PG_HOST}:{PG_PORT}/{PG_DATABASE}"
+default_dsn = f"postgres://{DBUSER}:{DBPWD}@{DBHOST}:{DBPORT}/{DBNAME}"
 
 ### Exclude List:
 excluded_default = [
