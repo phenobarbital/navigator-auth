@@ -71,8 +71,8 @@ class AzureAuth(ExternalAuth):
     }
     _description: str = "Microsoft Azure Authentication"
 
-    def configure(self, app, router):
-        super(AzureAuth, self).configure(app, router)
+    def configure(self, app):
+        super(AzureAuth, self).configure(app)
 
         # TODO: build the callback URL and append to routes
         self.base_url: str = f"https://login.microsoftonline.com/{AZURE_ADFS_TENANT_ID}"

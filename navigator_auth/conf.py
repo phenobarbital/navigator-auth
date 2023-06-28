@@ -5,9 +5,11 @@ Navigator Auth Configuration.
 import base64
 import orjson
 from cryptography import fernet
-from navconfig import config
+from navconfig import config, BASE_DIR
 from navconfig.logging import logging
 
+## Disable aiohttp Logging
+logging.getLogger(name='aiohttp.access').setLevel(logging.WARNING)
 
 ############
 #
@@ -42,11 +44,9 @@ excluded_default = [
     "/static/",
     "/api/v1/login",
     "/api/v1/logout",
-    "/login",
-    "/logout",
-    "/signin",
-    "/signout",
-    "/login/callback"
+    "/auth/login",
+    "/auth/logout",
+    "/auth/login/callback"
 ]
 new_excluded = [
     e.strip() for e in list(config.get("ROUTES_EXCLUDED", fallback="").split(","))
@@ -93,7 +93,7 @@ ALLOWED_HOSTS = [
 ## Redirections:
 AUTH_REDIRECT_URI = config.get("AUTH_REDIRECT_URI", section="auth")
 AUTH_LOGIN_FAILED_URI = config.get("AUTH_LOGIN_FAILED_URI", section="auth")
-
+AUTH_LOGOUT_REDIRECT_URI = config.get("AUTH_LOGOUT_REDIRECT_URI", section="auth")
 AUTH_SUCCESSFUL_CALLBACKS = ()
 
 # Enable authentication backends

@@ -13,6 +13,8 @@ from .okta import OktaAuth
 from .adfs import ADFSAuth
 from .azure import AzureAuth
 from .github import GithubAuth
+from .oauth2 import Oauth2Provider
+
 
 __all__ = (
     "NoAuth",
@@ -26,4 +28,5 @@ __all__ = (
     "ADFSAuth",
     "AzureAuth",
     "GithubAuth",
+    "Oauth2Provider"
 )

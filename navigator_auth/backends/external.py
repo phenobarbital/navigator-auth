@@ -14,7 +14,6 @@ from aiohttp import web, hdrs
 from aiohttp.client import ClientTimeout, ClientSession
 from datamodel.exceptions import ValidationError
 from navconfig.logging import logging
-from navigator_session import AUTH_SESSION_OBJECT
 from navigator_auth.identities import AuthUser
 from navigator_auth.exceptions import UserNotFound
 from navigator_auth.conf import (
@@ -75,7 +74,7 @@ class ExternalAuth(BaseAuthBackend):
         self.users_info: str = None
         self.authority: str = None
 
-    def configure(self, app, router):
+    def configure(self, app):
         # add the callback url
         router = app.router
         # TODO: know the host we already are running
@@ -119,11 +118,12 @@ class ExternalAuth(BaseAuthBackend):
             self.finish_logout,
             name=f"{self._service_name}_complete_logout",
         )
-        super(ExternalAuth, self).configure(app, router)
+        super(ExternalAuth, self).configure(app)
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements."""
         ## geting User Model for saving users:
+        ## TODO: Migrate Code to IdP
         if AUTH_MISSING_ACCOUNT == "create":
             self._user_model = self.get_authmodel(AUTH_USER_MODEL)
         else:
@@ -272,7 +272,8 @@ class ExternalAuth(BaseAuthBackend):
                     ) from ex
             else:
                 raise RuntimeError(
-                    f"Auth: Invalid config for AUTH_MISSING_ACCOUNT: {AUTH_MISSING_ACCOUNT}"
+                    f"Auth: Invalid config for AUTH_MISSING_ACCOUNT: \
+                    {AUTH_MISSING_ACCOUNT}"
                 ) from err
         if user and self._callbacks:
             # construir e invocar callbacks para actualizar data de usuario

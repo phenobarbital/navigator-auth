@@ -27,8 +27,8 @@ class GoogleAuth(ExternalAuth):
     _service_name: str = "google"
     _description: str = "Google Apps Authentication"
 
-    def configure(self, app, router):
-        super(GoogleAuth, self).configure(app, router)
+    def configure(self, app):
+        super(GoogleAuth, self).configure(app)
         # TODO: build the callback URL and append to routes
         self._credentials = {
             "client_id": GOOGLE_CLIENT_ID,

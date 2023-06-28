@@ -47,8 +47,8 @@ class OktaAuth(OauthAuth):
     _service_name: str = "okta"
     _description: str = "Okta Authentication"
 
-    def configure(self, app, router):
-        super(OktaAuth, self).configure(app, router)  # first, configure parents
+    def configure(self, app):
+        super(OktaAuth, self).configure(app)  # first, configure parents
 
         # auth paths.
         self.base_url = f"https://{OKTA_DOMAIN}/"

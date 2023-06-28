@@ -23,6 +23,7 @@ from navigator_session import SESSION_KEY, SessionHandler, get_session
 from .authorizations import authz_allow_hosts, authz_hosts
 from .backends.abstract import decode_token
 from .conf import (
+    BASE_DIR,
     AUTH_CREDENTIALS_REQUIRED,
     AUTH_USER_VIEW,
     AUTHENTICATION_BACKENDS,
@@ -50,7 +51,7 @@ from .libs.json import JSONContent
 from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
 from .storages.redis import RedisStorage
-
+from .templates import TemplateParser
 
 url = logging.getLogger("urllib3.connectionpool")
 url.setLevel(logging.WARNING)
@@ -74,15 +75,22 @@ class AuthHandler:
             self.auth_scheme = kwargs["scheme"]
         else:
             self.auth_scheme = "Bearer"
+        ## template parser:
+        self._parser = TemplateParser(
+            directory=BASE_DIR.joinpath('templates')
+        )
         # Get User Model:
         try:
             user_model = self.get_usermodel(AUTH_USER_VIEW)
         except Exception as ex:
-            raise ConfigError(f"Error Getting Auth User Model: {ex}") from ex
+            raise ConfigError(
+                f"Error Getting Auth User Model: {ex}"
+            ) from ex
         args = {
             "scheme": self.auth_scheme,
             "user_model": user_model,
             "user_attributes": self.get_user_attributes(USER_ATTRIBUTES),
+            "template_parser": self._parser,
             **kwargs,
         }
         # get the authentication backends (all of the list)
@@ -219,13 +227,19 @@ class AuthHandler:
             print(err)
             raise web.HTTPUnauthorized(reason=f"Logout Error {err.message}")
 
+    async def login(self, request: web.Request) -> web.Response:
+        pass
+
+    async def logout(self, request: web.Request) -> web.Response:
+        pass
+
     async def api_login(self, request: web.Request) -> web.Response:
         """Login.
 
         API based login.
         """
         # first: getting header for an existing backend
-        method = request.headers.get("X-Auth-Method")
+        method = request.headers.get("X-Auth-Method", None)
         userdata = None
         if method:
             try:
@@ -425,6 +439,9 @@ class AuthHandler:
         self.app[self.name] = self
         ## Configure Routes
         router = self.app.router
+        # Login / Logout routes
+        router.add_route("GET", "/auth/login", self.login, name='nav_login')
+        router.add_route("GET", "/auth/logout", self.logout, name='nav_logout')
         router.add_route("GET", "/api/v1/login", self.api_login, name="api_login")
         router.add_route("POST", "/api/v1/login", self.api_login, name="api_login_post")
         router.add_route("GET", "/api/v1/logout", self.api_logout, name="api_logout")
@@ -459,8 +476,7 @@ class AuthHandler:
         # if authentication backend needs initialization
         for name, backend in self.backends.items():
             try:
-                # backend.configure(app, router, handler=app)
-                backend.configure(self.app, router)
+                backend.configure(self.app)
                 if hasattr(backend, "auth_middleware"):
                     # add the middleware for this backend Authentication
                     mdl.append(backend.auth_middleware)
@@ -516,7 +532,10 @@ class AuthHandler:
         **kwargs,
     ) -> web.HTTPError:
         if headers:
-            headers = {**self.default_headers(message=str(reason), exception=exception), **headers}
+            headers = {
+                **self.default_headers(message=str(reason), exception=exception),
+                **headers
+            }
         else:
             headers = self.default_headers(message=str(reason), exception=exception)
         # TODO: process the exception object
@@ -546,7 +565,7 @@ class AuthHandler:
             obj = web.HTTPForbidden(**args)
         elif status == 404:  # not found
             obj = web.HTTPNotFound(**args)
-        elif status == 406: # Not acceptable
+        elif status == 406:  # Not acceptable
             obj = web.HTTPNotAcceptable(**args)
         elif status == 412:
             obj = web.HTTPPreconditionFailed(**args)
@@ -577,10 +596,7 @@ class AuthHandler:
         Description: Basic Authentication for NoAuth, Basic, Token and Django.
         """
         # avoid authorization backend on excluded methods:
-        if request.method == hdrs.METH_OPTIONS:
-            return await handler(request)
-        # avoid authorization on exclude list
-        if request.path in exclude_list:
+        if request.method == hdrs.METH_OPTIONS or request.path in exclude_list:
             return await handler(request)
         # avoid check system routes
         try:
@@ -593,11 +609,8 @@ class AuthHandler:
             if await backend.check_authorization(request):
                 return await handler(request)
         ## Already Authenticated
-        try:
-            if request.get("authenticated", False) is True:
-                return await handler(request)
-        except KeyError:
-            pass
+        if request.get("authenticated", False) is True:
+            return await handler(request)
         logging.debug(":: AUTH MIDDLEWARE ::")
         try:
             _, payload = decode_token(request)
@@ -608,7 +621,7 @@ class AuthHandler:
                 if not session:
                     if AUTH_CREDENTIALS_REQUIRED is True:
                         raise self.Unauthorized(
-                            reason="There is no Session for User or Authentication is missing"
+                            reason="There is no Session or Authentication is missing"
                         )
                 try:
                     request.user = await self.get_session_user(session)
@@ -620,7 +633,7 @@ class AuthHandler:
                 if not session:
                     if AUTH_CREDENTIALS_REQUIRED is True:
                         raise self.Unauthorized(
-                            reason="There is no Session for User or Authentication is missing"
+                            reason="There is no Session or Authentication is missing"
                         )
                 request.user = await self.get_session_user(session)
                 request["authenticated"] = True
@@ -630,14 +643,20 @@ class AuthHandler:
             )
             raise self.Unauthorized(reason=err.message)
         except AuthExpired as err:
-            logging.error("Auth Middleware: Auth Credentials were expired")
+            logging.error(
+                "Auth Middleware: Auth Credentials were expired"
+            )
             raise self.Unauthorized(reason=err.message, exception=err)
         except FailedAuth as err:
             raise self.ForbiddenAccess(reason=err.message, exception=err)
         except AuthException as err:
-            logging.error("Auth Middleware: Invalid Signature, secret or authentication failed.")
+            logging.error(
+                "Auth Middleware: Invalid Signature,\
+                secret or authentication failed."
+            )
             raise self.Unauthorized(
-                reason="Auth Middleware: Invalid Signature, secret or authentication failed.",
+                reason="Auth Middleware: Invalid Signature, \
+                secret or authentication failed.",
                 exception=err
             )
         return await handler(request)
