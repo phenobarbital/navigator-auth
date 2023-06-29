@@ -157,16 +157,19 @@ if not SECRET_KEY:
     fernet_key = fernet.Fernet.generate_key()
     SECRET_KEY = base64.urlsafe_b64decode(fernet_key)
 
+
+AUTH_CLIENT_ID = config.get('AUTH_CLIENT_ID', fallback='navigator_dev.client_id')
 AUTH_SESSION_OBJECT = config.get("AUTH_SESSION_OBJECT", fallback="session")
-AUTH_DEFAULT_ISSUER = "urn:Navigator"
-AUTH_DEFAULT_SCHEME = "Bearer"
-AUTH_TOKEN_ISSUER = config.get("AUTH_TOKEN_ISSUER", fallback="Navigator")
+
+## Basic Password Auth
 AUTH_PWD_DIGEST = config.get("AUTH_PWD_DIGEST", fallback="sha256")
 AUTH_PWD_ALGORITHM = config.get("AUTH_PWD_ALGORITHM", fallback="pbkdf2_sha256")
 AUTH_PWD_LENGTH = config.get("AUTH_PWD_LENGTH", fallback=32)
 AUTH_JWT_ALGORITHM = config.get("JWT_ALGORITHM", fallback="HS256")
 AUTH_PWD_SALT_LENGTH = config.get("AUTH_PWD_SALT_LENGTH", fallback=6)
 AUTH_USERNAME_ATTRIBUTE = config.get("AUTH_USERNAME_ATTRIBUTE", fallback="username")
+AUTH_PASSWORD_ATTRIBUTE = config.get("AUTH_PASSWORD_ATTRIBUTE", fallback="password")
+
 
 ## Django Auth Backend:
 DJANGO_SESSION_DB = config.get("DJANGO_SESSION_DB", fallback=REDIS_SESSION_DB)
@@ -190,10 +193,12 @@ DJANGO_USER_MAPPING = {
 PARTNER_KEY = config.get("PARTNER_KEY")
 CYPHER_TYPE = config.get("CYPHER_TYPE", fallback="RNC")
 
-## Token:
-AUTH_TOKEN_ISSUER = config.get("AUTH_TOKEN_ISSUER", fallback="Navigator")
+## Oauth2 authentication:
+AUTH_TOKEN_ISSUER = config.get("AUTH_TOKEN_ISSUER", fallback="urn:Navigator")
 AUTH_TOKEN_SECRET = config.get("AUTH_TOKEN_SECRET", fallback=PARTNER_KEY)
-
+AUTH_CODE_EXPIRATION = config.getint("AUTH_CODE_EXPIRATION", fallback=600)
+AUTH_DEFAULT_SCHEME = "Bearer"
+AUTH_DEFAULT_ISSUER = AUTH_TOKEN_ISSUER
 
 ### Azure Authentication
 # Microsoft Azure
@@ -252,7 +257,7 @@ GITHUB_CLIENT_ID = config.get("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = config.get("GITHUB_CLIENT_SECRET")
 
 ## Audit Backend
-# this is the backend for saving task executions
+# this is the backend for saving Authentication information
 ENABLE_AUDIT_LOG = config.getboolean('ENABLE_AUDIT_LOG', fallback=True)
 AUDIT_BACKEND = config.get('AUDIT_BACKEND', fallback='influx')
 AUDIT_CREDENTIALS = {

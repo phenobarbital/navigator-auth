@@ -38,7 +38,6 @@ from navigator_auth.conf import (
 from navigator_auth.libs.json import json_encoder
 # Authenticated Identity
 from navigator_auth.identities import Identity, AuthBackend
-from .idp import IdentityProvider
 
 
 class BaseAuthBackend(ABC):
@@ -67,6 +66,7 @@ class BaseAuthBackend(ABC):
         userid_attribute: str = None,
         password_attribute: str = None,
         template_parser: Callable = None,
+        identity: Callable = None,
         **kwargs,
     ):
         self._service = self.__class__.__name__
@@ -112,7 +112,7 @@ class BaseAuthBackend(ABC):
         ## Custom User Attributes:
         self._user_attributes = kwargs.get("user_attributes", {})
         ## Identity Provider:
-        self._idp = IdentityProvider()
+        self._idp = identity
         ## Template Parser:
         self._parser = template_parser
 

@@ -22,6 +22,7 @@ from navigator_session import SESSION_KEY, SessionHandler, get_session
 
 from .authorizations import authz_allow_hosts, authz_hosts
 from .backends.abstract import decode_token
+from .backends.idp import IdentityProvider
 from .conf import (
     BASE_DIR,
     AUTH_CREDENTIALS_REQUIRED,
@@ -30,6 +31,7 @@ from .conf import (
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,
     USER_ATTRIBUTES,
+    AUTH_CLIENT_ID,
     default_dsn,
     REDIS_AUTH_URL,
     logging,
@@ -79,6 +81,8 @@ class AuthHandler:
         self._parser = TemplateParser(
             directory=BASE_DIR.joinpath('templates')
         )
+        ## Identity Provider
+        self._idp = IdentityProvider()
         # Get User Model:
         try:
             user_model = self.get_usermodel(AUTH_USER_VIEW)
@@ -90,6 +94,7 @@ class AuthHandler:
             "scheme": self.auth_scheme,
             "user_model": user_model,
             "user_attributes": self.get_user_attributes(USER_ATTRIBUTES),
+            "identity": self._idp,
             "template_parser": self._parser,
             **kwargs,
         }
@@ -228,10 +233,29 @@ class AuthHandler:
             raise web.HTTPUnauthorized(reason=f"Logout Error {err.message}")
 
     async def login(self, request: web.Request) -> web.Response:
-        pass
+        params = {
+            "client_id": AUTH_CLIENT_ID,
+            "destination": "http://navigator-dev.dev.local:5000",
+            "token_service": "/api/v1/oauth2/token",
+            "redirect_uri": "http://navigator-dev.dev.local:5000/auth/login"
+        }
+        return await self._parser.view(
+            filename='auth/login.html',
+            params=params
+        )
 
     async def logout(self, request: web.Request) -> web.Response:
         pass
+
+    def get_auth_backend(self, request: web.Request):
+        if (method := request.headers.get("X-Auth-Method", None)):
+            try:
+                return self.backends[method]
+            except (TypeError, KeyError) as ex:
+                raise self.Unauthorized(
+                    reason=f"Unacceptable Auth Method: {method}"
+                ) from ex
+        return False
 
     async def api_login(self, request: web.Request) -> web.Response:
         """Login.
@@ -239,15 +263,8 @@ class AuthHandler:
         API based login.
         """
         # first: getting header for an existing backend
-        method = request.headers.get("X-Auth-Method", None)
         userdata = None
-        if method:
-            try:
-                backend = self.backends[method]
-            except (TypeError, KeyError) as ex:
-                raise self.Unauthorized(
-                    reason=f"Unacceptable Auth Method: {method}"
-                ) from ex
+        if (backend := self.get_auth_backend(request)):
             try:
                 userdata = await backend.authenticate(request)
                 if not userdata:
@@ -281,7 +298,6 @@ class AuthHandler:
                 )
         else:
             # second: if no backend declared, will iterate over all backends
-            userdata = None
             for _, backend in self.backends.items():
                 try:
                     # check credentials for all backends
@@ -298,7 +314,7 @@ class AuthHandler:
         # if not userdata, then raise an not Authorized
         if not userdata:
             raise self.ForbiddenAccess(
-                reason="Login Failure in all Auth Methods."
+                reason="Access Denied"
             )
         else:
             # at now: create the user-session
@@ -415,6 +431,8 @@ class AuthHandler:
         ## load the Session System
         # configuring Session Object
         self._session.setup(self.app)
+        ## Identity Provider
+        self._idp.setup(self.app)
         ## Manager for Auth Storage and Policy Storage
         ## adding a Redis Connection:
         try:
@@ -442,6 +460,7 @@ class AuthHandler:
         # Login / Logout routes
         router.add_route("GET", "/auth/login", self.login, name='nav_login')
         router.add_route("GET", "/auth/logout", self.logout, name='nav_logout')
+        # API Login
         router.add_route("GET", "/api/v1/login", self.api_login, name="api_login")
         router.add_route("POST", "/api/v1/login", self.api_login, name="api_login_post")
         router.add_route("GET", "/api/v1/logout", self.api_logout, name="api_logout")
@@ -585,6 +604,24 @@ class AuthHandler:
             reason=reason, **kwargs, status=401
         )
 
+    async def verify_exceptions(self, request: web.Request) -> bool:
+        # avoid authorization backend on excluded methods:
+        if request.method == hdrs.METH_OPTIONS or request.path in exclude_list:
+            return True
+        # avoid check system routes
+        try:
+            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
+                return True
+        except Exception:  # pylint: disable=W0703
+            pass
+        ### Authorization backends:
+        for backend in self._authz_backends:
+            if await backend.check_authorization(request):
+                return True
+        ## Already Authenticated
+        if request.get("authenticated", False) is True:
+            return True
+
     @web.middleware
     async def auth_middleware(
         self,
@@ -595,21 +632,7 @@ class AuthHandler:
         Basic Auth Middleware.
         Description: Basic Authentication for NoAuth, Basic, Token and Django.
         """
-        # avoid authorization backend on excluded methods:
-        if request.method == hdrs.METH_OPTIONS or request.path in exclude_list:
-            return await handler(request)
-        # avoid check system routes
-        try:
-            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
-                return await handler(request)
-        except Exception:  # pylint: disable=W0703
-            pass
-        ### Authorization backends:
-        for backend in self._authz_backends:
-            if await backend.check_authorization(request):
-                return await handler(request)
-        ## Already Authenticated
-        if request.get("authenticated", False) is True:
+        if await self.verify_exceptions(request):
             return await handler(request)
         logging.debug(":: AUTH MIDDLEWARE ::")
         try:

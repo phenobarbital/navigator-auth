@@ -26,6 +26,7 @@ from navigator_auth.exceptions import (
     UserNotFound,
     InvalidAuth,
 )
+from navigator_auth.responses import JSONResponse
 from .abstract import BaseAuthBackend
 
 
@@ -116,6 +117,7 @@ class Oauth2Provider(BaseAuthBackend):
             self.token_request,
             name="nav_oauth2_token_request",
         )
+        exclude_list.append(self.token_uri)
         # User Info
         router.add_route(
             "GET",
@@ -230,7 +232,6 @@ class Oauth2Provider(BaseAuthBackend):
     async def authorize(self, request: web.Request):
         """Starts a Oauth2 Code Flow."""
         data = await self.get_payload(request)
-        print('DATA > ', data)
         ## first: check if user has authorization code saved in Redis
         # Or user has a session created.
         ## Redirect to Login Page.
@@ -271,6 +272,17 @@ class Oauth2Provider(BaseAuthBackend):
                 status=400
             )
 
+    async def return_token(self, data, redirect_uri):
+        ## Implicit Flow, return in callback Access Token
+        access_token, exp = self._idp.create_token(data)
+        payload = {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": exp
+        }
+        uri = self.prepare_url(redirect_uri, params=payload)
+        self.redirect(uri)
+
     async def auth_login(self, request: web.Request):
         """auth_login.
             Login Page for User Authentication.
@@ -300,13 +312,12 @@ class Oauth2Provider(BaseAuthBackend):
                 )
             except (ValidationError, InvalidAuth) as exc:
                 raise web.HTTPBadRequest(
-                    reason=f"Auth: User not Found {exc}"
+                    reason=f"Auth: User Invalid {exc}"
                 )
-            except Exception as err:
-                raise AuthException(
-                    str(err),
-                    status=500
-                ) from err
+            except Exception as exc:
+                raise web.HTTPBadRequest(
+                    reason=f"Auth: Exception {exc}"
+                )
             ## Authorization:
             # Build the Authorization Code and returns
             redirect_uri = data.get('redirect_uri')
@@ -325,15 +336,7 @@ class Oauth2Provider(BaseAuthBackend):
                 uri = self.prepare_url(redirect_uri, params=payload)
                 self.redirect(uri)
             elif response_type == 'token':
-                ## Implicit Flow, return in callback Access Token
-                access_token, exp = self._idp.create_token(user, data)
-                payload = {
-                    "access_token": access_token,
-                    "token_type": "Bearer",
-                    "expires_in": exp
-                }
-                uri = self.prepare_url(redirect_uri, params=payload)
-                self.redirect(uri)
+                self.return_token(data, redirect_uri)
         else:
             return self.auth_error(
                 reason=f'Invalid HTTP Login Method: {request.method}',
@@ -341,7 +344,32 @@ class Oauth2Provider(BaseAuthBackend):
             )
 
     async def token_request(self, request):
-        pass
+        payload = await self.get_payload(request)
+        code = payload.get('code', None)
+        if not code:
+            return self.auth_error(
+                reason='Access Denied',
+                status=403
+            )
+        redirect_uri = payload.get('redirect_uri')
+        client_id = payload.get('client_id')
+        if self._idp.check_authorization_code(
+            code, client_id, redirect_uri
+        ):
+            # authorization accepted.
+            access_token, exp, scheme = self._idp.create_token(payload)
+            payload = {
+                "access_token": access_token,
+                "token_type": scheme,
+                "expires_in": exp
+            }
+            return JSONResponse(payload, status=200)
+        else:
+            # authorization denied.
+            return self.auth_error(
+                reason='Invalid Authorization Code, Access Denied',
+                status=403
+            )
 
     async def userinfo(self, request):
         pass
