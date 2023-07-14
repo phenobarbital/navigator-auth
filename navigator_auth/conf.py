@@ -17,7 +17,8 @@ logging.getLogger(name='aiohttp.access').setLevel(logging.WARNING)
 #
 ############
 
-## Allowed Hosts
+## Hosts
+DOMAIN_HOST = config.get('API_HOST', fallback='localhost:5000')
 HOSTS = [e.strip() for e in list(config.get("HOSTS", fallback="localhost").split(","))]
 
 ## Default Domain

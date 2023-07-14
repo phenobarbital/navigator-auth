@@ -15,7 +15,8 @@ from aiohttp.client import ClientTimeout, ClientSession
 from datamodel.exceptions import ValidationError
 from navconfig.logging import logging
 from navigator_auth.identities import AuthUser
-from navigator_auth.exceptions import UserNotFound
+from navigator_auth.libs.json import json_decoder
+from navigator_auth.exceptions import UserNotFound, AuthException
 from navigator_auth.conf import (
     AUTH_USER_MODEL,
     AUTH_LOGIN_FAILED_URI,
@@ -118,6 +119,15 @@ class ExternalAuth(BaseAuthBackend):
             self.finish_logout,
             name=f"{self._service_name}_complete_logout",
         )
+        # Check Credentials:
+        check_credentials = f"/auth/{self._service_name}/check_credentials"
+        router.add_route(
+            "GET",
+            check_credentials,
+            self.check_credentials,
+            name=f"{self._service_name}_check_credentials",
+        )
+        exclude_list.append(check_credentials)
         super(ExternalAuth, self).configure(app)
 
     async def on_startup(self, app: web.Application):
@@ -157,7 +167,6 @@ class ExternalAuth(BaseAuthBackend):
 
     def get_finish_redirect_url(self, request: web.Request) -> str:
         domain_url = self.get_domain(request)
-        print('>>', request.query.items())
         try:
             redirect_url = request.query["redirect_url"]
         except (TypeError, KeyError):
@@ -179,7 +188,11 @@ class ExternalAuth(BaseAuthBackend):
         return req.url
 
     def home_redirect(
-        self, request: web.Request, token: str = None, token_type: str = "Bearer"
+        self,
+        request: web.Request,
+        token: str = None,
+        token_type: str = "Bearer",
+        uri: str = None
     ):
         headers = {"x-authenticated": "true"}
         self.get_finish_redirect_url(request)
@@ -188,7 +201,15 @@ class ExternalAuth(BaseAuthBackend):
             headers["x-auth-token"] = token
             headers["x-auth-token-type"] = token_type
             params = {"token": token, "type": token_type}
-        url = self.prepare_url(self.finish_redirect_url, params)
+        if uri is not None:
+            if not bool(urlparse(uri).netloc):
+                domain_url = self.get_domain(request)
+                redirect_url = f"{domain_url}{uri}"
+            else:
+                redirect_url = uri
+        else:
+            redirect_url = self.finish_redirect_url
+        url = self.prepare_url(redirect_url, params)
         return web.HTTPFound(url, headers=headers)
 
     def failed_redirect(
@@ -357,7 +378,13 @@ class ExternalAuth(BaseAuthBackend):
                         return parse_qs(resp.decode("utf-8"))
                 else:
                     resp = await response.read()
-                    raise Exception(f"Error getting Session Information: {resp}")
+                    try:
+                        response = json_decoder(resp)
+                    except ValueError:
+                        response = resp
+                    raise AuthException(
+                        f"{response}"
+                    )
 
     async def auth_successful_callback(
         self, request: web.Request, user: Callable, **kwargs

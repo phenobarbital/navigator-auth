@@ -254,6 +254,10 @@ class IdentityProvider:
         # If we made it here, the token is valid!
         return True
 
+    def create_refresh_token(self) -> str:
+        # Generate a refresh token
+        return secrets.token_urlsafe(32)
+
     def create_token(
         self, data: dict = None, issuer: str = None, expiration: int = None
     ) -> str:

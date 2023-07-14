@@ -21,7 +21,6 @@ from navigator_auth.conf import (
     exclude_list,
 )
 from navigator_auth.exceptions import (
-    AuthException,
     FailedAuth,
     UserNotFound,
     InvalidAuth,
@@ -232,8 +231,6 @@ class Oauth2Provider(BaseAuthBackend):
     async def authorize(self, request: web.Request):
         """Starts a Oauth2 Code Flow."""
         data = await self.get_payload(request)
-        ## first: check if user has authorization code saved in Redis
-        # Or user has a session created.
         ## Redirect to Login Page.
         location = request.app.router['nav_oauth2_login'].url_for()
         payload = {
@@ -274,10 +271,12 @@ class Oauth2Provider(BaseAuthBackend):
 
     async def return_token(self, data, redirect_uri):
         ## Implicit Flow, return in callback Access Token
-        access_token, exp = self._idp.create_token(data)
+        access_token, exp, scheme = self._idp.create_token(data)
+        refresh_token = self._idp.create_refresh_token()
         payload = {
             "access_token": access_token,
-            "token_type": "Bearer",
+            "refresh_token": refresh_token,
+            "token_type": scheme,
             "expires_in": exp
         }
         uri = self.prepare_url(redirect_uri, params=payload)
@@ -336,7 +335,7 @@ class Oauth2Provider(BaseAuthBackend):
                 uri = self.prepare_url(redirect_uri, params=payload)
                 self.redirect(uri)
             elif response_type == 'token':
-                self.return_token(data, redirect_uri)
+                await self.return_token(data, redirect_uri)
         else:
             return self.auth_error(
                 reason=f'Invalid HTTP Login Method: {request.method}',
