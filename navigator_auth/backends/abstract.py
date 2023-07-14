@@ -38,7 +38,7 @@ from navigator_auth.conf import (
 from navigator_auth.libs.json import json_encoder
 # Authenticated Identity
 from navigator_auth.identities import Identity, AuthBackend
-from navigator_auth.backends.attributes import DomainAttribute
+
 
 class BaseAuthBackend(ABC):
     """Abstract Base for Authentication."""
@@ -65,6 +65,8 @@ class BaseAuthBackend(ABC):
         user_attribute: str = None,
         userid_attribute: str = None,
         password_attribute: str = None,
+        template_parser: Callable = None,
+        identity: Callable = None,
         **kwargs,
     ):
         self._service = self.__class__.__name__
@@ -94,9 +96,11 @@ class BaseAuthBackend(ABC):
         if not self.user_mapping:
             self.user_mapping = USER_MAPPING
         # starts the Executor
-        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.executor = ThreadPoolExecutor(max_workers=2)
         # logger
-        self.logger = logging.getLogger(f"Auth.{self._service}")
+        self.logger = logging.getLogger(
+            f"Auth.{self._service}"
+        )
         ## Backend Info:
         self._info = AuthBackend()
         self._info.name = self._service
@@ -107,6 +111,10 @@ class BaseAuthBackend(ABC):
         self._info.headers = {"x-auth-method": self._service}
         ## Custom User Attributes:
         self._user_attributes = kwargs.get("user_attributes", {})
+        ## Identity Provider:
+        self._idp = identity
+        ## Template Parser:
+        self._parser = template_parser
 
     def get_backend_info(self):
         return self._info
@@ -211,7 +219,7 @@ class BaseAuthBackend(ABC):
             return {AUTH_SESSION_OBJECT: userdata}
         return userdata
 
-    def configure(self, app, router):
+    def configure(self, app):
         """Base configuration for Auth Backends, need to be extended
         to create Session Object."""
         self._app = app
@@ -234,7 +242,10 @@ class BaseAuthBackend(ABC):
         **kwargs,
     ) -> web.HTTPError:
         if headers:
-            headers = {**self.default_headers(message=str(reason), exception=exception), **headers}
+            headers = {
+                **self.default_headers(message=str(reason), exception=exception),
+                **headers
+            }
         else:
             headers = self.default_headers(message=str(reason), exception=exception)
         # TODO: process the exception object
@@ -262,7 +273,7 @@ class BaseAuthBackend(ABC):
             obj = web.HTTPForbidden(**args)
         elif status == 404:  # not found
             obj = web.HTTPNotFound(**args)
-        elif status == 406: # Not acceptable
+        elif status == 406:  # Not acceptable
             obj = web.HTTPNotAcceptable(**args)
         elif status == 412:
             obj = web.HTTPPreconditionFailed(**args)

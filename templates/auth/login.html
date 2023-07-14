@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Sign in</title>
+  <script>
+    window.onload = function() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+
+      if (code) {
+        payload = {
+          code: code,
+          response_type: 'token',
+          client_id: '{{client_id}}',
+          redirect_uri: '{{redirect_uri}}'
+        }
+        fetch('{{destination}}{{token_service}}', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        })
+        .then(response => response.json())
+        .then(data => console.log(data))
+        .catch((error) => {
+          console.error('Error:', error);
+        });
+      }
+    };
+  </script>
+</head>
+<body>
+  <h3>
+    <a href="{{destination}}/api/v1/oauth2/authorize/?response_type=code&client_id={{client_id}}&redirect_uri={{redirect_uri}}&scope=code">
+    Sign in with Authorization Server</a>
+  </h3>
+</body>
+</html>

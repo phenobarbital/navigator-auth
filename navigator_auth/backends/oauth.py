@@ -35,7 +35,7 @@ class OauthAuth(ExternalAuth):
             return self.redirect(url)
         except Exception as err:
             raise AuthException(
-                f"{self._service_name}: Client doesn't have info for Authentication: {err}"
+                f"{self._service_name}: Client doesn't have information: {err}"
             ) from err
 
     def get_auth_response(self, request: web.Request) -> dict:

@@ -55,8 +55,9 @@ class ADFSAuth(ExternalAuth):
         "name": "Display-Name",
     }
 
-    def configure(self, app, router):
-        super(ADFSAuth, self).configure(app, router)
+    def configure(self, app):
+        super(ADFSAuth, self).configure(app)
+        router = app.router
         # URIs:
         if ADFS_TENANT_ID:
             self.server = AZURE_AD_SERVER

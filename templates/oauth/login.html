@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login</title>
+    <script>
+        function validateForm() {
+            var x = document.forms["authForm"]["password"].value;
+            if (x == "") {
+                alert("Password must be filled out");
+                return false;
+            }
+        }
+    </script>
+</head>
+<body>
+  <div class="">
+    <h1><span>Accessing</span></h1>
+    <div><span>Using your Navigator Account:</span></div>
+  </div>
+  <div>
+    <br /><br />
+    <form name="authForm" action="{{ action_url }}" onsubmit="return validateForm()" method="post">
+        Username:<br>
+        <input type="text" name="username">
+        <br>
+        Password:<br>
+        <input type="password" name="password">
+        <br><br>
+        <input type="hidden" name="response_type" value="{{ response_type }}">
+        <input type="hidden" name="client_id" value="{{ client_id }}">
+        <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
+        <input type="hidden" name="scope" value="{{ scope }}">
+        <input type="hidden" name="state" value="{{ state }}">
+        <input type="submit" value="Submit">
+    </form>
+  </div>
+</body>
+</html>

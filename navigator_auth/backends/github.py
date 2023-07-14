@@ -20,8 +20,8 @@ class GithubAuth(OauthAuth):
     _service_name: str = "github"
     _description: str = "Github Oauth Authentication"
 
-    def configure(self, app, router):
-        super(GithubAuth, self).configure(app, router)  # first, configure parents
+    def configure(self, app):
+        super(GithubAuth, self).configure(app)  # first, configure parents
 
         # auth paths.
         self.base_url = "https://api.github.com/"

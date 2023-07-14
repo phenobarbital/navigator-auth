@@ -9,7 +9,8 @@ import msal
 import aioredis
 from msal.authority import AuthorityBuilder, AZURE_PUBLIC
 from navconfig.logging import logging
-from navigator_auth.exceptions import AuthException
+from navigator_session import get_session
+from navigator_auth.exceptions import AuthException, UserNotFound
 from navigator_auth.conf import (
     AZURE_ADFS_CLIENT_ID,
     AZURE_ADFS_CLIENT_SECRET,
@@ -19,6 +20,7 @@ from navigator_auth.conf import (
     REDIS_AUTH_URL,
 )
 from navigator_auth.libs.json import json_encoder, json_decoder
+from navigator_auth.responses import JSONResponse
 from .external import ExternalAuth
 
 
@@ -65,14 +67,16 @@ class AzureAuth(ExternalAuth):
         "email": "mail",
         "username": "userPrincipalName",
         "given_name": "givenName",
+        "first_name": "givenName",
+        "last_name": "surname",
         "family_name": "surname",
         "name": "displayName",
         "phone": "mobilePhone"
     }
     _description: str = "Microsoft Azure Authentication"
 
-    def configure(self, app, router):
-        super(AzureAuth, self).configure(app, router)
+    def configure(self, app):
+        super(AzureAuth, self).configure(app)
 
         # TODO: build the callback URL and append to routes
         self.base_url: str = f"https://login.microsoftonline.com/{AZURE_ADFS_TENANT_ID}"
@@ -350,6 +354,101 @@ class AzureAuth(ExternalAuth):
     async def finish_logout(self, request):
         pass
 
+    def get_auth(self, request):
+        token = None
+        try:
+            if "Authorization" in request.headers:
+                try:
+                    token_type, token = (
+                        request.headers.get("Authorization").strip().split(" ", 1)
+                    )
+                except ValueError as ex:
+                    raise AuthException(
+                        "Invalid authorization Header", status=400
+                    ) from ex
+            else:
+                qs = {key: val for (key, val) in request.rel_url.query.items()}
+                token_type = 'Bearer'
+                token = qs.get('token', None)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.exception(
+                f"Azure: Error getting payload: {err}"
+            )
+            return None
+        return [token, token_type]
+
     async def check_credentials(self, request):
         """Authentication and create a session."""
-        return True
+        token, token_type = self.get_auth(request)
+        try:
+            data = await self.get(
+                url=self.userinfo_uri,
+                token=token,
+                token_type=token_type,
+            )
+            if not data:
+                return self.auth_error(
+                    reason={
+                        "message": "Access Denied",
+                        "error": "No user information available"
+                    },
+                    status=403
+                )
+        except Exception as err:
+            logging.exception(
+                f"Azure: Error getting User information: {err}"
+            )
+            return self.auth_error(
+                reason={
+                    "message": "Access Denied",
+                    "error": f"Error getting User Information: {err}"
+                },
+                status=403
+            )
+        # Creating User Session:
+        try:
+            userdata, uid = self.build_user_info(data)
+        except ValueError as err:
+            return self.auth_error(
+                reason={
+                    "message": "Access Denied",
+                    "error": f"Invalid User Information: {err}"
+                },
+                status=401
+            )
+        try:
+            data = await self.validate_user_info(
+                request, uid, userdata, token
+            )
+        except UserNotFound:
+            return self.auth_error(
+                reason={
+                    "message": "Access Denied",
+                    "error": f"User not Found: {uid}"
+                },
+                status=401
+            )
+        # if redirect, then redirect to page, else, returns session:
+        qs = {key: val for (key, val) in request.rel_url.query.items()}
+        redirect = qs.get('redirect', None)
+        if not redirect:
+            redirect = request.headers.get("redirect", None)
+        if redirect is not None:
+            return self.home_redirect(
+                request, token=token, token_type=token_type, uri=redirect
+            )
+        else:
+            # return session information:
+            try:
+                session = await get_session(request)
+                if isinstance(session, bool):
+                    # Empty Session
+                    session = {}
+                sessioninfo = {**data, **userdata}
+                return JSONResponse(sessioninfo, status=200)
+            except RuntimeError as err:
+                response = {
+                    "message": "Session Error",
+                    "error": str(err)
+                }
+                return JSONResponse(response, status=402)

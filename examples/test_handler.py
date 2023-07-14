@@ -10,11 +10,13 @@ from navigator_auth.decorators import (
 from navigator_auth import AuthHandler
 
 async def handle(request):
-    session = await get_session(request)
-    if session:
-        name = session.id
-    else:
-        name = request.match_info.get('name', "Anonymous")
+    name = request.match_info.get('name', "Anonymous")
+    try:
+        session = await get_session(request)
+        if session:
+            name = session.id
+    except Exception:
+        pass
     text = "Hello, " + name
     return web.Response(text=text)
 
@@ -23,7 +25,7 @@ app = web.Application()
 
 # create a new instance of Auth System
 auth = AuthHandler()
-auth.setup(app) # configure this Auth system into App.
+auth.setup(app)  # configure this Auth system into App.
 
 app.add_routes([web.get('/', handle),
                 web.get('/{name}', handle)])
