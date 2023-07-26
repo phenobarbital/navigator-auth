@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import importlib
 import jwt
 from aiohttp import web, hdrs
+from aiohttp.web_urldispatcher import SystemRoute
 from navconfig.logging import logging
 from datamodel.exceptions import ValidationError
 from asyncdb.models import Model
@@ -33,7 +34,8 @@ from navigator_auth.conf import (
     USER_MAPPING,
     AUTH_CREDENTIALS_REQUIRED,
     SECRET_KEY,
-    AUTH_SUCCESSFUL_CALLBACKS
+    AUTH_SUCCESSFUL_CALLBACKS,
+    exclude_list,
 )
 from navigator_auth.libs.json import json_encoder
 # Authenticated Identity
@@ -432,6 +434,23 @@ class BaseAuthBackend(ABC):
         except (AttributeError, RuntimeError) as ex:
             logging.warning(f"NAV: Unable to decode User session: {ex}")
 
+    async def verify_exceptions(self, request: web.Request) -> bool:
+        # avoid authorization backend on excluded methods:
+        if request.method == hdrs.METH_OPTIONS or request.path in exclude_list:
+            return True
+        # avoid check system routes
+        try:
+            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
+                return True
+        except Exception:  # pylint: disable=W0703
+            pass
+        ### Authorization backends:
+        for backend in self._authz_backends:
+            if await backend.check_authorization(request):
+                return True
+        ## Already Authenticated
+        if request.get("authenticated", False) is True:
+            return True
 
 def decode_token(request, issuer: str = None):
     jwt_token = None
