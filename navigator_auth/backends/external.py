@@ -24,6 +24,7 @@ from navigator_auth.conf import (
     AUTH_MISSING_ACCOUNT,
     AUTH_SUCCESSFUL_CALLBACKS,
     PREFERRED_AUTH_SCHEME,
+    AUTH_OAUTH2_REDIRECT_URL,
     exclude_list,
 )
 from .abstract import BaseAuthBackend
@@ -201,7 +202,10 @@ class ExternalAuth(BaseAuthBackend):
             headers["x-auth-token"] = token
             headers["x-auth-token-type"] = token_type
             params = {"token": token, "type": token_type}
-        if uri is not None:
+        if AUTH_OAUTH2_REDIRECT_URL is not None:
+            # TODO: relative URL and calculate based on Domain
+            redirect_url = AUTH_OAUTH2_REDIRECT_URL
+        elif uri is not None:
             if not bool(urlparse(uri).netloc):
                 domain_url = self.get_domain(request)
                 redirect_url = f"{domain_url}{uri}"
@@ -241,12 +245,12 @@ class ExternalAuth(BaseAuthBackend):
     async def finish_logout(self, request: web.Request):
         """finish_logout, Finish Logout Method."""
 
-    def build_user_info(self, userdata: dict) -> tuple:
+    def build_user_info(self, userdata: dict, token: str) -> tuple:
         """build_user_info.
             Get user or validate user from User Model.
         Args:
             userdata (Dict): User data gets from Auth Backend.
-
+            token (str): User token gets from Auth Backend.
         Returns:
             Tuple: user_id and user_data.
         Raises:
@@ -257,6 +261,8 @@ class ExternalAuth(BaseAuthBackend):
         userdata["id"] = userid
         userdata[self.session_key_property] = userid
         userdata["auth_method"] = self._service_name
+        # set original token in userdata
+        userdata['auth_token'] = token
         userdata = self.get_user_mapping(
             user=userdata, userdata=userdata
         )

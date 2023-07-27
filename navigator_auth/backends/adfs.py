@@ -232,8 +232,9 @@ class ADFSAuth(ExternalAuth):
                         )
                     except Exception as err:
                         logging.error(err)
-                    print("USER DATA: ", data)
-                    userdata, uid = self.build_user_info(data)
+                    userdata, uid = self.build_user_info(
+                        data, access_token
+                    )
                     userdata["id_token"] = id_token
                     data = await self.validate_user_info(
                         request, uid, userdata, access_token

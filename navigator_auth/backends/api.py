@@ -161,11 +161,8 @@ class APIKeyAuth(BaseAuthBackend):
     ) -> web.StreamResponse:
         request.user = None
         # avoid check system routes
-        try:
-            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
-                return await handler(request)
-        except Exception:  # pylint: disable=W0703
-            pass
+        if await self.verify_exceptions(request):
+            return await handler(request)
         try:
             if request.get("authenticated", False) is True:
                 # already authenticated

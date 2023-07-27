@@ -168,22 +168,9 @@ class TokenAuth(BaseAuthBackend):
         Token Auth Middleware.
         Description: Token Middleware.
         """
-        # avoid authorization backend on excluded methods:
-        if request.method == hdrs.METH_OPTIONS:
-            return await handler(request)
         # avoid check system routes
-        try:
-            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
-                return await handler(request)
-        except Exception:  # pylint: disable=W0703
-            pass
-        request.user = None
-        try:
-            if request.get("authenticated", False) is True:
-                # already authenticated
-                return await handler(request)
-        except KeyError:
-            pass
+        if await self.verify_exceptions(request):
+            return await handler(request)
         # self.logger.debug(f'MIDDLEWARE: {self.__class__.__name__}')
         tenant, jwt_token = await self.get_payload(request)
         if not tenant:

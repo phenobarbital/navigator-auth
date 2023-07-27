@@ -170,7 +170,10 @@ AUTH_JWT_ALGORITHM = config.get("JWT_ALGORITHM", fallback="HS256")
 AUTH_PWD_SALT_LENGTH = config.get("AUTH_PWD_SALT_LENGTH", fallback=6)
 AUTH_USERNAME_ATTRIBUTE = config.get("AUTH_USERNAME_ATTRIBUTE", fallback="username")
 AUTH_PASSWORD_ATTRIBUTE = config.get("AUTH_PASSWORD_ATTRIBUTE", fallback="password")
-
+AUTH_OAUTH2_REDIRECT_URL = config.get(
+    "AUTH_OAUTH2_REDIRECT_URL",
+    fallback=None
+)
 
 ## Django Auth Backend:
 DJANGO_SESSION_DB = config.get("DJANGO_SESSION_DB", fallback=REDIS_SESSION_DB)
