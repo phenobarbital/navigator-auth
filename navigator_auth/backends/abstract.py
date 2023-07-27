@@ -444,10 +444,6 @@ class BaseAuthBackend(ABC):
                 return True
         except Exception:  # pylint: disable=W0703
             pass
-        ### Authorization backends:
-        for backend in self._authz_backends:
-            if await backend.check_authorization(request):
-                return True
         ## Already Authenticated
         if request.get("authenticated", False) is True:
             return True
