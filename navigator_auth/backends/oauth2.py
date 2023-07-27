@@ -231,6 +231,7 @@ class Oauth2Provider(BaseAuthBackend):
     async def authorize(self, request: web.Request):
         """Starts a Oauth2 Code Flow."""
         data = await self.get_payload(request)
+        # TODO: Check if user is already authorized
         ## Redirect to Login Page.
         location = request.app.router['nav_oauth2_login'].url_for()
         payload = {
@@ -252,15 +253,20 @@ class Oauth2Provider(BaseAuthBackend):
             elif ctype == "application/json":
                 try:
                     data = await request.json()
-                except Exception:
+                except Exception as err:
                     self.logger.error(
-                        "Oauth2: Error getting JSON data from request"
+                        f"Oauth2: Error getting JSON data from request: {err}"
                     )
+            # TODO: configurable username and password attributes
             username = data.get('username', None)
             password = data.get('password', None)
             if None in [username, password]:
                 self.logger.error(
                     "Oauth2: Invalid username or password"
+                )
+                raise self.auth_error(
+                    reason="Oauth2: Invalid username or password",
+                    status=400
                 )
             return (username, password, data)
         else:

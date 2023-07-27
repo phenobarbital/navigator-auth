@@ -189,25 +189,9 @@ class TrocToken(BaseAuthBackend):
         Partner Auth Middleware.
         Description: Basic Authentication for Partner Token Auth.
         """
-        # avoid authorization backend on excluded methods:
-        if request.method == hdrs.METH_OPTIONS:
-            return await handler(request)
-        # avoid authorization on exclude list
-        if request.path in exclude_list:
-            return await handler(request)
         # avoid check system routes
-        try:
-            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
-                return await handler(request)
-        except Exception:  # pylint: disable=W0703
-            #self.logger.error(err)
-            pass
-        ## Already Authenticated
-        try:
-            if request.get("authenticated", False) is True:
-                return await handler(request)
-        except KeyError:
-            pass
+        if await self.verify_exceptions(request):
+            return await handler(request)
         self.logger.debug(f"MIDDLEWARE: {self.__class__.__name__}")
         try:
             _, payload = decode_token(request)
@@ -219,7 +203,7 @@ class TrocToken(BaseAuthBackend):
                 )
                 if not session and AUTH_CREDENTIALS_REQUIRED is True:
                     raise self.Unauthorized(
-                        reason="There is no Session for User or Authentication is missing"
+                        reason="There is no Session or Authentication is missing"
                     )
                 try:
                     request.user = await self.get_session_user(session)
@@ -231,7 +215,7 @@ class TrocToken(BaseAuthBackend):
             else:
                 if AUTH_CREDENTIALS_REQUIRED is True:
                     raise self.Unauthorized(
-                        reason="There is no Session for User or Authentication is missing"
+                        reason="There is no Session or Authentication is missing"
                     )
         except Forbidden as err:
             self.logger.error("TROC Auth: Access Denied")
@@ -242,6 +226,6 @@ class TrocToken(BaseAuthBackend):
         except FailedAuth as err:
             raise self.ForbiddenAccess(reason=err.message)
         except AuthException as err:
-            self.logger.error("Auth Middleware: Invalid Signature or Authentication Failed")
+            self.logger.error("Auth:Invalid Signature or Authentication Failed")
             raise self.ForbiddenAccess(reason=err.message)
         return await handler(request)

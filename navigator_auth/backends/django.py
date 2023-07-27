@@ -9,8 +9,7 @@ import logging
 from collections.abc import Callable, Awaitable
 import aioredis
 import orjson
-from aiohttp import web, hdrs
-from aiohttp.web_urldispatcher import SystemRoute
+from aiohttp import web
 from navigator_session import get_session, AUTH_SESSION_OBJECT
 from navigator_auth.exceptions import (
     AuthException,
@@ -25,8 +24,7 @@ from navigator_auth.conf import (
     AUTH_CREDENTIALS_REQUIRED,
     DJANGO_USER_MAPPING,
     DJANGO_SESSION_URL,
-    DJANGO_SESSION_PREFIX,
-    exclude_list,
+    DJANGO_SESSION_PREFIX
 )
 
 # User Identity
@@ -114,10 +112,12 @@ class DjangoAuth(BaseAuthBackend):
             session_data = data.decode("utf-8").split(":", 1)
             user = orjson.loads(session_data[1])
             try:
-                if not "user_id" in user:
+                if "user_id" not in user:
                     user["user_id"] = user[self._user_id_key]
             except KeyError:
-                logging.error("DjangoAuth: Current User Data missing User ID")
+                logging.error(
+                    "DjangoAuth: Current User Data missing User ID"
+                )
             session = {
                 "key": key,
                 "session_id": session_data[0],
@@ -137,7 +137,9 @@ class DjangoAuth(BaseAuthBackend):
         except UserNotFound as err:
             raise UserNotFound(f"User {login} doesn't exists: {err}") from err
         except Exception as e:
-            raise Exception(e) from e
+            raise InvalidAuth(
+                str(e)
+            ) from e
 
     async def authenticate(self, request):
         """Authenticate against user credentials (django session id)."""
@@ -225,24 +227,9 @@ class DjangoAuth(BaseAuthBackend):
         Basic Auth Middleware.
         Description: Basic Authentication for NoAuth, Basic, Token and Django.
         """
-        # avoid authorization backend on excluded methods:
-        if request.method == hdrs.METH_OPTIONS:
-            return await handler(request)
-        # avoid authorization on exclude list
-        if request.path in exclude_list:
-            return await handler(request)
         # avoid check system routes
-        try:
-            if isinstance(request.match_info.route, SystemRoute):  # eg. 404
-                return await handler(request)
-        except Exception:  # pylint: disable=W0703
-            pass
-        ## Already Authenticated
-        try:
-            if request.get("authenticated", False) is True:
-                return await handler(request)
-        except KeyError:
-            pass
+        if await self.verify_exceptions(request):
+            return await handler(request)
         self.logger.debug(":: DJANGO MIDDLEWARE ::")
         try:
             _, payload = decode_token(request)
@@ -254,7 +241,7 @@ class DjangoAuth(BaseAuthBackend):
                 )
                 if not session and AUTH_CREDENTIALS_REQUIRED is True:
                     raise self.Unauthorized(
-                        reason="There is no Session for User or Authentication is missing"
+                        reason="There is no Session or Authentication is missing"
                     )
                 try:
                     request.user = await self.get_session_user(session)
@@ -266,7 +253,7 @@ class DjangoAuth(BaseAuthBackend):
             else:
                 if AUTH_CREDENTIALS_REQUIRED is True:
                     raise self.Unauthorized(
-                        reason="There is no Session for User or Authentication is missing"
+                        reason="There is no Session or Authentication is missing"
                     )
         except Forbidden as err:
             self.logger.error("Auth Middleware: Access Denied")

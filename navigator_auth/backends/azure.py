@@ -202,7 +202,7 @@ class AzureAuth(ExternalAuth):
                             token_type="Bearer",
                         )
                         data = {**data, **client_info}
-                        userdata, uid = self.build_user_info(data)
+                        userdata, uid = self.build_user_info(data, access_token)
                         # also, user information:
                         data = await self.validate_user_info(
                             request, uid, userdata, access_token
@@ -292,7 +292,9 @@ class AzureAuth(ExternalAuth):
                     client_info = {}
                     if "client_info" in result:
                         # It happens when client_info and profile are in request
-                        client_info = orjson.loads(decode_part(result["client_info"]))
+                        client_info = orjson.loads(
+                            decode_part(result["client_info"])
+                        )
                     # getting user information:
                     try:
                         data = await self.get(
@@ -302,7 +304,7 @@ class AzureAuth(ExternalAuth):
                         )
                         # build user information:
                         data = {**data, **client_info}
-                        userdata, uid = self.build_user_info(data)
+                        userdata, uid = self.build_user_info(data, access_token)
                         userdata["id_token"] = id_token
                         userdata["claims"] = claims
                         data = await self.validate_user_info(
@@ -407,7 +409,7 @@ class AzureAuth(ExternalAuth):
             )
         # Creating User Session:
         try:
-            userdata, uid = self.build_user_info(data)
+            userdata, uid = self.build_user_info(data, token)
         except ValueError as err:
             return self.auth_error(
                 reason={
