@@ -432,12 +432,16 @@ class AzureAuth(ExternalAuth):
             )
         # if redirect, then redirect to page, else, returns session:
         qs = {key: val for (key, val) in request.rel_url.query.items()}
+        try:
+            acc_token = data["token"]
+        except (KeyError, TypeError):
+            acc_token = None
         redirect = qs.get('redirect', None)
         if not redirect:
             redirect = request.headers.get("redirect", None)
         if redirect is not None:
             return self.home_redirect(
-                request, token=token, token_type=token_type, uri=redirect
+                request, token=acc_token, token_type=token_type, uri=redirect
             )
         else:
             # return session information:
