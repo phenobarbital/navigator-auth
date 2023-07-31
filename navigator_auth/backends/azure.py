@@ -305,7 +305,7 @@ class AzureAuth(ExternalAuth):
                         # build user information:
                         data = {**data, **client_info}
                         userdata, uid = self.build_user_info(data, access_token)
-                        userdata["id_token"] = id_token
+                        # userdata["id_token"] = id_token
                         userdata["claims"] = claims
                         data = await self.validate_user_info(
                             request, uid, userdata, access_token
