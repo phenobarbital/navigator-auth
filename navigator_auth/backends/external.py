@@ -56,6 +56,7 @@ class ExternalAuth(BaseAuthBackend):
     _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
     _callbacks: Optional[list[Callable]] = None
     _external_auth: bool = True
+    token_type: str = 'Bearer'
 
     def __init__(
         self,
@@ -199,7 +200,6 @@ class ExternalAuth(BaseAuthBackend):
         self.get_finish_redirect_url(request)
         params = {}
         if token:
-            headers["x-auth-token"] = token
             headers["x-auth-token-type"] = token_type
             params = {"token": token, "type": token_type}
         if AUTH_OAUTH2_REDIRECT_URL is not None:
@@ -263,6 +263,7 @@ class ExternalAuth(BaseAuthBackend):
         userdata["auth_method"] = self._service_name
         # set original token in userdata
         userdata['auth_token'] = token
+        userdata["token_type"] = self.token_type
         userdata = self.get_user_mapping(
             user=userdata, userdata=userdata
         )
@@ -323,9 +324,10 @@ class ExternalAuth(BaseAuthBackend):
             payload = {"user_id": user_id, **userdata}
             # saving Auth data.
             await self.remember(request, user_id, userinfo, user)
-            # Create the User session.
+            # Create the User Token.
             jwt_token = self.create_jwt(data=payload)
-            data = {"token": jwt_token, "access_token": token, **userdata}
+            # "access_token": token
+            data = {"token": jwt_token, **userdata}
             return data
         except Exception as err:
             logging.exception(err)
