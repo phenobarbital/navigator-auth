@@ -14,9 +14,9 @@ from navigator_auth.conf import (
     ADFS_SERVER,
     ADFS_CLIENT_ID,
     ADFS_TENANT_ID,
-    # ADFS_RESOURCE,
+    ADFS_RESOURCE,
     ADFS_DEFAULT_RESOURCE,
-    # ADFS_AUDIENCE,
+    ADFS_AUDIENCE,
     ADFS_SCOPES,
     ADFS_ISSUER,
     USERNAME_CLAIM,
@@ -43,7 +43,7 @@ class ADFSAuth(ExternalAuth):
     _service_name: str = "adfs"
     user_attribute: str = "user"
     userid_attribute: str = "upn"
-    username_attribute: str = "upn"
+    username_attribute: str = "username"
     pwd_atrribute: str = "password"
     version = "v1.0"
     user_mapping: dict = {
@@ -124,12 +124,12 @@ class ADFSAuth(ExternalAuth):
         self.get_finish_redirect_url(request)
         try:
             self.state = base64.urlsafe_b64encode(self.redirect_uri.encode()).decode()
+            resource = ADFS_RESOURCE if ADFS_RESOURCE else ADFS_DEFAULT_RESOURCE
             query_params = {
                 "client_id": ADFS_CLIENT_ID,
                 "response_type": "code",
                 "redirect_uri": self.redirect_uri,
-                # "resource": ADFS_RESOURCE,
-                "resource": ADFS_DEFAULT_RESOURCE,
+                "resource": resource,
                 "response_mode": "query",
                 "state": self.state,
                 "scope": ADFS_SCOPES,
@@ -229,27 +229,28 @@ class ADFSAuth(ExternalAuth):
                 key=public_key,
                 algorithms=["RS256", "RS384", "RS512"],
                 verify=True,
-                # audience=ADFS_AUDIENCE,
-                audience=ADFS_DEFAULT_RESOURCE,
+                audience=ADFS_AUDIENCE,
                 issuer=ADFS_ISSUER,
                 options=options,
             )
+            print('DECODED TOKEN > ', data)
         except Exception as e:
             print('TOKEN ERROR > ', e)
             raise web.HTTPForbidden(
                 reason=f"Unable to decode JWT token {e}."
             )
         try:
-            # build user information:
-            try:
-                udata = await self.get(
-                    url=self.userinfo_uri,
-                    token=access_token,
-                    token_type=token_type,
-                )
-                data = {**data, **udata}
-            except Exception as err:
-                self.logger.error(err)
+            # # build user information:
+            # try:
+            #     udata = await self.get(
+            #         url=self.userinfo_uri,
+            #         token=access_token,
+            #         token_type=token_type,
+            #     )
+            #     data = {**data, **udata}
+            #     print('USER DATA > ', udata, data)
+            # except Exception as err:
+            #     self.logger.error(err)
             userdata, uid = self.build_user_info(
                 data, access_token
             )
@@ -270,7 +271,7 @@ class ADFSAuth(ExternalAuth):
         except (KeyError, TypeError):
             token = None
         return self.home_redirect(
-            request, token=token, token_type="Bearer"
+            request, token=token, token_type=token_type
         )
 
     async def logout(self, request):
