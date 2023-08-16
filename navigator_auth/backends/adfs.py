@@ -43,7 +43,7 @@ class ADFSAuth(ExternalAuth):
     _service_name: str = "adfs"
     user_attribute: str = "user"
     userid_attribute: str = "upn"
-    username_attribute: str = "upn"
+    username_attribute: str = "username"
     pwd_atrribute: str = "password"
     version = "v1.0"
     user_mapping: dict = {
