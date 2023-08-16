@@ -265,7 +265,7 @@ class ExternalAuth(BaseAuthBackend):
         userdata['auth_token'] = token
         userdata["token_type"] = self.token_type
         userdata = self.get_user_mapping(
-            user=userdata, userdata=userdata
+            user=userdata, userdata=userdata, remove_original=True
         )
         return (userdata, userid)
 
@@ -415,7 +415,7 @@ class ExternalAuth(BaseAuthBackend):
             await fn(request, user, self._user_model, **kwargs)
         except Exception as e:
             self.logger.exception(
-                f"Auth Callback: Error callig Callback Function: {fn}, {e!s}",
+                f"Error calling Callback Function: {fn}, {e!s}",
                 stack_info=False,
             )
 
