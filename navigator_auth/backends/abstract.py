@@ -183,8 +183,7 @@ class BaseAuthBackend(ABC):
         self,
         user: dict,
         userdata: dict,
-        default_mapping: bool = False,
-        remove_original: bool = False
+        default_mapping: bool = False
     ) -> dict:
         if default_mapping is True:
             mapping = USER_MAPPING
@@ -194,8 +193,6 @@ class BaseAuthBackend(ABC):
             if key != self.password_attribute:
                 try:
                     userdata[key] = user[val]
-                    if remove_original is True:
-                        del user[val]
                 except (KeyError, AttributeError):
                     self.logger.warning(
                         f"Error UserData: asking for a non existing attribute: {key}"
@@ -487,14 +484,20 @@ def decode_token(request, issuer: str = None):
             logging.debug(f"Decoded Token: {payload!s}")
             return [tenant, payload]
         except jwt.exceptions.ExpiredSignatureError as err:
+            print(err)
             raise AuthExpired(f"Credentials Expired: {err!s}") from err
         except jwt.exceptions.InvalidSignatureError as err:
+            print(err)
             raise AuthExpired(f"Signature Failed or Expired: {err!s}") from err
         except jwt.exceptions.DecodeError as err:
+            print(err)
             raise FailedAuth(f"Token Decoding Error: {err}") from err
         except jwt.exceptions.InvalidTokenError as err:
+            print(err)
             raise InvalidAuth(f"Invalid authorization token {err!s}") from err
         except Exception as err:
-            raise AuthException(str(err), status=501) from err
+            raise AuthException(
+                str(err), status=501
+            ) from err
     else:
         return [tenant, payload]

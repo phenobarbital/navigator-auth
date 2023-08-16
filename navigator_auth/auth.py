@@ -639,10 +639,32 @@ class AuthHandler:
         logging.debug(":: AUTH MIDDLEWARE ::")
         try:
             _, payload = decode_token(request)
+        except Forbidden as err:
+            logging.error(
+                f"Auth Middleware: Access Denied: {err}"
+            )
+            raise self.Unauthorized(
+                reason=err.message
+            )
+        except AuthExpired as err:
+            logging.error(
+                f"Auth Middleware: Credentials expired: {err}"
+            )
+            raise self.Unauthorized(
+                reason=err.message, exception=err
+            )
+        except FailedAuth as err:
+            raise self.ForbiddenAccess(
+                reason=err.message, exception=err
+            )
+        try:
             if payload:
                 ## check if user has a session:
                 # load session information
-                session = await get_session(request, payload, new=False)
+                try:
+                    session = await get_session(request, payload, new=False)
+                except Exception as err:
+                    print(err)
                 if not session:
                     if AUTH_CREDENTIALS_REQUIRED is True:
                         raise self.Unauthorized(
@@ -662,22 +684,10 @@ class AuthHandler:
                         )
                 request.user = await self.get_session_user(session)
                 request["authenticated"] = True
-        except Forbidden as err:
-            logging.error(
-                "Auth Middleware: Access Denied"
-            )
-            raise self.Unauthorized(reason=err.message)
-        except AuthExpired as err:
-            logging.error(
-                "Auth Middleware: Auth Credentials were expired"
-            )
-            raise self.Unauthorized(reason=err.message, exception=err)
-        except FailedAuth as err:
-            raise self.ForbiddenAccess(reason=err.message, exception=err)
         except AuthException as err:
             logging.error(
-                "Auth Middleware: Invalid Signature,\
-                secret or authentication failed."
+                f"Auth Middleware: Invalid Signature,\
+                secret or authentication failed: {err}"
             )
             raise self.Unauthorized(
                 reason="Auth Middleware: Invalid Signature, \

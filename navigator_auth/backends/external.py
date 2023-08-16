@@ -265,7 +265,7 @@ class ExternalAuth(BaseAuthBackend):
         userdata['auth_token'] = token
         userdata["token_type"] = self.token_type
         userdata = self.get_user_mapping(
-            user=userdata, userdata=userdata, remove_original=True
+            user=userdata, userdata=userdata
         )
         return (userdata, userid)
 
@@ -278,7 +278,7 @@ class ExternalAuth(BaseAuthBackend):
         try:
             login = userdata[self.username_attribute]
         except KeyError:
-            login = userdata[self.userid_attribute]
+            login = userdata[self.user_attribute]
         try:
             search = {self.username_attribute: login}
             self.logger.debug(f'USER SEARCH > {search}')

@@ -192,7 +192,9 @@ class AzureAuth(ExternalAuth):
                 client_info = {}
                 if "client_info" in result:
                     # It happens when client_info and profile are in request
-                    client_info = json_decoder(decode_part(result["client_info"]))
+                    client_info = json_decoder(
+                        decode_part(result["client_info"])
+                    )
                 try:
                     if "access_token" in result:
                         access_token = result["access_token"]
@@ -287,8 +289,8 @@ class AzureAuth(ExternalAuth):
                     token_type = result["token_type"]
                     access_token = result["access_token"]
                     # refresh_token = result['refresh_token']
-                    id_token = result["id_token"]
-                    claims = result["id_token_claims"]
+                    # id_token = result["id_token"]
+                    # claims = result["id_token_claims"]
                     client_info = {}
                     if "client_info" in result:
                         # It happens when client_info and profile are in request
@@ -304,9 +306,10 @@ class AzureAuth(ExternalAuth):
                         )
                         # build user information:
                         data = {**data, **client_info}
+                        print('USERDATA > ', data)
                         userdata, uid = self.build_user_info(data, access_token)
-                        # userdata["id_token"] = id_token
-                        userdata["claims"] = claims
+                        #  userdata["id_token"] = id_token
+                        #  userdata["claims"] = claims
                         data = await self.validate_user_info(
                             request, uid, userdata, access_token
                         )
