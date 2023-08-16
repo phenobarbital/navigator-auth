@@ -9,15 +9,14 @@ import jwt
 # needed by ADFS
 import requests
 import requests.adapters
-from navconfig.logging import logging
 from navigator_auth.exceptions import AuthException
 from navigator_auth.conf import (
     ADFS_SERVER,
     ADFS_CLIENT_ID,
     ADFS_TENANT_ID,
-    ADFS_RESOURCE,
+    # ADFS_RESOURCE,
     ADFS_DEFAULT_RESOURCE,
-    ADFS_AUDIENCE,
+    # ADFS_AUDIENCE,
     ADFS_SCOPES,
     ADFS_ISSUER,
     USERNAME_CLAIM,
@@ -170,7 +169,6 @@ class ADFSAuth(ExternalAuth):
             raise web.HTTPForbidden(
                 reason=f"ADFS: Invalid Callback response: {err}: {auth_response}"
             ) from err
-        # print(authorization_code, state, request_id)
         self.logger.debug(
             f"Received Authorization Code: {authorization_code}"
         )
@@ -179,7 +177,7 @@ class ADFSAuth(ExternalAuth):
             "code": authorization_code,
             "client_id": ADFS_CLIENT_ID,
             "grant_type": "authorization_code",
-            "redirect_uri": 'https://api.dev.navigator.mobileinsight.com/auth/adfs/callback',
+            "redirect_uri": self.redirect_uri,
             "scope": ADFS_SCOPES,
         }
         self.logger.debug(
@@ -244,11 +242,12 @@ class ADFSAuth(ExternalAuth):
         try:
             # build user information:
             try:
-                data = await self.get(
+                udata = await self.get(
                     url=self.userinfo_uri,
                     token=access_token,
                     token_type=token_type,
                 )
+                data = {**data, **udata}
             except Exception as err:
                 self.logger.error(err)
             userdata, uid = self.build_user_info(
@@ -259,7 +258,9 @@ class ADFSAuth(ExternalAuth):
                 request, uid, userdata, access_token
             )
         except Exception as err:
-            self.logger.exception(f"ADFS: Error getting User information: {err}")
+            self.logger.exception(
+                f"ADFS: Error getting User information: {err}"
+            )
             raise web.HTTPForbidden(
                 reason=f"ADFS: Error with User Information: {err}"
             )
