@@ -183,7 +183,8 @@ class BaseAuthBackend(ABC):
         self,
         user: dict,
         userdata: dict,
-        default_mapping: bool = False
+        default_mapping: bool = False,
+        remove_original: bool = False
     ) -> dict:
         if default_mapping is True:
             mapping = USER_MAPPING
@@ -193,6 +194,8 @@ class BaseAuthBackend(ABC):
             if key != self.password_attribute:
                 try:
                     userdata[key] = user[val]
+                    if remove_original is True:
+                        del user[val]
                 except (KeyError, AttributeError):
                     self.logger.warning(
                         f"Error UserData: asking for a non existing attribute: {key}"
@@ -334,6 +337,12 @@ class BaseAuthBackend(ABC):
             expiration = self.session_timeout
         if not issuer:
             issuer = AUTH_DEFAULT_ISSUER
+        try:
+            del data['exp']
+            del data['iat']
+            del data['iss']
+        except KeyError:
+            pass
         payload = {
             "exp": datetime.utcnow() + timedelta(seconds=expiration),
             "iat": datetime.utcnow(),

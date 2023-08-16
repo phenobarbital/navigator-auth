@@ -43,7 +43,7 @@ class ADFSAuth(ExternalAuth):
     _service_name: str = "adfs"
     user_attribute: str = "user"
     userid_attribute: str = "upn"
-    username_attribute: str = "username"
+    username_attribute: str = "upn"
     pwd_atrribute: str = "password"
     version = "v1.0"
     user_mapping: dict = {
@@ -128,19 +128,20 @@ class ADFSAuth(ExternalAuth):
                 "client_id": ADFS_CLIENT_ID,
                 "response_type": "code",
                 "redirect_uri": self.redirect_uri,
-                "resource": ADFS_RESOURCE,
+                # "resource": ADFS_RESOURCE,
+                "resource": "urn:microsoft:userinfo",
                 "response_mode": "query",
                 "state": self.state,
                 "scope": ADFS_SCOPES,
             }
-            logging.debug(" === AUTH Params === ")
-            logging.debug(f"{query_params!s}")
+            self.logger.debug(" === AUTH Params === ")
+            self.logger.debug(f"{query_params!s}")
             params = requests.compat.urlencode(query_params)
             login_url = f"{self.authorize_uri}?{params}"
             # Step A: redirect
             return self.redirect(login_url)
         except Exception as err:
-            logging.exception(err)
+            self.logger.exception(err)
             raise AuthException(
                 f"Client doesn't have info for ADFS Authentication: {err}"
             ) from err
@@ -153,24 +154,23 @@ class ADFSAuth(ExternalAuth):
         try:
             auth_response = dict(request.rel_url.query.items())
             if 'error' in auth_response:
-                logging.exception(
+                self.logger.exception(
                     f"ADFS: Error getting User information: {auth_response!r}"
                 )
                 raise web.HTTPForbidden(
                     reason=f"ADFS: Unable to Authenticate: {auth_response!r}"
                 )
-            print("SUCCESS RESPONSE : ", auth_response)
             authorization_code = auth_response["code"]
-            state = auth_response[
-                "state"
-            ]  # TODO: making validation with previous state
-            request_id = auth_response["client-request-id"]
+            # state = auth_response[
+            #     "state"
+            # ]  # TODO: making validation with previous state
+            # request_id = auth_response["client-request-id"]
         except Exception as err:
             raise web.HTTPForbidden(
                 reason=f"ADFS: Invalid Callback response: {err}: {auth_response}"
             ) from err
         # print(authorization_code, state, request_id)
-        logging.debug(
+        self.logger.debug(
             f"Received Authorization Code: {authorization_code}"
         )
         # getting an Access Token
@@ -181,7 +181,7 @@ class ADFSAuth(ExternalAuth):
             "redirect_uri": 'https://api.dev.navigator.mobileinsight.com/auth/adfs/callback',
             "scope": ADFS_SCOPES,
         }
-        logging.debug(
+        self.logger.debug(
             f'Query Params: {query_params!r}'
         )
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -193,14 +193,16 @@ class ADFSAuth(ExternalAuth):
                 error = exchange.get("error")
                 desc = exchange.get("error_description")
                 message = f"ADFS {error}: {desc}¡"
-                logging.exception(message)
+                self.logger.exception(message)
                 raise web.HTTPForbidden(reason=message)
             else:
                 ## processing the exchange response:
                 access_token = exchange["access_token"]
                 token_type = exchange["token_type"]  # ex: Bearer
-                id_token = exchange["id_token"]
-                logging.debug(f"Received access token: {access_token}")
+                # id_token = exchange["id_token"]
+                self.logger.debug(
+                    f"Received access token: {access_token}"
+                )
                 # decipher the Access Token:
                 # getting user information:
                 options = {
@@ -229,31 +231,33 @@ class ADFSAuth(ExternalAuth):
                 )
                 try:
                     # build user information:
-                    print('HERE > ', data)
                     try:
                         data = await self.get(
                             url=self.userinfo_uri,
                             token=access_token,
                             token_type=token_type,
                         )
-                        print('USERDATA > ', data)
                     except Exception as err:
-                        logging.error(err)
+                        self.logger.error(err)
                     userdata, uid = self.build_user_info(
                         data, access_token
                     )
-                    userdata["id_token"] = id_token
+                    # userdata["id_token"] = id_token
                     data = await self.validate_user_info(
                         request, uid, userdata, access_token
                     )
                 except Exception as err:
-                    logging.exception(f"ADFS: Error getting User information: {err}")
+                    self.logger.exception(f"ADFS: Error getting User information: {err}")
                     raise web.HTTPForbidden(
                         reason=f"ADFS: Error with User Information: {err}"
                     )
                 # Redirect User to HOME
+                try:
+                    token = data["token"]
+                except (KeyError, TypeError):
+                    token = None
                 return self.home_redirect(
-                    request, token=data["token"], token_type="Bearer"
+                    request, token=token, token_type="Bearer"
                 )
         except Exception as err:
             raise web.HTTPForbidden(reason=f"ADFS: Invalid Response from Server {err}.")
@@ -261,7 +265,7 @@ class ADFSAuth(ExternalAuth):
     async def logout(self, request):
         # first: removing the existing session
         # second: redirect to SSO logout
-        logging.debug(f"ADFS LOGOUT URI: {self.end_session_endpoint}")
+        self.logger.debug(f"ADFS LOGOUT URI: {self.end_session_endpoint}")
         return web.HTTPFound(self.end_session_endpoint)
 
     async def finish_logout(self, request):
