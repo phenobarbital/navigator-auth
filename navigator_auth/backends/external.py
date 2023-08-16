@@ -278,7 +278,7 @@ class ExternalAuth(BaseAuthBackend):
         try:
             login = userdata[self.username_attribute]
         except KeyError:
-            login = userdata[self.user_attribute]
+            login = userdata[self.userid_attribute]
         try:
             search = {self.username_attribute: login}
             self.logger.debug(f'USER SEARCH > {search}')

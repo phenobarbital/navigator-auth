@@ -25,6 +25,7 @@ from navigator_auth.conf import (
     ADFS_CALLBACK_REDIRECT_URL,
     ADFS_LOGIN_REDIRECT_URL,
     AZURE_AD_SERVER,
+    exclude_list
 )
 from .jwksutils import get_public_key
 from .external import ExternalAuth
@@ -56,7 +57,6 @@ class ADFSAuth(ExternalAuth):
     }
 
     def configure(self, app):
-        super(ADFSAuth, self).configure(app)
         router = app.router
         # URIs:
         if ADFS_TENANT_ID:
@@ -96,6 +96,8 @@ class ADFSAuth(ExternalAuth):
             self.redirect_uri = "{domain}" + callback
         else:
             callback = f"/auth/{self._service_name}/callback"
+        # Excluding Redirect for Authorization
+        exclude_list.append(self.redirect_uri)
         # Login and Redirect Routes:
         router.add_route(
             "GET", login, self.authenticate, name=f"{self._service_name}_login"
@@ -107,6 +109,7 @@ class ADFSAuth(ExternalAuth):
             self.auth_callback,
             name=f"{self._service_name}_callback_login",
         )
+        super(ADFSAuth, self).configure(app)
 
     async def authenticate(self, request: web.Request):
         """Authenticate, refresh or return the user credentials.
@@ -168,17 +171,19 @@ class ADFSAuth(ExternalAuth):
             ) from err
         # print(authorization_code, state, request_id)
         logging.debug(
-            f"Received authorization token: {authorization_code}"
+            f"Received Authorization Code: {authorization_code}"
         )
         # getting an Access Token
         query_params = {
             "code": authorization_code,
             "client_id": ADFS_CLIENT_ID,
             "grant_type": "authorization_code",
-            "redirect_uri": self.redirect_uri,
+            "redirect_uri": 'https://api.dev.navigator.mobileinsight.com/auth/adfs/callback',
             "scope": ADFS_SCOPES,
         }
-        logging.debug(f'Query Params: {query_params}')
+        logging.debug(
+            f'Query Params: {query_params!r}'
+        )
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         try:
             exchange = await self.post(
@@ -224,12 +229,14 @@ class ADFSAuth(ExternalAuth):
                 )
                 try:
                     # build user information:
+                    print('HERE > ', data)
                     try:
                         data = await self.get(
                             url=self.userinfo_uri,
                             token=access_token,
                             token_type=token_type,
                         )
+                        print('USERDATA > ', data)
                     except Exception as err:
                         logging.error(err)
                     userdata, uid = self.build_user_info(

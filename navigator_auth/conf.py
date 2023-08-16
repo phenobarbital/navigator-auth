@@ -218,6 +218,7 @@ AZURE_ADFS_SCOPES = [
 ]
 
 PREFERRED_AUTH_SCHEME = config.get("PREFERRED_AUTH_SCHEME", fallback="https")
+
 # ADFS SSO
 ADFS_SERVER = config.get("ADFS_SERVER")
 ADFS_CLIENT_ID = config.get("ADFS_CLIENT_ID")
