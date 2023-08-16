@@ -257,8 +257,12 @@ class ExternalAuth(BaseAuthBackend):
             UserNotFound: when user doesn't exists on Backend.
         """
         # User ID:
-        userid = userdata[self.userid_attribute]
-        userdata["id"] = userid
+        try:
+            userid = userdata[self.userid_attribute]
+            userdata["id"] = userid
+        except KeyError:
+            userid = userdata[self.username_attribute]
+            userdata["id"] = userid
         userdata[self.session_key_property] = userid
         userdata["auth_method"] = self._service_name
         # set original token in userdata
@@ -278,7 +282,10 @@ class ExternalAuth(BaseAuthBackend):
         try:
             login = userdata[self.username_attribute]
         except KeyError:
-            login = userdata[self.user_attribute]
+            try:
+                login = userdata[self.user_attribute]
+            except KeyError:
+                login = userdata[self.userid_attribute]
         try:
             search = {self.username_attribute: login}
             self.logger.debug(f'USER SEARCH > {search}')

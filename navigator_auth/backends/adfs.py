@@ -254,7 +254,7 @@ class ADFSAuth(ExternalAuth):
             userdata, uid = self.build_user_info(
                 data, access_token
             )
-            # userdata["id_token"] = id_token
+            userdata[self.username_attribute] = userdata['upn']
             data = await self.validate_user_info(
                 request, uid, userdata, access_token
             )
