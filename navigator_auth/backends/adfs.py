@@ -16,6 +16,7 @@ from navigator_auth.conf import (
     ADFS_CLIENT_ID,
     ADFS_TENANT_ID,
     ADFS_RESOURCE,
+    ADFS_DEFAULT_RESOURCE,
     ADFS_AUDIENCE,
     ADFS_SCOPES,
     ADFS_ISSUER,
@@ -129,7 +130,7 @@ class ADFSAuth(ExternalAuth):
                 "response_type": "code",
                 "redirect_uri": self.redirect_uri,
                 # "resource": ADFS_RESOURCE,
-                "resource": "urn:microsoft:userinfo",
+                "resource": ADFS_DEFAULT_RESOURCE,
                 "response_mode": "query",
                 "state": self.state,
                 "scope": ADFS_SCOPES,
@@ -182,7 +183,7 @@ class ADFSAuth(ExternalAuth):
             "scope": ADFS_SCOPES,
         }
         self.logger.debug(
-            f'Query Params: {query_params!r}'
+            f'Token Params: {query_params!r}'
         )
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         try:
@@ -203,69 +204,80 @@ class ADFSAuth(ExternalAuth):
                 self.logger.debug(
                     f"Received access token: {access_token}"
                 )
-                # decipher the Access Token:
-                # getting user information:
-                options = {
-                    "verify_signature": True,
-                    "verify_exp": True,
-                    "verify_nbf": True,
-                    "verify_iat": True,
-                    "verify_aud": True,
-                    "verify_iss": True,
-                    "require_exp": False,
-                    "require_iat": False,
-                    "require_nbf": False,
-                }
-                public_key = get_public_key(
-                    access_token, self.tenant_id, self.discovery_oid_uri
-                )
-                # Validate token and extract claims
-                data = jwt.decode(
-                    access_token,
-                    key=public_key,
-                    algorithms=["RS256", "RS384", "RS512"],
-                    verify=True,
-                    audience=ADFS_AUDIENCE,
-                    issuer=ADFS_ISSUER,
-                    options=options,
-                )
-                try:
-                    # build user information:
-                    try:
-                        data = await self.get(
-                            url=self.userinfo_uri,
-                            token=access_token,
-                            token_type=token_type,
-                        )
-                    except Exception as err:
-                        self.logger.error(err)
-                    userdata, uid = self.build_user_info(
-                        data, access_token
-                    )
-                    # userdata["id_token"] = id_token
-                    data = await self.validate_user_info(
-                        request, uid, userdata, access_token
-                    )
-                except Exception as err:
-                    self.logger.exception(f"ADFS: Error getting User information: {err}")
-                    raise web.HTTPForbidden(
-                        reason=f"ADFS: Error with User Information: {err}"
-                    )
-                # Redirect User to HOME
-                try:
-                    token = data["token"]
-                except (KeyError, TypeError):
-                    token = None
-                return self.home_redirect(
-                    request, token=token, token_type="Bearer"
-                )
         except Exception as err:
-            raise web.HTTPForbidden(reason=f"ADFS: Invalid Response from Server {err}.")
+            raise web.HTTPForbidden(
+                reason=f"Invalid Response from Token Server {err}."
+            )
+        try:
+            # decipher the Access Token:
+            # getting user information:
+            options = {
+                "verify_signature": True,
+                "verify_exp": True,
+                "verify_nbf": True,
+                "verify_iat": True,
+                "verify_aud": True,
+                "verify_iss": True,
+                "require_exp": False,
+                "require_iat": False,
+                "require_nbf": False,
+            }
+            public_key = get_public_key(
+                access_token, self.tenant_id, self.discovery_oid_uri
+            )
+            # Validate token and extract claims
+            data = jwt.decode(
+                access_token,
+                key=public_key,
+                algorithms=["RS256", "RS384", "RS512"],
+                verify=True,
+                # audience=ADFS_AUDIENCE,
+                audience=ADFS_DEFAULT_RESOURCE,
+                issuer=ADFS_ISSUER,
+                options=options,
+            )
+        except Exception as e:
+            print('TOKEN ERROR > ', e)
+            raise web.HTTPForbidden(
+                reason=f"Unable to decode JWT token {e}."
+            )
+        try:
+            # build user information:
+            try:
+                data = await self.get(
+                    url=self.userinfo_uri,
+                    token=access_token,
+                    token_type=token_type,
+                )
+            except Exception as err:
+                self.logger.error(err)
+            userdata, uid = self.build_user_info(
+                data, access_token
+            )
+            # userdata["id_token"] = id_token
+            data = await self.validate_user_info(
+                request, uid, userdata, access_token
+            )
+        except Exception as err:
+            self.logger.exception(f"ADFS: Error getting User information: {err}")
+            raise web.HTTPForbidden(
+                reason=f"ADFS: Error with User Information: {err}"
+            )
+        # Redirect User to HOME
+        try:
+            token = data["token"]
+        except (KeyError, TypeError):
+            token = None
+        return self.home_redirect(
+            request, token=token, token_type="Bearer"
+        )
 
     async def logout(self, request):
         # first: removing the existing session
         # second: redirect to SSO logout
-        self.logger.debug(f"ADFS LOGOUT URI: {self.end_session_endpoint}")
+        self.logger.debug(
+            f"ADFS LOGOUT URI: {self.end_session_endpoint}"
+        )
         return web.HTTPFound(self.end_session_endpoint)
 
     async def finish_logout(self, request):

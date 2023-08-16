@@ -224,6 +224,10 @@ ADFS_SERVER = config.get("ADFS_SERVER")
 ADFS_CLIENT_ID = config.get("ADFS_CLIENT_ID")
 ADFS_RELYING_PARTY_ID = config.get("ADFS_RELYING_PARTY_ID")
 ADFS_RESOURCE = config.get("ADFS_RESOURCE")
+ADFS_DEFAULT_RESOURCE = config.get(
+    "ADFS_DEFAULT_RESOURCE",
+    fallback="urn:microsoft:userinfo"
+)
 ADFS_AUDIENCE = config.get("ADFS_AUDIENCE")
 ADFS_ISSUER = config.get("ADFS_ISSUER")
 ADFS_SCOPES = config.get("ADFS_SCOPES", fallback="https://graph.microsoft.com/.default")
