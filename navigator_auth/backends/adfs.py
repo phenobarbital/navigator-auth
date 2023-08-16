@@ -43,7 +43,7 @@ class ADFSAuth(ExternalAuth):
     _service_name: str = "adfs"
     user_attribute: str = "user"
     userid_attribute: str = "upn"
-    username_attribute: str = "username"
+    username_attribute: str = "upn"
     pwd_atrribute: str = "password"
     version = "v1.0"
     user_mapping: dict = {
@@ -254,7 +254,7 @@ class ADFSAuth(ExternalAuth):
             userdata, uid = self.build_user_info(
                 data, access_token
             )
-            # userdata["id_token"] = id_token
+            userdata[self.username_attribute] = userdata['upn']
             data = await self.validate_user_info(
                 request, uid, userdata, access_token
             )
