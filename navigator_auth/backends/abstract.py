@@ -338,6 +338,7 @@ class BaseAuthBackend(ABC):
             del data['exp']
             del data['iat']
             del data['iss']
+            del data['aud']
         except KeyError:
             pass
         payload = {
