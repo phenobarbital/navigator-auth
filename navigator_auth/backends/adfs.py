@@ -233,6 +233,13 @@ class ADFSAuth(ExternalAuth):
                 issuer=ADFS_ISSUER,
                 options=options,
             )
+            try:
+                del data['aud']
+                del data['iss']
+                del data['iat']
+                del data['exp']
+            except KeyError:
+                pass
             print('DECODED TOKEN > ', data)
         except Exception as e:
             print('TOKEN ERROR > ', e)
@@ -240,17 +247,6 @@ class ADFSAuth(ExternalAuth):
                 reason=f"Unable to decode JWT token {e}."
             )
         try:
-            # # build user information:
-            # try:
-            #     udata = await self.get(
-            #         url=self.userinfo_uri,
-            #         token=access_token,
-            #         token_type=token_type,
-            #     )
-            #     data = {**data, **udata}
-            #     print('USER DATA > ', udata, data)
-            # except Exception as err:
-            #     self.logger.error(err)
             userdata, uid = self.build_user_info(
                 data, access_token
             )
