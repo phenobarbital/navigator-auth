@@ -55,6 +55,7 @@ class ADFSAuth(ExternalAuth):
         "department": "Department",
         "name": "Display-Name",
     }
+    _description: str = "SSO (Active Directory FS)"
 
     def configure(self, app):
         router = app.router
