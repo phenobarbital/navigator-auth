@@ -5,8 +5,7 @@ description: Single API Token Authentication
 """
 from collections.abc import Callable, Awaitable
 import jwt
-from aiohttp import web, hdrs
-from aiohttp.web_urldispatcher import SystemRoute
+from aiohttp import web
 from navigator_session import get_session
 from navigator_auth.exceptions import AuthException, InvalidAuth
 from navigator_auth.conf import (
@@ -59,8 +58,10 @@ class TokenAuth(BaseAuthBackend):
                 except ValueError:
                     pass
         except Exception as err:  # pylint: disable=W0703
-            self.logger.exception(f"TokenAuth: Error getting payload: {err}")
-            return None
+            self.logger.error(
+                f"TokenAuth: Error getting payload: {err}"
+            )
+            return [None, None]
         return [tenant, token]
 
     async def reconnect(self):
@@ -71,19 +72,26 @@ class TokenAuth(BaseAuthBackend):
         """Authenticate, refresh or return the user credentials."""
         try:
             tenant, token = await self.get_payload(request)
-            self.logger.debug(f"Tenant ID: {tenant}")
+            self.logger.debug(
+                f"Tenant ID: {tenant}"
+            )
         except Exception as err:
             raise AuthException(err, status=400) from err
         if not tenant:
-            # is another auth
+            # is another authorization backend
             return False
         if not token:
-            raise InvalidAuth("Invalid Credentials", status=401)
+            raise InvalidAuth(
+                "Invalid Credentials",
+                status=401
+            )
         else:
             payload = jwt.decode(
                 token, AUTH_TOKEN_SECRET, algorithms=[AUTH_JWT_ALGORITHM], leeway=30
             )
-            self.logger.debug(f"Decoded Token: {payload!s}")
+            self.logger.debug(
+                f"Decoded Token: {payload!s}"
+            )
             data = await self.check_token_info(request, tenant, payload)
             if not data:
                 raise InvalidAuth(
@@ -92,12 +100,10 @@ class TokenAuth(BaseAuthBackend):
             # getting user information
             # making validation
             try:
-                # u = data["name"]
                 username = data["partner"]
                 grants = data["grants"]
                 programs = data["programs"]
             except KeyError as err:
-                print(err)
                 raise InvalidAuth(
                     f"Missing attributes for Partner Token: {err!s}", status=401
                 ) from err
@@ -121,8 +127,10 @@ class TokenAuth(BaseAuthBackend):
                 usr.set(self.username_attribute, uid)
                 usr.programs = programs
                 usr.tenant = tenant
-                token = self.create_jwt(data=user)
+                token, exp, scheme = self._idp.create_token(data=user)
                 usr.access_token = token
+                usr.token_type = scheme
+                usr.expires_in = exp
                 # saving user-data into request:
                 await self.remember(request, uid, userdata, usr)
                 return {"token": f"{tenant}:{token}", **user}

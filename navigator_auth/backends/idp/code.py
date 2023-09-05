@@ -4,6 +4,7 @@ import redis
 from navigator_auth.conf import (
     REDIS_URL,
     AUTH_CODE_EXPIRATION,
+    AUTH_TOKEN_ISSUER,
     SECRET_KEY,
     AUTH_JWT_ALGORITHM
 )
@@ -18,7 +19,12 @@ class CodeManagement:
     def create_code(self, payload: dict):
         expiration_date = time.time() + AUTH_CODE_EXPIRATION
         payload['exp'] = expiration_date
-        authzcode = jwt.encode(payload, SECRET_KEY, algorithm=AUTH_JWT_ALGORITHM)
+        payload['iss'] = AUTH_TOKEN_ISSUER
+        authzcode = jwt.encode(
+            payload,
+            SECRET_KEY,
+            algorithm=AUTH_JWT_ALGORITHM
+        )
         self._codes[authzcode] = {
             **payload
         }
@@ -48,4 +54,7 @@ class CodeManagement:
         return [value.decode('utf-8') for value in self.redis.mget(self.redis.keys())]
 
     def items(self):
-        return [(key.decode('utf-8'), value.decode('utf-8')) for key, value in self.redis.items()]
+        return [
+            (key.decode('utf-8'), value.decode('utf-8'))
+            for key, value in self.redis.items()
+        ]

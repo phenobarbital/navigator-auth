@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 import importlib
+import pprint
 import jwt
 from aiohttp import web, hdrs
 from aiohttp.web_urldispatcher import SystemRoute
@@ -51,7 +52,6 @@ class BaseAuthBackend(ABC):
     username_attribute: str = AUTH_USERNAME_ATTRIBUTE
     user_mapping: dict = None
     session_key_property: str = SESSION_KEY
-    scheme: str = "Bearer"
     session_timeout: int = int(SESSION_TIMEOUT)
     _service: str = None
     _ident: Identity = Identity
@@ -87,10 +87,7 @@ class BaseAuthBackend(ABC):
         if not self.username_attribute:
             self.username_attribute = AUTH_USERNAME_ATTRIBUTE
         # authentication scheme
-        try:
-            self.scheme = kwargs["scheme"]
-        except KeyError:
-            pass
+        self.scheme = kwargs.pop('scheme', AUTH_DEFAULT_SCHEME)
         # user and group models
         # getting User and Group Models
         self.user_model: Model = kwargs["user_model"]
@@ -133,41 +130,24 @@ class BaseAuthBackend(ABC):
     async def on_cleanup(self, app: web.Application):
         """Used to cleanup and shutdown any db connection."""
 
-    def get_authmodel(self, model: str):
-        try:
-            parts = model.split(".")
-            name = parts[-1]
-            classpath = ".".join(parts[:-1])
-            module = importlib.import_module(classpath, package=name)
-            obj = getattr(module, name)
-            return obj
-        except ImportError as err:
-            ## Using fallback Model
-            raise RuntimeError(
-                f"Auth Model: Cannot import model {model}: {err}"
-            ) from err
-
-    async def get_user(self, **search):
-        """Getting User Object."""
-        user = None
-        error = None
-        try:
-            db = self._app["authdb"]
-            async with await db.acquire() as conn:
-                self.user_model.Meta.connection = conn
-                user = await self.user_model.get(**search)
-        except ValidationError as ex:
-            self.logger.error(f"Invalid User Information {search!s}")
-            print(ex.payload)
-            error = ex
-        except Exception as e:
-            error = e
-            self.logger.error(f"Error getting User {search!s}")
-            raise UserNotFound(f"Error getting User {search!s}: {e!s}") from e
-        # if not exists, return error of missing
-        if not user:
-            raise UserNotFound(f"User {search!s} doesn't exists: {error}")
-        return user
+    async def get_payload(self, request: web.Request):
+        token = None
+        if "Authorization" in request.headers:
+            try:
+                scheme, token = request.headers.get(
+                    hdrs.AUTHORIZATION
+                ).strip().split(" ", 1)
+            except ValueError as e:
+                raise AuthException(
+                    "Invalid Authentication Header",
+                    status=400
+                ) from e
+            if scheme != self.scheme:
+                raise AuthException(
+                    "Invalid Authentication Scheme",
+                    status=400
+                )
+        return token
 
     async def create_user(self, userdata) -> Identity:
         try:
@@ -182,28 +162,27 @@ class BaseAuthBackend(ABC):
     def get_user_mapping(
         self,
         user: dict,
-        userdata: dict,
         default_mapping: bool = False
     ) -> dict:
         if default_mapping is True:
             mapping = USER_MAPPING
         else:
             mapping = self.user_mapping
+        udata = {}
         for key, val in mapping.items():
             if key != self.password_attribute:
                 try:
-                    userdata[key] = user[val]
+                    udata[key] = user[val]
                 except (KeyError, AttributeError):
                     self.logger.warning(
                         f"Error UserData: asking for a non existing attribute: {key}"
                     )
-        return userdata
+        return udata
 
     def get_userdata(self, user: dict, default_mapping: bool = False, **kwargs) -> dict:
         userdata = {}
         userdata = self.get_user_mapping(
             user=user,
-            userdata=userdata,
             default_mapping=default_mapping
         )
         ### getting custom user attributes.
@@ -322,43 +301,6 @@ class BaseAuthBackend(ABC):
         except Exception as err:  # pylint: disable=W0703
             self.logger.exception(err)
 
-    def create_jwt(
-        self, issuer: str = None, expiration: int = None, data: dict = None
-    ) -> str:
-        """Creation of JWT tokens based on basic parameters.
-        issuer: for default, urn:Navigator
-        expiration: in seconds
-        **kwargs: data to put in payload
-        """
-        if not expiration:
-            expiration = self.session_timeout
-        if not issuer:
-            issuer = AUTH_DEFAULT_ISSUER
-        try:
-            del data['exp']
-            del data['iat']
-            del data['iss']
-            del data['aud']
-        except KeyError:
-            pass
-        payload = {
-            "exp": datetime.utcnow() + timedelta(seconds=expiration),
-            "iat": datetime.utcnow(),
-            "iss": issuer,
-            **data,
-        }
-        try:
-            jwt_token = jwt.encode(
-                payload,
-                SECRET_KEY,
-                AUTH_JWT_ALGORITHM,
-            )
-        except (TypeError, ValueError) as ex:
-            raise web.HTTPForbidden(
-                reason=f"Cannot Create Session Token: {ex!s}"
-            ) from ex
-        return jwt_token
-
     @abstractmethod
     async def check_credentials(self, request):
         """Authenticate against user credentials (token, user/password)."""
@@ -433,13 +375,16 @@ class BaseAuthBackend(ABC):
 
     async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:
         try:
+            user = None
             if session:
                 user = session.decode(name)
                 if user:
                     user.is_authenticated = True
             return user
         except (AttributeError, RuntimeError) as ex:
-            logging.warning(f"NAV: Unable to decode User session: {ex}")
+            self.logger.warning(
+                f"NAV: Unable to decode User session: {ex}"
+            )
 
     async def verify_exceptions(self, request: web.Request) -> bool:
         # avoid authorization backend on excluded methods:

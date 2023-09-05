@@ -92,7 +92,7 @@ class APIKeyAuth(BaseAuthBackend):
             elif mech == "api":
                 payload = orjson.loads(self.cipher.decode(token))
             # getting user information
-            data = await self.check_token_info(request, mech, payload)
+            data = await self.check_token_info(request, payload)
             if not data:
                 return None
             try:
@@ -116,7 +116,6 @@ class APIKeyAuth(BaseAuthBackend):
                 usr = await self.create_user(user)
                 usr.set(self.username_attribute, user_id)
                 self.logger.debug(f"User Created: {usr}")
-                # usr.access_token = data['token']
                 # saving user-data into request:
                 await self.remember(request, device_id, user, usr)
                 return {"token": token, **user}
@@ -124,7 +123,7 @@ class APIKeyAuth(BaseAuthBackend):
                 self.logger.exception(f"API Key Auth: Authentication Error: {err}")
                 return False
 
-    async def check_token_info(self, request, mech, payload):
+    async def check_token_info(self, request, payload):
         try:
             user_id = payload["user_id"]
             device_id = payload["device_id"]

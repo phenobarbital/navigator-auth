@@ -18,6 +18,7 @@ from navigator_auth.conf import (
     AZURE_ADFS_TENANT_ID,
     AZURE_SESSION_TIMEOUT,
     REDIS_AUTH_URL,
+    AZURE_MAPPING
 )
 from navigator_auth.libs.json import json_encoder, json_decoder
 from navigator_auth.responses import JSONResponse
@@ -62,17 +63,7 @@ class AzureAuth(ExternalAuth):
     userid_attribute: str = "id"
     pwd_atrribute: str = "password"
     _service_name: str = "azure"
-    user_mapping: dict = {
-        "userid": "id",
-        "email": "mail",
-        "username": "userPrincipalName",
-        "given_name": "givenName",
-        "first_name": "givenName",
-        "last_name": "surname",
-        "family_name": "surname",
-        "name": "displayName",
-        "phone": "mobilePhone"
-    }
+    user_mapping: dict = AZURE_MAPPING
     _description: str = "Microsoft Azure Authentication"
 
     def configure(self, app):
@@ -93,7 +84,9 @@ class AzureAuth(ExternalAuth):
         ## loading redis connection:
         await super(AzureAuth, self).on_startup(app)
         self._pool = aioredis.ConnectionPool.from_url(
-            REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
+            REDIS_AUTH_URL,
+            decode_responses=True,
+            encoding="utf-8"
         )
 
     async def on_cleanup(self, app: web.Application):
@@ -288,9 +281,6 @@ class AzureAuth(ExternalAuth):
                 if "token_type" in result:
                     token_type = result["token_type"]
                     access_token = result["access_token"]
-                    # refresh_token = result['refresh_token']
-                    # id_token = result["id_token"]
-                    # claims = result["id_token_claims"]
                     client_info = {}
                     if "client_info" in result:
                         # It happens when client_info and profile are in request
@@ -306,7 +296,6 @@ class AzureAuth(ExternalAuth):
                         )
                         # build user information:
                         data = {**data, **client_info}
-                        print('USERDATA > ', data)
                         userdata, uid = self.build_user_info(data, access_token)
                         #  userdata["id_token"] = id_token
                         #  userdata["claims"] = claims

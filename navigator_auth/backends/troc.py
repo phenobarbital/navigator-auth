@@ -4,8 +4,7 @@ Troc Authentication using RNC algorithm.
 """
 from typing import Optional
 from collections.abc import Awaitable, Callable
-from aiohttp import web, hdrs
-from aiohttp.web_urldispatcher import SystemRoute
+from aiohttp import web
 import orjson
 from navigator_session import get_session, AUTH_SESSION_OBJECT
 from navigator_auth.libs.cipher import Cipher
@@ -18,14 +17,12 @@ from navigator_auth.exceptions import (
     UserNotFound,
 )
 from navigator_auth.conf import (
-    AUTH_USER_MODEL,
     AUTH_CREDENTIALS_REQUIRED,
     PARTNER_KEY,
     CYPHER_TYPE,
-    exclude_list,
     AUTH_SUCCESSFUL_CALLBACKS
 )
-from .abstract import BaseAuthBackend, decode_token
+from .abstract import BaseAuthBackend
 from .basic import BasicUser
 
 
@@ -62,7 +59,7 @@ class TrocToken(BaseAuthBackend):
         self.cypher = Cipher(PARTNER_KEY, type=CYPHER_TYPE)
         ## Using Startup for detecting and loading functions.
         if self._success_callbacks:
-            self._user_model = self.get_authmodel(AUTH_USER_MODEL)
+            self._user_model = self._idp.user_model
             self.get_successful_callbacks()
 
     async def on_cleanup(self, app: web.Application):
@@ -70,9 +67,8 @@ class TrocToken(BaseAuthBackend):
 
     async def validate_user(self, login: str = None):
         # get the user based on Model
-        search = {self.username_attribute: login}
         try:
-            user = await self.get_user(**search)
+            user = await self._idp.get_user(login)
             return user
         except UserNotFound as err:
             raise UserNotFound(f"User {login} doesn't exists") from err
@@ -80,21 +76,10 @@ class TrocToken(BaseAuthBackend):
             self.logger.exception(err)
             raise
 
-    async def get_payload(self, request):
+    async def get_payload(self, request: web.Request):
         try:
             if "Authorization" in request.headers:
-                try:
-                    scheme, token = (
-                        request.headers.get("Authorization").strip().split(" ")
-                    )
-                except ValueError as ex:
-                    raise web.HTTPForbidden(
-                        reason="Invalid authorization Header",
-                    ) from ex
-                if scheme != self.scheme:
-                    raise web.HTTPForbidden(
-                        reason="Invalid Session scheme",
-                    )
+                token = super(TrocToken, self).get_payload(request)
             else:
                 try:
                     token = request.query.get("auth", None)
@@ -102,8 +87,10 @@ class TrocToken(BaseAuthBackend):
                     print(e)
                     return None
         except Exception as err:  # pylint: disable=W0703
-            self.logger.exception(f"TrocAuth: Error getting payload: {err}")
-            return None
+            self.logger.exception(
+                f"TrocAuth: Error getting payload: {err}"
+            )
+            raise
         return token
 
     async def authenticate(self, request):
@@ -112,15 +99,20 @@ class TrocToken(BaseAuthBackend):
             token = await self.get_payload(request)
             print('TOKEN TROC: > ', token)
         except Exception as err:
-            raise AuthException(str(err), status=400) from err
+            raise AuthException(
+                str(err),
+                status=400
+            ) from err
         if not token:
-            raise InvalidAuth("Missing Credentials", status=401)
+            raise InvalidAuth("Token: Missing Token", status=401)
         else:
             # getting user information
             # TODO: making the validation of token and expiration
             try:
                 data = orjson.loads(self.cypher.decode(token))
-                self.logger.debug(f"TrocToken: Decoded User data: {data!r}")
+                self.logger.debug(
+                    f"TrocToken: Decoded User data: {data!r}"
+                )
             except Exception as err:
                 raise InvalidAuth(f"Invalid Token: {err!s}", status=401) from err
             # making validation
@@ -157,8 +149,10 @@ class TrocToken(BaseAuthBackend):
                     self.username_attribute: username,
                     "user_id": user[self.userid_attribute],
                 }
-                token = self.create_jwt(data=payload)
+                token, exp, scheme = self._idp.create_token(data=payload)
                 usr.access_token = token
+                usr.token_type = scheme
+                usr.expires_in = exp
                 # saving user-data into request:
                 await self.remember(request, uid, userdata, usr)
                 ### check if any callbacks exists:
@@ -194,7 +188,9 @@ class TrocToken(BaseAuthBackend):
             return await handler(request)
         self.logger.debug(f"MIDDLEWARE: {self.__class__.__name__}")
         try:
-            _, payload = decode_token(request)
+            token = await self.get_payload(request)
+            _, payload = self._idp.decode_token(code=token)
+            # _, payload = decode_token(request)
             if payload:
                 ## check if user has a session:
                 # load session information

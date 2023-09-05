@@ -137,7 +137,7 @@ class ExternalAuth(BaseAuthBackend):
         ## geting User Model for saving users:
         ## TODO: Migrate Code to IdP
         if AUTH_MISSING_ACCOUNT == "create":
-            self._user_model = self.get_authmodel(AUTH_USER_MODEL)
+            self._user_model = self._idp.user_model
         else:
             self._user_model = None
         ## Using Startup for detecting and loading functions.
@@ -256,6 +256,10 @@ class ExternalAuth(BaseAuthBackend):
         Raises:
             UserNotFound: when user doesn't exists on Backend.
         """
+        # Get data for user mapping:
+        userdata = self.get_user_mapping(
+            user=userdata
+        )
         # User ID:
         try:
             userid = userdata[self.userid_attribute]
@@ -268,9 +272,6 @@ class ExternalAuth(BaseAuthBackend):
         # set original token in userdata
         userdata['auth_token'] = token
         userdata["token_type"] = self.token_type
-        userdata = self.get_user_mapping(
-            user=userdata, userdata=userdata
-        )
         return (userdata, userid)
 
     async def validate_user_info(
@@ -287,9 +288,7 @@ class ExternalAuth(BaseAuthBackend):
             except KeyError:
                 login = userdata[self.userid_attribute]
         try:
-            search = {self.username_attribute: login}
-            self.logger.debug(f'USER SEARCH > {search}')
-            user = await self.get_user(**search)
+            user = await self._idp.get_user(login)
         except UserNotFound as err:
             if AUTH_MISSING_ACCOUNT == "ignore":
                 pass
@@ -300,7 +299,7 @@ class ExternalAuth(BaseAuthBackend):
                 self.logger.info(f"Creating new User: {login}")
                 await self.create_external_user(userdata)
                 try:
-                    user = await self.get_user(**search)
+                    user = await self._idp.get_user(login)
                 except UserNotFound as ex:
                     raise UserNotFound(
                         f"User {login} doesn't exists: {ex}"

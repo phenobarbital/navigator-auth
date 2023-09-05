@@ -3,9 +3,6 @@
 Navigator Authentication using JSON Web Tokens.
 """
 import logging
-import hashlib
-import base64
-import secrets
 from aiohttp import web
 from navigator_session import AUTH_SESSION_OBJECT
 from datamodel.exceptions import ValidationError
@@ -15,14 +12,6 @@ from navigator_auth.exceptions import (
     UserNotFound,
     InvalidAuth,
 )
-from navigator_auth.conf import (
-    AUTH_PWD_DIGEST,
-    AUTH_PWD_ALGORITHM,
-    AUTH_PWD_LENGTH,
-    AUTH_PWD_SALT_LENGTH,
-    AUTH_USER_MODEL
-)
-
 # Authenticated Entity
 from navigator_auth.identities import AuthUser
 from .abstract import BaseAuthBackend
@@ -49,7 +38,8 @@ class BasicAuth(BaseAuthBackend):
         """Used to initialize Backend requirements."""
         ## Using Startup for detecting and loading functions.
         if self._success_callbacks:
-            self._user_model = self.get_authmodel(AUTH_USER_MODEL)
+            # self._user_model = self.get_authmodel(AUTH_USER_MODEL)
+            self._user_model = self._idp.user_model
             self.get_successful_callbacks()
 
     async def on_cleanup(self, app: web.Application):
@@ -58,8 +48,8 @@ class BasicAuth(BaseAuthBackend):
     async def validate_user(self, login: str = None, password: str = None):
         # get the user based on Model
         try:
-            search = {self.username_attribute: login}
-            user = await self.get_user(**search)
+            # search = {self.username_attribute: }
+            user = await self._idp.get_user(login)
         except ValidationError as ex:
             raise InvalidAuth(
                 f"Invalid User Information: {ex.payload}"
@@ -84,65 +74,20 @@ class BasicAuth(BaseAuthBackend):
                 "Invalid credentials on User Account"
             ) from ex
         try:
-            if self.check_password(pwd, password):
+            if self._idp.check_password(pwd, password):
                 # return the user Object
                 return user
             else:
                 raise FailedAuth(
                     "Basic Auth: Invalid Credentials"
                 )
-        except (InvalidAuth, FailedAuth, UserNotFound) as err:
+        except InvalidAuth as err:
             self.logger.error(err)
             raise
         except Exception as err:
             raise InvalidAuth(
                 f"Unknown Password Error: {err}"
             ) from err
-
-    def set_password(
-        self,
-        password: str,
-        token_num: int = 6,
-        iterations: int = 80000,
-        salt: str = None,
-    ):
-        if not salt:
-            salt = secrets.token_hex(token_num)
-        key = hashlib.pbkdf2_hmac(
-            AUTH_PWD_DIGEST,
-            password.encode("utf-8"),
-            salt.encode("utf-8"),
-            iterations,
-            dklen=AUTH_PWD_LENGTH,
-        )
-        hst = base64.b64encode(key).decode("utf-8").strip()
-        return f"{AUTH_PWD_ALGORITHM}${iterations}${salt}${hst}"
-
-    def check_password(self, current_password, password):
-        try:
-            algorithm, iterations, salt, _ = current_password.split("$", 3)
-        except ValueError as ex:
-            if str(ex).startswith('not enough values to unpack'):
-                raise InvalidAuth(
-                    "Invalid Password: user password doesn't match \
-                    algorithm requirements"
-                ) from ex
-            raise InvalidAuth(
-                f"Basic Auth: Invalid Password: {ex}"
-            ) from ex
-        assert algorithm == AUTH_PWD_ALGORITHM
-        compare_hash = self.set_password(
-            password,
-            iterations=int(iterations),
-            salt=salt,
-            token_num=AUTH_PWD_SALT_LENGTH,
-        )
-        try:
-            return secrets.compare_digest(current_password, compare_hash)
-        except (TypeError, ValueError) as ex:
-            raise InvalidAuth(
-                f"Basic Auth: Invalid Credentials: {ex}"
-            ) from ex
 
     async def get_payload(self, request):
         ctype = request.content_type
@@ -193,7 +138,9 @@ class BasicAuth(BaseAuthBackend):
         else:
             # making validations
             try:
-                user = await self.validate_user(login=user, password=pwd)
+                user = await self.validate_user(
+                    login=user, password=pwd
+                )
             except (FailedAuth, UserNotFound):  # pylint: disable=W0706
                 raise
             except (ValidationError, InvalidAuth) as err:
@@ -216,8 +163,10 @@ class BasicAuth(BaseAuthBackend):
                     self.session_key_property: username,
                 }
                 # Create the User session and returned.
-                token = self.create_jwt(data=payload)
+                token, exp, scheme = self._idp.create_token(data=payload)
                 usr.access_token = token
+                usr.token_type = scheme
+                usr.expires_in = exp
                 ### saving User data into session:
                 await self.remember(request, username, userdata, usr)
                 ### check if any callbacks exists:

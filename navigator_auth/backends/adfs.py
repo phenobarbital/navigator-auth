@@ -25,7 +25,8 @@ from navigator_auth.conf import (
     ADFS_CALLBACK_REDIRECT_URL,
     ADFS_LOGIN_REDIRECT_URL,
     AZURE_AD_SERVER,
-    exclude_list
+    exclude_list,
+    adfs_mapping
 )
 from .jwksutils import get_public_key
 from .external import ExternalAuth
@@ -46,15 +47,7 @@ class ADFSAuth(ExternalAuth):
     username_attribute: str = "username"
     pwd_atrribute: str = "password"
     version = "v1.0"
-    user_mapping: dict = {
-        "user_id": "upn",
-        "email": "email",
-        "given_name": "given_name",
-        "family_name": "family_name",
-        "groups": "group",
-        "department": "Department",
-        "name": "Display-Name",
-    }
+    user_mapping: dict = adfs_mapping
     _description: str = "SSO (Active Directory FS)"
 
     def configure(self, app):
@@ -135,8 +128,6 @@ class ADFSAuth(ExternalAuth):
                 "state": self.state,
                 "scope": ADFS_SCOPES,
             }
-            self.logger.debug(" === AUTH Params === ")
-            self.logger.debug(f"{query_params!s}")
             params = requests.compat.urlencode(query_params)
             login_url = f"{self.authorize_uri}?{params}"
             # Step A: redirect
@@ -162,16 +153,13 @@ class ADFSAuth(ExternalAuth):
                     reason=f"ADFS: Unable to Authenticate: {auth_response!r}"
                 )
             authorization_code = auth_response["code"]
-            # state = auth_response[
-            #     "state"
-            # ]  # TODO: making validation with previous state
-            # request_id = auth_response["client-request-id"]
+            # TODO: making validation with previous state
         except Exception as err:
             raise web.HTTPForbidden(
                 reason=f"ADFS: Invalid Callback response: {err}: {auth_response}"
             ) from err
         self.logger.debug(
-            f"Received Authorization Code: {authorization_code}"
+            f"Authorization Code: {authorization_code}"
         )
         # getting an Access Token
         query_params = {
@@ -241,9 +229,7 @@ class ADFSAuth(ExternalAuth):
                 del data['exp']
             except KeyError:
                 pass
-            print('DECODED TOKEN > ', data)
         except Exception as e:
-            print('TOKEN ERROR > ', e)
             raise web.HTTPForbidden(
                 reason=f"Unable to decode JWT token {e}."
             )
