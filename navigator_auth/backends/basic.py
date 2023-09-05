@@ -167,6 +167,8 @@ class BasicAuth(BaseAuthBackend):
                 usr.access_token = token
                 usr.token_type = scheme
                 usr.expires_in = exp
+                userdata['expires_in'] = exp
+                userdata['token_type'] = scheme
                 ### saving User data into session:
                 await self.remember(request, username, userdata, usr)
                 ### check if any callbacks exists:

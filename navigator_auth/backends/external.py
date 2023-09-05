@@ -18,7 +18,6 @@ from navigator_auth.identities import AuthUser
 from navigator_auth.libs.json import json_decoder
 from navigator_auth.exceptions import UserNotFound, AuthException
 from navigator_auth.conf import (
-    AUTH_USER_MODEL,
     AUTH_LOGIN_FAILED_URI,
     AUTH_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
@@ -56,7 +55,6 @@ class ExternalAuth(BaseAuthBackend):
     _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
     _callbacks: Optional[list[Callable]] = None
     _external_auth: bool = True
-    token_type: str = 'Bearer'
 
     def __init__(
         self,
@@ -271,7 +269,7 @@ class ExternalAuth(BaseAuthBackend):
         userdata["auth_method"] = self._service_name
         # set original token in userdata
         userdata['auth_token'] = token
-        userdata["token_type"] = self.token_type
+        userdata["token_type"] = self.scheme
         return (userdata, userid)
 
     async def validate_user_info(
@@ -331,10 +329,13 @@ class ExternalAuth(BaseAuthBackend):
             # saving Auth data.
             await self.remember(request, user_id, userinfo, user)
             # Create the User Token.
-            jwt_token = self.create_jwt(data=payload)
-            # "access_token": token
-            data = {"token": jwt_token, **userdata}
-            return data
+            token, exp, scheme = self._idp.create_token(data=payload)
+            return {
+                "token": token,
+                "type": scheme,
+                "expires_in": exp,
+                **userdata
+            }
         except Exception as err:
             logging.exception(err)
 

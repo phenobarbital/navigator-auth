@@ -204,7 +204,7 @@ class AzureAuth(ExternalAuth):
                         )
                         # Redirect User to HOME
                         return self.home_redirect(
-                            request, token=data["token"], token_type="Bearer"
+                            request, token=data["token"], token_type=self.scheme
                         )
                     else:
                         if 65001 in result.get("error_codes", []):
@@ -297,8 +297,6 @@ class AzureAuth(ExternalAuth):
                         # build user information:
                         data = {**data, **client_info}
                         userdata, uid = self.build_user_info(data, access_token)
-                        #  userdata["id_token"] = id_token
-                        #  userdata["claims"] = claims
                         data = await self.validate_user_info(
                             request, uid, userdata, access_token
                         )
@@ -389,7 +387,7 @@ class AzureAuth(ExternalAuth):
                     status=403
                 )
         except Exception as err:
-            logging.exception(
+            self.logger.exception(
                 f"Azure: Error getting User information: {err}"
             )
             return self.auth_error(
