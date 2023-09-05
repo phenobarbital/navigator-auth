@@ -43,4 +43,3 @@ class User(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         frozen = False
-        connection = None

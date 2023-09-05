@@ -21,7 +21,6 @@ from aiohttp.web_urldispatcher import SystemRoute
 from navigator_session import SESSION_KEY, SessionHandler, get_session
 
 from .authorizations import authz_allow_hosts, authz_hosts
-from .backends.abstract import decode_token
 from .backends.idp import IdentityProvider
 from .conf import (
     BASE_DIR,
@@ -638,7 +637,8 @@ class AuthHandler:
             return await handler(request)
         logging.debug(":: AUTH MIDDLEWARE ::")
         try:
-            _, payload = decode_token(request)
+            token = await self._idp.get_payload(request)
+            _, payload = self._idp.decode_token(code=token)
         except Forbidden as err:
             logging.error(
                 f"Auth Middleware: Access Denied: {err}"
@@ -664,7 +664,7 @@ class AuthHandler:
                 try:
                     session = await get_session(request, payload, new=False)
                 except Exception as err:
-                    print(err)
+                    logging.error(str(err))
                 if not session:
                     if AUTH_CREDENTIALS_REQUIRED is True:
                         raise self.Unauthorized(

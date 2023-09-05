@@ -18,7 +18,6 @@ from navigator_auth.identities import AuthUser
 from navigator_auth.libs.json import json_decoder
 from navigator_auth.exceptions import UserNotFound, AuthException
 from navigator_auth.conf import (
-    AUTH_USER_MODEL,
     AUTH_LOGIN_FAILED_URI,
     AUTH_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
@@ -56,7 +55,6 @@ class ExternalAuth(BaseAuthBackend):
     _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
     _callbacks: Optional[list[Callable]] = None
     _external_auth: bool = True
-    token_type: str = 'Bearer'
 
     def __init__(
         self,
@@ -137,7 +135,7 @@ class ExternalAuth(BaseAuthBackend):
         ## geting User Model for saving users:
         ## TODO: Migrate Code to IdP
         if AUTH_MISSING_ACCOUNT == "create":
-            self._user_model = self.get_authmodel(AUTH_USER_MODEL)
+            self._user_model = self._idp.user_model
         else:
             self._user_model = None
         ## Using Startup for detecting and loading functions.
@@ -256,6 +254,10 @@ class ExternalAuth(BaseAuthBackend):
         Raises:
             UserNotFound: when user doesn't exists on Backend.
         """
+        # Get data for user mapping:
+        userdata = self.get_user_mapping(
+            user=userdata
+        )
         # User ID:
         try:
             userid = userdata[self.userid_attribute]
@@ -267,10 +269,7 @@ class ExternalAuth(BaseAuthBackend):
         userdata["auth_method"] = self._service_name
         # set original token in userdata
         userdata['auth_token'] = token
-        userdata["token_type"] = self.token_type
-        userdata = self.get_user_mapping(
-            user=userdata, userdata=userdata
-        )
+        userdata["token_type"] = self.scheme
         return (userdata, userid)
 
     async def validate_user_info(
@@ -287,9 +286,7 @@ class ExternalAuth(BaseAuthBackend):
             except KeyError:
                 login = userdata[self.userid_attribute]
         try:
-            search = {self.username_attribute: login}
-            self.logger.debug(f'USER SEARCH > {search}')
-            user = await self.get_user(**search)
+            user = await self._idp.get_user(login)
         except UserNotFound as err:
             if AUTH_MISSING_ACCOUNT == "ignore":
                 pass
@@ -300,7 +297,7 @@ class ExternalAuth(BaseAuthBackend):
                 self.logger.info(f"Creating new User: {login}")
                 await self.create_external_user(userdata)
                 try:
-                    user = await self.get_user(**search)
+                    user = await self._idp.get_user(login)
                 except UserNotFound as ex:
                     raise UserNotFound(
                         f"User {login} doesn't exists: {ex}"
@@ -332,10 +329,13 @@ class ExternalAuth(BaseAuthBackend):
             # saving Auth data.
             await self.remember(request, user_id, userinfo, user)
             # Create the User Token.
-            jwt_token = self.create_jwt(data=payload)
-            # "access_token": token
-            data = {"token": jwt_token, **userdata}
-            return data
+            token, exp, scheme = self._idp.create_token(data=payload)
+            return {
+                "token": token,
+                "type": scheme,
+                "expires_in": exp,
+                **userdata
+            }
         except Exception as err:
             logging.exception(err)
 

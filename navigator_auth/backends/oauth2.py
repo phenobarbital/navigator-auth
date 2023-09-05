@@ -12,7 +12,6 @@ from aiohttp import web
 from datamodel.exceptions import ValidationError
 from navigator_auth.identities import AuthUser
 from navigator_auth.conf import (
-    AUTH_USER_MODEL,
     AUTH_LOGIN_FAILED_URI,
     AUTH_LOGOUT_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
@@ -146,7 +145,7 @@ class Oauth2Provider(BaseAuthBackend):
         ## geting User Model for saving users:
         ## TODO: Migrate Code to IdP
         if AUTH_MISSING_ACCOUNT == "create":
-            self._user_model = self.get_authmodel(AUTH_USER_MODEL)
+            self._user_model = self._idp.user_model
         else:
             self._user_model = None
         ## Using Startup for detecting and loading functions.

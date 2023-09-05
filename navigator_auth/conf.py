@@ -201,7 +201,7 @@ CYPHER_TYPE = config.get("CYPHER_TYPE", fallback="RNC")
 AUTH_TOKEN_ISSUER = config.get("AUTH_TOKEN_ISSUER", fallback="urn:Navigator")
 AUTH_TOKEN_SECRET = config.get("AUTH_TOKEN_SECRET", fallback=PARTNER_KEY)
 AUTH_CODE_EXPIRATION = config.getint("AUTH_CODE_EXPIRATION", fallback=600)
-AUTH_DEFAULT_SCHEME = "Bearer"
+AUTH_DEFAULT_SCHEME = config.get('AUTH_DEFAULT_SCHEME', fallback="Bearer")
 AUTH_DEFAULT_ISSUER = AUTH_TOKEN_ISSUER
 
 ### Azure Authentication
@@ -218,6 +218,22 @@ AZURE_ADFS_SCOPES = [
 ]
 
 PREFERRED_AUTH_SCHEME = config.get("PREFERRED_AUTH_SCHEME", fallback="https")
+
+AZURE_MAPPING = {
+    "phone": "businessPhones",
+    "display_name": "displayName",
+    "first_name": "givenName",
+    "given_name": "givenName",
+    "last_name": "surname",
+    "family_name": "surname",
+    "userid": "id",
+    "job_title": "jobTitle",
+    "mail": "mail",
+    "mobile": "mobilePhone",
+    "username": "userPrincipalName",
+    "utid": "utid",
+    "name": "displayName"
+}
 
 # ADFS SSO
 ADFS_SERVER = config.get("ADFS_SERVER")
@@ -238,10 +254,15 @@ ADFS_LOGIN_REDIRECT_URL = config.get("ADFS_LOGIN_REDIRECT_URL")
 ADFS_CALLBACK_REDIRECT_URL = config.get("ADFS_CALLBACK_REDIRECT_URL", fallback=None)
 
 adfs_mapping = {
-    "first_name": "given_name",
-    "last_name": "family_name",
+    "user_id": "upn",
     "email": "email",
+    "given_name": "given_name",
+    "family_name": "family_name",
+    "department": "Department",
+    "name": "Display-Name",
+    "display_name": "Display-Name"
 }
+
 AZURE_AD_SERVER = config.get("AZURE_AD_SERVER", fallback="login.microsoftonline.com")
 AZURE_SESSION_TIMEOUT = config.get("AZURE_SESSION_TIMEOUT", fallback=120)
 ADFS_CLAIM_MAPPING = config.get("ADFS_CLAIM_MAPPING", fallback=adfs_mapping)

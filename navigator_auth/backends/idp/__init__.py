@@ -5,7 +5,7 @@ import base64
 import secrets
 import importlib
 import jwt
-from aiohttp import web
+from aiohttp import web, hdrs
 from datamodel.exceptions import ValidationError
 from navconfig.logging import logging
 from navigator_session import (
@@ -14,18 +14,19 @@ from navigator_session import (
 from navigator_auth.identities import Identity
 from navigator_auth.conf import (
     AUTH_TOKEN_ISSUER,
-    AUTH_TOKEN_SECRET,
     AUTH_USERNAME_ATTRIBUTE,
     AUTH_PASSWORD_ATTRIBUTE,
     USER_MAPPING,
     AUTH_USER_VIEW,
+    AUTH_USER_MODEL,
     AUTH_PWD_ALGORITHM,
     AUTH_PWD_SALT_LENGTH,
     AUTH_PWD_DIGEST,
     AUTH_PWD_LENGTH,
     AUTH_CODE_EXPIRATION,
     AUTH_JWT_ALGORITHM,
-    SECRET_KEY
+    SECRET_KEY,
+    AUTH_DEFAULT_SCHEME
 )
 from navigator_auth.exceptions import (
     UserNotFound,
@@ -43,7 +44,7 @@ class IdentityProvider:
     """
     username_attribute: str = AUTH_USERNAME_ATTRIBUTE
     pwd_atrribute: str = AUTH_PASSWORD_ATTRIBUTE
-    scheme: str = "Bearer"
+    scheme: str = AUTH_DEFAULT_SCHEME
     session_timeout: int = int(SESSION_TIMEOUT)
     user_mapping = USER_MAPPING
 
@@ -56,11 +57,17 @@ class IdentityProvider:
         self.logger = logging.getLogger(
             "Auth.IdP"
         )
-        # Get User Model:
+        # get search model:
         try:
-            self.user_model = self.get_usermodel(AUTH_USER_VIEW)
+            self.user_search = self.get_usermodel(
+                AUTH_USER_VIEW
+            )
             self.logger.debug(
-                f"User Model: {self.user_model}"
+                f"User Model: {self.user_search}"
+            )
+            # Get User Model:
+            self.user_model = self.get_usermodel(
+                AUTH_USER_MODEL
             )
         except Exception as ex:
             raise ConfigError(
@@ -70,8 +77,9 @@ class IdentityProvider:
     def setup(self, app: web.Application):
         self.app = app
         self.logger.notice(
-            "Initializing Identity Provider."
+            ":: Initializing Identity Provider ::"
         )
+        # Code Management
 
     def get_usermodel(self, model: str):
         try:
@@ -89,28 +97,30 @@ class IdentityProvider:
     async def get_user(self, login: str) -> Identity:
         """Getting User Object."""
         user = None
-        error = None
         try:
             db = self.app["authdb"]
             async with await db.acquire() as conn:
                 search = {self.username_attribute: login}
-                self.user_model.Meta.connection = conn
-                user = await self.user_model.get(**search)
+                self.user_search.Meta.connection = conn
+                user = await self.user_search.get(**search)
         except ValidationError as ex:
             self.logger.error(
                 f"Invalid User Information {search!s}"
             )
             print(ex.payload)
-            error = ex
+            raise
         except Exception as e:
-            error = e
             self.logger.error(
                 f"Error getting User {search!s}"
             )
-            raise UserNotFound(f"Error getting User {search!s}: {e!s}") from e
+            raise UserNotFound(
+                f"Error getting User {search!s}: {e!s}"
+            ) from e
         # if not exists, return error of missing
         if not user:
-            raise UserNotFound(f"User {search!s} doesn't exists: {error}")
+            raise UserNotFound(
+                f"User {search!s} doesn't exists"
+            )
         return user
 
     async def authenticate_credentials(self, login: str = None, password: str = None):
@@ -258,14 +268,43 @@ class IdentityProvider:
         # Generate a refresh token
         return secrets.token_urlsafe(32)
 
+    async def get_payload(self, request: web.Request):
+        token = None
+        if "Authorization" in request.headers:
+            try:
+                scheme, token = request.headers.get(
+                    hdrs.AUTHORIZATION
+                ).strip().split(" ", 1)
+            except ValueError as e:
+                raise AuthException(
+                    "Invalid Authentication Header",
+                    status=400
+                ) from e
+            if scheme != self.scheme:
+                raise AuthException(
+                    "Invalid Authentication Scheme",
+                    status=400
+                )
+        return token
+
     def create_token(
-        self, data: dict = None, issuer: str = None, expiration: int = None
+        self,
+        data: dict = None,
+        issuer: str = None,
+        expiration: int = None
     ) -> str:
         """Creation of JWT tokens based on basic parameters.
         issuer: for default, urn:Navigator
         expiration: in seconds
         **kwargs: data to put in payload
         """
+        try:
+            del data['exp']
+            del data['iat']
+            del data['iss']
+            del data['aud']
+        except KeyError:
+            pass
         if not expiration:
             expiration = self.session_timeout
         if not issuer:
@@ -292,24 +331,32 @@ class IdentityProvider:
             ) from ex
         return jwt_token, exp, self.scheme
 
-    def decode_token(self, code, scheme, issuer: str = None):
+    def decode_token(
+        self,
+        code: str,
+        issuer: str = None
+    ):
         payload = None
+        tenant = None
         if not issuer:
             issuer = AUTH_TOKEN_ISSUER
-        if scheme != self.scheme:
-            raise InvalidAuth(
-                "Invalid Auth Scheme"
-            )
+        try:
+            tenant, jwt_token = code.split(":")
+        except (TypeError, ValueError, AttributeError):
+            # normal Token:
+            jwt_token = code
         try:
             payload = jwt.decode(
-                code,
+                jwt_token,
                 SECRET_KEY,
                 algorithms=[AUTH_JWT_ALGORITHM],
                 iss=issuer,
                 leeway=30,
             )
-            self.logger.debug(f"Decoded Token: {payload!s}")
-            return payload
+            self.logger.debug(
+                f"Decoded Token: {payload!s}"
+            )
+            return [tenant, payload]
         except jwt.exceptions.ExpiredSignatureError as exc:
             raise AuthExpired(
                 f"Credentials Expired: {exc!s}"
@@ -327,4 +374,7 @@ class IdentityProvider:
                 f"Invalid authorization token {exc!s}"
             ) from exc
         except Exception as err:
-            raise AuthException(str(err), status=501) from err
+            raise AuthException(
+                str(err),
+                status=501
+            ) from err
