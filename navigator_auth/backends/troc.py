@@ -79,7 +79,7 @@ class TrocToken(BaseAuthBackend):
     async def get_payload(self, request: web.Request):
         try:
             if "Authorization" in request.headers:
-                token = super(TrocToken, self).get_payload(request)
+                token = await super(TrocToken, self).get_payload(request)
             else:
                 try:
                     token = request.query.get("auth", None)

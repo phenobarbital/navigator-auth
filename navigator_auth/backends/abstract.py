@@ -322,12 +322,12 @@ class BaseAuthBackend(ABC):
     async def auth_successful_callback(
         self, request: web.Request, user: Callable, **kwargs
     ) -> None:
-        coro = []
-        for fn in self._callbacks:
-            func = self.call_successful_callbacks(request, fn, user, **kwargs)
-            coro.append(asyncio.create_task(func))
         try:
-            await asyncio.gather(*coro, return_exceptions=True)
+            for fn in self._callbacks:
+                await self.call_successful_callbacks(request, fn, user, **kwargs)
+        #     coro.append(asyncio.create_task(func))
+        # try:
+        #     await asyncio.gather(*coro, return_exceptions=True)
         except Exception as ex:  # pylint: disable=W0718
             self.logger.exception(
                 f"Auth Callback Error: {ex}", stack_info=True
