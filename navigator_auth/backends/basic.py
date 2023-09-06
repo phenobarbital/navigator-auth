@@ -169,9 +169,7 @@ class BasicAuth(BaseAuthBackend):
                 usr.expires_in = exp
                 userdata['expires_in'] = exp
                 userdata['token_type'] = scheme
-                ### saving User data into session:
-                await self.remember(request, username, userdata, usr)
-                ### check if any callbacks exists:
+                # invoke callbacks to update user data:
                 if user and self._callbacks:
                     # construir e invocar callbacks para actualizar data de usuario
                     args = {
@@ -180,6 +178,9 @@ class BasicAuth(BaseAuthBackend):
                         "userdata": userdata
                     }
                     await self.auth_successful_callback(request, user, **args)
+                ### saving User data into session:
+                await self.remember(request, username, userdata, usr)
+                ### check if any callbacks exists:
                 return {"token": token, **userdata}
             except Exception as err:  # pylint: disable=W0703
                 logging.exception(f"BasicAuth: Authentication Error: {err}")
