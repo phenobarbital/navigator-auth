@@ -26,9 +26,8 @@ from navigator_auth.conf import (
     DJANGO_SESSION_URL,
     DJANGO_SESSION_PREFIX
 )
-
 # User Identity
-from .abstract import BaseAuthBackend, decode_token
+from .abstract import BaseAuthBackend
 
 
 class DjangoUser(AuthUser):
@@ -232,7 +231,7 @@ class DjangoAuth(BaseAuthBackend):
             return await handler(request)
         self.logger.debug(":: DJANGO MIDDLEWARE ::")
         try:
-            _, payload = decode_token(request)
+            _, payload = self._idp.decode_token(request)
             if payload:
                 ## check if user has a session:
                 # load session information

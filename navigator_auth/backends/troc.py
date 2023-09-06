@@ -155,8 +155,6 @@ class TrocToken(BaseAuthBackend):
                 usr.expires_in = exp
                 userdata['expires_in'] = exp
                 userdata['token_type'] = scheme
-                # saving user-data into request:
-                await self.remember(request, uid, userdata, usr)
                 ### check if any callbacks exists:
                 if user and self._callbacks:
                     # construir e invocar callbacks para actualizar data de usuario
@@ -166,6 +164,8 @@ class TrocToken(BaseAuthBackend):
                         "userdata": userdata
                     }
                     await self.auth_successful_callback(request, user, **args)
+                # saving user-data into request:
+                await self.remember(request, uid, userdata, usr)
                 return {"token": token, **userdata}
             except Exception as err:  # pylint: disable=W0703
                 self.logger.exception(f"TROC Auth: Authentication Error: {err}")
