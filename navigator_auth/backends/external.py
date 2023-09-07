@@ -259,13 +259,17 @@ class ExternalAuth(BaseAuthBackend):
             user=userdata
         )
         # User ID:
-        print('USERDATA > ', userdata)
         try:
             userid = userdata[self.userid_attribute]
             userdata["id"] = userid
         except KeyError:
-            userid = userdata[self.username_attribute]
-            userdata["id"] = userid
+            try:
+                userid = userdata[self.username_attribute]
+                userdata["id"] = userid
+            except (TypeError, KeyError) as exc:
+                raise ValueError(
+                    f"User cannot have username attribute: {self.userid_attribute}"
+                ) from exc
         userdata[self.session_key_property] = userid
         userdata["auth_method"] = self._service_name
         # set original token in userdata

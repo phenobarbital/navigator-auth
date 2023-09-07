@@ -227,6 +227,7 @@ AZURE_MAPPING = {
     "last_name": "surname",
     "family_name": "surname",
     "userid": "id",
+    "id": "id",
     "job_title": "jobTitle",
     "mail": "mail",
     "mobile": "mobilePhone",
@@ -254,6 +255,7 @@ ADFS_LOGIN_REDIRECT_URL = config.get("ADFS_LOGIN_REDIRECT_URL")
 ADFS_CALLBACK_REDIRECT_URL = config.get("ADFS_CALLBACK_REDIRECT_URL", fallback=None)
 
 adfs_mapping = {
+    "upn": "upn",
     "user_id": "upn",
     "email": "email",
     "given_name": "given_name",
