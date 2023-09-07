@@ -169,6 +169,7 @@ class BaseAuthBackend(ABC):
         else:
             mapping = self.user_mapping
         udata = {}
+        print('MAPPING > ', mapping)
         for key, val in mapping.items():
             if key != self.password_attribute:
                 try:
