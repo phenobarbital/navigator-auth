@@ -88,10 +88,12 @@ class ADFSAuth(ExternalAuth):
         if ADFS_CALLBACK_REDIRECT_URL is not None:
             callback = ADFS_CALLBACK_REDIRECT_URL
             self.redirect_uri = "{domain}" + callback
+            # Excluding Redirect for Authorization
+            exclude_list.append(self.redirect_uri)
         else:
             callback = f"/auth/{self._service_name}/callback"
-        # Excluding Redirect for Authorization
-        exclude_list.append(self.redirect_uri)
+            self.redirect_uri = "{domain}" + callback
+            exclude_list.append(callback)
         # Login and Redirect Routes:
         router.add_route(
             "GET", login, self.authenticate, name=f"{self._service_name}_login"

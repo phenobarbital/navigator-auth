@@ -338,6 +338,8 @@ class IdentityProvider:
     ):
         payload = None
         tenant = None
+        if not code:
+            return [None, None]
         if not issuer:
             issuer = AUTH_TOKEN_ISSUER
         try:
