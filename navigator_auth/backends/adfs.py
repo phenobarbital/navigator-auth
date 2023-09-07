@@ -46,7 +46,7 @@ class ADFSAuth(ExternalAuth):
     userid_attribute: str = "upn"
     username_attribute: str = "username"
     pwd_atrribute: str = "password"
-    version = "v1.0"
+    version = "v1.1"
     user_mapping: dict = adfs_mapping
     _description: str = "SSO (Active Directory FS)"
 
@@ -236,6 +236,7 @@ class ADFSAuth(ExternalAuth):
                 reason=f"Unable to decode JWT token {e}."
             )
         try:
+            self.logger.debug(f'Received User: {data!r}')
             userdata, uid = self.build_user_info(
                 data, access_token
             )
