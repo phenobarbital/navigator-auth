@@ -259,6 +259,7 @@ class ExternalAuth(BaseAuthBackend):
             user=userdata
         )
         # User ID:
+        print('USERDATA > ', userdata)
         try:
             userid = userdata[self.userid_attribute]
             userdata["id"] = userid
