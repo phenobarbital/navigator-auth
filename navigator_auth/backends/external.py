@@ -50,7 +50,6 @@ class ExternalAuth(BaseAuthBackend):
     username_attribute: str = "username"
     pwd_atrribute: str = "password"
     _service_name: str = "service"
-    user_mapping: dict = {}
     _ident: AuthUser = OauthUser
     _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
     _callbacks: Optional[list[Callable]] = None
@@ -63,7 +62,12 @@ class ExternalAuth(BaseAuthBackend):
         password_attribute: str = None,
         **kwargs,
     ):
-        super().__init__(user_attribute, userid_attribute, password_attribute, **kwargs)
+        super().__init__(
+            user_attribute,
+            userid_attribute,
+            password_attribute,
+            **kwargs
+        )
         self.base_url: str = ""
         self.authorize_uri: str = ""
         self.userinfo_uri: str = ""
@@ -257,7 +261,7 @@ class ExternalAuth(BaseAuthBackend):
         """
         # Get data for user mapping:
         userdata = self.get_user_mapping(
-            user=userdata
+            user=userdata, mapping=self.user_mapping, default_mapping=False
         )
         # User ID:
         try:
