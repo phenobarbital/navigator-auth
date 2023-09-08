@@ -169,6 +169,9 @@ class BaseAuthBackend(ABC):
         else:
             mapping = self.user_mapping
         udata = {}
+        self.logger.debug(
+            f'Mapping: {mapping}'
+        )
         for key, val in mapping.items():
             if key != self.password_attribute:
                 try:
@@ -180,7 +183,6 @@ class BaseAuthBackend(ABC):
         return udata
 
     def get_userdata(self, user: dict, default_mapping: bool = False, **kwargs) -> dict:
-        userdata = {}
         userdata = self.get_user_mapping(
             user=user,
             default_mapping=default_mapping

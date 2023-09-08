@@ -253,6 +253,7 @@ class ExternalAuth(BaseAuthBackend):
             Tuple: user_id and user_data.
         Raises:
             UserNotFound: when user doesn't exists on Backend.
+            ValueError: User doesn't have username attributes.
         """
         # Get data for user mapping:
         userdata = self.get_user_mapping(
@@ -275,12 +276,12 @@ class ExternalAuth(BaseAuthBackend):
         # set original token in userdata
         userdata['auth_token'] = token
         userdata["token_type"] = self.scheme
+        print('ENDED userdata > ', userdata)
         return (userdata, userid)
 
     async def validate_user_info(
         self, request: web.Request, user_id: Any, userdata: Any, token: str
     ) -> dict:
-        data = None
         user = None
         # then, if everything is ok with user data, can we validate from model:
         try:

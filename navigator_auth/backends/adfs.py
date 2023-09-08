@@ -236,11 +236,13 @@ class ADFSAuth(ExternalAuth):
                 reason=f"Unable to decode JWT token {e}."
             )
         try:
-            self.logger.debug(f'Received User: {data!r}')
+            self.logger.debug(
+                f'Received User: {data!r}'
+            )
             userdata, uid = self.build_user_info(
                 data, access_token
             )
-            userdata[self.username_attribute] = userdata['upn']
+            userdata[self.username_attribute] = userdata[self.userid_attribute]
             data = await self.validate_user_info(
                 request, uid, userdata, access_token
             )
