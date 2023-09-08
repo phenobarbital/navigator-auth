@@ -2,16 +2,12 @@ import asyncio
 from typing import Union, Optional
 from collections.abc import Callable, Iterable
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 import importlib
-import pprint
-import jwt
 from aiohttp import web, hdrs
 from aiohttp.web_urldispatcher import SystemRoute
 from navconfig.logging import logging
-from datamodel.exceptions import ValidationError
 from asyncdb.models import Model
 from navigator_session import (
     new_session,
@@ -22,19 +18,13 @@ from navigator_session import (
 )
 from navigator_auth.exceptions import (
     AuthException,
-    UserNotFound,
-    InvalidAuth,
-    FailedAuth,
-    AuthExpired,
+    InvalidAuth
 )
 from navigator_auth.conf import (
-    AUTH_DEFAULT_ISSUER,
     AUTH_DEFAULT_SCHEME,
     AUTH_USERNAME_ATTRIBUTE,
-    AUTH_JWT_ALGORITHM,
     USER_MAPPING,
     AUTH_CREDENTIALS_REQUIRED,
-    SECRET_KEY,
     AUTH_SUCCESSFUL_CALLBACKS,
     exclude_list,
 )
@@ -50,7 +40,6 @@ class BaseAuthBackend(ABC):
     password_attribute: str = "password"
     userid_attribute: str = "user_id"
     username_attribute: str = AUTH_USERNAME_ATTRIBUTE
-    user_mapping: dict = USER_MAPPING
     session_key_property: str = SESSION_KEY
     session_timeout: int = int(SESSION_TIMEOUT)
     _service: str = None
@@ -97,6 +86,8 @@ class BaseAuthBackend(ABC):
         self.logger = logging.getLogger(
             f"Auth.{self._service}"
         )
+        # User Mapping:
+        self.user_mapping: dict = USER_MAPPING
         ## Backend Info:
         self._info = AuthBackend()
         self._info.name = self._service

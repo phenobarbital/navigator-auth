@@ -63,8 +63,22 @@ class AzureAuth(ExternalAuth):
     userid_attribute: str = "id"
     pwd_atrribute: str = "password"
     _service_name: str = "azure"
-    user_mapping: dict = AZURE_MAPPING
     _description: str = "Microsoft Azure Authentication"
+
+    def __init__(
+        self,
+        user_attribute: str = None,
+        userid_attribute: str = None,
+        password_attribute: str = None,
+        **kwargs,
+    ):
+        super().__init__(
+            user_attribute,
+            userid_attribute,
+            password_attribute,
+            **kwargs
+        )
+        self.user_mapping = AZURE_MAPPING
 
     def configure(self, app):
         super(AzureAuth, self).configure(app)
