@@ -247,12 +247,18 @@ class ExternalAuth(BaseAuthBackend):
     async def finish_logout(self, request: web.Request):
         """finish_logout, Finish Logout Method."""
 
-    def build_user_info(self, userdata: dict, token: str) -> tuple:
+    def build_user_info(
+        self,
+        userdata: dict,
+        token: str,
+        mapping: dict = None
+    ) -> tuple:
         """build_user_info.
             Get user or validate user from User Model.
         Args:
             userdata (Dict): User data gets from Auth Backend.
             token (str): User token gets from Auth Backend.
+            mapping (dict): User mapping gets from Auth Backend.
         Returns:
             Tuple: user_id and user_data.
         Raises:
@@ -260,8 +266,10 @@ class ExternalAuth(BaseAuthBackend):
             ValueError: User doesn't have username attributes.
         """
         # Get data for user mapping:
+        if not mapping:
+            mapping = self.user_mapping
         userdata = self.get_user_mapping(
-            user=userdata, mapping=self.user_mapping, default_mapping=False
+            user=userdata, mapping=mapping, default_mapping=False
         )
         # User ID:
         try:
