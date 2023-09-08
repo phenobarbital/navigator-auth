@@ -47,10 +47,10 @@ class ADFSAuth(ExternalAuth):
     username_attribute: str = "username"
     pwd_atrribute: str = "password"
     version = "v1.1"
-    user_mapping: dict = adfs_mapping
     _description: str = "SSO (Active Directory FS)"
 
     def configure(self, app):
+        self.user_mapping = adfs_mapping
         router = app.router
         # URIs:
         if ADFS_TENANT_ID:

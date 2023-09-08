@@ -50,7 +50,7 @@ class BaseAuthBackend(ABC):
     password_attribute: str = "password"
     userid_attribute: str = "user_id"
     username_attribute: str = AUTH_USERNAME_ATTRIBUTE
-    user_mapping: dict = None
+    user_mapping: dict = USER_MAPPING
     session_key_property: str = SESSION_KEY
     session_timeout: int = int(SESSION_TIMEOUT)
     _service: str = None
@@ -91,9 +91,6 @@ class BaseAuthBackend(ABC):
         # user and group models
         # getting User and Group Models
         self.user_model: Model = kwargs["user_model"]
-        # user mapping
-        if not self.user_mapping:
-            self.user_mapping = USER_MAPPING
         # starts the Executor
         self.executor = ThreadPoolExecutor(max_workers=2)
         # logger
