@@ -159,11 +159,12 @@ class BaseAuthBackend(ABC):
     def get_user_mapping(
         self,
         user: dict,
-        default_mapping: bool = False
+        default_mapping: bool = False,
+        mapping: dict = None
     ) -> dict:
         if default_mapping is True:
             mapping = USER_MAPPING
-        else:
+        elif mapping is None:
             mapping = self.user_mapping
         udata = {}
         self.logger.debug(
