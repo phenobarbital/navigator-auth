@@ -47,8 +47,22 @@ class ADFSAuth(ExternalAuth):
     username_attribute: str = "username"
     pwd_atrribute: str = "password"
     version = "v1.1"
-    user_mapping: dict = adfs_mapping
     _description: str = "SSO (Active Directory FS)"
+
+    def __init__(
+        self,
+        user_attribute: str = None,
+        userid_attribute: str = None,
+        password_attribute: str = None,
+        **kwargs,
+    ):
+        super().__init__(
+            user_attribute,
+            userid_attribute,
+            password_attribute,
+            **kwargs
+        )
+        self.user_mapping = adfs_mapping
 
     def configure(self, app):
         router = app.router
