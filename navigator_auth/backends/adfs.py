@@ -254,7 +254,7 @@ class ADFSAuth(ExternalAuth):
                 f'Received User: {data!r}'
             )
             userdata, uid = self.build_user_info(
-                data, access_token
+                data, access_token, mapping=adfs_mapping
             )
             userdata[self.username_attribute] = userdata[self.userid_attribute]
             data = await self.validate_user_info(
