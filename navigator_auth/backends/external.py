@@ -269,7 +269,7 @@ class ExternalAuth(BaseAuthBackend):
         if not mapping:
             mapping = self.user_mapping
         userdata = self.get_user_mapping(
-            user=userdata, mapping=mapping, default_mapping=False
+            user=userdata, mapping=mapping
         )
         # User ID:
         try:
@@ -334,7 +334,7 @@ class ExternalAuth(BaseAuthBackend):
             }
             await self.auth_successful_callback(request, user, **args)
         try:
-            userinfo = self.get_userdata(user, default_mapping=True)
+            userinfo = self.get_userdata(user=user)
             ### merging userdata and userinfo:
             userinfo = {**userinfo, **userdata}
             user = await self.create_user(userinfo)

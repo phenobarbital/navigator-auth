@@ -150,12 +150,9 @@ class BaseAuthBackend(ABC):
     def get_user_mapping(
         self,
         user: dict,
-        default_mapping: bool = False,
         mapping: dict = None
     ) -> dict:
-        if default_mapping is True:
-            mapping = USER_MAPPING
-        elif mapping is None:
+        if mapping is None:
             mapping = self.user_mapping
         udata = {}
         self.logger.debug(
@@ -171,10 +168,9 @@ class BaseAuthBackend(ABC):
                     )
         return udata
 
-    def get_userdata(self, user: dict, default_mapping: bool = False, **kwargs) -> dict:
+    def get_userdata(self, user: dict, **kwargs) -> dict:
         userdata = self.get_user_mapping(
-            user=user,
-            default_mapping=default_mapping
+            user=user
         )
         ### getting custom user attributes.
         for obj in self._user_attributes:

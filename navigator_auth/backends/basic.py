@@ -148,7 +148,7 @@ class BasicAuth(BaseAuthBackend):
             except Exception as err:
                 raise AuthException(str(err), status=500) from err
             try:
-                userdata = self.get_userdata(user)
+                userdata = self.get_userdata(user=user)
                 username = user[self.username_attribute]
                 uid = user[self.userid_attribute]
                 userdata[self.username_attribute] = username
