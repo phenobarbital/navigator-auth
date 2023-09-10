@@ -25,6 +25,7 @@ from navigator_auth.conf import (
     PREFERRED_AUTH_SCHEME,
     AUTH_OAUTH2_REDIRECT_URL,
     exclude_list,
+    USER_MAPPING
 )
 from .abstract import BaseAuthBackend
 
@@ -251,7 +252,7 @@ class ExternalAuth(BaseAuthBackend):
         self,
         userdata: dict,
         token: str,
-        mapping: dict = None
+        mapping: dict
     ) -> tuple:
         """build_user_info.
             Get user or validate user from User Model.
@@ -266,8 +267,6 @@ class ExternalAuth(BaseAuthBackend):
             ValueError: User doesn't have username attributes.
         """
         # Get data for user mapping:
-        if not mapping:
-            mapping = self.user_mapping
         userdata = self.get_user_mapping(
             user=userdata, mapping=mapping
         )
@@ -325,16 +324,24 @@ class ExternalAuth(BaseAuthBackend):
                     f"Auth: Invalid config for AUTH_MISSING_ACCOUNT: \
                     {AUTH_MISSING_ACCOUNT}"
                 ) from err
+        print('=================================================')
         if user and self._callbacks:
-            # construir e invocar callbacks para actualizar data de usuario
-            args = {
-                "username_attribute": self.username_attribute,
-                "userid_attribute": self.userid_attribute,
-                "userdata": userdata
-            }
-            await self.auth_successful_callback(request, user, **args)
+            try:
+                # construir e invocar callbacks para actualizar data de usuario
+                args = {
+                    "username_attribute": self.username_attribute,
+                    "userid_attribute": self.userid_attribute,
+                    "userdata": userdata
+                }
+                await self.auth_successful_callback(request, user, **args)
+            except Exception as exc:
+                self.logger.warning(exc)
         try:
-            userinfo = self.get_userdata(user=user)
+            print('==== POR AQUI VA === ')
+            userinfo = self.get_userdata(
+                user=user,
+                mapping=USER_MAPPING
+            )
             ### merging userdata and userinfo:
             userinfo = {**userinfo, **userdata}
             user = await self.create_user(userinfo)

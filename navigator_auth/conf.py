@@ -254,7 +254,7 @@ GROUP_CLAIM = config.get("GROUP_CLAIM")
 ADFS_LOGIN_REDIRECT_URL = config.get("ADFS_LOGIN_REDIRECT_URL")
 ADFS_CALLBACK_REDIRECT_URL = config.get("ADFS_CALLBACK_REDIRECT_URL", fallback=None)
 
-adfs_mapping = {
+ADFS_MAPPING = {
     "upn": "upn",
     "user_id": "upn",
     "email": "email",
@@ -267,7 +267,7 @@ adfs_mapping = {
 
 AZURE_AD_SERVER = config.get("AZURE_AD_SERVER", fallback="login.microsoftonline.com")
 AZURE_SESSION_TIMEOUT = config.get("AZURE_SESSION_TIMEOUT", fallback=120)
-ADFS_CLAIM_MAPPING = config.get("ADFS_CLAIM_MAPPING", fallback=adfs_mapping)
+ADFS_CLAIM_MAPPING = config.get("ADFS_CLAIM_MAPPING", fallback=ADFS_MAPPING)
 
 # Okta
 OKTA_CLIENT_ID = config.get("OKTA_CLIENT_ID")

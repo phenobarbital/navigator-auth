@@ -132,7 +132,11 @@ class OktaAuth(OauthAuth):
                 timeout=60,
                 headers={"Authorization": f"Bearer {access_token}"},
             ).json()
-            userdata, uid = self.build_user_info(data, access_token)
+            userdata, uid = self.build_user_info(
+                data,
+                access_token,
+                mapping=self.user_mapping
+            )
             # get user data
             data = await self.validate_user_info(request, uid, userdata, access_token)
             return self.home_redirect(request, token=data["token"], token_type="Bearer")

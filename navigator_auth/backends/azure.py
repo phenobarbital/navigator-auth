@@ -211,7 +211,11 @@ class AzureAuth(ExternalAuth):
                             token_type="Bearer",
                         )
                         data = {**data, **client_info}
-                        userdata, uid = self.build_user_info(data, access_token)
+                        userdata, uid = self.build_user_info(
+                            userdata=data,
+                            token=access_token,
+                            mapping=self.user_mapping
+                        )
                         # also, user information:
                         data = await self.validate_user_info(
                             request, uid, userdata, access_token
@@ -292,57 +296,61 @@ class AzureAuth(ExternalAuth):
                 result = app.acquire_token_by_auth_code_flow(
                     auth_code_flow=flow, auth_response=auth_response
                 )
-                if "token_type" in result:
-                    token_type = result["token_type"]
-                    access_token = result["access_token"]
-                    client_info = {}
-                    if "client_info" in result:
-                        # It happens when client_info and profile are in request
-                        client_info = orjson.loads(
-                            decode_part(result["client_info"])
-                        )
-                    # getting user information:
-                    try:
-                        data = await self.get(
-                            url=self.userinfo_uri,
-                            token=access_token,
-                            token_type=token_type,
-                        )
-                        # build user information:
-                        data = {**data, **client_info}
-                        userdata, uid = self.build_user_info(data, access_token)
-                        data = await self.validate_user_info(
-                            request, uid, userdata, access_token
-                        )
-                    except Exception as err:
-                        logging.exception(
-                            f"Azure: Error getting User information: {err}"
-                        )
+                if "token_type" not in result:
+                    if "error" in result:
+                        error = result["error"]
+                        desc = result["error_description"]
+                        message = f"Azure {error}: {desc}"
+                        logging.exception(message)
                         return self.failed_redirect(
-                            request, error="ERROR_RESOURCE_NOT_FOUND",
-                            message=f"Azure: Error getting User information: {err}"
+                            request, error="AUTHENTICATION_ERROR",
+                            message="Failed to generate session token"
                         )
-                    # Redirect User to HOME
-                    try:
-                        token = data["token"]
-                    except (KeyError, TypeError):
-                        token = None
-                    return self.home_redirect(
-                        request, token=token, token_type=token_type
+                    else:
+                        return self.failed_redirect(
+                            request, error=f"Info: {result}"
+                        )
+                token_type = result["token_type"]
+                access_token = result["access_token"]
+                client_info = {}
+                if "client_info" in result:
+                    # It happens when client_info and profile are in request
+                    client_info = orjson.loads(
+                        decode_part(result["client_info"])
                     )
-                elif "error" in result:
-                    error = result["error"]
-                    desc = result["error_description"]
-                    message = f"Azure {error}: {desc}"
-                    logging.exception(message)
+                # getting user information:
+                try:
+                    data = await self.get(
+                        url=self.userinfo_uri,
+                        token=access_token,
+                        token_type=token_type,
+                    )
+                    # build user information:
+                    data = {**data, **client_info}
+                    userdata, uid = self.build_user_info(
+                        userdata=data,
+                        token=access_token,
+                        mapping=self.user_mapping
+                    )
+                    data = await self.validate_user_info(
+                        request, uid, userdata, access_token
+                    )
+                except Exception as err:
+                    logging.exception(
+                        f"Azure: Error getting User information: {err}"
+                    )
                     return self.failed_redirect(
-                        request, error="AUTHENTICATION_ERROR",
-                        message="Failed to generate session token"
+                        request, error="ERROR_RESOURCE_NOT_FOUND",
+                        message=f"Azure: Error getting User information: {err}"
                     )
-                else:
-                    return self.failed_redirect(
-                        request, error="ERROR_CONFIGURATION"
-                    )
+                # Redirect User to HOME
+                try:
+                    token = data["token"]
+                except (KeyError, TypeError):
+                    token = None
+                return self.home_redirect(
+                    request, token=token, token_type=token_type
+                )
             except Exception as err:
                 logging.exception(err)
                 return self.failed_redirect(
@@ -413,7 +421,11 @@ class AzureAuth(ExternalAuth):
             )
         # Creating User Session:
         try:
-            userdata, uid = self.build_user_info(data, token)
+            userdata, uid = self.build_user_info(
+                userdata=data,
+                token=token,
+                mapping=self.user_mapping
+            )
         except ValueError as err:
             return self.auth_error(
                 reason={

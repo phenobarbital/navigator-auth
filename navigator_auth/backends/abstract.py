@@ -50,6 +50,8 @@ class BaseAuthBackend(ABC):
     _external_auth: bool = False
     _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
     _callbacks: Optional[list[Callable]] = None
+    # User Mapping:
+    user_mapping: dict = USER_MAPPING
 
     def __init__(
         self,
@@ -86,8 +88,6 @@ class BaseAuthBackend(ABC):
         self.logger = logging.getLogger(
             f"Auth.{self._service}"
         )
-        # User Mapping:
-        self.user_mapping: dict = USER_MAPPING
         ## Backend Info:
         self._info = AuthBackend()
         self._info.name = self._service
@@ -140,7 +140,9 @@ class BaseAuthBackend(ABC):
     async def create_user(self, userdata) -> Identity:
         try:
             usr = self._ident(data=userdata)
-            self.logger.debug(f"User Created > {usr.username}")
+            self.logger.debug(
+                f"User Created > {usr.username}"
+            )
             return usr
         except Exception as err:
             raise InvalidAuth(
@@ -150,10 +152,8 @@ class BaseAuthBackend(ABC):
     def get_user_mapping(
         self,
         user: dict,
-        mapping: dict = None
+        mapping: dict
     ) -> dict:
-        if mapping is None:
-            mapping = self.user_mapping
         udata = {}
         self.logger.debug(
             f'Mapping: {mapping}'
@@ -170,7 +170,7 @@ class BaseAuthBackend(ABC):
 
     def get_userdata(self, user: dict, **kwargs) -> dict:
         userdata = self.get_user_mapping(
-            user=user
+            user=user, mapping=USER_MAPPING
         )
         ### getting custom user attributes.
         for obj in self._user_attributes:
