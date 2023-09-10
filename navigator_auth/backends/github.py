@@ -75,7 +75,11 @@ class GithubAuth(OauthAuth):
                     headers=headers,
                 )
                 if data:
-                    userdata, uid = self.build_user_info(data, access_token)
+                    userdata, uid = self.build_user_info(
+                        data,
+                        access_token,
+                        mapping=self.user_mapping
+                    )
                     # also, user information:
                     data = await self.validate_user_info(
                         request, uid, userdata, access_token

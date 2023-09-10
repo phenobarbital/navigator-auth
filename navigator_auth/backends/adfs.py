@@ -26,7 +26,7 @@ from navigator_auth.conf import (
     ADFS_LOGIN_REDIRECT_URL,
     AZURE_AD_SERVER,
     exclude_list,
-    adfs_mapping
+    ADFS_MAPPING
 )
 from .jwksutils import get_public_key
 from .external import ExternalAuth
@@ -48,21 +48,7 @@ class ADFSAuth(ExternalAuth):
     pwd_atrribute: str = "password"
     version = "v1.1"
     _description: str = "SSO (Active Directory FS)"
-
-    def __init__(
-        self,
-        user_attribute: str = None,
-        userid_attribute: str = None,
-        password_attribute: str = None,
-        **kwargs,
-    ):
-        super().__init__(
-            user_attribute,
-            userid_attribute,
-            password_attribute,
-            **kwargs
-        )
-        self.user_mapping = adfs_mapping
+    user_mapping: dict = ADFS_MAPPING
 
     def configure(self, app):
         router = app.router
@@ -253,8 +239,13 @@ class ADFSAuth(ExternalAuth):
             self.logger.debug(
                 f'Received User: {data!r}'
             )
+            self.logger.debug(
+                f'Backend Mapping: {self.user_mapping}'
+            )
             userdata, uid = self.build_user_info(
-                data, access_token, mapping=adfs_mapping
+                userdata=data,
+                token=access_token,
+                mapping=self.user_mapping
             )
             userdata[self.username_attribute] = userdata[self.userid_attribute]
             data = await self.validate_user_info(
