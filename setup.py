@@ -31,11 +31,12 @@ with open(version, 'r', encoding='utf-8') as meta:
             name = node.targets[0]
             if isinstance(name, ast.Name) and \
                     name.id in (
-                            '__version__',
-                            '__title__',
-                            '__description__',
-                            '__author__',
-                            '__license__', '__author_email__'):
+                        '__version__',
+                        '__title__',
+                        '__description__',
+                        '__author__',
+                        '__license__', '__author_email__'
+            ):
                 v = node.value
                 if name.id == '__version__':
                     __version__ = v.s
@@ -119,7 +120,7 @@ setup(
     ],
     install_requires=[
         "PyNaCl==1.5.0",
-        "aiohttp==3.8.4",
+        "aiohttp==3.8.5",
         "uvloop==0.17.0",
         "asyncio==3.4.3",
         "asyncdb>=2.2.0",
