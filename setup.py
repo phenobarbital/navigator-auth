@@ -126,7 +126,7 @@ setup(
         "asyncdb>=2.2.0",
         "navconfig[default]>=1.1.0",
         "PyJWT==2.8.0",
-        "pycryptodome==3.17",
+        "pycryptodome==3.19.0",
         "rncryptor==3.3.0",
         "msal==1.22.0",
         "aiogoogle==5.5.0",
