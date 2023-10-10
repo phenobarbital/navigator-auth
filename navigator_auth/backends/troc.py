@@ -95,16 +95,19 @@ class TrocToken(BaseAuthBackend):
 
     async def authenticate(self, request):
         """Authenticate, refresh or return the user credentials."""
+        qs = {key: val for (key, val) in request.query.items()}
         try:
             token = await self.get_payload(request)
-            print('TOKEN TROC: > ', token)
         except Exception as err:
             raise AuthException(
                 str(err),
                 status=400
             ) from err
         if not token:
-            raise InvalidAuth("Token: Missing Token", status=401)
+            raise InvalidAuth(
+                "Token: Missing Token",
+                status=401
+            )
         else:
             # getting user information
             # TODO: making the validation of token and expiration
@@ -165,10 +168,21 @@ class TrocToken(BaseAuthBackend):
                     }
                     await self.auth_successful_callback(request, user, **args)
                 # saving user-data into request:
+                print('USER > ', userdata, usr)
                 await self.remember(request, uid, userdata, usr)
+                # If redirect_uri is set:
+                if 'redirect_uri' in qs:
+                    # redirect:
+                    redirect = qs.get('redirect_uri', None)
+                    return self.uri_redirect(
+                        request,
+                        token=token, uri=redirect
+                    )
                 return {"token": token, **userdata}
             except Exception as err:  # pylint: disable=W0703
-                self.logger.exception(f"TROC Auth: Authentication Error: {err}")
+                self.logger.exception(
+                    f"TROC Auth: Authentication Error: {err}"
+                )
                 return False
 
     async def check_credentials(self, request):
@@ -188,7 +202,9 @@ class TrocToken(BaseAuthBackend):
         # avoid check system routes
         if await self.verify_exceptions(request):
             return await handler(request)
-        self.logger.debug(f"MIDDLEWARE: {self.__class__.__name__}")
+        self.logger.debug(
+            f"MIDDLEWARE: {self.__class__.__name__}"
+        )
         try:
             token = await self.get_payload(request)
             _, payload = self._idp.decode_token(code=token)

@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 import importlib
+from urllib.parse import urlparse
+from requests.models import PreparedRequest
 from aiohttp import web, hdrs
 from aiohttp.web_urldispatcher import SystemRoute
 from navconfig.logging import logging
@@ -27,6 +29,8 @@ from navigator_auth.conf import (
     AUTH_CREDENTIALS_REQUIRED,
     AUTH_SUCCESSFUL_CALLBACKS,
     exclude_list,
+    PREFERRED_AUTH_SCHEME,
+    AUTH_REDIRECT_URI
 )
 from navigator_auth.libs.json import json_encoder
 # Authenticated Identity
@@ -386,3 +390,50 @@ class BaseAuthBackend(ABC):
         ## Already Authenticated
         if request.get("authenticated", False) is True:
             return True
+
+    def get_domain(self, request: web.Request) -> str:
+        uri = urlparse(str(request.url))
+        domain_url = f"{PREFERRED_AUTH_SCHEME}://{uri.netloc}"
+        logging.debug(f"DOMAIN: {domain_url}")
+        return domain_url
+
+    def get_finish_redirect_url(self, request: web.Request) -> str:
+        domain_url = self.get_domain(request)
+        try:
+            redirect_url = request.query["redirect_uri"]
+        except (TypeError, KeyError):
+            redirect_url = AUTH_REDIRECT_URI
+        if not bool(urlparse(redirect_url).netloc):
+            redirect_url = f"{domain_url}{redirect_url}"
+        self.finish_redirect_url = redirect_url
+
+    def prepare_url(self, url: str, params: dict = None):
+        req = PreparedRequest()
+        req.prepare_url(url, params)
+        return req.url
+
+    def uri_redirect(
+        self,
+        request: web.Request,
+        token: str = None,
+        token_type: str = "Bearer",
+        uri: str = None
+    ):
+        headers = {
+            "x-authenticated": "true"
+        }
+        self.get_finish_redirect_url(request)
+        params = {}
+        if token:
+            headers["x-auth-token-type"] = token_type
+            params = {"token": token, "type": token_type}
+        if uri is not None:
+            if not bool(urlparse(uri).netloc):
+                domain_url = self.get_domain(request)
+                redirect_url = f"{domain_url}{uri}"
+            else:
+                redirect_url = uri
+        else:
+            redirect_url = self.finish_redirect_url
+        url = self.prepare_url(redirect_url, params)
+        return web.HTTPFound(url, headers=headers)

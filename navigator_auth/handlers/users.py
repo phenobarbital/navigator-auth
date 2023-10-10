@@ -4,6 +4,7 @@ import importlib
 import hashlib
 import base64
 import secrets
+from urllib.parse import urlparse
 from aiohttp import web
 from datamodel.exceptions import ValidationError
 from navigator_session import get_session, SESSION_KEY, AUTH_SESSION_OBJECT
@@ -19,6 +20,8 @@ from navigator_auth.conf import (
     AUTH_PWD_ALGORITHM,
     AUTH_PWD_SALT_LENGTH,
     PARTNER_KEY,
+    PREFERRED_AUTH_SCHEME,
+    TROCTOKEN_REDIRECT_URI
 )
 from .base import BaseView, BaseHandler
 
@@ -95,6 +98,14 @@ class UserSession(BaseHandler):
         headers = {"x-status": "OK", "x-message": "Session Saved"}
         return self.json_response(content=data, headers=headers)
 
+    def get_domain(self, request: web.Request) -> str:
+        uri = urlparse(str(request.url))
+        domain_url = f"{PREFERRED_AUTH_SCHEME}://{uri.netloc}"
+        self.logger.debug(
+            f"DOMAIN: {domain_url}"
+        )
+        return domain_url
+
     async def gen_token(self, request: web.Request):
         """Generate a RCCRYPT TOKEN from Email account."""
         session = await self.session(request)
@@ -106,7 +117,10 @@ class UserSession(BaseHandler):
         ### TODO: check if user is superuser:
         userinfo = session[AUTH_SESSION_OBJECT]
         if userinfo["superuser"] is False:
-            return self.error(reason="Access Denied", status=406)
+            return self.error(
+                reason="Access Denied",
+                status=406
+            )
         try:
             db = request.app["authdb"]
             async with await db.acquire() as conn:
@@ -123,7 +137,13 @@ class UserSession(BaseHandler):
                 cipher = Cipher(PARTNER_KEY, ctype="RNC")
                 rnc = cipher.encode(self._json.dumps(data))
                 headers = {"x-status": "OK", "x-message": "Token Generated"}
-                response = {"token": rnc.upper()}
+                token = rnc.upper()
+                api_url = self.get_domain(request)
+                red = TROCTOKEN_REDIRECT_URI
+                response = {
+                    "token": token,
+                    "uri": f"{api_url}/api/v1/login?auth={token}&redirect_uri={red}"
+                }
                 return self.json_response(content=response, headers=headers)
         except ValidationError as ex:
             self.error(reason="User info has errors", exception=ex.payload, status=412)
