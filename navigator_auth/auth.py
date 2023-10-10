@@ -256,6 +256,9 @@ class AuthHandler:
                 ) from ex
         return False
 
+    def get_token_backend(self):
+        return self.backends['TrocToken']
+
     async def api_login(self, request: web.Request) -> web.Response:
         """Login.
 
@@ -263,6 +266,7 @@ class AuthHandler:
         """
         # first: getting header for an existing backend
         userdata = None
+        qs = {key: val for (key, val) in request.query.items()}
         if (backend := self.get_auth_backend(request)):
             try:
                 userdata = await backend.authenticate(request)
@@ -295,6 +299,20 @@ class AuthHandler:
                     reason=f"Auth Exception: {err}",
                     exception=err
                 )
+        elif 'auth' in qs:
+            # Using TrocToken or other backend on list with auth=
+            if (backend := self.get_token_backend()):
+                try:
+                    userdata = await backend.authenticate(request)
+                    if not userdata:
+                        raise self.ForbiddenAccess(
+                            reason="User was not authenticated"
+                        )
+                except Exception as err:
+                    raise self.auth_error(
+                        reason=f"Auth Exception: {err}",
+                        exception=err
+                    )
         else:
             # second: if no backend declared, will iterate over all backends
             for _, backend in self.backends.items():

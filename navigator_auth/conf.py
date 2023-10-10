@@ -196,7 +196,10 @@ DJANGO_USER_MAPPING = {
 # used by tokenauth with RNC.
 PARTNER_KEY = config.get("PARTNER_KEY")
 CYPHER_TYPE = config.get("CYPHER_TYPE", fallback="RNC")
-
+TROCTOKEN_REDIRECT_URI = config.get(
+    'TROCTOKEN_REDIRECT_URI',
+    fallback=AUTH_REDIRECT_URI
+)
 ## Oauth2 authentication:
 AUTH_TOKEN_ISSUER = config.get("AUTH_TOKEN_ISSUER", fallback="urn:Navigator")
 AUTH_TOKEN_SECRET = config.get("AUTH_TOKEN_SECRET", fallback=PARTNER_KEY)
