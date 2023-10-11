@@ -1,11 +1,12 @@
+from aiohttp import web
 from .permissions import PermissionHandler
-from .users import UserHandler, UserSession
+from .users import UserManager, UserSession
 from .groups import GroupHandler, GroupPermissionHandler, UserGroupHandler
 from .userattrs import UserAccountHandler, UserIdentityHandler
 from .partners import PartnerKeyHandler
 
 ## TODO migration of login/logout handlers:
-def handler_routes(router) -> None:
+def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     ### Model permissions:
     router.add_view(
         r"/api/v1/permissions/{id:.*}", PermissionHandler,
@@ -43,14 +44,8 @@ def handler_routes(router) -> None:
         name="api_group_permissions",
     )
     ### User Methods:
-    router.add_view(
-        r"/api/v1/users/{id:.*}", UserHandler,
-        name="api_auth_users_id"
-    )
-    router.add_view(
-        r"/api/v1/users{meta:\:?.*}", UserHandler,
-        name="api_auth_users"
-    )
+    # User:
+    UserManager.configure(app, '/api/v1/users')
     # User Group:
     router.add_view(
         r"/api/v1/usergroups/{id:.*}", UserGroupHandler,

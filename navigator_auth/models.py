@@ -54,7 +54,7 @@ class User(Model):
     is_superuser: bool = Column(required=True, default=False)
     is_staff: bool = Column(required=False, default=True)
     title: str = Column(required=False, max=120)
-    avatar: Text = Column(max=2048)
+    avatar: Text
     is_active: bool = Column(required=True, default=True)
     is_new: bool = Column(required=True, default=True)
     timezone: str = Column(required=False, max=75, default="UTC", repr=False)
@@ -65,13 +65,14 @@ class User(Model):
         required=False, readonly=True, default=datetime.now()
     )
     created_by: str = Column(required=False)
-    # program_id: int = Column(required=False)
 
     class Meta:
         name = AUTH_USERS_TABLE
         schema = AUTH_DB_SCHEMA
+        description: str = 'User Schema'
         strict = True
         connection = None
+        frozen = False
 
 
 class UserIdentity(Model):
@@ -100,6 +101,7 @@ class UserIdentity(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+        frozen = False
 
 class VwUserIdentity(Model):
     identity_id: UUID = Column(
@@ -122,6 +124,7 @@ class VwUserIdentity(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+        frozen = False
 
 
 class UserDevices(Model):
@@ -166,6 +169,7 @@ class UserDevices(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+        frozen = False
 
 
 class Group(Model):
@@ -184,6 +188,7 @@ class Group(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+        frozen = False
 
 
 ## User belong to Group:
@@ -198,6 +203,7 @@ class UserGroup(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+        frozen = False
 
 
 class Permission(Model):
@@ -217,6 +223,7 @@ class Permission(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+        frozen = False
 
 
 class GroupPermission(Model):
@@ -232,6 +239,7 @@ class GroupPermission(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+        frozen = False
 
 
 class UserPermission(Model):
@@ -247,6 +255,7 @@ class UserPermission(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+        frozen = False
 
 class UserAttributes(Model):
     """Example of Extending User Model for adding more properties"""
@@ -265,6 +274,7 @@ class UserAttributes(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+        frozen = False
 
 
 class UserAccount(Model):
@@ -284,3 +294,4 @@ class UserAccount(Model):
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
+        frozen = False

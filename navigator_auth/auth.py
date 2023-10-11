@@ -45,7 +45,7 @@ from .exceptions import (
     InvalidAuth,
     UserNotFound,
 )
-from .handlers import handler_routes
+from .handlers import setup_handlers
 
 ## Responses
 from .libs.json import JSONContent
@@ -506,7 +506,7 @@ class AuthHandler:
             name="api_get_auth_methods",
         )
         ### Handler for Auth Objects:
-        handler_routes(router)
+        setup_handlers(self.app, router)
         # the backend add a middleware to the app
         mdl = self.app.middlewares
         # if authentication backend needs initialization
