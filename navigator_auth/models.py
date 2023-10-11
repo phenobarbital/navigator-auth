@@ -178,6 +178,7 @@ class Group(Model):
     )
     group_name: str = Column(required=True)
     is_active: bool = Column(required=True, default=True)
+    client_id: int = Column(required=False)
     description: Text = Column(required=False)
     created_at: datetime = Column(required=False, default=datetime.now())
     updated_at: datetime = Column(required=False, default=datetime.now())

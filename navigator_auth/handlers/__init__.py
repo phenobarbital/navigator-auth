@@ -1,7 +1,7 @@
 from aiohttp import web
 from .permissions import PermissionHandler
 from .users import UserManager, UserSession
-from .groups import GroupHandler, GroupPermissionHandler, UserGroupHandler
+from .groups import GroupManager, GroupPermissionManager, UserGroupManager
 from .userattrs import UserAccountHandler, UserIdentityHandler
 from .partners import PartnerKeyHandler
 
@@ -17,44 +17,14 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
         name="api_permissions"
     )
     ## Groups:
-    router.add_view(
-        r"/api/v1/groups/{id:.*}", GroupHandler,
-        name="api_groups_id"
-    )
-    router.add_view(
-        r"/api/v1/groups{meta:\:?.*}", GroupHandler,
-        name="api_groups"
-    )
-    router.add_view(
-        r"/api/v1/user_groups/{id:.*}", UserGroupHandler,
-        name="api_user_groups_id"
-    )
-    router.add_view(
-        r"/api/v1/user_groups{meta:\:?.*}", UserGroupHandler,
-        name="api_user_groups"
-    )
-    router.add_view(
-        r"/api/v1/group_permissions/{id:.*}",
-        GroupPermissionHandler,
-        name="api_group_permissions_id",
-    )
-    router.add_view(
-        r"/api/v1/group_permissions{meta:\:?.*}",
-        GroupPermissionHandler,
-        name="api_group_permissions",
-    )
+    GroupManager.configure(app, '/api/v1/groups')
+    # User Group:
+    UserGroupManager.configure(app, '/api/v1/user_groups')
+    GroupPermissionManager.configure(app, '/api/v1/group_permissions')
+    UserGroupManager.configure(app, '/api/v1/usergroups')
     ### User Methods:
     # User:
     UserManager.configure(app, '/api/v1/users')
-    # User Group:
-    router.add_view(
-        r"/api/v1/usergroups/{id:.*}", UserGroupHandler,
-        name="api_auth_usergroups_id"
-    )
-    router.add_view(
-        r"/api/v1/usergroups{meta:\:?.*}", UserGroupHandler,
-        name="api_auth_usergroups"
-    )
     # User Account:
     router.add_view(
         r"/api/v1/user_accounts/{id:.*}", UserAccountHandler,
