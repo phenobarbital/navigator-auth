@@ -120,11 +120,11 @@ setup(
     ],
     install_requires=[
         "PyNaCl==1.5.0",
-        "aiohttp==3.8.5",
-        "uvloop==0.17.0",
+        "aiohttp==3.8.6",
+        "uvloop==0.19.0",
         "asyncio==3.4.3",
         "asyncdb>=2.2.0",
-        "navconfig[default]>=1.1.0",
+        "navconfig[default]>=1.4.0",
         "PyJWT==2.8.0",
         "pycryptodome==3.17",
         "rncryptor==3.3.0",
@@ -133,7 +133,7 @@ setup(
         "okta-jwt-verifier==0.2.3",
         "python-slugify==8.0.1",
         "aiohttp_cors>=0.7.0",
-        "navigator-session>=0.3.3",
+        "navigator-session>=0.4.0",
         "pendulum==2.1.2"
     ],
     ext_modules=cythonize(extensions),

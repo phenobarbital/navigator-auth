@@ -20,7 +20,8 @@ from navigator_auth.conf import (
     AUTH_CREDENTIALS_REQUIRED,
     PARTNER_KEY,
     CYPHER_TYPE,
-    AUTH_SUCCESSFUL_CALLBACKS
+    AUTH_SUCCESSFUL_CALLBACKS,
+    TROCTOKEN_REDIRECT_URI
 )
 from .abstract import BaseAuthBackend
 from .basic import BasicUser
@@ -173,7 +174,7 @@ class TrocToken(BaseAuthBackend):
                 # If redirect_uri is set:
                 if 'redirect_uri' in qs:
                     # redirect:
-                    redirect = qs.get('redirect_uri', None)
+                    redirect = qs.get('redirect_uri', TROCTOKEN_REDIRECT_URI)
                     return self.uri_redirect(
                         request,
                         token=token, uri=redirect
