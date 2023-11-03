@@ -1,8 +1,9 @@
-from typing import Any
+from asyncdb.models import Model
 from navigator.views.model import ModelView, NotSet
 from navigator_auth.models import User
 from navigator_auth.conf import (
     AUTH_USER_MODEL,
+    AUTH_USER_VIEW
 )
 from .passwd import set_basic_password
 
@@ -10,9 +11,11 @@ from .passwd import set_basic_password
 class UserManager(ModelView):
     """
     Main Class for Managing Users.
+    TODO: Allow User editing own data.
     """
 
-    model: Any = User
+    model: Model = User
+    get_model: Model = AUTH_USER_VIEW
     name: str = "Users"
     model_name: str = AUTH_USER_MODEL
     pk: str = "user_id"
