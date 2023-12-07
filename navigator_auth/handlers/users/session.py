@@ -2,9 +2,9 @@ import time
 from urllib.parse import urlparse
 from aiohttp import web
 from datamodel.exceptions import ValidationError
-from navigator.libs.cypher import Cipher
 from navigator_session import get_session, SESSION_KEY, AUTH_SESSION_OBJECT
 from navigator_auth.exceptions import AuthException
+from navigator_auth.libs.cipher import Cipher
 from navigator_auth.models import User
 from navigator_auth.conf import (
     PARTNER_KEY,
