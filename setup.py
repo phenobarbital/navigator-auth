@@ -129,7 +129,7 @@ setup(
         "rncryptor==3.3.0",
         "msal==1.22.0",
         "aiogoogle==5.5.0",
-        "okta-jwt-verifier==0.2.3",
+        "okta-jwt-verifier==0.2.4",
         "python-slugify==8.0.1",
         "aiohttp_cors>=0.7.0",
         "navigator-session>=0.5.0",
