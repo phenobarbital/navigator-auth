@@ -287,7 +287,6 @@ class ExternalAuth(BaseAuthBackend):
         # set original token in userdata
         userdata['auth_token'] = token
         userdata["token_type"] = self.scheme
-        print('ENDED userdata > ', userdata)
         return (userdata, userid)
 
     async def validate_user_info(
@@ -305,14 +304,16 @@ class ExternalAuth(BaseAuthBackend):
         try:
             user = await self._idp.get_user(login)
         except UserNotFound as err:
-            if AUTH_MISSING_ACCOUNT == "ignore":
-                pass
-            elif AUTH_MISSING_ACCOUNT == "raise":
-                raise UserNotFound(f"User {login} doesn't exists: {err}") from err
+            if AUTH_MISSING_ACCOUNT == "raise":
+                raise UserNotFound(
+                    f"User {login} doesn't exists: {err}"
+                ) from err
             elif AUTH_MISSING_ACCOUNT == "create":
                 # can create an user using userdata:
-                self.logger.info(f"Creating new User: {login}")
                 await self.create_external_user(userdata)
+                self.logger.info(
+                    f"Created new User: {login}"
+                )
                 try:
                     user = await self._idp.get_user(login)
                 except UserNotFound as ex:
@@ -324,7 +325,6 @@ class ExternalAuth(BaseAuthBackend):
                     f"Auth: Invalid config for AUTH_MISSING_ACCOUNT: \
                     {AUTH_MISSING_ACCOUNT}"
                 ) from err
-        print('=================================================')
         if user and self._callbacks:
             try:
                 # construir e invocar callbacks para actualizar data de usuario
@@ -337,7 +337,6 @@ class ExternalAuth(BaseAuthBackend):
             except Exception as exc:
                 self.logger.warning(exc)
         try:
-            print('==== POR AQUI VA === ')
             userinfo = self.get_userdata(
                 user=user,
                 mapping=USER_MAPPING
@@ -350,11 +349,16 @@ class ExternalAuth(BaseAuthBackend):
             except KeyError:
                 user.username = user_id
             user.token = token  # issued token:
-            payload = {"user_id": user_id, **userdata}
+            payload = {
+                "user_id": user_id,
+                **userdata
+            }
             # saving Auth data.
             await self.remember(request, user_id, userinfo, user)
             # Create the User Token.
-            token, exp, scheme = self._idp.create_token(data=payload)
+            token, exp, scheme = self._idp.create_token(
+                data=payload
+            )
             return {
                 "token": token,
                 "type": scheme,
@@ -362,7 +366,8 @@ class ExternalAuth(BaseAuthBackend):
                 **userdata
             }
         except Exception as err:
-            logging.exception(err)
+            logging.exception(str(err))
+            raise
 
     @abstractmethod
     async def check_credentials(self, request: web.Request):
@@ -409,7 +414,9 @@ class ExternalAuth(BaseAuthBackend):
                 allow_redirects=True,
                 **kwargs,
             ) as response:
-                logging.debug(f"{url} with response: {response.status}, {response!s}")
+                logging.debug(
+                    f"{url} with response: {response.status}, {response!s}"
+                )
                 if response.status == 200:
                     try:
                         return await response.json()
@@ -442,8 +449,10 @@ class ExternalAuth(BaseAuthBackend):
         self, request: web.Request, fn: Callable, user: Callable, **kwargs
     ) -> None:
         # start here:
-        print(":: Calling the Successful Callback :: ", fn)
         try:
+            self.logger.notice(
+                f":: Calling Callback Function: {fn} ::"
+            )
             await fn(request, user, self._user_model, **kwargs)
         except Exception as e:
             self.logger.exception(
@@ -463,28 +472,43 @@ class ExternalAuth(BaseAuthBackend):
             login = userdata[self.username_attribute]
         except KeyError:
             login = userdata[self.user_attribute]
-        try:
-            async with await db.acquire() as conn:
-                self._user_model.Meta.connection = conn
-                # generate userdata:
-                data = {}
-                columns = self._user_model.columns(self._user_model)
-                for col in columns:
-                    try:
-                        data[col] = userdata[col]
-                    except KeyError:
-                        pass
+        async with await db.acquire() as conn:
+            self._user_model.Meta.connection = conn
+            # generate userdata:
+            data = {}
+            columns = self._user_model.columns(self._user_model)
+            for col in columns:
                 try:
-                    user = self._user_model(**data)
-                    if user:
-                        await user.insert()
-                        return user
-                    else:
-                        raise UserNotFound(f"Cannot create User {login}")
-                except ValidationError as ex:
-                    self.logger.error(f"Invalid User Information {login!s}")
-                    print(ex.payload)
-                    raise UserNotFound(f"Cannot create User {login}: {ex}") from ex
-        except Exception as e:
-            self.logger.error(f"Error getting User {login}")
-            raise UserNotFound(f"Error getting User {login}: {e!s}") from e
+                    data[col] = userdata[col]
+                except KeyError:
+                    pass
+            try:
+                user = self._user_model(**data)
+                if user:
+                    user = await user.insert()
+                    return user
+                else:
+                    raise UserNotFound(
+                        f"Cannot create User {login}"
+                    )
+            except TypeError as ex:
+                self.logger.error(
+                    f"Payload error for {login!s}"
+                )
+            except ValidationError as ex:
+                self.logger.error(
+                    f"Invalid User Information {login!s}"
+                )
+                self.logger.warning(
+                    f"{ex.payload!r}"
+                )
+                raise UserNotFound(
+                    f"Cannot create User {login}: {ex}"
+                ) from ex
+            except Exception as e:
+                self.logger.error(
+                    f"Error getting User {login}"
+                )
+                raise UserNotFound(
+                    f"Error getting User {login}: {e!s}"
+                ) from e
