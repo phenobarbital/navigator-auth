@@ -6,7 +6,7 @@ import base64
 import orjson
 from aiohttp import web
 import msal
-import aioredis
+import redis.asyncio as aioredis
 from msal.authority import AuthorityBuilder, AZURE_PUBLIC
 from navconfig.logging import logging
 from navigator_session import get_session

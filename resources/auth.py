@@ -1,5 +1,6 @@
 from datetime import datetime
 from aiohttp import web
+from datamodel.exceptions import ValidationError
 from asyncdb.drivers.pg import pg
 from asyncdb.models import Column, Model
 from asyncdb.exceptions import NoDataFound
@@ -14,10 +15,12 @@ from navigator_auth.conf import (
 
 async def last_login(request: web.Request, user: Model, usermodel: Model, **kwargs):
     print("::: Calling last Login ::: ")
-    logging.debug(f"User was logged in: {user.username}")
+    logging.debug(
+        f"User was logged in: {user.username}"
+    )
     # making a connection, then, saving the last login to user.
     args = {
-        "user_id": user["user_id"]
+        "username": user["username"]
     }
     try:
         db = pg(dsn=default_dsn)
@@ -26,10 +29,12 @@ async def last_login(request: web.Request, user: Model, usermodel: Model, **kwar
             u = await usermodel.get(**args)
             u.last_login = datetime.utcnow()
             await u.update()
-    except Exception as e:
-        logging.exception(e, stack_info=True)
-    finally:
-        db = None
+    except ValidationError as ex:
+        print(ex)
+        print(ex.payload)
+    except Exception as ex:
+        print(ex)
+        logging.exception(ex, stack_info=True)
 
 
 async def saving_troc_user(request: web.Request, user: Model, usermodel: Model, **kwargs):

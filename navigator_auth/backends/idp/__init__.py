@@ -6,6 +6,7 @@ import secrets
 import importlib
 import jwt
 from aiohttp import web, hdrs
+from asyncdb.exceptions.exceptions import NoDataFound
 from datamodel.exceptions import ValidationError
 from navconfig.logging import logging
 from navigator_session import (
@@ -103,15 +104,29 @@ class IdentityProvider:
                 search = {self.username_attribute: login}
                 self.user_search.Meta.connection = conn
                 user = await self.user_search.get(**search)
+        except NoDataFound as ex:
+            self.logger.error(
+                f"User {search!s} not found: {ex}"
+            )
+            raise UserNotFound(
+                f"User {search!s} doesn't exists"
+            ) from ex
+        except TypeError as ex:
+            self.logger.error(
+                f"Error on User Data {search!s}: {ex}"
+            )
+            raise
         except ValidationError as ex:
             self.logger.error(
-                f"Invalid User Information {search!s}"
+                f"Invalid User Information {search!s}: {ex}"
             )
-            print(ex.payload)
+            self.logger.warning(
+                f"{ex.payload!r}"
+            )
             raise
         except Exception as e:
             self.logger.error(
-                f"Error getting User {search!s}"
+                f"Error getting User {search!s}: {e!s}"
             )
             raise UserNotFound(
                 f"Error getting User {search!s}: {e!s}"

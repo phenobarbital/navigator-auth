@@ -14,7 +14,9 @@ class UserAttribute(metaclass=ABCMeta):
         try:
             return (self.name, self.get_value(user, userdata, **kwargs))
         except Exception as exc:
-            logging.warning(f'Error getting user attribute {self.name}: {exc}')
+            logging.warning(
+                f'Error getting user attribute {self.name}: {exc}'
+            )
             return self.name, None
 
     @abstractmethod
