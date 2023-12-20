@@ -70,10 +70,10 @@ class Oauth2Provider(BaseAuthBackend):
         self.base_url: str = ""
         ## TODO: customize URLs
         self.login_uri: str = "/oauth2/login"
-        self.authorize_uri: str = "/api/v1/oauth2/authorize"
-        self.token_uri: str = "/api/v1/oauth2/token"
-        self.userinfo_uri: str = "/api/v1/oauth2/userinfo"
-        self.logout_uri: str = "/api/v1/oauth2/logout"
+        self.authorize_uri: str = "/oauth2/authorize"
+        self.token_uri: str = "/oauth2/token"
+        self.userinfo_uri: str = "/oauth2/userinfo"
+        self.logout_uri: str = "/oauth2/logout"
         self.login_failed_uri = AUTH_LOGIN_FAILED_URI
         self.logout_redirect_uri = AUTH_LOGOUT_REDIRECT_URI
         if not self.logout_redirect_uri:
@@ -91,14 +91,14 @@ class Oauth2Provider(BaseAuthBackend):
         )
         router.add_route(
             "*",
-            "/api/v1/oauth2/authorize/",
+            "/oauth2/authorize/",
             self.authorize,
             name="nav_oauth2_authorize_alt",
         )
         ## added to excluded list:
         exclude_list.append(self.authorize_uri)
         exclude_list.append(
-            "/api/v1/oauth2/authorize/"
+            "/oauth2/authorize/"
         )
         ## login
         router.add_route(
