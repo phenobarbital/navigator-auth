@@ -182,6 +182,13 @@ DJANGO_SESSION_PREFIX = config.get(
     "DJANGO_SESSION_PREFIX", fallback=f"{CACHE_PREFIX}_session"
 )
 
+BASIC_USER_MAPPING = {
+    "user_id": "user_id",
+    "name": "display_name",
+    "email": "email",
+    "upn": "email"
+}
+
 DJANGO_USER_MAPPING = {
     "groups": "groups",
     "programs": "programs",

@@ -139,3 +139,4 @@ navigator_auth/libs/parser.cpp
 .vscode/settings.json
 navigator_auth/exceptions.c
 navigator_auth/libs/json.cpp
+navigator_auth/exceptions.c

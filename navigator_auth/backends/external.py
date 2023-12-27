@@ -205,15 +205,15 @@ class ExternalAuth(BaseAuthBackend):
         if token:
             headers["x-auth-token-type"] = token_type
             params = {"token": token, "type": token_type}
-        if AUTH_OAUTH2_REDIRECT_URL is not None:
-            # TODO: relative URL and calculate based on Domain
-            redirect_url = AUTH_OAUTH2_REDIRECT_URL
-        elif uri is not None:
+        if uri is not None:
             if not bool(urlparse(uri).netloc):
                 domain_url = self.get_domain(request)
                 redirect_url = f"{domain_url}{uri}"
             else:
                 redirect_url = uri
+        elif AUTH_OAUTH2_REDIRECT_URL is not None:
+            # TODO: relative URL and calculate based on Domain
+            redirect_url = AUTH_OAUTH2_REDIRECT_URL
         else:
             redirect_url = self.finish_redirect_url
         url = self.prepare_url(redirect_url, params)

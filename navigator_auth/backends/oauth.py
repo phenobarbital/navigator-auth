@@ -47,5 +47,7 @@ class OauthAuth(ExternalAuth):
         except KeyError:
             code = None
         if not code:
-            raise RuntimeError(f"Auth Error: {self._service_name} Code not accessible")
+            raise RuntimeError(
+                f"Auth Error: {self._service_name} Code not accessible"
+            )
         return code
