@@ -25,7 +25,7 @@ from navigator_auth.exceptions import (
     InvalidAuth,
 )
 from navigator_auth.responses import JSONResponse
-from .abstract import BaseAuthBackend
+from ..abstract import BaseAuthBackend
 
 
 class OauthUser(AuthUser):

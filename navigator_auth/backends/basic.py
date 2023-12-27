@@ -6,16 +6,18 @@ import logging
 from aiohttp import web
 from navigator_session import AUTH_SESSION_OBJECT
 from datamodel.exceptions import ValidationError
-from navigator_auth.exceptions import (
+# Authenticated Entity
+from ..conf import (
+    BASIC_USER_MAPPING
+)
+from .abstract import BaseAuthBackend
+from ..exceptions import (
     AuthException,
     FailedAuth,
     UserNotFound,
     InvalidAuth,
 )
-# Authenticated Entity
-from navigator_auth.identities import AuthUser
-from .abstract import BaseAuthBackend
-
+from ..identities import AuthUser
 
 class BasicUser(AuthUser):
     """BasicAuth.
@@ -160,7 +162,7 @@ class BasicAuth(BaseAuthBackend):
                     self.user_property: user[self.userid_attribute],
                     self.username_attribute: username,
                     "user_id": uid,
-                    self.session_key_property: username,
+                    self.session_key_property: username
                 }
                 # Create the User session and returned.
                 token, exp, scheme = self._idp.create_token(data=payload)
@@ -169,6 +171,9 @@ class BasicAuth(BaseAuthBackend):
                 usr.expires_in = exp
                 userdata['expires_in'] = exp
                 userdata['token_type'] = scheme
+                userdata['auth_method'] = "basic"
+                for key, val in BASIC_USER_MAPPING.items():
+                    userdata[key] = user[val]
                 # invoke callbacks to update user data:
                 if user and self._callbacks:
                     # construir e invocar callbacks para actualizar data de usuario
