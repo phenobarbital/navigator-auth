@@ -197,14 +197,21 @@ class ExternalAuth(BaseAuthBackend):
         request: web.Request,
         token: str = None,
         token_type: str = "Bearer",
-        uri: str = None
+        uri: str = None,
+        queryparams: Optional[dict] = None
     ):
         headers = {"x-authenticated": "true"}
         self.get_finish_redirect_url(request)
         params = {}
+        if queryparams:
+            params = queryparams
         if token:
             headers["x-auth-token-type"] = token_type
-            params = {"token": token, "type": token_type}
+            _auth = {
+                "token": token,
+                "type": token_type
+            }
+            params = {**params, **_auth}
         if uri is not None:
             if not bool(urlparse(uri).netloc):
                 domain_url = self.get_domain(request)
