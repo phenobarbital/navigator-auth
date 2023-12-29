@@ -452,10 +452,11 @@ class AzureAuth(ExternalAuth):
             acc_token = data["token"]
         except (KeyError, TypeError):
             acc_token = None
-        redirect = qs.get('redirect', None)
+        redirect = qs.pop('redirect', None)
         if not redirect:
             redirect = request.headers.get("redirect", None)
         if redirect is not None:
+            # passing QS transparently to backend:
             return self.home_redirect(
                 request, token=acc_token, token_type=token_type, uri=redirect
             )
