@@ -458,7 +458,11 @@ class AzureAuth(ExternalAuth):
         if redirect is not None:
             # passing QS transparently to backend:
             return self.home_redirect(
-                request, token=acc_token, token_type=token_type, uri=redirect
+                request,
+                token=acc_token,
+                token_type=token_type,
+                uri=redirect,
+                queryparams=qs
             )
         else:
             # return session information:
