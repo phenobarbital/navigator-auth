@@ -52,7 +52,7 @@ class ModelPolicy(Model):
     environment: Optional[dict] = Field(required=False, default_factory=dict)
     objects: Optional[dict] = Field(required=False, default_factory=dict)
     objects_attr: str = Field(required=False)
-    description : str = Field(required=False)
+    description: str = Field(required=False)
     enforcing: bool = Field(required=True, default=False)
     priority: int = Field(required=True, default=1)
     org_id: int = Field(required=True, default=1)

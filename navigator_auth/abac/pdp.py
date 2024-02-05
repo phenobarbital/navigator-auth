@@ -34,7 +34,11 @@ async def find_deny_policy(ctx, policies):
 class PDP:
     """ABAC Policy Decision Point implementation.
     """
-    def __init__(self, storage: AbstractStorage, policies: Optional[List[Policy]] = None):
+    def __init__(
+        self,
+        storage: AbstractStorage,
+        policies: Optional[List[Policy]] = None
+    ):
         self._policies: list = []
         if isinstance(policies, list):
             self._policies = policies
@@ -52,7 +56,6 @@ class PDP:
 
     def sorted_policies(self):
         self._policies.sort(key=lambda policy: policy.priority)
-
 
     async def _load_policies(self):
         # Load policies from storage
@@ -95,7 +98,7 @@ class PDP:
 
     def setup(self, app: web.Application):
         if isinstance(app, web.Application):
-            self.app = app # register the app into the Extension
+            self.app = app  # register the app into the Extension
         elif hasattr(app, "get_app"):
             self.app = app.get_app()
         else:
@@ -150,7 +153,7 @@ class PDP:
             session: SessionData = None,
             user: Any = None,
             effect: PolicyEffect = PolicyEffect.ALLOW
-        ):
+    ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
         except KeyError:
@@ -203,7 +206,7 @@ class PDP:
             user: Any = None,
             groups: list = None,
             effect: PolicyEffect = PolicyEffect.ALLOW
-        ):
+    ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
         except KeyError:
@@ -232,7 +235,7 @@ class PDP:
             files: list[str],
             session: SessionData = None,
             user: Any = None
-        ):
+    ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
         except KeyError:
@@ -263,14 +266,13 @@ class PDP:
         final_allowed_files = list(_files.difference(denied_files_set))
         return final_allowed_files
 
-
     async def is_allowed(
             self,
             request: web.Request,
             session: SessionData = None,
             user: Any = None,
             **kwargs
-        ):
+    ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
         except KeyError:
@@ -322,7 +324,6 @@ class PDP:
         await self.auditlog(answer, user)
         return answer
 
-
     async def filter_obj(
             self,
             request: web.Request,
@@ -331,7 +332,7 @@ class PDP:
             session: SessionData = None,
             user: Any = None,
             effect: PolicyEffect = PolicyEffect.ALLOW
-        ):
+    ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
         except KeyError:

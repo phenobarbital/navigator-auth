@@ -12,6 +12,9 @@ develop:
 	pip install -Ur docs/requirements-dev.txt
 	flit install --symlink
 
+compile:
+	python setup.py build_ext --inplace
+
 release:
 	lint test clean
 	flit publish
