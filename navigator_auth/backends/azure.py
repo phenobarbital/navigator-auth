@@ -339,12 +339,14 @@ class AzureAuth(ExternalAuth):
             except Exception as err:
                 logging.exception(err)
                 return self.failed_redirect(
-                    request, error="ERROR_INVALID_REQUEST"
+                    request, error="ERROR_INVALID_REQUEST",
+                    message=f"Error getting User information: {err}"
                 )
         except Exception as err:
             logging.exception(err)
             return self.failed_redirect(
-                request, error="ERROR_UNKNOWN"
+                request, error="ERROR_UNKNOWN",
+                message=f"Error: {err}"
             )
 
     async def logout(self, request):
