@@ -7,7 +7,7 @@ and decrypt, after that, a session will be created.
 import base64
 import logging
 from collections.abc import Callable, Awaitable
-import aioredis
+import redis.asyncio as aioredis
 import orjson
 from aiohttp import web
 from navigator_session import get_session, AUTH_SESSION_OBJECT
