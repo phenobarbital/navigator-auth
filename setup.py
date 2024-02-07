@@ -88,7 +88,7 @@ setup(
     python_requires=">=3.9.14",
     url="https://github.com/phenobarbital/navigator-auth",
     description=__description__,
-    keywords=['asyncio', 'auth', 'aioredis', 'aiohttp', 'authz', 'authentication', 'authorization'],
+    keywords=['asyncio', 'auth', 'abac', 'aiohttp', 'authz', 'authentication', 'authorization'],
     platforms=['POSIX'],
     long_description=readme(),
     long_description_content_type='text/markdown',

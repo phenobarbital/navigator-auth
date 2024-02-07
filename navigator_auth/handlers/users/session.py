@@ -93,7 +93,7 @@ class UserSession(BaseHandler):
                     "username": user.username,
                     "timestamp": str(time.time()),
                 }
-                cipher = Cipher(PARTNER_KEY, ctype="RNC")
+                cipher = Cipher(PARTNER_KEY, type="RNC")
                 rnc = cipher.encode(self._json.dumps(data))
                 headers = {"x-status": "OK", "x-message": "Token Generated"}
                 token = rnc.upper()
@@ -127,7 +127,10 @@ class UserSession(BaseHandler):
             userinfo = session[AUTH_SESSION_OBJECT]
             user_id = userinfo["user_id"]
         except KeyError:
-            return self.error(reason="Invalid Session, missing Session ID", status=406)
+            return self.error(
+                reason="Invalid Session, missing Session ID",
+                status=406
+            )
         ## validating user Id:
         if userid is not None and userid != user_id:
             return self.error(

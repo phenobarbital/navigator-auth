@@ -164,6 +164,32 @@ class ExternalAuth(BaseAuthBackend):
                 ) from e
         self._callbacks = fns
 
+    async def get_payload(self, request):
+        ctype = request.content_type
+        if request.method == "POST":
+            if ctype in (
+                "multipart/mixed",
+                "multipart/form-data",
+                "application/x-www-form-urlencoded",
+            ):
+                data = await request.post()
+                if len(data) > 0:
+                    user = data.get(self.user_attribute, None)
+                    password = data.get(self.pwd_atrribute, None)
+                    return [user, password]
+                else:
+                    return [None, None]
+            elif ctype == "application/json":
+                try:
+                    data = await request.json()
+                    user = data[self.user_attribute]
+                    password = data[self.pwd_atrribute]
+                    return [user, password]
+                except Exception:
+                    return [None, None]
+        else:
+            return [None, None]
+
     def get_domain(self, request: web.Request) -> str:
         uri = urlparse(str(request.url))
         domain_url = f"{PREFERRED_AUTH_SCHEME}://{uri.netloc}"
@@ -234,7 +260,10 @@ class ExternalAuth(BaseAuthBackend):
     ):
         self.get_finish_redirect_url(request)
         headers = {"x-message": message}
-        params = {"error": error}
+        params = {
+            "error": error,
+            "message": message
+        }
         url = self.prepare_url(self.finish_redirect_url, params)
 
         return web.HTTPFound(url, headers=headers)

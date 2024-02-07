@@ -141,6 +141,9 @@ class BaseAuthBackend(ABC):
                 )
         return token
 
+    def queryparams(self, request: web.Request) -> dict:
+        return {key: val for (key, val) in request.query.items()}
+
     async def create_user(self, userdata) -> Identity:
         try:
             usr = self._ident(data=userdata)
