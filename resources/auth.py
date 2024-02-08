@@ -120,8 +120,12 @@ async def set_filtering_fixed(
             return
         gh = f"SELECT hierarchy, hlevel from walmart.group_hierarchy('{job_code}');"
         store_hierarchy = await conn.fetch_one(gh)
-        hierarchy = store_hierarchy['hierarchy']
-        hlevel = store_hierarchy['hlevel']
+        try:
+            hierarchy = store_hierarchy['hierarchy']
+            hlevel = store_hierarchy['hlevel']
+        except TypeError:
+            # Job Position is not configured to use hierarchy
+            return
         if hierarchy == 'store':
             sql = f"SELECT walmart.store_filtering('{location_code}', '{hlevel}')"
         elif hierarchy == 'market':
@@ -138,7 +142,6 @@ async def set_filtering_fixed(
             userdata['filtering_fixed'] = next(iter(filter_fixed.values()))
         except NoDataFound:
             return
-
 
 class User(Model):
     """User using auth Schema."""
