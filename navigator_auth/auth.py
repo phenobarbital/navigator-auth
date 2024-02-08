@@ -334,6 +334,8 @@ class AuthHandler:
                 reason="Access Denied"
             )
         else:
+            if isinstance(userdata, web.HTTPFound):
+                return userdata
             # at now: create the user-session
             try:
                 response = JSONResponse(userdata, status=200)

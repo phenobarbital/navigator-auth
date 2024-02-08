@@ -151,7 +151,8 @@ class TrocToken(BaseAuthBackend):
                 payload = {
                     self.user_property: user[self.userid_attribute],
                     self.username_attribute: username,
-                    "user_id": user[self.userid_attribute],
+                    "user_id": uid,
+                    self.session_key_property: username
                 }
                 token, exp, scheme = self._idp.create_token(data=payload)
                 usr.access_token = token
@@ -160,24 +161,28 @@ class TrocToken(BaseAuthBackend):
                 userdata['expires_in'] = exp
                 userdata['token_type'] = scheme
                 ### check if any callbacks exists:
-                if user and self._callbacks:
-                    # construir e invocar callbacks para actualizar data de usuario
-                    args = {
-                        "username_attribute": self.username_attribute,
-                        "userid_attribute": self.userid_attribute,
-                        "userdata": userdata
-                    }
-                    await self.auth_successful_callback(request, user, **args)
+                try:
+                    if user and self._callbacks:
+                        # construir e invocar callbacks para actualizar data de usuario
+                        args = {
+                            "username_attribute": self.username_attribute,
+                            "userid_attribute": self.userid_attribute,
+                            "userdata": userdata
+                        }
+                        await self.auth_successful_callback(request, user, **args)
+                except Exception as err:
+                    self.logger.error(str(err))
                 # saving user-data into request:
-                print('USER > ', userdata, usr)
+                # print('USER > ', userdata, usr)
                 await self.remember(request, uid, userdata, usr)
                 # If redirect_uri is set:
                 if 'redirect_uri' in qs:
                     # redirect:
-                    redirect = qs.get('redirect_uri', TROCTOKEN_REDIRECT_URI)
+                    redirect = qs.pop('redirect_uri', TROCTOKEN_REDIRECT_URI)
                     return self.uri_redirect(
                         request,
-                        token=token, uri=redirect
+                        token=token,
+                        uri=redirect
                     )
                 return {"token": token, **userdata}
             except Exception as err:  # pylint: disable=W0703

@@ -88,7 +88,15 @@ setup(
     python_requires=">=3.9.14",
     url="https://github.com/phenobarbital/navigator-auth",
     description=__description__,
-    keywords=['asyncio', 'auth', 'abac', 'aiohttp', 'authz', 'authentication', 'authorization'],
+    keywords=[
+        'asyncio',
+        'auth',
+        'abac',
+        'aiohttp',
+        'authz',
+        'authentication',
+        'authorization'
+    ],
     platforms=['POSIX'],
     long_description=readme(),
     long_description_content_type='text/markdown',
@@ -110,7 +118,11 @@ setup(
     ],
     author=__author__,
     author_email=__author_email__,
-    packages=find_packages(exclude=['contrib', 'docs', 'tests','settings','resources', "examples"]),
+    packages=find_packages(
+        exclude=[
+            'contrib', 'docs', 'tests', 'settings', 'resources', "examples"
+        ]
+    ),
     license=__license__,
     setup_requires=[
         "wheel==0.42.0",
