@@ -269,7 +269,7 @@ class UserAttributes(Model):
     location_code: str = Column(required=False)
     job_code: str = Column(required=False)
     start_date: datetime = Column(required=False)
-    birth_date: str = Column(required=False)
+    birthday: str = Column(required=False)
     worker_type: str = Column(required=False)
     created_at: datetime = Column(required=False, default=datetime.now())
 
