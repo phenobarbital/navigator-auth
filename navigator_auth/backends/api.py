@@ -120,7 +120,9 @@ class APIKeyAuth(BaseAuthBackend):
                 await self.remember(request, device_id, user, usr)
                 return {"token": token, **user}
             except Exception as err:  # pylint: disable=W0703
-                self.logger.exception(f"API Key Auth: Authentication Error: {err}")
+                self.logger.exception(
+                    f"API Key Auth: Authentication Error: {err}"
+                )
                 return False
 
     async def check_token_info(self, request, payload):
