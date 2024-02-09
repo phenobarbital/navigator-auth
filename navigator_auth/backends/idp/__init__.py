@@ -12,8 +12,8 @@ from navconfig.logging import logging
 from navigator_session import (
     SESSION_TIMEOUT
 )
-from navigator_auth.identities import Identity
-from navigator_auth.conf import (
+from ...identities import Identity
+from ...conf import (
     AUTH_TOKEN_ISSUER,
     AUTH_USERNAME_ATTRIBUTE,
     AUTH_PASSWORD_ATTRIBUTE,
@@ -29,7 +29,7 @@ from navigator_auth.conf import (
     SECRET_KEY,
     AUTH_DEFAULT_SCHEME
 )
-from navigator_auth.exceptions import (
+from ...exceptions import (
     UserNotFound,
     ConfigError,
     InvalidAuth,
@@ -37,6 +37,7 @@ from navigator_auth.exceptions import (
     AuthExpired,
     AuthException
 )
+from ...libs import DefaultEncoder
 
 class IdentityProvider:
     """IdP.
@@ -327,18 +328,20 @@ class IdentityProvider:
         if not data:
             data = {}
         iat = datetime.utcnow()
-        exp = iat + timedelta(seconds=expiration)
+        exp = (iat + timedelta(seconds=expiration)).timestamp()
         payload = {
             "exp": exp,
             "iat": iat,
             "iss": issuer,
             **data,
         }
+        print('PAYLOAD > ', payload)
         try:
             jwt_token = jwt.encode(
                 payload,
                 SECRET_KEY,
                 AUTH_JWT_ALGORITHM,
+                json_encoder=DefaultEncoder
             )
         except (TypeError, ValueError) as ex:
             raise AuthException(
