@@ -335,7 +335,6 @@ class IdentityProvider:
             "iss": issuer,
             **data,
         }
-        print('PAYLOAD > ', payload)
         try:
             jwt_token = jwt.encode(
                 payload,
