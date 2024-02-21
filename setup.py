@@ -113,6 +113,7 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Framework :: AsyncIO",
         "Framework :: aiohttp",
     ],
@@ -131,7 +132,7 @@ setup(
     ],
     install_requires=[
         "PyNaCl==1.5.0",
-        "aiohttp==3.9.1",
+        "aiohttp==3.9.2",
         "uvloop==0.19.0",
         "asyncio==3.4.3",
         "asyncdb[default]>=2.6.0",
