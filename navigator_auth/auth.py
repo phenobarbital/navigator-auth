@@ -9,14 +9,11 @@ Supporting:
  * Session Support (on top of navigator-session)
 """
 import importlib
-import inspect
 from typing import Union
 from collections.abc import Awaitable, Callable, Iterable
 import orjson
 from orjson import JSONDecodeError
-import aiohttp_cors
 from aiohttp import hdrs, web
-from aiohttp.abc import AbstractView
 from aiohttp.web_urldispatcher import SystemRoute
 from navigator_session import SESSION_KEY, SessionHandler, get_session
 
@@ -430,36 +427,6 @@ class AuthHandler:
         else:
             raise web.HTTPForbidden(reason="Auth: User Data is missing on Request.")
 
-    def setup_cors(self, app: web.Application):
-        cors = aiohttp_cors.setup(
-            app,
-            defaults={
-                "*": aiohttp_cors.ResourceOptions(
-                    allow_credentials=True,
-                    expose_headers="*",
-                    allow_methods="*",
-                    allow_headers="*",
-                    max_age=3600,
-                )
-            },
-        )
-        for route in list(app.router.routes()):
-            # Ensure the route has a resource attribute and it's not None
-            routes = getattr(route.resource, '_routes', [])
-            routes = [r for r in routes]
-            if "OPTIONS" in routes:
-                # Skip if OPTIONS is already configured
-                continue
-            try:
-                if inspect.isclass(route.handler) and issubclass(
-                    route.handler, AbstractView
-                ):
-                    cors.add(route, webview=True)
-                else:
-                    cors.add(route)
-            except (TypeError, ValueError, RuntimeError):
-                pass
-
     def setup(self, app: web.Application) -> web.Application:
         if isinstance(app, web.Application):
             self.app = app  # register the app into the Extension
@@ -543,9 +510,6 @@ class AuthHandler:
                 ) from err
         # last: add the basic jwt middleware (used by basic auth and others)
         mdl.append(self.auth_middleware)
-
-        # at the End: configure CORS for routes:
-        self.setup_cors(self.app)
         return self.app
 
     async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:
