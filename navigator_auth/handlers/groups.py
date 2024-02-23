@@ -1,6 +1,13 @@
 from datamodel import BaseModel
-from navigator_auth.models import Group, UserGroup, GroupPermission
-from navigator_auth.conf import AUTH_GROUP_MODEL, AUTH_USER_GROUP_MODEL
+from ..models import (
+    Group,
+    UserGroup,
+    GroupPermission
+)
+from ..conf import (
+    AUTH_GROUP_MODEL,
+    AUTH_USER_GROUP_MODEL
+)
 from .handler import ModelHandler
 
 

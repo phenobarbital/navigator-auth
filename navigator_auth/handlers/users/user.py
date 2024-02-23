@@ -1,7 +1,7 @@
 from asyncdb.models import Model
 from navigator.views.model import ModelView, NotSet
-from navigator_auth.models import User
-from navigator_auth.conf import (
+from ...models import User
+from ...conf import (
     AUTH_USER_MODEL,
     AUTH_USER_VIEW
 )

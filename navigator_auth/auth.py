@@ -457,7 +457,7 @@ class AuthHandler:
                     cors.add(route, webview=True)
                 else:
                     cors.add(route)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, RuntimeError):
                 pass
 
     def setup(self, app: web.Application) -> web.Application:

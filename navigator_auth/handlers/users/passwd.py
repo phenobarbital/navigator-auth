@@ -1,8 +1,8 @@
 import secrets
 import hashlib
 import base64
-from navigator_auth.exceptions import AuthException
-from navigator_auth.conf import (
+from ...exceptions import AuthException
+from ...conf import (
     AUTH_PWD_DIGEST,
     AUTH_PWD_LENGTH,
     AUTH_PWD_ALGORITHM,

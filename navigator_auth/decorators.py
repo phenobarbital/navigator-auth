@@ -4,8 +4,8 @@ from collections.abc import Callable
 from aiohttp import web, hdrs
 from aiohttp.abc import AbstractView
 from navigator_session import get_session
-from navigator_auth.exceptions import AuthException
-from navigator_auth.conf import AUTH_SESSION_OBJECT
+from .exceptions import AuthException
+from .conf import AUTH_SESSION_OBJECT
 
 
 F = TypeVar("F", bound=Callable[..., Any])
