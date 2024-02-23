@@ -430,8 +430,24 @@ class AuthHandler:
         else:
             raise web.HTTPForbidden(reason="Auth: User Data is missing on Request.")
 
-    def setup_cors(self, cors):
-        for route in list(self.app.router.routes()):
+    def setup_cors(self, app: web.Application):
+        cors = aiohttp_cors.setup(
+            app,
+            defaults={
+                "*": aiohttp_cors.ResourceOptions(
+                    allow_credentials=True,
+                    expose_headers="*",
+                    allow_methods="*",
+                    allow_headers="*",
+                    max_age=3600,
+                )
+            },
+        )
+        for route in list(app.router.routes()):
+            if any(r.method == "OPTIONS" for r in route.resource._routes):
+                print(route)
+                # Skip if OPTIONS is already configured
+                continue
             try:
                 if inspect.isclass(route.handler) and issubclass(
                     route.handler, AbstractView
@@ -527,19 +543,7 @@ class AuthHandler:
         mdl.append(self.auth_middleware)
 
         # at the End: configure CORS for routes:
-        cors = aiohttp_cors.setup(
-            self.app,
-            defaults={
-                "*": aiohttp_cors.ResourceOptions(
-                    allow_credentials=True,
-                    expose_headers="*",
-                    allow_methods="*",
-                    allow_headers="*",
-                    max_age=3600,
-                )
-            },
-        )
-        self.setup_cors(cors)
+        self.setup_cors(self.app)
         return self.app
 
     async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:
