@@ -144,7 +144,6 @@ setup(
         "aiogoogle==5.5.0",
         "okta-jwt-verifier==0.2.3",
         "python-slugify==8.0.1",
-        "aiohttp_cors>=0.7.0",
         "navigator-session>=0.5.0",
         "pendulum==2.1.2",
         "psycopg2-binary==2.9.9"
