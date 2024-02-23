@@ -444,8 +444,10 @@ class AuthHandler:
             },
         )
         for route in list(app.router.routes()):
-            if any(r.method == "OPTIONS" for r in route.resource._routes):
-                print(route)
+            # Ensure the route has a resource attribute and it's not None
+            routes = getattr(route.resource, '_routes', [])
+            routes = [r for r in routes]
+            if "OPTIONS" in routes:
                 # Skip if OPTIONS is already configured
                 continue
             try:
