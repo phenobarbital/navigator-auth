@@ -14,8 +14,8 @@ from asyncdb.exceptions import (
     ModelError
 )
 from navigator_session import get_session
-from navigator_auth.exceptions import AuthException
-from .base import BaseView
+from navigator.views import BaseView
+from ..exceptions import AuthException
 
 
 class ModelHandler(BaseView):

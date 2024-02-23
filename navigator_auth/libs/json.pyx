@@ -9,7 +9,7 @@ from asyncpg.pgproto import pgproto
 from dataclasses import _MISSING_TYPE, MISSING
 from typing import Any, Union
 from decimal import Decimal
-from navigator_auth.exceptions cimport AuthException
+from ..exceptions cimport AuthException
 import orjson
 
 

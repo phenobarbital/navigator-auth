@@ -3,7 +3,10 @@ from asyncdb.exceptions import (
     NoDataFound
 )
 from asyncdb.exceptions import DriverError
-from navigator_session import get_session, AUTH_SESSION_OBJECT
+from navigator_session import (
+    get_session,
+    AUTH_SESSION_OBJECT
+)
 from navigator_auth.models import (
     UserAccount, UserIdentity, VwUserIdentity
 )

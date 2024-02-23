@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 from requests.models import PreparedRequest
 from aiohttp import web
 from datamodel.exceptions import ValidationError
-from navigator_auth.identities import AuthUser
-from navigator_auth.conf import (
+from ...identities import AuthUser
+from ...conf import (
     AUTH_LOGIN_FAILED_URI,
     AUTH_LOGOUT_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
@@ -19,12 +19,12 @@ from navigator_auth.conf import (
     PREFERRED_AUTH_SCHEME,
     exclude_list,
 )
-from navigator_auth.exceptions import (
+from ...exceptions import (
     FailedAuth,
     UserNotFound,
     InvalidAuth,
 )
-from navigator_auth.responses import JSONResponse
+from ...responses import JSONResponse
 from ..abstract import BaseAuthBackend
 
 

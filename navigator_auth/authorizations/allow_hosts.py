@@ -2,7 +2,7 @@
 import fnmatch
 import logging
 from aiohttp import web
-from navigator_auth.conf import ALLOWED_HOSTS
+from ..conf import ALLOWED_HOSTS
 from .abstract import BaseAuthzHandler
 
 

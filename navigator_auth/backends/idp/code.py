@@ -1,7 +1,7 @@
 import time
 import jwt
 import redis
-from navigator_auth.conf import (
+from ...conf import (
     REDIS_URL,
     AUTH_CODE_EXPIRATION,
     AUTH_TOKEN_ISSUER,

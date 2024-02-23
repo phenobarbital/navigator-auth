@@ -3,16 +3,16 @@ from urllib.parse import urlparse
 from aiohttp import web
 from datamodel.exceptions import ValidationError
 from navigator_session import get_session, SESSION_KEY, AUTH_SESSION_OBJECT
-from navigator_auth.exceptions import AuthException
-from navigator_auth.libs.cipher import Cipher
-from navigator_auth.models import User
-from navigator_auth.conf import (
+from navigator.views import BaseHandler
+from ...exceptions import AuthException
+from ...libs.cipher import Cipher
+from ...models import User
+from ...conf import (
     PARTNER_KEY,
     PREFERRED_AUTH_SCHEME,
     TROCTOKEN_REDIRECT_URI
 )
 from .passwd import check_password, set_basic_password
-from ..base import BaseHandler
 
 
 class UserSession(BaseHandler):
