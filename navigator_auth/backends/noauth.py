@@ -1,4 +1,4 @@
-"""Django Session Backend.
+"""Null Auth Backend.
 
 Navigator Authentication using Anonymous Backend
 """
@@ -8,7 +8,7 @@ from aiohttp import web
 from navigator_session import AUTH_SESSION_OBJECT
 
 # Authenticated Entity
-from navigator_auth.identities import AuthUser, Guest
+from ..identities import AuthUser, Guest
 from .abstract import BaseAuthBackend
 
 

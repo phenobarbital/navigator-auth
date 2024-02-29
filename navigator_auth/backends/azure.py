@@ -10,8 +10,8 @@ import redis.asyncio as aioredis
 from msal.authority import AuthorityBuilder, AZURE_PUBLIC
 from navconfig.logging import logging
 from navigator_session import get_session
-from navigator_auth.exceptions import AuthException, UserNotFound
-from navigator_auth.conf import (
+from ..exceptions import AuthException, UserNotFound
+from ..conf import (
     AZURE_ADFS_CLIENT_ID,
     AZURE_ADFS_CLIENT_SECRET,
     AZURE_ADFS_DOMAIN,
@@ -20,8 +20,8 @@ from navigator_auth.conf import (
     REDIS_AUTH_URL,
     AZURE_MAPPING
 )
-from navigator_auth.libs.json import json_encoder, json_decoder
-from navigator_auth.responses import JSONResponse
+from ..libs.json import json_encoder, json_decoder
+from ..responses import JSONResponse
 from .external import ExternalAuth
 
 

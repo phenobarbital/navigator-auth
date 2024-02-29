@@ -69,11 +69,11 @@ class BasicAuth(BaseAuthBackend):
             pwd = user[self.pwd_atrribute]
         except KeyError as ex:
             raise InvalidAuth(
-                "Missing Password attr on User Account"
+                f"Missing Password attribute on User {login}"
             ) from ex
         except (ValidationError, TypeError, ValueError) as ex:
             raise InvalidAuth(
-                "Invalid credentials on User Account"
+                f"Invalid credentials on User {login}"
             ) from ex
         try:
             if self._idp.check_password(pwd, password):
@@ -81,8 +81,11 @@ class BasicAuth(BaseAuthBackend):
                 return user
             else:
                 raise FailedAuth(
-                    "Basic Auth: Invalid Credentials"
+                    f"User {login}: Invalid Credentials"
                 )
+        except FailedAuth as err:
+            self.logger.error(err)
+            raise
         except InvalidAuth as err:
             self.logger.error(err)
             raise
@@ -134,7 +137,7 @@ class BasicAuth(BaseAuthBackend):
             ) from err
         if not pwd and not user:
             raise InvalidAuth(
-                "Basic Auth: Invalid Credentials",
+                "Basic Auth: Missing Credentials",
                 status=401
             )
         else:
@@ -143,12 +146,15 @@ class BasicAuth(BaseAuthBackend):
                 user = await self.validate_user(
                     login=user, password=pwd
                 )
-            except (FailedAuth, UserNotFound):  # pylint: disable=W0706
+            except (FailedAuth, UserNotFound, InvalidAuth):  # pylint: disable=W0706
                 raise
-            except (ValidationError, InvalidAuth) as err:
+            except (ValidationError) as err:
                 raise InvalidAuth(str(err), status=401) from err
             except Exception as err:
-                raise AuthException(str(err), status=500) from err
+                raise AuthException(
+                    str(err),
+                    status=500
+                ) from err
             try:
                 userdata = self.get_userdata(user=user)
                 username = user[self.username_attribute]
@@ -188,7 +194,9 @@ class BasicAuth(BaseAuthBackend):
                 ### check if any callbacks exists:
                 return {"token": token, **userdata}
             except Exception as err:  # pylint: disable=W0703
-                logging.exception(f"BasicAuth: Authentication Error: {err}")
+                logging.exception(
+                    f"BasicAuth: Authentication Error: {err}"
+                )
                 return False
 
     async def check_credentials(self, request):

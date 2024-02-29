@@ -18,11 +18,12 @@ from navigator_session import (
     SESSION_KEY,
     SESSION_USER_PROPERTY,
 )
-from navigator_auth.exceptions import (
+from ..exceptions import (
     AuthException,
-    InvalidAuth
+    InvalidAuth,
+    UserNotFound
 )
-from navigator_auth.conf import (
+from ..conf import (
     AUTH_DEFAULT_SCHEME,
     AUTH_USERNAME_ATTRIBUTE,
     USER_MAPPING,
@@ -32,9 +33,9 @@ from navigator_auth.conf import (
     PREFERRED_AUTH_SCHEME,
     AUTH_REDIRECT_URI
 )
-from navigator_auth.libs.json import json_encoder
+from ..libs.json import json_encoder
 # Authenticated Identity
-from navigator_auth.identities import Identity, AuthBackend
+from ..identities import Identity, AuthBackend
 
 
 class BaseAuthBackend(ABC):
@@ -162,9 +163,6 @@ class BaseAuthBackend(ABC):
         mapping: dict
     ) -> dict:
         udata = {}
-        self.logger.debug(
-            f'Mapping: {mapping}'
-        )
         for key, val in mapping.items():
             if key != self.password_attribute:
                 try:
@@ -188,7 +186,7 @@ class BaseAuthBackend(ABC):
                     userdata[key] = value
             except (KeyError, AttributeError):
                 self.logger.warning(
-                    f"Error UserData: asking for a non existing attribute: {key}"
+                    f"Error UserData: asking for a non-existing attribute: {key}"
                 )
         if AUTH_SESSION_OBJECT:
             return {AUTH_SESSION_OBJECT: userdata}
@@ -234,12 +232,15 @@ class BaseAuthBackend(ABC):
         }
         if isinstance(reason, dict):
             response_obj = {**response_obj, **reason}
-            # args["content_type"] = "application/json"
-            args["reason"] = json_encoder(response_obj)
+            args["content_type"] = "application/json"
+            args["body"] = json_encoder(response_obj)
         else:
             response_obj['reason'] = reason
             args["reason"] = json_encoder(response_obj)
         # defining the error
+        if args["content_type"] == "application/json":
+            args['body'] = args['reason']
+            del args['reason']
         if status == 400:  # bad request
             obj = web.HTTPBadRequest(**args)
         elif status == 401:  # unauthorized
@@ -260,13 +261,31 @@ class BaseAuthBackend(ABC):
 
     def ForbiddenAccess(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
         return self.auth_error(
-            reason=reason, **kwargs, status=403
+            reason=reason, status=403, **kwargs
         )
 
     def Unauthorized(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
         return self.auth_error(
-            reason=reason, **kwargs, status=401
+            reason=reason, status=401, **kwargs
         )
+
+    async def validate_user(self, login: str = None, userid: int = None):
+        # get the user based on Model
+        try:
+            if login is not None:
+                user = await self._idp.get_user(login)
+            if userid is not None:
+                user = await self._idp.user_from_id(userid)
+            else:
+                raise UserNotFound(
+                    "User Not Found"
+                )
+            return user
+        except UserNotFound:
+            raise
+        except Exception as err:
+            self.logger.exception(err)
+            raise
 
     async def remember(
         self, request: web.Request, identity: str, userdata: dict, user: Identity

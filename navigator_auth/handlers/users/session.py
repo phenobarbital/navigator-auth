@@ -55,7 +55,7 @@ class UserSession(BaseHandler):
         for k, value in data.items():
             session[k] = value
         headers = {"x-status": "OK", "x-message": "Session Saved"}
-        return self.json_response(content=data, headers=headers)
+        return self.json_response(response=data, headers=headers)
 
     def get_domain(self, request: web.Request) -> str:
         uri = urlparse(str(request.url))
@@ -103,11 +103,18 @@ class UserSession(BaseHandler):
                     "token": token,
                     "uri": f"{api_url}/api/v1/login?auth={token}&redirect_uri={red}"
                 }
-                return self.json_response(content=response, headers=headers)
+                return self.json_response(response=response, headers=headers)
         except ValidationError as ex:
-            self.error(reason="User info has errors", exception=ex.payload, status=412)
+            self.error(
+                reason="User info has errors",
+                exception=ex.payload,
+                status=412
+            )
         except Exception as err:  # pylint: disable=W0703
-            return self.critical(reason=f"Error getting User: {err}", exception=err)
+            return self.critical(
+                reason=f"Error getting User: {err}",
+                exception=err
+            )
 
     async def password_change(self, request: web.Request):
         """Reset User Password."""
@@ -149,7 +156,7 @@ class UserSession(BaseHandler):
                     headers = {"x-status": "OK", "x-message": "Session OK"}
                     response = {"action": "Password Changed", "status": "OK"}
                     return self.json_response(
-                        content=response, headers=headers, status=202
+                        response=response, headers=headers, status=202
                     )
                 else:
                     return self.error(
@@ -172,16 +179,27 @@ class UserSession(BaseHandler):
             data = await self.json_data(request)
             new_password = data["password"]
         except (TypeError, ValueError, AuthException):
-            return self.error(reason="Invalid User Data", status=406)
+            return self.error(
+                reason="Invalid User",
+                status=406
+            )
         ### TODO: check if user is superuser:
         userinfo = session[AUTH_SESSION_OBJECT]
         if userinfo["superuser"] is False:
-            return self.error(reason="Access Denied", status=406)
+            return self.error(
+                reason="Access Denied, Session Missing",
+                status=406
+            )
         try:
             db = request.app["authdb"]
             async with await db.acquire() as conn:
                 User.Meta.connection = conn
                 user = await User.get(user_id=userid)
+                if not user:
+                    return self.error(
+                        reason="User not found",
+                        status=404
+                    )
                 ## Reset Password:
                 user.password = set_basic_password(new_password)
                 user.is_new = True
@@ -193,11 +211,22 @@ class UserSession(BaseHandler):
                     "username": user.username,
                     "status": "OK",
                 }
-                return self.json_response(content=response, headers=headers, status=202)
+                return self.json_response(
+                    response=response,
+                    headers=headers,
+                    status=202
+                )
         except ValidationError as ex:
-            self.error(reason="User info has errors", exception=ex.payload, status=412)
+            self.error(
+                reason="User data has errors",
+                exception=ex.payload,
+                status=412
+            )
         except Exception as err:  # pylint: disable=W0703
-            return self.critical(reason=f"Error getting User: {err}", exception=err)
+            return self.critical(
+                reason=f"Error getting User: {err}",
+                exception=err
+            )
 
     async def user_session(self, request: web.Request):
         """Getting User Session information."""
@@ -208,7 +237,7 @@ class UserSession(BaseHandler):
         _id = session[SESSION_KEY]
         data = {"session_id": _id, **userdata}
         if data:
-            return self.json_response(content=data, headers=headers)
+            return self.json_response(response=data, headers=headers)
         else:
             return self.error(reason="Empty Session", status=406)
 
@@ -226,7 +255,7 @@ class UserSession(BaseHandler):
                 User.Meta.connection = conn
                 user = await User.get(user_id=user_id)
                 user.password = None
-                return self.json_response(content=user, status=200)
+                return self.json_response(response=user, status=200)
         except ValidationError as ex:
             self.error(reason="User info has errors", exception=ex.payload, status=412)
         except Exception as err:  # pylint: disable=W0703

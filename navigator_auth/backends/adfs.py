@@ -9,8 +9,8 @@ import jwt
 # needed by ADFS
 import requests
 import requests.adapters
-from navigator_auth.exceptions import AuthException
-from navigator_auth.conf import (
+from ..exceptions import AuthException
+from ..conf import (
     ADFS_SERVER,
     ADFS_CLIENT_ID,
     ADFS_TENANT_ID,

@@ -7,8 +7,8 @@ from collections.abc import Callable, Awaitable
 import jwt
 from aiohttp import web
 from navigator_session import get_session
-from navigator_auth.exceptions import AuthException, InvalidAuth
-from navigator_auth.conf import (
+from ..exceptions import AuthException, InvalidAuth
+from ..conf import (
     AUTH_JWT_ALGORITHM,
     AUTH_TOKEN_ISSUER,
     AUTH_TOKEN_SECRET,
@@ -16,7 +16,7 @@ from navigator_auth.conf import (
 
 
 # Authenticated Entity
-from navigator_auth.identities import AuthUser, Program
+from ..identities import AuthUser, Program
 from .abstract import BaseAuthBackend
 
 
