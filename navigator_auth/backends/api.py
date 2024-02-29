@@ -184,6 +184,8 @@ class APIKeyAuth(BaseAuthBackend):
             return False
         try:
             data = await self.get_token_info(request, mech, token)
+            if not data:
+                return False
             userid = data.get(AUTH_USERID_ATTRIBUTE, None)
             user = await self.validate_user(userid=userid)
         except UserNotFound:
