@@ -14,10 +14,10 @@ from aiohttp import web, hdrs
 from aiohttp.client import ClientTimeout, ClientSession
 from datamodel.exceptions import ValidationError
 from navconfig.logging import logging
-from navigator_auth.identities import AuthUser
-from navigator_auth.libs.json import json_decoder
-from navigator_auth.exceptions import UserNotFound, AuthException
-from navigator_auth.conf import (
+from ..identities import AuthUser
+from ..libs.json import json_decoder
+from ..exceptions import UserNotFound, AuthException
+from ..conf import (
     AUTH_LOGIN_FAILED_URI,
     AUTH_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,

@@ -4,7 +4,7 @@ Oauth is a Abstract Class with basic functionalities for all Oauth2 backends.
 """
 from abc import abstractmethod
 from aiohttp import web
-from navigator_auth.exceptions import AuthException
+from ..exceptions import AuthException
 from .external import ExternalAuth
 
 

@@ -6,8 +6,8 @@ from aiohttp import web
 from aiogoogle import Aiogoogle
 from aiogoogle.auth.utils import create_secret
 from navconfig.logging import logging
-from navigator_auth.exceptions import AuthException
-from navigator_auth.conf import (
+from ..exceptions import AuthException
+from ..conf import (
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_API_SCOPES,

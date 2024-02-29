@@ -16,7 +16,6 @@ from orjson import JSONDecodeError
 from aiohttp import hdrs, web
 from aiohttp.web_urldispatcher import SystemRoute
 from navigator_session import SESSION_KEY, SessionHandler, get_session
-
 from .authorizations import authz_allow_hosts, authz_hosts
 from .backends.idp import IdentityProvider
 from .conf import (
@@ -108,6 +107,8 @@ class AuthHandler:
         )  # pylint: disable=E1123
         ### JSON encoder
         self._json = JSONContent()
+        # Logger Backend
+        self.logger = logging.getLogger(name='Nav.Auth')
 
     @property
     def session(self):
@@ -156,7 +157,9 @@ class AuthHandler:
                 logging.debug(f"Auth: Loading Backend {bkname}")
                 backends[bkname] = obj(**kwargs)
             except ImportError as ex:
-                raise ConfigError(f"Error loading Auth Backend {backend}: {ex}") from ex
+                raise ConfigError(
+                    f"Error loading Auth Backend {backend}: {ex}"
+                ) from ex
         return backends
 
     def get_usermodel(self, model: str):
@@ -220,13 +223,16 @@ class AuthHandler:
         """
         try:
             response = web.json_response(
-                {"message": "Logout successful", "state": 202}, status=202
+                {"message": "Logout successful", "state": 202},
+                status=202
             )
             await self._session.storage.forgot(request, response)
             return response
         except Exception as err:
             print(err)
-            raise web.HTTPUnauthorized(reason=f"Logout Error {err.message}")
+            raise web.HTTPUnauthorized(
+                reason=f"Logout Error {err.message}"
+            )
 
     async def login(self, request: web.Request) -> web.Response:
         params = {
@@ -276,20 +282,22 @@ class AuthHandler:
                     reason=f"User Doesn't exists: {err.message}",
                     exception=err
                 )
-            except Forbidden as err:
+            except (
+                InvalidAuth,
+                Forbidden,
+                FailedAuth
+            ) as err:
+                self.logger.error(str(err))
                 raise self.ForbiddenAccess(
-                    reason=f"{err.message}"
+                    reason=f"{err.message}",
+                    status=err.status
                 )
-            except FailedAuth as err:
-                raise self.ForbiddenAccess(
-                    reason="Failed Authentication",
-                    exception=err
-                )
-            except InvalidAuth as err:
+            except AuthException as err:
                 logging.exception(err)
                 raise self.ForbiddenAccess(
                     reason=f"{err.message}",
-                    exception=err
+                    exception=err,
+                    status=err.status
                 )
             except Exception as err:
                 raise self.auth_error(
@@ -318,7 +326,12 @@ class AuthHandler:
                     userdata = await backend.authenticate(request)
                     if userdata:
                         break
-                except (AuthException, UserNotFound, InvalidAuth, FailedAuth) as err:
+                except (
+                    AuthException,
+                    UserNotFound,
+                    InvalidAuth,
+                    FailedAuth
+                ):
                     continue
                 except Exception as err:
                     raise self.auth_error(
@@ -583,9 +596,14 @@ class AuthHandler:
             obj = web.HTTPBadRequest(**args)
         return obj
 
-    def ForbiddenAccess(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
+    def ForbiddenAccess(
+        self,
+        reason: Union[str, dict],
+        status: int = 403,
+        **kwargs
+    ) -> web.HTTPError:
         return self.auth_error(
-            reason=reason, **kwargs, status=403
+            reason=reason, **kwargs, status=status
         )
 
     def Unauthorized(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:

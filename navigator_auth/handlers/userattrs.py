@@ -7,10 +7,10 @@ from navigator_session import (
     get_session,
     AUTH_SESSION_OBJECT
 )
-from navigator_auth.models import (
+from ..models import (
     UserAccount, UserIdentity, VwUserIdentity
 )
-from navigator_auth.conf import (
+from ..conf import (
     AUTH_USER_IDENTITY_MODEL
 )
 from .model import ModelHandler

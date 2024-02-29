@@ -1,6 +1,6 @@
 from datamodel import BaseModel
-from navigator_auth.models import Permission
-from navigator_auth.conf import AUTH_PERMISSION_MODEL
+from ..models import Permission
+from ..conf import AUTH_PERMISSION_MODEL
 from .model import ModelHandler
 
 

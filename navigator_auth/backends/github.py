@@ -4,7 +4,7 @@ Description: Backend Authentication/Authorization using Okta Service.
 """
 import logging
 from aiohttp import web
-from navigator_auth.conf import GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
+from ..conf import GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
 from .oauth import OauthAuth
 
 

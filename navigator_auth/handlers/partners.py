@@ -3,13 +3,13 @@ from uuid import UUID
 from datetime import datetime
 import jwt
 from asyncdb.models import Model, Column
-from navigator_auth.conf import (
+from ..conf import (
     AUTH_DB_SCHEMA,
     AUTH_TOKEN_ISSUER,
     AUTH_JWT_ALGORITHM,
     AUTH_TOKEN_SECRET
 )
-from navigator_auth.exceptions import ConfigError
+from ..exceptions import ConfigError
 from .model import ModelHandler
 
 class PartnerKey(Model):

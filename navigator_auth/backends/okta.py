@@ -6,7 +6,7 @@ import requests
 from aiohttp import web
 from okta_jwt_verifier import JWTVerifier
 from navconfig.logging import logging
-from navigator_auth.conf import (
+from ..conf import (
     OKTA_CLIENT_ID,
     OKTA_CLIENT_SECRET,
     OKTA_DOMAIN,

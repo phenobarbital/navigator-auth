@@ -15,6 +15,7 @@ from navigator_session import (
 from ...identities import Identity
 from ...conf import (
     AUTH_TOKEN_ISSUER,
+    AUTH_USERID_ATTRIBUTE,
     AUTH_USERNAME_ATTRIBUTE,
     AUTH_PASSWORD_ATTRIBUTE,
     USER_MAPPING,
@@ -44,6 +45,7 @@ class IdentityProvider:
 
     Identity Provider for Navigator.
     """
+    userid_attribute: str = AUTH_USERID_ATTRIBUTE
     username_attribute: str = AUTH_USERNAME_ATTRIBUTE
     pwd_atrribute: str = AUTH_PASSWORD_ATTRIBUTE
     scheme: str = AUTH_DEFAULT_SCHEME
@@ -95,6 +97,38 @@ class IdentityProvider:
             raise ConfigError(
                 f"Auth: Error loading Auth User Model {model}: {ex}"
             ) from ex
+
+    async def user_from_id(self, uid: int) -> Identity:
+        """Getting User Object."""
+        user = None
+        try:
+            db = self.app["authdb"]
+            async with await db.acquire() as conn:
+                search = {self.userid_attribute: uid}
+                self.user_search.Meta.connection = conn
+                user = await self.user_search.get(**search)
+        except NoDataFound as ex:
+            raise UserNotFound(
+                f"User {search!s} doesn't exists"
+            ) from ex
+        except ValidationError as ex:
+            self.logger.error(
+                f"Invalid User Information {search!s}: {ex}"
+            )
+            self.logger.warning(
+                f"Error on User Model = {ex.payload!r}"
+            )
+            raise
+        except Exception as e:
+            raise UserNotFound(
+                f"Error getting User {search!s}: {e!s}"
+            ) from e
+        # if not exists, return error of missing
+        if not user:
+            raise UserNotFound(
+                f"User {search!s} doesn't exists"
+            )
+        return user
 
     async def get_user(self, login: str) -> Identity:
         """Getting User Object."""
@@ -179,6 +213,11 @@ class IdentityProvider:
 
     def check_password(self, current_password, password):
         try:
+            if current_password is None:
+                raise InvalidAuth(
+                    "User: Password cannot be null.",
+                    status=412
+                )
             algorithm, iterations, salt, _ = current_password.split("$", 3)
         except ValueError as ex:
             if str(ex).startswith('not enough values to unpack'):
@@ -196,12 +235,7 @@ class IdentityProvider:
             salt=salt,
             token_num=AUTH_PWD_SALT_LENGTH,
         )
-        try:
-            return secrets.compare_digest(current_password, compare_hash)
-        except (TypeError, ValueError) as ex:
-            raise InvalidAuth(
-                f"Basic Auth: Invalid Credentials: {ex}"
-            ) from ex
+        return secrets.compare_digest(current_password, compare_hash)
 
     def set_password(
         self,
@@ -364,6 +398,8 @@ class IdentityProvider:
         except (TypeError, ValueError, AttributeError):
             # normal Token:
             jwt_token = code
+        if not jwt_token:
+            return [None, None]
         try:
             payload = jwt.decode(
                 jwt_token,

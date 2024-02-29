@@ -11,7 +11,7 @@ import redis.asyncio as aioredis
 import orjson
 from aiohttp import web
 from navigator_session import get_session, AUTH_SESSION_OBJECT
-from navigator_auth.exceptions import (
+from ..exceptions import (
     AuthException,
     AuthExpired,
     FailedAuth,
@@ -19,8 +19,8 @@ from navigator_auth.exceptions import (
     InvalidAuth,
     UserNotFound,
 )
-from navigator_auth.identities import AuthUser, Column
-from navigator_auth.conf import (
+from ..identities import AuthUser, Column
+from ..conf import (
     AUTH_CREDENTIALS_REQUIRED,
     DJANGO_USER_MAPPING,
     DJANGO_SESSION_URL,
