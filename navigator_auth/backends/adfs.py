@@ -8,6 +8,7 @@ import jwt
 
 # needed by ADFS
 import requests
+import redis.asyncio as aioredis
 import requests.adapters
 from ..exceptions import AuthException
 from ..conf import (
@@ -24,12 +25,15 @@ from ..conf import (
     ADFS_CLAIM_MAPPING,
     ADFS_CALLBACK_REDIRECT_URL,
     ADFS_LOGIN_REDIRECT_URL,
+    AZURE_SESSION_TIMEOUT,
     AZURE_AD_SERVER,
     exclude_list,
-    ADFS_MAPPING
+    ADFS_MAPPING,
+    REDIS_AUTH_URL
 )
 from .jwksutils import get_public_key
 from .external import ExternalAuth
+from ..libs.json import json_encoder, json_decoder
 
 _jwks_cache = {}
 
@@ -107,6 +111,25 @@ class ADFSAuth(ExternalAuth):
         )
         super(ADFSAuth, self).configure(app)
 
+    async def on_startup(self, app: web.Application):
+        """Used to initialize Backend requirements."""
+        ## loading redis connection:
+        await super(ADFSAuth, self).on_startup(app)
+        self._pool = aioredis.ConnectionPool.from_url(
+            REDIS_AUTH_URL,
+            decode_responses=True,
+            encoding="utf-8"
+        )
+
+    async def on_cleanup(self, app: web.Application):
+        """Used to cleanup and shutdown any db connection."""
+        try:
+            await self._pool.disconnect(
+                inuse_connections=True
+            )
+        except Exception as e:  # pylint: disable=W0703
+            pass
+
     async def authenticate(self, request: web.Request):
         """Authenticate, refresh or return the user credentials.
 
@@ -118,6 +141,10 @@ class ADFSAuth(ExternalAuth):
         )
         ## getting Finish Redirect URL
         self.get_finish_redirect_url(request)
+        qs = self.queryparams(request)
+        redirect = None
+        if "redirect_uri" in qs:
+            redirect = qs.pop("redirect_uri")
         try:
             self.state = base64.urlsafe_b64encode(self.redirect_uri.encode()).decode()
             resource = ADFS_RESOURCE if ADFS_RESOURCE else ADFS_DEFAULT_RESOURCE
@@ -132,6 +159,15 @@ class ADFSAuth(ExternalAuth):
             }
             params = requests.compat.urlencode(query_params)
             login_url = f"{self.authorize_uri}?{params}"
+            # Saving redirect info on Redis:
+            flow = {}
+            async with aioredis.Redis(connection_pool=self._pool) as redis:
+                flow['internal_redirect'] = redirect
+                await redis.setex(
+                    f"adfs_auth_{self.state}",
+                    600,
+                    json_encoder(flow)
+                )
             # Step A: redirect
             return self.redirect(login_url)
         except Exception as err:
@@ -155,7 +191,28 @@ class ADFSAuth(ExternalAuth):
                     reason=f"ADFS: Unable to Authenticate: {auth_response!r}"
                 )
             authorization_code = auth_response["code"]
-            # TODO: making validation with previous state
+            state = None
+            try:
+                state = auth_response["state"]
+            except (TypeError, KeyError, ValueError):
+                return self.failed_redirect(
+                    request, error="MISSING_AUTH_NONCE",
+                    message="Missing Auth Nonce"
+                )
+            flow = {}
+            print('STATE > ', state)
+            internal_redirect = None
+            # making validation with previous state
+            try:
+                async with aioredis.Redis(connection_pool=self._pool) as redis:
+                    result = await redis.get(f"adfs_auth_{state}")
+                    flow = json_decoder(result)
+                    internal_redirect = flow.pop(
+                        'internal_redirect',
+                        None
+                    )
+            except Exception:
+                pass
         except Exception as err:
             raise web.HTTPForbidden(
                 reason=f"ADFS: Invalid Callback response: {err}: {auth_response}"
@@ -182,7 +239,7 @@ class ADFSAuth(ExternalAuth):
             if "error" in exchange:
                 error = exchange.get("error")
                 desc = exchange.get("error_description")
-                message = f"ADFS {error}: {desc}¡"
+                message = f"ADFS {error}: {desc}"
                 self.logger.exception(message)
                 raise web.HTTPForbidden(reason=message)
             else:
@@ -264,7 +321,10 @@ class ADFSAuth(ExternalAuth):
         except (KeyError, TypeError):
             token = None
         return self.home_redirect(
-            request, token=token, token_type=token_type
+            request,
+            token=token,
+            token_type=token_type,
+            uri=internal_redirect
         )
 
     async def logout(self, request):

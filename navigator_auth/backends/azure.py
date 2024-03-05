@@ -260,6 +260,7 @@ class AzureAuth(ExternalAuth):
                     request, error="MISSING_AUTH_NONCE",
                     message="Missing Auth Nonce"
                 )
+            flow = {}
             try:
                 async with aioredis.Redis(connection_pool=self._pool) as redis:
                     result = await redis.get(f"azure_auth_{state}")
