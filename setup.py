@@ -132,11 +132,9 @@ setup(
     ],
     install_requires=[
         "PyNaCl==1.5.0",
-        "aiohttp==3.9.2",
+        "aiohttp>=3.9.3",
         "uvloop==0.19.0",
         "asyncio==3.4.3",
-        "asyncdb[default]>=2.6.0",
-        "navconfig[default]>=1.5.0",
         "PyJWT==2.8.0",
         "pycryptodome==3.20.0",
         "rncryptor==3.3.0",
@@ -144,9 +142,10 @@ setup(
         "aiogoogle==5.5.0",
         "okta-jwt-verifier==0.2.3",
         "python-slugify==8.0.1",
-        "navigator-session>=0.5.0",
-        "pendulum==2.1.2",
-        "psycopg2-binary==2.9.9"
+        "psycopg2-binary==2.9.9",
+        "asyncdb>=2.6.0",
+        "navconfig>=1.6.3",
+        "navigator-session>=0.5.3",
     ],
     ext_modules=cythonize(extensions),
     project_urls={  # Optional
