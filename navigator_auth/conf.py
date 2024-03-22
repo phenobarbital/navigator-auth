@@ -312,6 +312,12 @@ AUDIT_CREDENTIALS = {
     "token": config.get('INFLUX_TOKEN')
 }
 
+
+## Oauth Provider:
+OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS = config.getint(
+    "OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS", fallback=4
+)
+
 try:
     from settings.settings import *  # pylint: disable=W0614,W0401
 except ImportError as ex:
