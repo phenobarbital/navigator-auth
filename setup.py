@@ -127,7 +127,7 @@ setup(
     license=__license__,
     setup_requires=[
         "wheel==0.42.0",
-        "Cython==3.0.6",
+        "Cython==3.0.9",
         "asyncio==3.4.3"
     ],
     install_requires=[
