@@ -18,7 +18,9 @@ def user_session() -> Callable[[F], F]:
         @wraps(handler)
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
             # Supports class based views see web.View
+            _is_view: bool = False
             if isinstance(args[0], AbstractView):
+                _is_view = True
                 request = args[0].request
             else:
                 request = args[-1]
@@ -29,7 +31,12 @@ def user_session() -> Callable[[F], F]:
                 user = session.decode("user")
             except (AttributeError, TypeError, RuntimeError):
                 user = None
-            response = await handler(*args, session, user, **kwargs)
+            if _is_view:
+                args[0].session = session
+                args[0].user = user
+                response = await handler(*args, **kwargs)
+            else:
+                response = await handler(*args, session, user, **kwargs)
             return response
 
         return _wrap
