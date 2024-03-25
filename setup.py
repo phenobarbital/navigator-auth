@@ -127,10 +127,11 @@ setup(
     license=__license__,
     setup_requires=[
         "wheel==0.42.0",
-        "Cython==3.0.6",
+        "Cython==3.0.9",
         "asyncio==3.4.3"
     ],
     install_requires=[
+        "Cython==3.0.9",
         "PyNaCl==1.5.0",
         "aiohttp>=3.9.3",
         "uvloop==0.19.0",
@@ -143,7 +144,7 @@ setup(
         "okta-jwt-verifier==0.2.3",
         "python-slugify==8.0.1",
         "psycopg2-binary==2.9.9",
-        "asyncdb>=2.6.0",
+        "asyncdb>=2.6.20",
         "navconfig>=1.6.3",
         "navigator-session>=0.5.3",
     ],
