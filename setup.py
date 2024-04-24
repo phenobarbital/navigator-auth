@@ -133,7 +133,8 @@ setup(
     install_requires=[
         "Cython==3.0.9",
         "PyNaCl==1.5.0",
-        "aiohttp>=3.9.3",
+        "aiohttp>=3.9.5",
+        "alt-aiohttp-cors==0.7.1",
         "uvloop==0.19.0",
         "asyncio==3.4.3",
         "PyJWT==2.8.0",

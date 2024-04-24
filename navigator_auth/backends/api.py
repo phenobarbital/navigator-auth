@@ -6,6 +6,7 @@ description: Single API Token Authentication
 from collections.abc import Callable, Awaitable
 import orjson
 from aiohttp import web
+from navigator_session import get_session
 from ..libs.cipher import Cipher
 from ..exceptions import (
     AuthException,
@@ -23,7 +24,6 @@ from ..conf import (
 # Authenticated Entity
 from ..identities import AuthUser
 from .abstract import BaseAuthBackend
-
 
 class APIKeyUser(AuthUser):
     token: str
@@ -68,6 +68,9 @@ class APIKeyAuth(BaseAuthBackend):
                 if ":" in token:
                     # is an Partner Token, not API
                     return [None, None]
+            elif 'X-API-KEY' in request.headers:
+                token = request.headers.get('X-API-KEY')
+                mech = "api"
             elif "apikey" in request.rel_url.query:
                 token = request.rel_url.query["apikey"]
                 mech = "api"
@@ -138,10 +141,11 @@ class APIKeyAuth(BaseAuthBackend):
             }
             try:
                 userdata[AUTH_USERID_ATTRIBUTE] = user_id
-                userdata[self.session_key_property] = user_id
-                usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
-                usr.set(self.username_attribute, user_id)
-                self.logger.debug(f"User Created: {usr}")
+                userdata[self.session_key_property] = device_id
+                userdata[self.username_attribute] = data.get('name', user_id)
+                userdata['auth_method'] = 'apikey'
+                userdata['token'] = token
+                usr = await self.create_user(userdata)
                 # saving user-data into request:
                 await self.remember(request, device_id, userdata, usr)
                 return {"token": token, **userdata}
@@ -188,6 +192,8 @@ class APIKeyAuth(BaseAuthBackend):
                 return False
             userid = data.get(AUTH_USERID_ATTRIBUTE, None)
             user = await self.validate_user(userid=userid)
+        except AuthExpired:
+            raise
         except UserNotFound:
             return False
         except Exception as err:
@@ -203,6 +209,7 @@ class APIKeyAuth(BaseAuthBackend):
                 **data,
             }
             userdata[AUTH_USERID_ATTRIBUTE] = userid
+            userdata[self.session_key_property] = str(data["device_id"])
             return userdata
         except Exception as err:  # pylint: disable=W0703
             self.logger.exception(err)
@@ -226,16 +233,36 @@ class APIKeyAuth(BaseAuthBackend):
             pass
         try:
             if (userdata := await self.check_credentials(request)):
-                request["authenticated"] = True
-                request[self.session_key_property] = userdata["user_id"]
+                try:
+                    userid = userdata.get('user_id')
+                    request[self.session_key_property] = userdata.get(
+                        self.session_key_property,
+                        userid
+                    )
+                    session = await get_session(
+                        request, userdata, new=True, ignore_cookie=True
+                    )
+                    request.user = await self.get_session_user(session)
+                    request["authenticated"] = True
+                except Exception as ex:  # pylint: disable=W0703
+                    self.logger.error(
+                        f"Missing User Object from Session: {ex}"
+                    )
         except (FailedAuth, InvalidAuth) as err:
             raise self.Unauthorized(
                 reason=f"API Key: {err.message!s}",
                 exception=err
             )
+        except AuthExpired as err:
+            raise self.Unauthorized(
+                reason=f"API Key Expired: {err.message!s}",
+                exception=err
+            )
         except AuthException as err:
             if AUTH_CREDENTIALS_REQUIRED is True:
-                self.logger.error(f"Invalid authorization token: {err!r}")
+                self.logger.error(
+                    f"Invalid authorization token: {err!r}"
+                )
                 raise self.Unauthorized(
                     reason=f"API Key: Invalid authorization Key: {err!r}",
                     exception=err
