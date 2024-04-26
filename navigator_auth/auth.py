@@ -611,6 +611,9 @@ class AuthHandler:
             reason=reason, **kwargs, status=401
         )
 
+    def add_exclude_list(self, path: str):
+        exclude_list.append(path)
+
     async def verify_exceptions(self, request: web.Request) -> bool:
         # avoid authorization backend on excluded methods:
         if request.method == hdrs.METH_OPTIONS or request.path in exclude_list:
