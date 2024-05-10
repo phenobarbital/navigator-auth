@@ -29,16 +29,17 @@ from ..abstract import BaseAuthBackend
 
 
 class OauthUser(AuthUser):
-    access_token: str
-    refresh_token: str
     given_name: str
     family_name: str
+    # Any other column required
 
     def __post_init__(self, data):
         super(OauthUser, self).__post_init__(data)
         self.first_name = self.given_name
         self.last_name = self.family_name
 
+    def get_user_id(self):
+        return self.id
 
 class Oauth2Provider(BaseAuthBackend):
     """Oauth2Provider.

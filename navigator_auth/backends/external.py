@@ -14,6 +14,7 @@ from aiohttp import web, hdrs
 from aiohttp.client import ClientTimeout, ClientSession
 from datamodel.exceptions import ValidationError
 from navconfig.logging import logging
+from navigator_session import AUTH_SESSION_OBJECT
 from ..identities import AuthUser
 from ..libs.json import json_decoder
 from ..exceptions import UserNotFound, AuthException
@@ -385,9 +386,16 @@ class ExternalAuth(BaseAuthBackend):
             except KeyError:
                 user.username = user_id
             user.token = token  # issued token:
+            uid = userinfo[AUTH_SESSION_OBJECT].get('user_id', user_id)
+            username = userdata.get('username')
             payload = {
-                "user_id": user_id,
-                **userdata
+                "user_id": uid,
+                self.user_property: uid,
+                self.username_attribute: username,
+                "email": userdata.get('email', username),
+                self.session_key_property: user_id,
+                "auth_method": userdata.get('auth_method', self._service_name),
+                "token_type": userdata.get('token_type', self.scheme)
             }
             # saving Auth data.
             await self.remember(request, user_id, userinfo, user)
