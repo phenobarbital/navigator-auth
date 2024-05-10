@@ -95,7 +95,7 @@ class ADFSAuth(ExternalAuth):
             # Excluding Redirect for Authorization
             exclude_list.append(self.redirect_uri)
         else:
-            callback = f"/auth/{self._service_name}/callback"
+            callback = f"/auth/{self._service_name}/callback/"
             self.redirect_uri = "{domain}" + callback
             exclude_list.append(callback)
         # Login and Redirect Routes:
