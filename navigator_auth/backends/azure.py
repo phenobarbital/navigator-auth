@@ -82,7 +82,6 @@ class AzureAuth(ExternalAuth):
 
     def configure(self, app):
         super(AzureAuth, self).configure(app)
-
         # TODO: build the callback URL and append to routes
         self.base_url: str = f"https://login.microsoftonline.com/{AZURE_ADFS_TENANT_ID}"
         self.authorize_uri = f"https://login.microsoftonline.com/{AZURE_ADFS_TENANT_ID}/oauth2/v2.0/authorize"
@@ -226,6 +225,9 @@ class AzureAuth(ExternalAuth):
             domain_url = self.get_domain(request)
             self.redirect_uri = self.redirect_uri.format(
                 domain=domain_url, service=self._service_name
+            )
+            self.logger.notice(
+                f"Redirect URL: {self.redirect_uri}"
             )
             SCOPE = ["https://graph.microsoft.com/.default"]
             app = self.get_msal_app()

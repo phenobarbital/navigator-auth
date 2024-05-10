@@ -205,6 +205,9 @@ class ExternalAuth(BaseAuthBackend):
             redirect_url = AUTH_REDIRECT_URI
         if not bool(urlparse(redirect_url).netloc):
             redirect_url = f"{domain_url}{redirect_url}"
+        self.logger.notice(
+            f"Redirect URL: {redirect_url}"
+        )
         self.finish_redirect_url = redirect_url
 
     def redirect(self, uri: str):
@@ -250,6 +253,9 @@ class ExternalAuth(BaseAuthBackend):
             redirect_url = AUTH_OAUTH2_REDIRECT_URL
         else:
             redirect_url = self.finish_redirect_url
+        self.logger.notice(
+            f"Redirect URL: {redirect_url}, Params: {params}, Headers: {headers}"
+        )
         url = self.prepare_url(redirect_url, params)
         return web.HTTPFound(url, headers=headers)
 
