@@ -66,6 +66,7 @@ class User(Model):
     position_id: str = Column(required=False)
     group_id: list = Column(required=False)
     groups: list = Column(required=False)
+    job_code: str = Column(required=False)
     program_id: list = Column(required=False)
     programs: list = Column(required=False)
     start_date: datetime = Column(required=False)
