@@ -144,10 +144,10 @@ setup(
         "aiogoogle==5.5.0",
         "okta-jwt-verifier==0.2.3",
         "python-slugify==8.0.1",
-        "psycopg2-binary==2.9.9",
+        "psycopg2-binary>=2.9.9",
         "asyncdb>=2.6.20",
         "navconfig>=1.6.3",
-        "navigator-session>=0.5.3",
+        "navigator-session>=0.5.6",
     ],
     ext_modules=cythonize(extensions),
     project_urls={  # Optional

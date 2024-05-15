@@ -48,7 +48,13 @@ class APIKeyAuth(BaseAuthBackend):
         token = None
         mech = None
         try:
-            if "Authorization" in request.headers:
+            if 'X-API-KEY' in request.headers:
+                token = request.headers.get('X-API-KEY')
+                mech = "api"
+            elif "apikey" in request.rel_url.query:
+                token = request.rel_url.query["apikey"]
+                mech = "api"
+            elif "Authorization" in request.headers:
                 # Bearer Token (jwt)
                 try:
                     scheme, token = (
@@ -68,12 +74,6 @@ class APIKeyAuth(BaseAuthBackend):
                 if ":" in token:
                     # is an Partner Token, not API
                     return [None, None]
-            elif 'X-API-KEY' in request.headers:
-                token = request.headers.get('X-API-KEY')
-                mech = "api"
-            elif "apikey" in request.rel_url.query:
-                token = request.rel_url.query["apikey"]
-                mech = "api"
             else:
                 return [None, None]
         except Exception as err:  # pylint: disable=W0703
