@@ -8,7 +8,7 @@ import importlib
 from urllib.parse import urlparse
 from requests.models import PreparedRequest
 from aiohttp import web, hdrs
-from aiohttp.web_urldispatcher import SystemRoute
+from aiohttp.web_urldispatcher import SystemRoute, StaticResource
 from navconfig.logging import logging
 from asyncdb.models import Model
 from navigator_session import (
@@ -399,18 +399,41 @@ class BaseAuthBackend(ABC):
             )
 
     async def verify_exceptions(self, request: web.Request) -> bool:
-        # avoid authorization backend on excluded methods:
-        if request.method == hdrs.METH_OPTIONS or request.path in exclude_list:
+        # avoid authorization backend on OPTION method:
+        if request.method == hdrs.METH_OPTIONS:
             return True
+
+        # Check for explicit exclude list matches (if still needed)
+        if request.path in exclude_list:
+            return True
+
+        # Check if it's a static route
+        try:
+            if isinstance(request.match_info.route.resource, StaticResource):
+                return True
+        except AttributeError:  # In case of missing attributes during routing
+            pass
+
+        # Check if the request is for a static resource
+        if request.path.startswith("/static/"):
+            return True
+
         # avoid check system routes
         try:
             if isinstance(request.match_info.route, SystemRoute):  # eg. 404
                 return True
         except Exception:  # pylint: disable=W0703
             pass
+        ### Authorization backends:
+        for backend in self._authz_backends:
+            if await backend.check_authorization(request):
+                return True
+        if request.path in exclude_list:
+            return True
         ## Already Authenticated
         if request.get("authenticated", False) is True:
             return True
+        return False   # Assuming no authentication match by default
 
     def get_domain(self, request: web.Request) -> str:
         uri = urlparse(str(request.url))

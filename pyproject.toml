@@ -25,7 +25,6 @@ classifiers=[
   "Typing :: Typed",
   "Environment :: Web Environment",
   "Framework :: AsyncIO",
-  "Framework :: AIOHTTP",
   "Topic :: Software Development :: Libraries :: Application Frameworks",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Topic :: Software Development :: Build Tools",
