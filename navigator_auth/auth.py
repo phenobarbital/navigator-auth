@@ -14,8 +14,7 @@ from collections.abc import Awaitable, Callable, Iterable
 import orjson
 from orjson import JSONDecodeError
 from aiohttp import hdrs, web
-from aiohttp.web_urldispatcher import SystemRoute
-from aiohttp.web_routedef import StaticResource
+from aiohttp.web_urldispatcher import SystemRoute, StaticResource
 from navigator_session import SESSION_KEY, SessionHandler, get_session
 from .authorizations import authz_allow_hosts, authz_hosts
 from .backends.idp import IdentityProvider
