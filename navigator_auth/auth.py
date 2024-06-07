@@ -15,6 +15,7 @@ import orjson
 from orjson import JSONDecodeError
 from aiohttp import hdrs, web
 from aiohttp.web_urldispatcher import SystemRoute
+from aiohttp.web_routedef import StaticResource
 from navigator_session import SESSION_KEY, SessionHandler, get_session
 from .authorizations import authz_allow_hosts, authz_hosts
 from .backends.idp import IdentityProvider
@@ -615,9 +616,25 @@ class AuthHandler:
         exclude_list.append(path)
 
     async def verify_exceptions(self, request: web.Request) -> bool:
-        # avoid authorization backend on excluded methods:
-        if request.method == hdrs.METH_OPTIONS or request.path in exclude_list:
+        # avoid authorization backend on OPTION method:
+        if request.method == hdrs.METH_OPTIONS:
             return True
+
+        # Check for explicit exclude list matches (if still needed)
+        if request.path in exclude_list:
+            return True
+
+        # Check if it's a static route
+        try:
+            if isinstance(request.match_info.route.resource, StaticResource):
+                return True
+        except AttributeError:  # In case of missing attributes during routing
+            pass
+
+        # Check if the request is for a static resource
+        if request.path.startswith("/static/"):
+            return True
+
         # avoid check system routes
         try:
             if isinstance(request.match_info.route, SystemRoute):  # eg. 404
@@ -633,6 +650,7 @@ class AuthHandler:
         ## Already Authenticated
         if request.get("authenticated", False) is True:
             return True
+        return False   # Assuming no authentication match by default
 
     @web.middleware
     async def auth_middleware(
