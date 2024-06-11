@@ -49,6 +49,7 @@ from .responses import JSONResponse
 from .storages.postgres import PostgresStorage
 from .storages.redis import RedisStorage
 from .templates import TemplateParser
+from .middlewares.security import security_middleware
 
 url = logging.getLogger("urllib3.connectionpool")
 url.setLevel(logging.WARNING)
@@ -536,6 +537,8 @@ class AuthHandler:
                 ) from err
         # last: add the basic jwt middleware (used by basic auth and others)
         mdl.append(self.auth_middleware)
+        # Append something to the end of the list
+        mdl.append(security_middleware)
         return self.app
 
     async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:
