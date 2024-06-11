@@ -109,7 +109,7 @@ class IdentityProvider:
                 user = await self.user_search.get(**search)
         except NoDataFound as ex:
             raise UserNotFound(
-                f"User {search!s} doesn't exists"
+                f"Invalid credentials for User {search!s}"
             ) from ex
         except ValidationError as ex:
             self.logger.error(
@@ -126,7 +126,7 @@ class IdentityProvider:
         # if not exists, return error of missing
         if not user:
             raise UserNotFound(
-                f"User {search!s} doesn't exists"
+                f"Invalid credentials for User {search!s}"
             )
         return user
 
@@ -144,7 +144,7 @@ class IdentityProvider:
                 f"User {search!s} not found: {ex}"
             )
             raise UserNotFound(
-                f"User {search!s} doesn't exists"
+                f"Invalid Credentials for {search!s}"
             ) from ex
         except TypeError as ex:
             self.logger.error(
@@ -164,12 +164,12 @@ class IdentityProvider:
                 f"Error getting User {search!s}: {e!s}"
             )
             raise UserNotFound(
-                f"Error getting User {search!s}: {e!s}"
+                f"Invalid User credentials for: {search!s}: {e!s}"
             ) from e
         # if not exists, return error of missing
         if not user:
             raise UserNotFound(
-                f"User {search!s} doesn't exists"
+                f"Invalid Credentials for {search!s}"
             )
         return user
 
@@ -180,10 +180,8 @@ class IdentityProvider:
             raise InvalidAuth(
                 f"User: Invalid {ex.payload}"
             ) from ex
-        except UserNotFound as err:
-            raise UserNotFound(
-                f"User: {login} doesn't exists: {err}"
-            ) from err
+        except UserNotFound:
+            raise
         except Exception as err:
             raise InvalidAuth(
                 f"User: Auth Exception: {err}"
@@ -193,7 +191,7 @@ class IdentityProvider:
             pwd = user[self.pwd_atrribute]
         except (KeyError, ValidationError, TypeError, ValueError) as ex:
             raise InvalidAuth(
-                "Invalid credentials on User Account"
+                "Invalid credentials for User"
             ) from ex
         try:
             if self.check_password(pwd, password):
@@ -208,7 +206,7 @@ class IdentityProvider:
             raise
         except Exception as err:
             raise InvalidAuth(
-                f"Unknown Password Error: {err}"
+                f"Unknown Error: {err}"
             ) from err
 
     def check_password(self, current_password, password):
@@ -226,7 +224,7 @@ class IdentityProvider:
                     algorithm requirements"
                 ) from ex
             raise InvalidAuth(
-                f"Basic Auth: Invalid Password: {ex}"
+                f"Basic Auth: Invalid Credentials: {ex}"
             ) from ex
         assert algorithm == AUTH_PWD_ALGORITHM
         compare_hash = self.set_password(

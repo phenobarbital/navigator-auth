@@ -56,13 +56,11 @@ class BasicAuth(BaseAuthBackend):
             raise InvalidAuth(
                 f"Invalid User Information: {ex.payload}"
             ) from ex
-        except UserNotFound as err:
-            raise UserNotFound(
-                f"User {login} doesn't exists: {err}"
-            ) from err
+        except (InvalidAuth, FailedAuth, UserNotFound):
+            raise
         except Exception as err:
             raise InvalidAuth(
-                f"Unknown Exception: {err}"
+                f"{err}"
             ) from err
         try:
             # later, check the password

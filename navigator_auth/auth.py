@@ -262,6 +262,63 @@ class AuthHandler:
     def get_token_backend(self):
         return self.backends['TrocToken']
 
+    async def _login_token(self, request: web.Request):
+        # Using TrocToken or other backend on list with auth
+        if (backend := self.get_token_backend()):
+            try:
+                userdata = await backend.authenticate(request)
+                if not userdata:
+                    raise self.ForbiddenAccess(
+                        reason="User was not authenticated"
+                    )
+                return userdata
+            except UserNotFound as err:
+                raise self.Unauthorized(
+                    reason="Invalid credentials",
+                    exception=err
+                )
+            except Exception as err:
+                raise self.auth_error(
+                    reason=f"Auth Exception: {err}",
+                    exception=err
+                )
+
+    async def _backend_auth(self, request: web.Request, backend):
+        try:
+            userdata = await backend.authenticate(request)
+            if not userdata:
+                raise self.ForbiddenAccess(
+                    reason="User was not Authenticated"
+                )
+            return userdata
+        except UserNotFound as err:
+            raise self.Unauthorized(
+                reason="Invalid Credentials",
+                exception=err
+            )
+        except (
+            InvalidAuth,
+            Forbidden,
+            FailedAuth
+        ) as err:
+            self.logger.error(str(err))
+            raise self.ForbiddenAccess(
+                reason=f"{err.message}",
+                status=err.status
+            )
+        except AuthException as err:
+            logging.exception(err)
+            raise self.ForbiddenAccess(
+                reason=f"{err.message}",
+                exception=err,
+                status=err.status
+            )
+        except Exception as err:
+            raise self.auth_error(
+                reason=f"Auth Exception: {err}",
+                exception=err
+            )
+
     async def api_login(self, request: web.Request) -> web.Response:
         """Login.
 
@@ -271,53 +328,9 @@ class AuthHandler:
         userdata = None
         qs = {key: val for (key, val) in request.query.items()}
         if (backend := self.get_auth_backend(request)):
-            try:
-                userdata = await backend.authenticate(request)
-                if not userdata:
-                    raise self.ForbiddenAccess(
-                        reason="User was not authenticated"
-                    )
-            except UserNotFound as err:
-                raise self.Unauthorized(
-                    reason=f"User Doesn't exists: {err.message}",
-                    exception=err
-                )
-            except (
-                InvalidAuth,
-                Forbidden,
-                FailedAuth
-            ) as err:
-                self.logger.error(str(err))
-                raise self.ForbiddenAccess(
-                    reason=f"{err.message}",
-                    status=err.status
-                )
-            except AuthException as err:
-                logging.exception(err)
-                raise self.ForbiddenAccess(
-                    reason=f"{err.message}",
-                    exception=err,
-                    status=err.status
-                )
-            except Exception as err:
-                raise self.auth_error(
-                    reason=f"Auth Exception: {err}",
-                    exception=err
-                )
+            userdata = await self._backend_auth(request, backend)
         elif 'auth' in qs:
-            # Using TrocToken or other backend on list with auth=
-            if (backend := self.get_token_backend()):
-                try:
-                    userdata = await backend.authenticate(request)
-                    if not userdata:
-                        raise self.ForbiddenAccess(
-                            reason="User was not authenticated"
-                        )
-                except Exception as err:
-                    raise self.auth_error(
-                        reason=f"Auth Exception: {err}",
-                        exception=err
-                    )
+            userdata = await self._login_token(request)
         else:
             # second: if no backend declared, will iterate over all backends
             for _, backend in self.backends.items():
