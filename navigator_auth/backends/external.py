@@ -349,7 +349,7 @@ class ExternalAuth(BaseAuthBackend):
         except UserNotFound as err:
             if AUTH_MISSING_ACCOUNT == "raise":
                 raise UserNotFound(
-                    f"User {login} doesn't exists: {err}"
+                    f"Invalid Credentials for {login}"
                 ) from err
             elif AUTH_MISSING_ACCOUNT == "create":
                 # can create an user using userdata:
@@ -361,7 +361,7 @@ class ExternalAuth(BaseAuthBackend):
                     user = await self._idp.get_user(login)
                 except UserNotFound as ex:
                     raise UserNotFound(
-                        f"User {login} doesn't exists: {ex}"
+                        f"Invalid Credentials for {login}"
                     ) from ex
             else:
                 raise RuntimeError(

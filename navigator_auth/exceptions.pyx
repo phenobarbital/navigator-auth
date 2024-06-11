@@ -16,10 +16,10 @@ cdef class AuthException(Exception):
         self.status = int(status)
 
     def __repr__(self):
-        return f"{self.message}, status: {self.status}"
+        return f"{self.message}"
 
     def __str__(self):
-        return f"{self.message}, status: {self.status}"
+        return f"{self.message}"
 
     def get(self):
         return self.message

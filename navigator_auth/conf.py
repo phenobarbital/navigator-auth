@@ -59,6 +59,14 @@ AUTH_CREDENTIALS_REQUIRED = config.getboolean(
     "AUTH_CREDENTIALS_REQUIRED", fallback=True
 )
 
+# Security Headers:
+XFRAME_OPTIONS = config.get('XFRAME_OPTIONS', fallback='DENY')
+XREFERER_POLICY = config.get(
+    'XREFERER_POLICY',
+    fallback='strict-origin-when-cross-origin'
+)
+XCONTENT_TYPE_OPTIONS = config.get('XCONTENT_TYPE_OPTIONS', fallback='nosniff')
+
 # what happen when a user doesn't exists?
 # possible values are: create (user is created), raise (a UserDoesntExists raises)
 # and ignore, session is created but user is missing.

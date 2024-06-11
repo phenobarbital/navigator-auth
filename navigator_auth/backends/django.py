@@ -133,8 +133,8 @@ class DjangoAuth(BaseAuthBackend):
         try:
             user = await self.get_user(**search)
             return user
-        except UserNotFound as err:
-            raise UserNotFound(f"User {login} doesn't exists: {err}") from err
+        except (FailedAuth, InvalidAuth, UserNotFound):
+            raise
         except Exception as e:
             raise InvalidAuth(
                 str(e)
