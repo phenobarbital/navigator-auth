@@ -537,7 +537,7 @@ class AuthHandler:
                 ) from err
         # last: add the basic jwt middleware (used by basic auth and others)
         mdl.append(self.auth_middleware)
-        # Append something to the end of the list
+        # and the security headers on responses.
         mdl.append(security_middleware)
         return self.app
 
