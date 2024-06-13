@@ -124,6 +124,7 @@ class TrocToken(BaseAuthBackend):
                 raise
             try:
                 user = await self.validate_user(login=username)
+                print('HERE >> ', user, data, username)
             except UserNotFound:
                 raise
             except Exception as err:

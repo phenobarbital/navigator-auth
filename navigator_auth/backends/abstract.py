@@ -271,14 +271,15 @@ class BaseAuthBackend(ABC):
 
     async def validate_user(self, login: str = None, userid: int = None):
         # get the user based on Model
+        user = None
         try:
-            if login is not None:
+            if login:
                 user = await self._idp.get_user(login)
-            if userid is not None:
+            elif userid:
                 user = await self._idp.user_from_id(userid)
             else:
                 raise UserNotFound(
-                    "User Not Found"
+                    "Missing User Information"
                 )
             return user
         except UserNotFound:
