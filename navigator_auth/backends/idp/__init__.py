@@ -6,7 +6,7 @@ import secrets
 import importlib
 import jwt
 from aiohttp import web, hdrs
-from asyncdb.exceptions.exceptions import NoDataFound
+from asyncdb.exceptions import NoDataFound
 from datamodel.exceptions import ValidationError
 from navconfig.logging import logging
 from navigator_session import (
@@ -139,6 +139,13 @@ class IdentityProvider:
                 search = {self.username_attribute: login}
                 self.user_search.Meta.connection = conn
                 user = await self.user_search.get(**search)
+                if user:
+                    return user
+                raise UserNotFound(
+                    f"Invalid Credentials for {search!s}"
+                )
+        except UserNotFound:
+            raise
         except NoDataFound as ex:
             self.logger.error(
                 f"User {search!s} not found: {ex}"
@@ -166,12 +173,6 @@ class IdentityProvider:
             raise UserNotFound(
                 f"Invalid User credentials for: {search!s}: {e!s}"
             ) from e
-        # if not exists, return error of missing
-        if not user:
-            raise UserNotFound(
-                f"Invalid Credentials for {search!s}"
-            )
-        return user
 
     async def authenticate_credentials(self, login: str = None, password: str = None):
         try:

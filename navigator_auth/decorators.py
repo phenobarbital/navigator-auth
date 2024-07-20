@@ -1,5 +1,6 @@
 from functools import wraps
-from typing import Any, TypeVar
+import inspect
+from typing import Any, TypeVar, Union
 from collections.abc import Callable
 from aiohttp import web, hdrs
 from aiohttp.abc import AbstractView
@@ -19,9 +20,9 @@ def user_session() -> Callable[[F], F]:
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
             # Supports class based views see web.View
             _is_view: bool = False
-            if isinstance(args[0], AbstractView):
+            if inspect.isclass(handler) and issubclass(handler, AbstractView):
                 _is_view = True
-                request = args[0].request
+                request = args[0]
             else:
                 request = args[-1]
             if request is None:
@@ -51,8 +52,8 @@ def is_authenticated(content_type: str = "application/json") -> Callable:
         @wraps(handler)
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
             # Supports class based views see web.View
-            if isinstance(args[0], AbstractView):
-                request = args[0].request
+            if inspect.isclass(handler) and issubclass(handler, AbstractView):
+                request = args[0]
             else:
                 request = args[-1]
             if request is None:
@@ -62,7 +63,16 @@ def is_authenticated(content_type: str = "application/json") -> Callable:
                 return await handler(*args, **kwargs)
             else:
                 app = request.app
-                auth = app["auth"]
+                try:
+                    auth = app["auth"]
+                except KeyError as ex:
+                    raise web.HTTPBadRequest(
+                        reason="Authentication Backend is not enabled.",
+                        headers={
+                            hdrs.CONTENT_TYPE: content_type,
+                            hdrs.CONNECTION: "keep-alive",
+                        },
+                    ) from ex
                 userdata = None
                 for _, backend in auth.backends.items():
                     try:
@@ -95,8 +105,8 @@ def allowed_groups(groups: list, content_type: str = "application/json") -> Call
         @wraps(handler)
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
             # Supports class based views see web.View
-            if isinstance(args[0], AbstractView):
-                request = args[0].request
+            if inspect.isclass(handler) and issubclass(handler, AbstractView):
+                request = args[0]
             else:
                 request = args[-1]
             if request is None:
@@ -152,8 +162,8 @@ def allowed_programs(
         @wraps(handler)
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
             # Supports class based views see web.View
-            if isinstance(args[0], AbstractView):
-                request = args[0].request
+            if inspect.isclass(handler) and issubclass(handler, AbstractView):
+                request = args[0]
             else:
                 request = args[-1]
             if request is None:
@@ -202,8 +212,8 @@ def allowed_organizations(
         @wraps(handler)
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
             # Supports class based views see web.View
-            if isinstance(args[0], AbstractView):
-                request = args[0].request
+            if inspect.isclass(handler) and issubclass(handler, AbstractView):
+                request = args[0]
             else:
                 request = args[-1]
             if request is None:
@@ -251,15 +261,24 @@ def apikey_required(content_type: str = "application/json") -> Callable:
         @wraps(handler)
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
             # Supports class based views see web.View
-            if isinstance(args[0], AbstractView):
-                request = args[0].request
+            if inspect.isclass(handler) and issubclass(handler, AbstractView):
+                request = args[0]
             else:
                 request = args[-1]
             if request is None:
                 raise ValueError(f"web.Request was not found in arguments. {handler!s}")
             ###
             app = request.app
-            auth = app["auth"]
+            try:
+                auth = app["auth"]
+            except KeyError as ex:
+                raise web.HTTPBadRequest(
+                    reason="Auth is required",
+                    headers={
+                        hdrs.CONTENT_TYPE: content_type,
+                        hdrs.CONNECTION: "keep-alive",
+                    },
+                ) from ex
             userdata = None
             try:
                 backend = auth.backends["APIKeyAuth"]

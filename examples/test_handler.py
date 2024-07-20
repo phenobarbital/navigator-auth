@@ -1,6 +1,7 @@
 from aiohttp import web
 from navconfig.logging import logging
 from navigator_session import get_session
+from navigator.views import BaseView
 from navigator_auth.decorators import (
     user_session,
     is_authenticated,
@@ -9,6 +10,17 @@ from navigator_auth.decorators import (
     apikey_required
 )
 from navigator_auth import AuthHandler
+
+@is_authenticated()
+@user_session()
+class TestHandler(BaseView):
+    async def get(self):
+        session = self.request.session
+        user = self.request.user
+        print('GOT USER ', user, session)
+        name = self.request.match_info.get('name', user.first_name)
+        text = "Hello, " + name
+        return web.Response(text=text)
 
 async def handle(request):
     name = request.match_info.get('name', "Anonymous")
@@ -51,7 +63,7 @@ app.add_routes([web.get('/', handle),
 @user_session()
 async def usersession(request, session, user):
     print('GOT USER ', user, session)
-    name = request.match_info.get('name', "Anonymous")
+    name = request.match_info.get('name', user.first_name)
     text = "Hello, " + name
     return web.Response(text=text)
 
@@ -94,8 +106,10 @@ app.add_routes([
     web.get('/services/protected', url_protected),
     web.get('/services/admin', only_supers),
     web.get('/services/walmart', only_walmart),
-    web.get('/services/api_required', api_required),
+    web.get('/services/api_required', api_required)
 ])
+
+app.router.add_view('/services/base_test', TestHandler)
 
 
 if __name__ == '__main__':
