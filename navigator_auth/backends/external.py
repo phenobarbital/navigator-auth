@@ -394,17 +394,18 @@ class ExternalAuth(BaseAuthBackend):
             user.token = token  # issued token:
             uid = userinfo[AUTH_SESSION_OBJECT].get('user_id', user_id)
             username = userdata.get('username')
+            # saving Auth data.
+            session = await self.remember(request, user_id, userinfo, user)
             payload = {
                 "user_id": uid,
                 self.user_property: uid,
                 self.username_attribute: username,
                 "email": userdata.get('email', username),
                 self.session_key_property: user_id,
+                self.session_id_property: session.session_id,
                 "auth_method": userdata.get('auth_method', self._service_name),
                 "token_type": userdata.get('token_type', self.scheme)
             }
-            # saving Auth data.
-            await self.remember(request, user_id, userinfo, user)
             # Create the User Token.
             token, exp, scheme = self._idp.create_token(
                 data=payload
