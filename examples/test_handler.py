@@ -50,7 +50,7 @@ async def debug_middleware(request, handler):
     response = await handler(request)
     return response
 
-app = web.Application(middlewares=[debug_middleware])
+app = web.Application()
 
 # create a new instance of Auth System
 auth = AuthHandler()

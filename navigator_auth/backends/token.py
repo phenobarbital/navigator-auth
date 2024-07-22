@@ -111,6 +111,14 @@ class TokenAuth(BaseAuthBackend):
             try:
                 userdata = dict(data)
                 uid = data["name"]
+                userdata[self.session_key_property] = uid
+                usr = await self.create_user(userdata)
+                usr.id = uid
+                usr.set(self.username_attribute, uid)
+                usr.programs = programs
+                usr.tenant = tenant
+                # saving user-data into request:
+                session = await self.remember(request, uid, userdata, usr)
                 user = {
                     "name": data["name"],
                     "partner": username,
@@ -120,19 +128,12 @@ class TokenAuth(BaseAuthBackend):
                     "tenant": tenant,
                     "id": data["name"],
                     "user_id": uid,
+                    self.session_id_property: session.session_id
                 }
-                userdata[self.session_key_property] = uid
-                usr = await self.create_user(userdata)
-                usr.id = uid
-                usr.set(self.username_attribute, uid)
-                usr.programs = programs
-                usr.tenant = tenant
                 token, exp, scheme = self._idp.create_token(data=user)
                 usr.access_token = token
                 usr.token_type = scheme
                 usr.expires_in = exp
-                # saving user-data into request:
-                await self.remember(request, uid, userdata, usr)
                 return {"token": f"{tenant}:{token}", **user}
             except Exception as err:  # pylint: disable=W0703
                 self.logger.exception(f"TokenAuth: Authentication Error: {err}")

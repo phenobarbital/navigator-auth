@@ -16,6 +16,7 @@ from navigator_session import (
     AUTH_SESSION_OBJECT,
     SESSION_TIMEOUT,
     SESSION_KEY,
+    SESSION_ID,
     SESSION_USER_PROPERTY,
 )
 from ..exceptions import (
@@ -46,6 +47,7 @@ class BaseAuthBackend(ABC):
     userid_attribute: str = "user_id"
     username_attribute: str = AUTH_USERNAME_ATTRIBUTE
     session_key_property: str = SESSION_KEY
+    session_id_property: str = SESSION_ID
     session_timeout: int = int(SESSION_TIMEOUT)
     _service: str = None
     _ident: Identity = Identity
@@ -302,10 +304,12 @@ class BaseAuthBackend(ABC):
                 session = await new_session(request, userdata)
                 user.is_authenticated = True  # if session, then, user is authenticated.
                 session[self.session_key_property] = identity
+                request[self.session_id_property] = session.session_id
                 try:
                     await session.save_encoded_data(request, 'user', user)
                 except RuntimeError as ex:
                     print('Error Saving User ', ex)
+                return session
             except Exception as err:
                 raise web.HTTPForbidden(
                     reason=f"Error Creating User Session: {err!s}"
@@ -338,9 +342,6 @@ class BaseAuthBackend(ABC):
         try:
             for fn in self._callbacks:
                 await self.call_successful_callbacks(request, fn, user, **kwargs)
-        #     coro.append(asyncio.create_task(func))
-        # try:
-        #     await asyncio.gather(*coro, return_exceptions=True)
         except Exception as ex:  # pylint: disable=W0718
             self.logger.exception(
                 f"Auth Callback Error: {ex}", stack_info=True

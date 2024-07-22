@@ -162,11 +162,16 @@ class BasicAuth(BaseAuthBackend):
                 usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
                 usr.id = uid
                 usr.set(self.username_attribute, username)
+                for key, val in BASIC_USER_MAPPING.items():
+                    userdata[key] = user[val]
+                ### saving User data into session:
+                session = await self.remember(request, username, userdata, usr)
                 payload = {
                     self.user_property: user[self.userid_attribute],
                     self.username_attribute: username,
                     "user_id": uid,
-                    self.session_key_property: username
+                    self.session_key_property: username,
+                    self.session_id_property: session.session_id
                 }
                 # Create the User session and returned.
                 token, exp, scheme = self._idp.create_token(data=payload)
@@ -176,8 +181,6 @@ class BasicAuth(BaseAuthBackend):
                 userdata['expires_in'] = exp
                 userdata['token_type'] = scheme
                 userdata['auth_method'] = "basic"
-                for key, val in BASIC_USER_MAPPING.items():
-                    userdata[key] = user[val]
                 # invoke callbacks to update user data:
                 if user and self._callbacks:
                     # construir e invocar callbacks para actualizar data de usuario
@@ -187,8 +190,6 @@ class BasicAuth(BaseAuthBackend):
                         "userdata": userdata
                     }
                     await self.auth_successful_callback(request, user, **args)
-                ### saving User data into session:
-                await self.remember(request, username, userdata, usr)
                 ### check if any callbacks exists:
                 return {"token": token, **userdata}
             except Exception as err:  # pylint: disable=W0703

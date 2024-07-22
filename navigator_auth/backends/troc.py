@@ -148,11 +148,14 @@ class TrocToken(BaseAuthBackend):
                 usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
                 usr.id = uid
                 usr.set(self.username_attribute, username)
+                # saving user-data into request:
+                session = await self.remember(request, uid, userdata, usr)
                 payload = {
                     self.user_property: user[self.userid_attribute],
                     self.username_attribute: username,
                     "user_id": uid,
-                    self.session_key_property: username
+                    self.session_key_property: username,
+                    self.session_id_property: session.session_id
                 }
                 token, exp, scheme = self._idp.create_token(data=payload)
                 usr.access_token = token
@@ -172,9 +175,6 @@ class TrocToken(BaseAuthBackend):
                         await self.auth_successful_callback(request, user, **args)
                 except Exception as err:
                     self.logger.error(str(err))
-                # saving user-data into request:
-                # print('USER > ', userdata, usr)
-                await self.remember(request, uid, userdata, usr)
                 # If redirect_uri is set:
                 if 'redirect_uri' in qs:
                     # redirect:

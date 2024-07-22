@@ -656,12 +656,12 @@ class AuthHandler:
                 return True
         except Exception:  # pylint: disable=W0703
             pass
+
         ### Authorization backends:
         for backend in self._authz_backends:
             if await backend.check_authorization(request):
                 return True
-        if request.path in exclude_list:
-            return True
+
         ## Already Authenticated
         if request.get("authenticated", False) is True:
             return True
