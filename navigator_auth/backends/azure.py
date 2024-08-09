@@ -259,7 +259,8 @@ class AzureAuth(ExternalAuth):
                 state = auth_response["state"]
             except (TypeError, KeyError, ValueError):
                 return self.failed_redirect(
-                    request, error="MISSING_AUTH_NONCE",
+                    request,
+                    error="MISSING_AUTH_NONCE",
                     message="Missing Auth Nonce"
                 )
             flow = {}
