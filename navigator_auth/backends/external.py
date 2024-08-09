@@ -202,7 +202,7 @@ class ExternalAuth(BaseAuthBackend):
     def get_finish_redirect_url(self, request: web.Request) -> str:
         domain_url = self.get_domain(request)
         try:
-            redirect_url = request.query["redirect_url"]
+            redirect_url = request.query['redirect_uri']
         except (TypeError, KeyError):
             redirect_url = AUTH_REDIRECT_URI if AUTH_REDIRECT_URI else '/'
         if not bool(urlparse(redirect_url).netloc):
@@ -244,7 +244,10 @@ class ExternalAuth(BaseAuthBackend):
                 "type": token_type
             }
             params = {**params, **_auth}
-        if uri is not None:
+        if uri:
+            self.logger.notice(
+                f"Redirect to: {uri}"
+            )
             if not bool(urlparse(uri).netloc):
                 domain_url = self.get_domain(request)
                 redirect_url = f"{domain_url}{uri}"
