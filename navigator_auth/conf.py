@@ -100,9 +100,10 @@ ALLOWED_HOSTS = [
 ]
 
 ## Redirections:
-AUTH_REDIRECT_URI = config.get("AUTH_REDIRECT_URI", section="auth")
-AUTH_LOGIN_FAILED_URI = config.get("AUTH_LOGIN_FAILED_URI", section="auth")
-AUTH_LOGOUT_REDIRECT_URI = config.get("AUTH_LOGOUT_REDIRECT_URI", section="auth")
+AUTH_REDIRECT_URI = config.get("AUTH_REDIRECT_URI", fallback="/")
+AUTH_FAILED_REDIRECT_URI = config.get("AUTH_FAILED_REDIRECT_URI", fallback="/login")
+AUTH_LOGIN_FAILED_URI = config.get("AUTH_LOGIN_FAILED_URI", fallback="/login")
+AUTH_LOGOUT_REDIRECT_URI = config.get("AUTH_LOGOUT_REDIRECT_URI", fallback="/logout")
 AUTH_SUCCESSFUL_CALLBACKS = ()
 
 # Enable authentication backends

@@ -21,6 +21,7 @@ from ..exceptions import UserNotFound, AuthException
 from ..conf import (
     AUTH_LOGIN_FAILED_URI,
     AUTH_REDIRECT_URI,
+    AUTH_FAILED_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
     AUTH_SUCCESSFUL_CALLBACKS,
     PREFERRED_AUTH_SCHEME,
@@ -95,7 +96,8 @@ class ExternalAuth(BaseAuthBackend):
         self._info.uri = f"/api/v1/auth/{self._service_name}/"
         ## added to excluded list:
         exclude_list.append(f"/api/v1/auth/{self._service_name}/")
-        self.finish_redirect_url = None
+        self.finish_redirect_url: str = None
+        self.failed_redirect_url: str = AUTH_FAILED_REDIRECT_URI
         ## alt login
         router.add_route(
             "GET",
@@ -202,7 +204,7 @@ class ExternalAuth(BaseAuthBackend):
         try:
             redirect_url = request.query["redirect_url"]
         except (TypeError, KeyError):
-            redirect_url = AUTH_REDIRECT_URI
+            redirect_url = AUTH_REDIRECT_URI if AUTH_REDIRECT_URI else '/'
         if not bool(urlparse(redirect_url).netloc):
             redirect_url = f"{domain_url}{redirect_url}"
         self.logger.notice(
@@ -259,20 +261,30 @@ class ExternalAuth(BaseAuthBackend):
         url = self.prepare_url(redirect_url, params)
         return web.HTTPFound(url, headers=headers)
 
+    def get_failed_redirect_url(self, request: web.Request) -> str:
+        domain_url = self.get_domain(request)
+        redirect_url = AUTH_FAILED_REDIRECT_URI if AUTH_FAILED_REDIRECT_URI else '/'
+        if not bool(urlparse(redirect_url).netloc):
+            # if redirect is not an absolute resource
+            redirect_url = f"{domain_url}{redirect_url}"
+        self.logger.warning(
+            f"Failed Redirect URI: {redirect_url}"
+        )
+        return redirect_url
+
     def failed_redirect(
         self,
         request: web.Request,
         error: str = "ERROR_UNKNOWN",
         message: str = "ERROR_UNKNOWN"
     ):
-        self.get_finish_redirect_url(request)
-        headers = {"x-message": message}
+        url = self.get_failed_redirect_url(request)
+        headers = {"x-message": message, "x-error": str(error)}
         params = {
             "error": error,
             "message": message
         }
-        url = self.prepare_url(self.finish_redirect_url, params)
-
+        url = self.prepare_url(url, params)
         return web.HTTPFound(url, headers=headers)
 
     @abstractmethod
