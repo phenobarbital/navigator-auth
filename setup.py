@@ -135,13 +135,12 @@ setup(
         "PyNaCl==1.5.0",
         "aiohttp>=3.9.5",
         "alt-aiohttp-cors==0.7.1",
-        "uvloop==0.19.0",
         "asyncio==3.4.3",
-        "PyJWT==2.8.0",
+        "PyJWT==2.9.0",
         "pycryptodome==3.20.0",
         "rncryptor==3.3.0",
         "msal>=1.28.0",
-        "aiogoogle==5.5.0",
+        "aiogoogle==5.12.0",
         "okta-jwt-verifier==0.2.5",
         "python-slugify==8.0.1",
         "psycopg2-binary>=2.9.9",
@@ -149,6 +148,11 @@ setup(
         "navconfig>=1.6.3",
         "navigator-session>=0.5.6",
     ],
+    extras_require={
+        "uvloop": [
+            "uvloop==0.19.0",
+        ],
+    },
     ext_modules=cythonize(extensions),
     project_urls={  # Optional
         "Source": "https://github.com/phenobarbital/navigator-auth",

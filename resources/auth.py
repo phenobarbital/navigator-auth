@@ -26,6 +26,8 @@ async def last_login(request: web.Request, user: Model, usermodel: Model, **kwar
         db = pg(dsn=default_dsn)
         async with await db.connection() as conn:
             usermodel.Meta.set_connection(conn)
+            print('MODEL >>> ', usermodel)
+            print('ARGS > ', args)
             u = await usermodel.get(**args)
             u.last_login = datetime.utcnow()
             await u.update()
