@@ -60,11 +60,10 @@ class User(Model):
     timezone: str = Column(required=False, max=75, default="UTC", repr=False)
     attributes: Optional[dict] = Column(required=False, default_factory=dict)
     created_at: datetime = Column(required=False, default=datetime.now())
-    updated_at: datetime = Column(required=False, default=datetime.now())
     last_login: datetime = Column(
         required=False, readonly=True, default=datetime.now()
     )
-    created_by: str = Column(required=False)
+    # created_by: str = Column(required=False)
 
     class Meta:
         name = AUTH_USERS_TABLE
