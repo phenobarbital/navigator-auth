@@ -409,6 +409,7 @@ class ExternalAuth(BaseAuthBackend):
             user.token = token  # issued token:
             uid = userinfo[AUTH_SESSION_OBJECT].get('user_id', user_id)
             username = userdata.get('username')
+            userinfo['user_id'] = uid
             # saving Auth data.
             session = await self.remember(request, user_id, userinfo, user)
             payload = {
