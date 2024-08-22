@@ -558,6 +558,10 @@ class ExternalAuth(BaseAuthBackend):
                     raise UserNotFound(
                         f"Cannot create User {login}"
                     )
+            except ValueError as ex:
+                self.logger.error(
+                    f"Wrong Payload for {login!s}: {data!s}"
+                )
             except TypeError as ex:
                 self.logger.error(
                     f"Payload error for {login!s}"

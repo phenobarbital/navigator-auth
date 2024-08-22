@@ -239,7 +239,7 @@ AZURE_ADFS_SCOPES = [
 
 PREFERRED_AUTH_SCHEME = config.get("PREFERRED_AUTH_SCHEME", fallback="https")
 
-AZURE_MAPPING = {
+azure_mapping = {
     "phone": "businessPhones",
     "display_name": "displayName",
     "first_name": "givenName",
@@ -256,6 +256,16 @@ AZURE_MAPPING = {
     "utid": "utid",
     "name": "displayName"
 }
+az_mapping = config.get("AZURE_MAPPING")
+
+if az_mapping is not None:
+    try:
+        azure_mapping = orjson.loads(az_mapping)
+    except orjson.JSONDecodeError:
+        logging.exception(
+            "Auth: Invalid Azure Mapping on *AZURE_MAPPING*"
+        )
+AZURE_MAPPING = azure_mapping
 
 # ADFS SSO
 ADFS_SERVER = config.get("ADFS_SERVER")
@@ -277,7 +287,6 @@ ADFS_CALLBACK_REDIRECT_URL = config.get("ADFS_CALLBACK_REDIRECT_URL", fallback=N
 
 ADFS_MAPPING = {
     "upn": "upn",
-    "user_id": "upn",
     "email": "email",
     "given_name": "given_name",
     "family_name": "family_name",
@@ -285,10 +294,19 @@ ADFS_MAPPING = {
     "name": "Display-Name",
     "display_name": "Display-Name"
 }
+ad_mapping = config.get("ADFS_CLAIM_MAPPING")
+if ad_mapping is not None:
+    try:
+        ad_mapping = orjson.loads(ad_mapping)
+    except orjson.JSONDecodeError:
+        logging.exception(
+            "Auth: Invalid Azure Mapping on *ADFS_MAPPING*"
+        )
+ADFS_CLAIM_MAPPING = ad_mapping
 
 AZURE_AD_SERVER = config.get("AZURE_AD_SERVER", fallback="login.microsoftonline.com")
 AZURE_SESSION_TIMEOUT = config.get("AZURE_SESSION_TIMEOUT", fallback=120)
-ADFS_CLAIM_MAPPING = config.get("ADFS_CLAIM_MAPPING", fallback=ADFS_MAPPING)
+
 
 # Okta
 OKTA_CLIENT_ID = config.get("OKTA_CLIENT_ID")
