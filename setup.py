@@ -126,12 +126,12 @@ setup(
     ),
     license=__license__,
     setup_requires=[
-        "wheel==0.42.0",
-        "Cython==3.0.9",
-        "asyncio==3.4.3"
+        'setuptools==74.0.0',
+        'Cython==3.0.11',
+        'wheel==0.44.0'
     ],
     install_requires=[
-        "Cython==3.0.9",
+        "Cython==3.0.11",
         "PyNaCl==1.5.0",
         "aiohttp>=3.9.5",
         "alt-aiohttp-cors==0.7.1",
@@ -139,18 +139,18 @@ setup(
         "PyJWT==2.9.0",
         "pycryptodome==3.20.0",
         "rncryptor==3.3.0",
-        "msal>=1.28.0",
+        'msal>=1.28.0,<1.30.1',
         "aiogoogle==5.12.0",
         "okta-jwt-verifier==0.2.5",
         "python-slugify==8.0.1",
         "psycopg2-binary>=2.9.9",
-        "asyncdb>=2.6.20",
-        "navconfig>=1.6.3",
-        "navigator-session>=0.5.6",
+        "asyncdb>=2.8.0",
+        "navconfig>=1.7.0",
+        "navigator-session>=0.6.0",
     ],
     extras_require={
         "uvloop": [
-            "uvloop==0.19.0",
+            "uvloop==0.20.0",
         ],
     },
     ext_modules=cythonize(extensions),

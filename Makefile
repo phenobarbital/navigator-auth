@@ -1,15 +1,13 @@
 venv:
-	python3.10 -m venv .venv
+	python3.11 -m venv .venv
 	echo 'run `source .venv/bin/activate` to start develop Navigator-Auth'
 
 install:
 	pip install -U pip
-	pip install wheel==0.42.0
 	pip install -e .
 
 develop:
 	pip install -U pip
-	pip install wheel==0.42.0
 	pip install -e .
 	pip install -Ur docs/requirements-dev.txt
 	flit install --symlink
