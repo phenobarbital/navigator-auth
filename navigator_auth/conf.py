@@ -60,11 +60,24 @@ AUTH_CREDENTIALS_REQUIRED = config.getboolean(
 )
 
 # Security Headers:
+ENABLE_XFRAME_OPTIONS = config.getboolean('ENABLE_XFRAME_OPTIONS', fallback=True)
 XFRAME_OPTIONS = config.get('XFRAME_OPTIONS', fallback='DENY')
+
+# Security: Referer Policy
+ENABLE_XREFERER_POLICY = config.getboolean('XREFERER_POLICY', fallback=True)
 XREFERER_POLICY = config.get(
     'XREFERER_POLICY',
     fallback='strict-origin-when-cross-origin'
 )
+
+# Content Security Policy:
+HSTS_MAX_AGE = config.getint('HSTS_MAX_AGE', fallback=31536000)
+STRICT_INCLUDE_SUBDOMAINS = config.getboolean(
+    'STRICT_INCLUDE_SUBDOMAINS',
+    fallback=True
+)
+ENABLE_XSS_PROTECTION = config.getboolean('ENABLE_XSS_PROTECTION', fallback=True)
+XSS_PROTECTION = config.get('XSS_PROTECTION', fallback='1; mode=block')
 XCONTENT_TYPE_OPTIONS = config.get('XCONTENT_TYPE_OPTIONS', fallback='nosniff')
 
 # what happen when a user doesn't exists?

@@ -2,9 +2,15 @@ from collections.abc import Callable, Awaitable
 from aiohttp import web
 from aiohttp.web import middleware
 from ..conf import (
+    ENABLE_XFRAME_OPTIONS,
     XFRAME_OPTIONS,
+    ENABLE_XREFERER_POLICY,
     XREFERER_POLICY,
-    XCONTENT_TYPE_OPTIONS
+    XCONTENT_TYPE_OPTIONS,
+    XSS_PROTECTION,
+    ENABLE_XSS_PROTECTION,
+    HSTS_MAX_AGE,
+    STRICT_INCLUDE_SUBDOMAINS
 )
 
 
@@ -18,13 +24,19 @@ async def security_middleware(
     Description: This middleware adds security headers to the response.
     """
     response = await handler(request)
-    response.headers['X-XSS-Protection'] = '1; mode=block'
+    if ENABLE_XSS_PROTECTION is True:
+        response.headers['X-XSS-Protection'] = XSS_PROTECTION
     response.headers['X-Content-Type-Options'] = XCONTENT_TYPE_OPTIONS
-    response.headers['X-Frame-Options'] = XFRAME_OPTIONS
-    response.headers['Referrer-Policy'] = XREFERER_POLICY
+    if ENABLE_XFRAME_OPTIONS is True:
+        response.headers['X-Frame-Options'] = XFRAME_OPTIONS
+    if ENABLE_XREFERER_POLICY is True:
+        response.headers['Referrer-Policy'] = XREFERER_POLICY
     # Add the Strict-Transport-Security header
     if request.scheme == 'https':  # Only set HSTS over HTTPS
-        age = 'max-age=31536000; includeSubDomains'
-        response.headers['Strict-Transport-Security'] = age
+        age_string = f"max-age={HSTS_MAX_AGE};"
+        if STRICT_INCLUDE_SUBDOMAINS is True:
+            age_string += '; includeSubDomains'
+        age_string += '; preload'
+        response.headers['Strict-Transport-Security'] = age_string
 
     return response
