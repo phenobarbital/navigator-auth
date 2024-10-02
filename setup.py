@@ -141,7 +141,7 @@ setup(
         "rncryptor==3.3.0",
         'msal>=1.28.0,<1.30.1',
         "aiogoogle==5.12.0",
-        "okta-jwt-verifier==0.2.5",
+        "okta-jwt-verifier==0.2.7",
         "python-slugify==8.0.1",
         "psycopg2-binary>=2.9.9",
         "asyncdb>=2.8.0",
