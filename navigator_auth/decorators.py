@@ -1,7 +1,7 @@
 from functools import wraps
 import inspect
 from typing import Any, TypeVar, Union
-from collections.abc import Callable
+from collections.abc import Callable, Awaitable
 from aiohttp import web, hdrs
 from aiohttp.abc import AbstractView
 from navigator_session import get_session
@@ -11,89 +11,153 @@ from .conf import AUTH_SESSION_OBJECT
 
 F = TypeVar("F", bound=Callable[..., Any])
 
+def get_auth(app) -> Awaitable:
+    try:
+        return app["auth"]
+    except KeyError as ex:
+        raise web.HTTPBadRequest(
+            reason="Authentication Backend is not enabled.",
+            headers={
+                hdrs.CONTENT_TYPE: 'application/json',
+                hdrs.CONNECTION: "keep-alive",
+            },
+        ) from ex
 
 def user_session() -> Callable[[F], F]:
     """Decorator for getting User in the request."""
 
     def _wrapper(handler: F):
-        @wraps(handler)
-        async def _wrap(*args, **kwargs) -> web.StreamResponse:
-            # Supports class based views see web.View
-            _is_view: bool = False
-            if inspect.isclass(handler) and issubclass(handler, AbstractView):
-                _is_view = True
-                request = args[0]
-            else:
-                request = args[-1]
-            if request is None:
-                raise ValueError(f"web.Request was not found in arguments. {handler!s}")
+        if inspect.isclass(handler):
+            # We are decorating a class-based view
+            for method_name in hdrs.METH_ALL:
+                method = getattr(handler, method_name.lower(), None)
+                if method is not None and callable(method):
+                    # Wrap the method
+                    setattr(
+                        handler,
+                        method_name.lower(),
+                        _wrap_method(method)
+                    )
+            return handler
+        else:
+            # We are decorating a function handler
+            @wraps(handler)
+            async def _wrap(*args, **kwargs) -> web.StreamResponse:
+                # Get the request object
+                request = args[0] if isinstance(args[0], web.Request) else args[-1]
+                session = await get_session(request, new=False)
+                try:
+                    user = session.decode("user")
+                except (AttributeError, TypeError, RuntimeError):
+                    user = None
+                request['session'] = session
+                request['user'] = user
+                args[0].user = user
+                args[0].session = session
+                return await handler(*args, session, user, **kwargs)
+            return _wrap
+
+    def _wrap_method(method):
+        @wraps(method)
+        async def wrapped_method(self, *args, **kwargs):
+            request = self.request
             session = await get_session(request, new=False)
             try:
                 user = session.decode("user")
             except (AttributeError, TypeError, RuntimeError):
                 user = None
-            if _is_view:
-                args[0].session = session
-                args[0].user = user
-                response = await handler(*args, **kwargs)
-            else:
-                response = await handler(*args, session, user, **kwargs)
-            return response
-
-        return _wrap
+            # Attach session and user to self
+            self.session = session
+            self.user = user
+            # also, added to request:
+            request.session = session
+            request.user = user
+            return await method(self, *args, **kwargs)
+        return wrapped_method
 
     return _wrapper
 
 
 def is_authenticated(content_type: str = "application/json") -> Callable:
-    """Decorator to check if an user has been authenticated for this request."""
+    """Decorator to check if a user has been authenticated for this request."""
 
-    def _wrapper(handler: F):
-        @wraps(handler)
-        async def _wrap(*args, **kwargs) -> web.StreamResponse:
-            # Supports class based views see web.View
-            if inspect.isclass(handler) and issubclass(handler, AbstractView):
-                request = args[0]
-            else:
+    def _wrapper(handler):
+        if inspect.isclass(handler):
+            # We are decorating a class
+            for method_name in hdrs.METH_ALL:
+                method = getattr(handler, method_name.lower(), None)
+                if method is not None and callable(method):
+                    # Wrap the method
+                    setattr(
+                        handler,
+                        method_name.lower(),
+                        _wrap_method(method)
+                    )
+            return handler
+        else:
+            # We are decorating a function
+            @wraps(handler)
+            async def _wrap(*args, **kwargs) -> web.StreamResponse:
                 request = args[-1]
-            if request is None:
-                raise ValueError(f"web.Request was not found in arguments. {handler!s}")
-            if request.get("authenticated", False) is True:
-                # already authenticated
-                return await handler(*args, **kwargs)
-            else:
-                app = request.app
-                try:
-                    auth = app["auth"]
-                except KeyError as ex:
-                    raise web.HTTPBadRequest(
-                        reason="Authentication Backend is not enabled.",
-                        headers={
-                            hdrs.CONTENT_TYPE: content_type,
-                            hdrs.CONNECTION: "keep-alive",
-                        },
-                    ) from ex
-                userdata = None
-                for _, backend in auth.backends.items():
-                    try:
-                        userdata = await backend.authenticate(request)
-                        if userdata:
-                            break
-                    except AuthException:
-                        pass
-                if userdata:
+                if request is None or not isinstance(request, web.Request):
+                    raise ValueError(
+                        f"web.Request was not found in arguments. {handler!s}"
+                    )
+                if request.get("authenticated", False) is True:
+                    # Already authenticated
                     return await handler(*args, **kwargs)
                 else:
-                    # check credentials:
-                    raise web.HTTPUnauthorized(
-                        reason="Access Denied",
-                        headers={
-                            hdrs.CONTENT_TYPE: content_type,
-                            hdrs.CONNECTION: "keep-alive",
-                        },
-                    )
+                    app = request.app
+                    auth = get_auth(app)
+                    userdata = None
+                    for _, backend in auth.backends.items():
+                        try:
+                            userdata = await backend.authenticate(request)
+                            if userdata:
+                                break
+                        except AuthException:
+                            pass
+                    if userdata:
+                        return await handler(*args, **kwargs)
+                    else:
+                        # Credentials check failed
+                        raise web.HTTPUnauthorized(
+                            reason="Access Denied",
+                            headers={
+                                hdrs.CONTENT_TYPE: content_type,
+                                hdrs.CONNECTION: "keep-alive",
+                            },
+                        )
+            return _wrap
 
-        return _wrap
+    def _wrap_method(method):
+        @wraps(method)
+        async def wrapped_method(self, *args, **kwargs):
+            request = self.request
+            if request.get("authenticated", False):
+                return await method(self, *args, **kwargs)
+            app = request.app
+            auth = get_auth(app)
+            userdata = None
+            for _, backend in auth.backends.items():
+                try:
+                    userdata = await backend.authenticate(request)
+                    if userdata:
+                        break
+                except AuthException:
+                    pass
+            if userdata:
+                return await method(*args, **kwargs)
+            else:
+                # Credentials check failed
+                raise web.HTTPUnauthorized(
+                    reason="Access Denied",
+                    headers={
+                        hdrs.CONTENT_TYPE: content_type,
+                        hdrs.CONNECTION: "keep-alive",
+                    },
+                )
+        return wrapped_method
 
     return _wrapper
 

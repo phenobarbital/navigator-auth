@@ -14,8 +14,8 @@ from navigator_auth.decorators import (
 )
 from navigator_auth import AuthHandler
 
-@is_authenticated()
 @user_session()
+@is_authenticated()
 class TestHandler(BaseView):
     async def get(self):
         session = self.request.session
@@ -145,6 +145,7 @@ for route in list(app.router.routes()):
 
 if __name__ == '__main__':
     try:
+        print(TestHandler, type(TestHandler))
         web.run_app(
             app, host='localhost', port=5000, handle_signals=True
         )
