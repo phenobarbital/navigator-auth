@@ -4,7 +4,7 @@ venv:
 
 install:
 	pip install -U pip
-	pip install -e .
+	pip install -e .[uvloop]
 
 develop:
 	pip install -U pip

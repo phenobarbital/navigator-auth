@@ -1,4 +1,5 @@
 import inspect
+import pathlib
 from aiohttp import web
 from aiohttp.abc import AbstractView
 from aiohttp_cors import setup as cors_setup, ResourceOptions
@@ -62,6 +63,21 @@ auth.setup(app)  # configure this Auth system into App.
 app.add_routes([web.get('/', handle),
                 web.get('/{name}', handle)])
 
+# Serve static files from the admin/public directory
+app.router.add_static(
+    '/static/',
+    path=pathlib.Path(__file__).parent.parent / 'admin' / 'public',
+    name='static'
+)
+
+# Route for the admin index page
+async def admin_index(request):
+    return web.FileResponse(
+        pathlib.Path(__file__).parent.parent / 'admin' / 'public' / 'index.html'
+    )
+
+app.router.add_get('/admin', admin_index)
+app.router.add_get('/admin/', admin_index)
 
 @user_session()
 async def usersession(request, session, user):
