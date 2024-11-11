@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+import fnmatch
 from aiohttp import web, hdrs
 from aiohttp.web_urldispatcher import SystemRoute
 from navconfig.logging import logging
@@ -30,8 +31,10 @@ async def abac_middleware(
     except Exception:  # pylint: disable=W0703
         pass
     # avoid authorization on exclude list
-    if request.path in exclude_list:
-        return await handler(request)
+    for pattern in exclude_list:
+        if fnmatch.fnmatch(request.path, pattern):
+            return await handler(request)
+    # avoid authorization on exceptions
     if request.path in exceptions:
         return await handler(request)
     logging.debug(' == ABAC MIDDLEWARE == ')

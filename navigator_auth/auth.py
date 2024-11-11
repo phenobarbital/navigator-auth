@@ -8,9 +8,10 @@ Supporting:
  * authorization exceptions via middlewares
  * Session Support (on top of navigator-session)
 """
-import importlib
 from typing import Union
 from collections.abc import Awaitable, Callable, Iterable
+import fnmatch
+import importlib
 import orjson
 from orjson import JSONDecodeError
 from aiohttp import hdrs, web
@@ -635,9 +636,10 @@ class AuthHandler:
         if request.method == hdrs.METH_OPTIONS:
             return True
 
-        # Check for explicit exclude list matches (if still needed)
-        if request.path in exclude_list:
-            return True
+        # Check for explicit exclude list matches
+        for pattern in exclude_list:
+            if fnmatch.fnmatch(request.path, pattern):
+                return True
 
         # Check if it's a static route
         try:

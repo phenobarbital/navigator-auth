@@ -2,6 +2,7 @@ import asyncio
 from typing import Union, Optional
 from collections.abc import Callable, Iterable
 from abc import ABC, abstractmethod
+import fnmatch
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 import importlib
@@ -40,7 +41,7 @@ from ..identities import Identity, AuthBackend
 
 
 class BaseAuthBackend(ABC):
-    """Abstract Base for Authentication."""
+    """Abstract Base for all Authentication Backends."""
 
     user_attribute: str = "user"
     password_attribute: str = "password"
@@ -405,9 +406,10 @@ class BaseAuthBackend(ABC):
         if request.method == hdrs.METH_OPTIONS:
             return True
 
-        # Check for explicit exclude list matches (if still needed)
-        if request.path in exclude_list:
-            return True
+        # Check for explicit exclude list matches:
+        for pattern in exclude_list:
+            if fnmatch.fnmatch(request.path, pattern):
+                return True
 
         # Check if it's a static route
         try:
