@@ -691,18 +691,18 @@ class AuthHandler:
             )
             raise self.Unauthorized(
                 reason=err.message
-            )
+            ) from err
         except AuthExpired as err:
             logging.error(
                 f"Auth Middleware: Credentials expired: {err}"
             )
             raise self.Unauthorized(
                 reason=err.message, exception=err
-            )
+            ) from err
         except FailedAuth as err:
             raise self.ForbiddenAccess(
                 reason=err.message, exception=err
-            )
+            ) from err
         try:
             if payload:
                 ## check if user has a session:
@@ -711,11 +711,10 @@ class AuthHandler:
                     session = await get_session(request, payload, new=False)
                 except Exception as err:
                     logging.error(str(err))
-                if not session:
-                    if AUTH_CREDENTIALS_REQUIRED is True:
-                        raise self.Unauthorized(
-                            reason="There is no Session or Authentication is missing"
-                        )
+                if not session and AUTH_CREDENTIALS_REQUIRED is True:
+                    raise self.Unauthorized(
+                        reason="There is no Session or Authentication is missing"
+                    )
                 try:
                     request.user = await self.get_session_user(session)
                     request["authenticated"] = True
@@ -723,11 +722,10 @@ class AuthHandler:
                     logging.error(f"Missing User Object from Session: {ex}")
             elif self.secure_cookies is True:
                 session = await get_session(request, None, new=False)
-                if not session:
-                    if AUTH_CREDENTIALS_REQUIRED is True:
-                        raise self.Unauthorized(
-                            reason="There is no Session or Authentication is missing"
-                        )
+                if not session and AUTH_CREDENTIALS_REQUIRED is True:
+                    raise self.Unauthorized(
+                        reason="There is no Session or Authentication is missing"
+                    )
                 request.user = await self.get_session_user(session)
                 request["authenticated"] = True
         except AuthException as err:

@@ -1,20 +1,21 @@
 # -*- coding: utf-8 -*-
 """Navigator Auth Meta information.
-   Navigator Auth allows us to authenticate/authorize users over an aiohttp application.
+Navigator-Auth add an authentication/authorization layer over an aiohttp application.
 """
 
 __title__ = "navigator_auth"
 __description__ = (
     "Navigator Auth is an Authentication/Authorization Toolkit for aiohttp."
 )
-__version__ = "0.14.8"  # pragma: no cover
+__version__ = "0.15.1"  # pragma: no cover
 __author__ = "Jesus Lara"
 __author_email__ = "jesuslarag@gmail.com"
+__copyright__ = "Copyright (c) 2020-2025 Jesus Lara"
 __license__ = "Apache 2.0 License"
 
 
-def get_version() -> tuple:  # pragma: no cover
+def get_version() -> tuple:    # pragma: no cover
     """
     Get nav-auth version as tuple.
     """
-    return tuple(x for x in __version__.split("."))  # pragma: no cover
+    return tuple(__version__.split("."))

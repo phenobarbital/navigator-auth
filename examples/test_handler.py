@@ -15,13 +15,14 @@ from navigator_auth.decorators import (
 )
 from navigator_auth import AuthHandler
 
-@user_session()
 @is_authenticated()
+@user_session()
 class TestHandler(BaseView):
     async def get(self):
         session = self.request.session
+        print('SESSION > ', session)
         user = self.request.user
-        print('GOT USER ', user, session)
+        print('USER > ', user.username)
         name = self.request.match_info.get('name', user.first_name)
         text = "Hello, " + name
         return web.Response(text=text)
@@ -63,21 +64,6 @@ auth.setup(app)  # configure this Auth system into App.
 app.add_routes([web.get('/', handle),
                 web.get('/{name}', handle)])
 
-# Serve static files from the admin/public directory
-app.router.add_static(
-    '/static/',
-    path=pathlib.Path(__file__).parent.parent / 'admin' / 'public',
-    name='static'
-)
-
-# Route for the admin index page
-async def admin_index(request):
-    return web.FileResponse(
-        pathlib.Path(__file__).parent.parent / 'admin' / 'public' / 'index.html'
-    )
-
-app.router.add_get('/admin', admin_index)
-app.router.add_get('/admin/', admin_index)
 
 @user_session()
 async def usersession(request, session, user):
@@ -90,7 +76,9 @@ async def usersession(request, session, user):
 @is_authenticated()
 async def url_protected(request):
     session = await get_session(request)
-    name = str(session['id'])
+    name = 'Anonymous'
+    if session:
+        name = str(session['id'])
     text = "Protected Content for: " + name
     return web.Response(text=text)
 

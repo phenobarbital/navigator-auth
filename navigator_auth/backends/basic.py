@@ -5,10 +5,12 @@ Navigator Authentication using JSON Web Tokens.
 import logging
 from aiohttp import web
 from navigator_session import AUTH_SESSION_OBJECT
+from navigator_session import SESSION_KEY, SessionHandler, get_session
 from datamodel.exceptions import ValidationError
 # Authenticated Entity
 from ..conf import (
-    BASIC_USER_MAPPING
+    BASIC_USER_MAPPING,
+    exclude_list
 )
 from .abstract import BaseAuthBackend
 from ..exceptions import (
@@ -17,6 +19,7 @@ from ..exceptions import (
     UserNotFound,
     InvalidAuth,
 )
+from ..responses import JSONResponse
 from ..identities import AuthUser
 
 class BasicUser(AuthUser):
@@ -35,6 +38,18 @@ class BasicAuth(BaseAuthBackend):
     _ident: AuthUser = BasicUser
     _description: str = "Basic User/Password authentication"
     _service_name: str = "basic"
+
+    def configure(self, app):
+        router = app.router
+        check_credentials = f"/auth/{self._service_name}/check_credentials"
+        router.add_route(
+            "GET",
+            check_credentials,
+            self.check_credentials,
+            name=f"{self._service_name}_check_credentials",
+        )
+        exclude_list.append(check_credentials)
+        super().configure(app)
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements."""
@@ -193,10 +208,52 @@ class BasicAuth(BaseAuthBackend):
                 ### check if any callbacks exists:
                 return {"token": token, **userdata}
             except Exception as err:  # pylint: disable=W0703
-                logging.exception(
+                self.logger.exception(
                     f"BasicAuth: Authentication Error: {err}"
                 )
                 return False
 
     async def check_credentials(self, request):
         """Using for check the user credentials to the backend."""
+        try:
+            token = await self._idp.get_payload(request)
+            _, payload = self._idp.decode_token(code=token)
+            username = payload.get(self.username_attribute)
+            user = await self._idp.get_user(username)
+            if not user:
+                raise UserNotFound(
+                    f"User {username} not found"
+                )
+        except Exception as err:
+            self.logger.error(
+                f"Auth Middleware: Access Denied: {err}"
+            )
+            raise self.Unauthorized(
+                reason=err.message
+            ) from err
+        # User information:
+        userdata = self.get_userdata(user=user)
+        uid = user[self.userid_attribute]
+        usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
+        usr.id = uid
+        usr.set(self.username_attribute, username)
+        # load session information
+        try:
+            session = await self.remember(request, username, userdata, usr)
+            try:
+                request.user = await self.get_session_user(session)
+                self._set_user_request(request, usr)
+                sessioninfo = {
+                    "status": "success",
+                    "message": "User Authenticated",
+                    "username": username
+                }
+                return JSONResponse(sessioninfo, status=200)
+            except Exception as ex:  # pylint: disable=W0703
+                self.logger.error(
+                    f"Missing User Object from Session: {ex}"
+                )
+        except Exception as err:
+            raise self.Unauthorized(
+                reason=err.message
+            ) from err

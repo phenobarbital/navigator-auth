@@ -248,16 +248,18 @@ class APIKeyAuth(BaseAuthBackend):
                     self.logger.error(
                         f"Missing User Object from Session: {ex}"
                     )
+        except web.HTTPError:
+            raise
         except (FailedAuth, InvalidAuth) as err:
             raise self.Unauthorized(
                 reason=f"API Key: {err.message!s}",
                 exception=err
-            )
+            ) from err
         except AuthExpired as err:
             raise self.Unauthorized(
                 reason=f"API Key Expired: {err.message!s}",
                 exception=err
-            )
+            ) from err
         except AuthException as err:
             if AUTH_CREDENTIALS_REQUIRED is True:
                 self.logger.error(
@@ -266,7 +268,7 @@ class APIKeyAuth(BaseAuthBackend):
                 raise self.Unauthorized(
                     reason=f"API Key: Invalid authorization Key: {err!r}",
                     exception=err
-                )
+                ) from err
         except Exception as err:
             if AUTH_CREDENTIALS_REQUIRED is True:
                 self.logger.exception(f"Error on API Key Middleware: {err}")

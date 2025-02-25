@@ -191,9 +191,7 @@ class BaseAuthBackend(ABC):
                 self.logger.warning(
                     f"Error UserData: asking for a non-existing attribute: {key}"
                 )
-        if AUTH_SESSION_OBJECT:
-            return {AUTH_SESSION_OBJECT: userdata}
-        return userdata
+        return {AUTH_SESSION_OBJECT: userdata} if AUTH_SESSION_OBJECT else userdata
 
     def configure(self, app):
         """Base configuration for Auth Backends, need to be extended
@@ -454,6 +452,12 @@ class BaseAuthBackend(ABC):
         req = PreparedRequest()
         req.prepare_url(url, params)
         return req.url
+
+    def _set_user_request(self, request: web.Request, user: Identity):
+        request[self.user_property] = user
+        setattr(request, self.user_property, user)
+        request[self.user_property].is_authenticated = True
+        request["authenticated"] = True
 
     def uri_redirect(
         self,

@@ -76,9 +76,7 @@ class Oauth2Provider(BaseAuthBackend):
         self.userinfo_uri: str = "/oauth2/userinfo"
         self.logout_uri: str = "/oauth2/logout"
         self.login_failed_uri = AUTH_LOGIN_FAILED_URI
-        self.logout_redirect_uri = AUTH_LOGOUT_REDIRECT_URI
-        if not self.logout_redirect_uri:
-            self.logout_redirect_uri = '/oauth2/login'
+        self.logout_redirect_uri = AUTH_LOGOUT_REDIRECT_URI or '/oauth2/login'
         self.redirect_uri = None
 
     def configure(self, app):

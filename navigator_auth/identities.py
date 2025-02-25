@@ -107,6 +107,10 @@ class AuthUser(Identity):
     organizations: List[Organization] = Column(required=False, default_factory=list)
     superuser: bool = Column(required=True, default=False)
 
+    class Meta:
+        strict = False
+        frozen = False
+
     def __post_init__(self, data) -> None:
         super(AuthUser, self).__post_init__(data)
         if self.groups is not None:

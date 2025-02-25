@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Navigator-Auth.
 
-    Navigator-Auth is a python package that provides a simple way to authenticate using
-    several authentication mechanisms.
+    Navigator-Auth is a python package that provides a simple an integrated way
+    to authenticate using several authentication mechanisms.
 See:
 https://github.com/phenobarbital/navigator-auth
 """
@@ -40,18 +40,18 @@ with open(version, 'r', encoding='utf-8') as meta:
                 v = node.value
                 if name.id == '__version__':
                     __version__ = v.s
-                if name.id == '__title__':
+                elif name.id == '__title__':
                     __title__ = v.s
-                if name.id == '__description__':
+                elif name.id == '__description__':
                     __description__ = v.s
-                if name.id == '__license__':
+                elif name.id == '__license__':
                     __license__ = v.s
-                if name.id == '__author__':
+                elif name.id == '__author__':
                     __author__ = v.s
-                if name.id == '__author_email__':
+                elif name.id == '__author_email__':
                     __author_email__ = v.s
 
-COMPILE_ARGS = ["-O2"]
+COMPILE_ARGS = ["-O3"]
 
 extensions = [
     Extension(
@@ -148,13 +148,15 @@ setup(
     ],
     extras_require={
         "uvloop": [
-            "uvloop==0.21.0",
+            "uvloop>=0.20.0",
         ],
     },
     ext_modules=cythonize(extensions),
     project_urls={  # Optional
         "Source": "https://github.com/phenobarbital/navigator-auth",
         "Funding": "https://paypal.me/phenobarbital",
+        "Tracker": "https://github.com/phenobarbital/navigator-auth/issues",
+        "Documentation": "https://github.com/phenobarbital/navigator-auth",
         "Say Thanks!": "https://saythanks.io/to/phenobarbital",
     },
 )
