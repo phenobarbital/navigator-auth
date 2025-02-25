@@ -241,7 +241,6 @@ class TrocToken(BaseAuthBackend):
                     usr.id = username
                     usr.set(self.username_attribute, username)
                     self._set_user_request(request, usr)
-                    request["authenticated"] = True
                     return await handler(request)
             except InvalidAuth:
                 _, payload = self._idp.decode_token(code=token)

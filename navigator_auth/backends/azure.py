@@ -84,11 +84,11 @@ class AzureAuth(ExternalAuth):
         super(AzureAuth, self).configure(app)
         # TODO: build the callback URL and append to routes
         self.base_url: str = f"https://login.microsoftonline.com/{AZURE_ADFS_TENANT_ID}"
-        self.authorize_uri = f"https://login.microsoftonline.com/{AZURE_ADFS_TENANT_ID}/oauth2/v2.0/authorize"
+        self.authorize_uri = f"https://login.microsoftonline.com/{AZURE_ADFS_TENANT_ID}/oauth2/v2.0/authorize"  # noqa
         self.userinfo_uri = "https://graph.microsoft.com/v1.0/me"
         # issuer:
         self._issuer = f"https://login.microsoftonline.com/{AZURE_ADFS_TENANT_ID}"
-        self._token_uri = f"https://login.microsoftonline.com/{AZURE_ADFS_TENANT_ID}/oauth2/v2.0/token"
+        self._token_uri = f"https://login.microsoftonline.com/{AZURE_ADFS_TENANT_ID}/oauth2/v2.0/token"  # noqa
         self.authority = AuthorityBuilder(AZURE_PUBLIC, "contoso.onmicrosoft.com")
         self.users_info = "https://graph.microsoft.com/v1.0/users"
 

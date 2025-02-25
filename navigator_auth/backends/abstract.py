@@ -191,9 +191,7 @@ class BaseAuthBackend(ABC):
                 self.logger.warning(
                     f"Error UserData: asking for a non-existing attribute: {key}"
                 )
-        if AUTH_SESSION_OBJECT:
-            return {AUTH_SESSION_OBJECT: userdata}
-        return userdata
+        return {AUTH_SESSION_OBJECT: userdata} if AUTH_SESSION_OBJECT else userdata
 
     def configure(self, app):
         """Base configuration for Auth Backends, need to be extended
