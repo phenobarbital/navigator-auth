@@ -124,7 +124,6 @@ class TrocToken(BaseAuthBackend):
                 raise
             try:
                 user = await self.validate_user(login=username)
-                print('HERE >> ', user, data, username)
             except UserNotFound:
                 raise
             except Exception as err:
@@ -235,42 +234,58 @@ class TrocToken(BaseAuthBackend):
             token = await self.get_payload(request)
             try:
                 data, username = await self.get_token(token)
-                if await self.check_credentials(request, username, data):
+                magic = data.pop('magic', None)
+                # TODO: evaluate the Magic attribute in payload
+                if userdata := await self.check_credentials(request, username, data):
+                    usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
+                    usr.id = username
+                    usr.set(self.username_attribute, username)
+                    self._set_user_request(request, usr)
                     request["authenticated"] = True
                     return await handler(request)
             except InvalidAuth:
                 _, payload = self._idp.decode_token(code=token)
-            if payload:
-                ## check if user has a session:
-                # load session information
-                session = await get_session(
-                    request, payload, new=False, ignore_cookie=True
+            if not payload and AUTH_CREDENTIALS_REQUIRED is True:
+                raise self.Unauthorized(
+                    reason="There is no Session or Authentication is missing"
                 )
-                if not session and AUTH_CREDENTIALS_REQUIRED is True:
-                    raise self.Unauthorized(
-                        reason="There is no Session or Authentication is missing"
-                    )
-                try:
-                    request.user = await self.get_session_user(session)
-                    request["authenticated"] = True
-                except UnboundLocalError:
-                    pass
-                except Exception as ex:  # pylint: disable=W0703
-                    self.logger.error(f"Missing User Object from Session: {ex}")
-            else:
-                if AUTH_CREDENTIALS_REQUIRED is True:
-                    raise self.Unauthorized(
-                        reason="There is no Session or Authentication is missing"
-                    )
+            ## check if user has a session:
+            # load session information
+            session = await get_session(
+                request, payload, new=False, ignore_cookie=True
+            )
+            if not session and AUTH_CREDENTIALS_REQUIRED is True:
+                raise self.Unauthorized(
+                    reason="There is no Session or Authentication is missing"
+                )
+            try:
+                request.user = await self.get_session_user(session)
+                request["authenticated"] = True
+            except UnboundLocalError:
+                pass
+            except Exception as ex:  # pylint: disable=W0703
+                self.logger.error(
+                    f"Missing User Object from Session: {ex}"
+                )
+        except web.HTTPError:
+            raise
         except Forbidden as err:
             self.logger.error("TROC Auth: Access Denied")
-            raise self.ForbiddenAccess(reason=err.message)
+            raise self.ForbiddenAccess(
+                reason=err.message
+            ) from err
         except AuthExpired as err:
             self.logger.error("TROC Auth: Credentials expired")
-            raise self.Unauthorized(reason=err.message)
+            raise self.Unauthorized(
+                reason=err.message
+            ) from err
         except FailedAuth as err:
-            raise self.ForbiddenAccess(reason=err.message)
+            raise self.ForbiddenAccess(
+                reason=err.message
+            ) from err
         except AuthException as err:
             self.logger.error("Invalid Signature or Authentication Failed")
-            raise self.ForbiddenAccess(reason=err.message)
+            raise self.ForbiddenAccess(
+                reason=err.message
+            ) from err
         return await handler(request)

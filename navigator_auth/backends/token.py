@@ -212,23 +212,27 @@ class TokenAuth(BaseAuthBackend):
                         request.user.is_authenticated = True
                     except (AttributeError, KeyError):
                         pass
+            except web.HTTPError:
+                raise
             except jwt.exceptions.ExpiredSignatureError as err:
                 self.logger.error(f"TokenAuth: token expired: {err!s}")
-                raise web.HTTPForbidden(reason=f"TokenAuth: token expired: {err!s}")
+                raise web.HTTPForbidden(
+                    reason=f"TokenAuth: token expired: {err!s}"
+                ) from err
             except jwt.exceptions.InvalidSignatureError as err:
                 self.logger.error(f"Invalid Credentials: {err!r}")
                 raise web.HTTPForbidden(
                     reason=f"TokenAuth: Invalid or missing Credentials: {err!r}"
-                )
+                ) from err
             except jwt.exceptions.DecodeError as err:
                 self.logger.error(f"Invalid authorization token: {err!r}")
                 raise web.HTTPForbidden(
                     reason=f"TokenAuth: Invalid authorization token: {err!r}"
-                )
+                ) from err
             except AuthException as err:
                 self.logger.error("TokenAuth: Authentication failed.")
                 raise self.Unauthorized(
                     reason="TokenAuth: Authentication failed.",
                     exception=err
-                )
+                ) from err
         return await handler(request)

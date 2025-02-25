@@ -455,6 +455,12 @@ class BaseAuthBackend(ABC):
         req.prepare_url(url, params)
         return req.url
 
+    def _set_user_request(self, request: web.Request, user: Identity):
+        request[self.user_property] = user
+        setattr(request, self.user_property, user)
+        request[self.user_property].is_authenticated = True
+        request["authenticated"] = True
+
     def uri_redirect(
         self,
         request: web.Request,

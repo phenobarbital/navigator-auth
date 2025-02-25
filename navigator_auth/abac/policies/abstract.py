@@ -145,7 +145,6 @@ class AbstractPolicy(ABC):
         for resource in self.resources:
             ## first: check by resource context
             if resource.resource_type == "uri":
-                # print('HERE >> ', resource.resource_type, ctx.path, resource.match(ctx.path))
                 if resource.match(ctx.path) is not None:
                     fit_result = True
                     ## second: check if match with conditions:
@@ -154,11 +153,14 @@ class AbstractPolicy(ABC):
                             # If the key is not covered by EvalContext, skip the condition
                             continue
                         ctx_value = getattr(ctx, key)
-                        if isinstance(value, dict):
-                             # Check if value is a subset of ctx_value
-                            if not all(item in ctx_value.items() for item in value.items()):
-                                fit_result = False
-                                break
+                        if any(
+                            item not in ctx_value.items()
+                            for item in value.items()
+                        ):
+                            # Check if value is a subset of ctx_value
+                            # if not all(item in ctx_value.items() for item in value.items()):
+                            fit_result = False
+                            break
                         elif isinstance(value, list):
                             if ctx_value not in value:
                                 fit_result = False
@@ -169,7 +171,6 @@ class AbstractPolicy(ABC):
                                 break
             else:
                 # ... handle application (Extensible) resources ...
-                # print('HERE >> ', resource.resource_type, resource.match(ctx))
                 fit_result = self._fits_policy(resource, ctx)
         if fit_result is True:
             ## third: check if user of session has contexts attributes required:
