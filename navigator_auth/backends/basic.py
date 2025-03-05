@@ -5,7 +5,7 @@ Navigator Authentication using JSON Web Tokens.
 import logging
 from aiohttp import web
 from navigator_session import AUTH_SESSION_OBJECT
-from navigator_session import SESSION_KEY, SessionHandler, get_session
+from navigator_session import SESSION_KEY, SESSION_ID, SessionHandler, get_session
 from datamodel.exceptions import ValidationError
 # Authenticated Entity
 from ..conf import (
@@ -122,12 +122,11 @@ class BasicAuth(BaseAuthBackend):
             "application/x-www-form-urlencoded",
         ):
             data = await request.post()
-            if len(data) > 0:
-                user = data.get(self.username_attribute, None)
-                password = data.get(self.pwd_atrribute, None)
-                return [user, password]
-            else:
+            if len(data) <= 0:
                 return [None, None]
+            user = data.get(self.username_attribute, None)
+            password = data.get(self.pwd_atrribute, None)
+            return [user, password]
         elif ctype == "application/json":
             try:
                 data = await request.json()
@@ -239,7 +238,10 @@ class BasicAuth(BaseAuthBackend):
                 reason=err.message
             ) from err
         # User information:
+        session_id = payload.get(SESSION_ID, None)
         userdata = self.get_userdata(user=user)
+        if session_id:
+            userdata[SESSION_ID] = session_id
         if not userdata:
             raise InvalidAuth(
                 "Invalid User Information"

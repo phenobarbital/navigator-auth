@@ -68,14 +68,11 @@ class TrocToken(BaseAuthBackend):
 
     async def get_payload(self, request: web.Request):
         try:
-            if "Authorization" in request.headers:
-                token = await super(TrocToken, self).get_payload(request)
-            else:
-                try:
-                    token = request.query.get("auth", None)
-                except Exception as e:  # pylint: disable=W0703
-                    print(e)
-                    return None
+            try:
+                token = request.query.get("auth", None)
+            except Exception as e:  # pylint: disable=W0703
+                print(e)
+                return None
         except Exception as err:  # pylint: disable=W0703
             self.logger.exception(
                 f"TrocAuth: Error getting payload: {err}"
@@ -103,7 +100,7 @@ class TrocToken(BaseAuthBackend):
 
     async def authenticate(self, request):
         """Authenticate, refresh or return the user credentials."""
-        qs = {key: val for (key, val) in request.query.items()}
+        qs = dict(request.query.items())
         try:
             token = await self.get_payload(request)
         except Exception as err:
@@ -232,6 +229,8 @@ class TrocToken(BaseAuthBackend):
         try:
             payload = None
             token = await self.get_payload(request)
+            if not token:
+                return await handler(request)
             try:
                 data, username = await self.get_token(token)
                 magic = data.pop('magic', None)
