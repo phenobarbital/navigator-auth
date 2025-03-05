@@ -38,6 +38,7 @@ from ..conf import (
 from ..libs.json import json_encoder
 # Authenticated Identity
 from ..identities import Identity, AuthBackend
+from .idp import IdentityProvider
 
 
 class BaseAuthBackend(ABC):
@@ -67,7 +68,7 @@ class BaseAuthBackend(ABC):
         userid_attribute: str = None,
         password_attribute: str = None,
         template_parser: Callable = None,
-        identity: Callable = None,
+        identity: IdentityProvider = None,
         **kwargs,
     ):
         self._service = self.__class__.__name__

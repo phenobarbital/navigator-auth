@@ -224,6 +224,13 @@ class BasicAuth(BaseAuthBackend):
                 raise UserNotFound(
                     f"User {username} not found"
                 )
+        except UserNotFound as err:
+            self.logger.error(
+                f"User Not Found: {err}"
+            )
+            raise self.Unauthorized(
+                reason="User Not Found"
+            ) from err
         except Exception as err:
             self.logger.error(
                 f"Auth Middleware: Access Denied: {err}"
@@ -233,6 +240,10 @@ class BasicAuth(BaseAuthBackend):
             ) from err
         # User information:
         userdata = self.get_userdata(user=user)
+        if not userdata:
+            raise InvalidAuth(
+                "Invalid User Information"
+            )
         uid = user[self.userid_attribute]
         usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
         usr.id = uid
@@ -246,7 +257,8 @@ class BasicAuth(BaseAuthBackend):
                 sessioninfo = {
                     "status": "success",
                     "message": "User Authenticated",
-                    "username": username
+                    "username": username,
+                    "session": userdata
                 }
                 return JSONResponse(sessioninfo, status=200)
             except Exception as ex:  # pylint: disable=W0703
