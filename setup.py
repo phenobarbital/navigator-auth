@@ -138,13 +138,13 @@ setup(
         "PyJWT==2.9.0",
         "pycryptodome==3.21.0",
         "rncryptor==3.3.0",
-        'msal>=1.28.0,<1.30.1',
+        'msal>=1.28.0,<=1.32.0',
         "aiogoogle==5.13.2",
         "okta-jwt-verifier==0.2.5",
         "python-slugify==8.0.1",
         "asyncdb>=2.8.0",
         "navconfig>=1.7.0",
-        "navigator-session>=0.6.2",
+        "navigator-session>=0.6.5",
     ],
     extras_require={
         "uvloop": [
