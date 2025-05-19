@@ -6,7 +6,7 @@ from aiohttp import web, hdrs
 from aiohttp.abc import AbstractView
 from navigator_session import get_session
 from .exceptions import AuthException
-from .conf import AUTH_SESSION_OBJECT
+from .conf import AUTH_SESSION_OBJECT, exclude_list
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -37,6 +37,38 @@ def _apply_decorator(handler, func_wrapper, method_wrapper):
             if method is not None and callable(method):
                 setattr(handler, method_name.lower(), method_wrapper(method))
         return handler
+
+def allow_anonymous(handler: F) -> F:
+    """
+    Marks a handler or view as allowing anonymous access, bypassing authentication.
+    This decorator adds the request path to the exclude list so that authentication
+    is not required for this endpoint.
+
+    Args:
+        func: The handler function or class-based view to decorate.
+
+    Returns:
+        Callable: The decorated handler that allows anonymous access.
+    """
+    def _func_wrapper(handler):
+        @wraps(handler)
+        async def _wrap(*args, **kwargs) -> web.StreamResponse:
+            request = args[0] if isinstance(args[0], web.Request) else args[-1]
+            if request is not None:
+                setattr(request, "allow_anonymous", True)
+            return await handler(*args, **kwargs)
+        return _wrap
+
+    def _method_wrapper(method):
+        @wraps(method)
+        async def wrapped_method(self, *args, **kwargs):
+            request = self.request
+            if request is not None:
+                setattr(request, "allow_anonymous", True)
+            return await method(self, *args, **kwargs)
+        return wrapped_method
+
+    return lambda handler: _apply_decorator(handler, _func_wrapper, _method_wrapper)
 
 def user_session() -> Callable[[F], F]:
     """Decorator for attaching a User from session to the request and view instance."""
@@ -83,7 +115,22 @@ def user_session() -> Callable[[F], F]:
 
 
 def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]:
-    """Decorator to check if a user has been authenticated for this request."""
+    """
+    Checks if a user is authenticated before allowing access to the handler.
+    This decorator ensures that only authenticated users can access the handler,
+    attempting authentication with available backends if necessary.
+
+    Args:
+        content_type: The content type to use in HTTP responses
+        (default is "application/json").
+
+    Returns:
+        Callable: A decorator that wraps the handler to enforce authentication.
+
+    Raises:
+        web.HTTPUnauthorized: If the user is not authenticated and authentication fails.
+        ValueError: If a web.Request object is not found in the handler arguments.
+    """
 
     def _func_wrapper(handler):
         @wraps(handler)
