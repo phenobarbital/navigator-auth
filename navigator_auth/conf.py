@@ -129,6 +129,13 @@ AUTHORIZATION_BACKENDS = [
     )
 ]
 
+### Allowed User-Agents:
+ALLOWED_UA = [
+    e.strip()
+    for e in list(config.get("ALLOWED_UA", fallback="*").split(","))
+    if e.strip() != ""
+]
+
 ## Basic Authorization Middlewares
 AUTHORIZATION_MIDDLEWARES = ()
 
@@ -359,6 +366,14 @@ OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS = config.getint(
 )
 
 try:
-    from settings.settings import *  # pylint: disable=W0614,W0401
+    from settings.settings import *  # pylint: disable=W0614,W0401 # noqa
 except ImportError as ex:
-    print(ex)
+    logging.error(
+        f'There is no "*settings/settings.py" module in project. {ex}'
+    )
+    try:
+        from settings import *  # pylint: disable=W0614,W0401 # noqa
+    except ImportError as ex:
+        logging.error(
+            f'There is no "*settings/__init__.py" module in project. {ex}'
+        )
