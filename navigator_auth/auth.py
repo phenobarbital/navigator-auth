@@ -8,6 +8,7 @@ Supporting:
  * authorization exceptions via middlewares
  * Session Support (on top of navigator-session)
 """
+import contextlib
 from typing import Union
 from collections.abc import Awaitable, Callable, Iterable
 import fnmatch
@@ -17,7 +18,7 @@ from orjson import JSONDecodeError
 from aiohttp import hdrs, web
 from aiohttp.web_urldispatcher import SystemRoute, StaticResource
 from navigator_session import SESSION_KEY, SessionHandler, get_session
-from .authorizations import authz_allow_hosts, authz_hosts
+from .authorizations import authz_allow_hosts, authz_hosts, authz_useragent
 from .backends.idp import IdentityProvider
 from .conf import (
     BASE_DIR,
@@ -185,6 +186,26 @@ class AuthHandler:
                 b.append(authz_hosts())
             elif backend == "allow_hosts":
                 b.append(authz_allow_hosts())
+            elif backend == "authz_allow_hosts":
+                b.append(authz_allow_hosts())
+            elif backend == "authz_hosts":
+                b.append(authz_hosts())
+            elif backend == 'useragent':
+                b.append(authz_useragent())
+            elif backend == 'authz_useragent':
+                b.append(authz_useragent())
+            else:
+                try:
+                    parts = backend.split(".")
+                    bkname = parts[-1]
+                    classpath = ".".join(parts[:-1])
+                    module = importlib.import_module(classpath, package=bkname)
+                    obj = getattr(module, bkname)
+                    b.append(obj)
+                except ImportError as ex:
+                    raise ConfigError(
+                        f"Error loading Authz Backend {backend}: {ex}"
+                    ) from ex
         return b
 
     def get_user_attributes(self, attributes: Iterable) -> tuple:
@@ -642,11 +663,10 @@ class AuthHandler:
                 return True
 
         # Check if it's a static route
-        try:
+        with contextlib.suppress(AttributeError):
+            # In case of missing attributes during routing
             if isinstance(request.match_info.route.resource, StaticResource):
                 return True
-        except AttributeError:  # In case of missing attributes during routing
-            pass
 
         # Check if the request is for a static resource
         if request.path.startswith("/static/"):
@@ -663,6 +683,10 @@ class AuthHandler:
         for backend in self._authz_backends:
             if await backend.check_authorization(request):
                 return True
+
+        ### Allow Anonymous Access
+        if request.get('allow_anonymous', False) is True:
+            return True
 
         ## Already Authenticated
         if request.get("authenticated", False) is True:
