@@ -500,33 +500,6 @@ class ExternalAuth(BaseAuthBackend):
                         f"{response}"
                     )
 
-    async def auth_successful_callback(
-        self, request: web.Request, user: Callable, **kwargs
-    ) -> None:
-        coro = []
-        for fn in self._callbacks:
-            func = self.call_successful_callbacks(request, fn, user, **kwargs)
-            coro.append(asyncio.create_task(func))
-        try:
-            await asyncio.gather(*coro, return_exceptions=True)
-        except Exception as ex:
-            self.logger.exception(f"Auth Callback Error: {ex}")
-
-    async def call_successful_callbacks(
-        self, request: web.Request, fn: Callable, user: Callable, **kwargs
-    ) -> None:
-        # start here:
-        try:
-            self.logger.notice(
-                f":: Calling Callback Function: {fn} ::"
-            )
-            await fn(request, user, self._user_model, **kwargs)
-        except Exception as e:
-            self.logger.exception(
-                f"Error calling Callback Function: {fn}, {e!s}",
-                stack_info=False,
-            )
-
     async def create_external_user(self, userdata: dict) -> Callable:
         """create_external_user.
 
