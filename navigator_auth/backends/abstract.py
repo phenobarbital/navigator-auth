@@ -1,7 +1,7 @@
-import asyncio
-from typing import Union, Optional
+from typing import Union, Optional, Set
 from collections.abc import Callable, Iterable
 from abc import ABC, abstractmethod
+import asyncio
 import fnmatch
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
@@ -111,6 +111,8 @@ class BaseAuthBackend(ABC):
         self._idp = identity
         ## Template Parser:
         self._parser = template_parser
+        # Keep track of background tasks to prevent them from being garbage collected
+        self._background_tasks: Set[asyncio.Task] = set()
 
     def get_backend_info(self):
         return self._info
@@ -123,9 +125,19 @@ class BaseAuthBackend(ABC):
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements."""
 
-    @abstractmethod
     async def on_cleanup(self, app: web.Application):
-        """Used to cleanup and shutdown any db connection."""
+        """"Cancel any pending background tasks on shutdown."""
+        if hasattr(self, '_background_tasks'):
+            # Cancel all pending background tasks
+            for task in self._background_tasks:
+                task.cancel()
+
+            # Wait for all tasks to finish cancellation
+            if self._background_tasks:
+                await asyncio.gather(
+                    *self._background_tasks,
+                    return_exceptions=True
+                )
 
     async def get_payload(self, request: web.Request):
         token = None
@@ -336,29 +348,33 @@ class BaseAuthBackend(ABC):
                 ) from e
         self._callbacks = fns
 
+    async def _safe_callback_wrapper(
+        self, request: web.Request, fn, user, **kwargs
+    ) -> None:
+        """Wrapper that handles exceptions for background callbacks."""
+        try:
+            await fn(request, user, self._user_model, **kwargs)
+        except Exception as ex:
+            self.logger.exception(
+                f"Background Auth Callback Error in {fn.__name__}: {ex}",
+                stack_info=False
+            )
+
     async def auth_successful_callback(
         self, request: web.Request, user: Callable, **kwargs
     ) -> None:
-        try:
-            for fn in self._callbacks:
-                await self.call_successful_callbacks(request, fn, user, **kwargs)
-        except Exception as ex:  # pylint: disable=W0718
-            self.logger.exception(
-                f"Auth Callback Error: {ex}", stack_info=True
+        """Run callbacks in background without blocking login process."""
+        if not self._callbacks:
+            return
+        for fn in self._callbacks:
+            task = asyncio.create_task(
+                self._safe_callback_wrapper(request, fn, user, **kwargs)
             )
+            # Add task to our set to prevent garbage collection
+            self._background_tasks.add(task)
 
-    async def call_successful_callbacks(
-        self, request: web.Request, fn: Callable, user: Callable, **kwargs
-    ) -> None:
-        # start here:
-        print(":: Calling the Successful Callback :: ", fn)
-        try:
-            await fn(request, user, self._user_model, **kwargs)
-        except Exception as e:
-            self.logger.exception(
-                f"Auth Callback: Error callig Callback Function: {fn}, {e!s}",
-                stack_info=False,
-            )
+            # Remove task from set when it completes (cleanup)
+            task.add_done_callback(self._background_tasks.discard)
 
     def threaded_function(
         self,
@@ -371,10 +387,7 @@ class BaseAuthBackend(ABC):
         @wraps(func)
         async def _wrap(*args, loop: asyncio.AbstractEventLoop = None, **kwargs):
             result = None
-            if evt is None:
-                loop = asyncio.get_event_loop()
-            else:
-                loop = evt
+            loop = asyncio.get_event_loop() if evt is None else evt
             try:
                 if threaded:
                     fn = partial(func, *args, **kwargs)
