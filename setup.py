@@ -139,7 +139,7 @@ setup(
         "pycryptodome==3.21.0",
         "rncryptor==3.3.0",
         'msal>=1.28.0,<=1.32.0',
-        "aiogoogle==5.13.2",
+        "aiogoogle==5.17.0",
         "okta-jwt-verifier==0.2.5",
         "python-slugify==8.0.1",
         "asyncdb>=2.8.0",
