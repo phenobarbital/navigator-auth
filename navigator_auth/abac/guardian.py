@@ -30,8 +30,8 @@ class Guardian:
         except RuntimeError as ex:
             self._logger.error('NAV User Session system is not installed.')
             raise PreconditionFailed(
-               reason="Missing User session for validating Access.",
-               exception=ex
+                reason="Missing User session for validating Access.",
+                exception=ex
             ) from ex
         try:
             user = session.decode('user')
@@ -103,7 +103,7 @@ class Guardian:
             request: web.Request,
             groups: list,
             effect: PolicyEffect = PolicyEffect.ALLOW
-        ):
+    ):
         """allowed_groups.
 
             Check if user is belong to any permitted groups.
@@ -129,7 +129,7 @@ class Guardian:
             self,
             request: web.Request,
             **kwargs
-        ):
+    ):
         """is_allowed.
 
             Check if user is allowed to access some object resources and return
@@ -151,14 +151,13 @@ class Guardian:
             **kwargs
         )
 
-
     async def filter(
             self,
             request: web.Request,
             objects: list,
             type: str = 'file',
             effect: PolicyEffect = PolicyEffect.ALLOW
-        ):
+    ):
         """filter.
 
             Check if user is allowed to access some object resources and return filtered
@@ -168,7 +167,7 @@ class Guardian:
             objects (list): List of objects to be evaluated.
             objtype (str): kind of object to be evaluated (default=file)
             effect (PolicyEffect, optional): Effect to be applied,
-              Defaults to PolicyEffect.ALLOW.
+            Defaults to PolicyEffect.ALLOW.
 
         Raises:
             web.HTTPUnauthorized: Access is Denied.
@@ -247,7 +246,6 @@ class PEP(BaseHandler):
                 response=msg,
                 status=403
             )
-
 
     async def is_allowed(self, request: web.Request) -> web.Response:
         """is_allowed.
