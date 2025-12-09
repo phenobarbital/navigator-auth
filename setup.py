@@ -135,7 +135,7 @@ setup(
         "PyNaCl==1.5.0",
         "aiohttp>=3.9.5",
         "alt-aiohttp-cors>=0.7.1",
-        "PyJWT==2.9.0",
+        "PyJWT==2.10.1",
         "pycryptodome==3.21.0",
         "rncryptor==3.3.0",
         'msal>=1.28.0,<=1.32.0',
