@@ -64,7 +64,7 @@ class NoAuth(BaseAuthBackend):
             self.username_attribute: f"Anonymous {key}",
             **userdata,
         }
-        token, exp, scheme = self._idp.create_token(data=payload)
+        token, exp, scheme = self._idp.create_token(data=payload, expiration=3600)
         user.access_token = token
         user.token_type = scheme
         user.expires_in = exp
