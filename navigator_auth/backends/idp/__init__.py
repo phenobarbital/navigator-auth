@@ -336,6 +336,16 @@ class IdentityProvider:
                 )
         return token
 
+    def create_ephemeral_token(
+        self,
+        data: dict = None,
+        expiration: int = 1800
+    ) -> str:
+        """Create an Ephemeral Token (short-lived) for accessing resources.
+        default expiration: 30 minutes.
+        """
+        return self.create_token(data=data, expiration=expiration)
+
     def create_token(
         self,
         data: dict = None,
