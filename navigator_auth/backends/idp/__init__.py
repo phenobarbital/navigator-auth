@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import base64
 import secrets
@@ -370,13 +370,13 @@ class IdentityProvider:
             issuer = AUTH_TOKEN_ISSUER
         if not data:
             data = {}
-        iat = datetime.utcnow()
+        iat = datetime.now(timezone.utc)
         exp = (iat + timedelta(seconds=expiration)).timestamp()
         payload = {
-            "exp": exp,
-            "iat": iat,
-            "iss": issuer,
-            **data,
+             "exp": exp,
+             "iat": iat,
+             "iss": issuer,
+             **data,
         }
         try:
             jwt_token = jwt.encode(
