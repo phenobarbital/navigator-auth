@@ -73,6 +73,8 @@ class User(Model):
     birthday: str = Column(required=False)
     worker_type: str = Column(required=False)
     created_at: datetime = Column(required=False)
+    reports_to_associate_oid: str = Column(required=False)
+    manager_id: str = Column(required=False)
 
     def birth_date(self):
         if self.birthday:
@@ -98,8 +100,7 @@ class User(Model):
         years = today.year - employment.year
         # Adjust for cases where the current month is before the start month
         if today.month < employment.month or (
-            today.month == employment.month
-            and today.day < employment.day
+            today.month == employment.month and today.day < employment.day
         ):
             years -= 1
         # Calculate the months

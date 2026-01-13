@@ -1,41 +1,83 @@
 [build-system]
 requires = [
-  'setuptools==74.0.0',
-  'Cython==3.0.11',
-  'wheel==0.44.0'
+  'setuptools>=74.0.0',
+  'Cython>=3.0.11',
+  'wheel>=0.44.0'
 ]
-
 build-backend = "setuptools.build_meta"
 
-[tool.flit.metadata]
-module = "navigator_auth"
-author = "Jesus Lara Gimenez"
-author-email = "jesuslarag@gmail.com"
-home-page = "https://github.com/phenobarbital/navigator-auth"
-classifiers=[
-  "Development Status :: 4 - Beta",
-  "Intended Audience :: Developers",
-  "Intended Audience :: System Administrators",
-  "Operating System :: OS Independent",
-  "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
-  "Programming Language :: Python",
-  "Typing :: Typed",
-  "Environment :: Web Environment",
-  "Framework :: AsyncIO",
-  "Topic :: Software Development :: Libraries :: Application Frameworks",
-  "Topic :: Software Development :: Libraries :: Python Modules",
-  "Topic :: Software Development :: Build Tools",
-  "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
-  "Topic :: Internet :: WWW/HTTP",
-  "License :: OSI Approved :: BSD License",
-]
-description-file = "README.md"
+[project]
+name = "navigator-auth"
+version = "0.16.0"
+description = "Navigator Auth is an Authentication/Authorization Toolkit for aiohttp."
+readme = "README.md"
 requires-python = ">=3.9.16"
+license = { text = "Apache 2.0 License" }
+authors = [
+    { name = "Jesus Lara Gimenez", email = "jesuslarag@gmail.com" }
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Environment :: Web Environment",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Systems Administration",
+    "Topic :: System :: Networking",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: AsyncIO",
+    "Framework :: aiohttp",
+    "License :: OSI Approved :: Apache Software License",
+]
+dependencies = [
+    "Cython>=3.0.11",
+    "PyNaCl>=1.5.0",
+    "aiohttp>=3.9.5",
+    "alt-aiohttp-cors>=0.7.1",
+    "PyJWT>=2.10.1",
+    "pycryptodome>=3.21.0",
+    "rncryptor>=3.3.0",
+    "msal>=1.28.0,<=1.32.0",
+    "aiogoogle>=5.17.0",
+    "okta-jwt-verifier>=0.2.5",
+    "python-slugify>=8.0.1",
+    "asyncdb>=2.8.0",
+    "navconfig>=1.7.0",
+    "navigator-session>=0.6.5",
+    "navigator-api>=0.5.0",
+]
+
+[project.optional-dependencies]
+uvloop = ["uvloop>=0.20.0"]
+
+[project.urls]
+Homepage = "https://github.com/phenobarbital/navigator-auth"
+Source = "https://github.com/phenobarbital/navigator-auth"
+Funding = "https://paypal.me/phenobarbital"
+Tracker = "https://github.com/phenobarbital/navigator-auth/issues"
+Documentation = "https://github.com/phenobarbital/navigator-auth"
+
+[tool.setuptools]
+packages = ["navigator_auth"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "coverage",
+    "mypy",
+    "pylint",
+    "pre-commit",
+    "black",
+    "flake8"
+]
 
 [tool.pytest.ini_options]
 addopts = [

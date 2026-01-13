@@ -13,8 +13,7 @@ from .abstract import BaseAuthBackend
 
 
 class AnonymousUser(AuthUser):
-    first_name: str = "Anonymous"
-    last_name: str = "User"
+    display_name: str = "Anonymous User"
 
 
 class NoAuth(BaseAuthBackend):
@@ -44,9 +43,8 @@ class NoAuth(BaseAuthBackend):
             AUTH_SESSION_OBJECT: {
                 "session": key,
                 self.user_property: key,
-                self.username_attribute: "Anonymous",
-                "first_name": "Anonymous",
-                "last_name": "User",
+                self.username_attribute: f"Anonymous {key}",
+                "display_name": "Anonymous User",
             }
         }
         return [userdata, key]
@@ -57,7 +55,9 @@ class NoAuth(BaseAuthBackend):
         user.id = key
         user.add_group(Guest)
         user.set(self.username_attribute, "Anonymous")
-        logging.debug(f"User Created > {user}")
+        logging.debug(
+            f"User Created > {user}"
+        )
         payload = {
             self.session_key_property: key,
             self.user_property: None,
