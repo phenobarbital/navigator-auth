@@ -136,11 +136,11 @@ for route in list(app.router.routes()):
             if inspect.isclass(route.handler) and issubclass(
                 route.handler, AbstractView
             ):
-                cors.add(route, webview=True)
+                cors.add(route)
             else:
                 cors.add(route)
     except (TypeError, ValueError, RuntimeError) as exc:
-        if 'already has OPTIONS handler' in str(exc):
+        if 'already has OPTIONS handler' in str(exc) or "already has a '*' handler" in str(exc):
             continue
         print(
             f"Error setting up CORS for route {route}: {exc}"

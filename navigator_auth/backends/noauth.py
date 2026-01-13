@@ -54,22 +54,26 @@ class NoAuth(BaseAuthBackend):
         user = await self.create_user(userdata[AUTH_SESSION_OBJECT])
         user.id = key
         user.add_group(Guest)
-        user.set(self.username_attribute, "Anonymous")
+        user.set(self.username_attribute, f"Anonymous {key}")
         logging.debug(
             f"User Created > {user}"
         )
         payload = {
             self.session_key_property: key,
             self.user_property: None,
-            self.username_attribute: "Anonymous",
+            self.username_attribute: f"Anonymous {key}",
             **userdata,
         }
-        token = self.create_jwt(data=payload)
+        token, exp, scheme = self._idp.create_token(data=payload)
         user.access_token = token
+        user.token_type = scheme
+        user.expires_in = exp
         await self.remember(request, key, userdata, user)
         return {
             "token": token,
             self.session_key_property: key,
-            self.username_attribute: "Anonymous",
+            self.username_attribute: f"Anonymous {key}",
+            "expires_in": exp,
+            "token_type": scheme,
             **userdata,
         }
