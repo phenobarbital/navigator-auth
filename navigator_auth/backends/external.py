@@ -220,6 +220,21 @@ class ExternalAuth(BaseAuthBackend):
         return web.HTTPFound(uri)
 
     def prepare_url(self, url: str, params: dict = None):
+        """Construct a URL with query parameters.
+
+        Note: PreparedRequest doesn't handle custom URL schemes (navigator://, myapp://, etc.)
+        so we manually construct URLs for non-HTTP schemes to support mobile deep links.
+        """
+        parsed = urlparse(url)
+        if parsed.scheme and parsed.scheme not in ('http', 'https', ''):
+            # Custom scheme - manually append params
+            if params:
+                from urllib.parse import urlencode
+                query_string = urlencode(params)
+                separator = '&' if '?' in url else '?'
+                return f"{url}{separator}{query_string}"
+            return url
+        # Standard HTTP(S) URL - use PreparedRequest
         req = PreparedRequest()
         req.prepare_url(url, params)
         return req.url
