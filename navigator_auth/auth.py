@@ -17,7 +17,7 @@ import orjson
 from orjson import JSONDecodeError
 from aiohttp import hdrs, web
 from aiohttp.web_urldispatcher import SystemRoute, StaticResource
-from navigator_session import SESSION_KEY, SessionHandler, get_session
+from navigator_session import SESSION_KEY, SessionHandler, get_session, SESSION_ID
 from .authorizations import authz_allow_hosts, authz_hosts, authz_useragent
 from .backends.idp import IdentityProvider
 from .conf import (
@@ -342,6 +342,43 @@ class AuthHandler:
                 exception=err
             )
 
+    async def api_create_token(self, request: web.Request) -> web.Response:
+        """Create an ephemeral token."""
+        if not request.get("authenticated", False):
+            raise self.Unauthorized(
+                reason="Access Denied"
+            )
+        try:
+            # users will use bearer tokens received by authentication backend
+            # to request to IDP provisioning service an bearer (jwt)
+            # token with expiration of 30 minutes (default)
+            user = request.user
+            session = None
+            if hasattr(request, "session"):
+                session = request.session
+            payload = {
+                "user_id": user.id,
+                "username": user.username,
+                "user": user.id
+            }
+            if session:
+                try:
+                    payload[SESSION_ID] = session.id
+                except AttributeError:
+                     # In case session is dict-like or other type
+                    pass
+            token, exp, scheme = self._idp.create_ephemeral_token(data=payload)
+            return JSONResponse({
+                "token": token,
+                "expires_in": exp,
+                "token_type": scheme
+            }, status=200)
+        except Exception as err:
+            raise self.auth_error(
+                reason=f"Error Creating Token: {err}",
+                exception=err
+            )
+
     async def api_login(self, request: web.Request) -> web.Response:
         """Login.
 
@@ -517,6 +554,13 @@ class AuthHandler:
         router.add_route("GET", "/api/v1/login", self.api_login, name="api_login")
         router.add_route("POST", "/api/v1/login", self.api_login, name="api_login_post")
         router.add_route("GET", "/api/v1/logout", self.api_logout, name="api_logout")
+        # API Create Token
+        router.add_route(
+            "POST",
+            "/api/v1/auth_tokens/create",
+            self.api_create_token,
+            name="api_create_token"
+        )
         # get the session information for a program (only)
         router.add_route(
             "GET",
