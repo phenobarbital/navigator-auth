@@ -65,12 +65,9 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: dist-artifacts
-
-      - name: Move wheel files to dist directory
-        run: |
-          mkdir -p dist
-          find dist-artifacts -name '*' -exec mv {} dist/ \;
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
 
       - name: List files in dist
         run: ls -l dist
