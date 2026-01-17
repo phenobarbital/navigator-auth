@@ -14,6 +14,7 @@ from .adfs import ADFSAuth
 from .azure import AzureAuth
 from .github import GithubAuth
 from .oauth2 import Oauth2Provider
+from .saml import SAMLAuth
 
 
 __all__ = (
@@ -28,5 +29,6 @@ __all__ = (
     "ADFSAuth",
     "AzureAuth",
     "GithubAuth",
-    "Oauth2Provider"
+    "Oauth2Provider",
+    "SAMLAuth"
 )
