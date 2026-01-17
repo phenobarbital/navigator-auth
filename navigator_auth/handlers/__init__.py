@@ -4,6 +4,7 @@ from .users import UserManager, UserSession
 from .groups import GroupManager, GroupPermissionManager, UserGroupManager
 from .userattrs import UserAccountHandler, UserIdentityHandler
 from .partners import PartnerKeyHandler
+from .recovery import ForgotPasswordHandler, ResetPasswordHandler
 
 ## TODO migration of login/logout handlers:
 def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
@@ -62,3 +63,13 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     router.add_post("/api/v2/user/set_password", usr.password_change)
     router.add_post("/api/v2/user/password_reset/{userid:.*}", usr.password_reset)
     router.add_get("/api/v2/user/gen_token/{userid:.*}", usr.gen_token, allow_head=True)
+    
+    ## Recovery Methods:
+    router.add_view(
+        r"/api/v1/forgot-password", ForgotPasswordHandler,
+        name="api_forgot_password"
+    )
+    router.add_view(
+        r"/api/v1/reset-password", ResetPasswordHandler,
+        name="api_reset_password"
+    )

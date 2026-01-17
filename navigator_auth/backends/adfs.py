@@ -200,7 +200,6 @@ class ADFSAuth(ExternalAuth):
                     message="Missing Auth Nonce"
                 )
             flow = {}
-            print('STATE > ', state)
             internal_redirect = None
             # making validation with previous state
             try:

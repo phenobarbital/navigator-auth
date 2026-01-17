@@ -2,7 +2,7 @@
 
 Description: Backend Authentication/Authorization using Okta Service.
 """
-import requests
+import aiohttp
 from aiohttp import web
 from okta_jwt_verifier import JWTVerifier
 from navconfig.logging import logging
@@ -78,7 +78,6 @@ class OktaAuth(OauthAuth):
         return qs
 
     async def auth_callback(self, request: web.Request):
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
         domain_url = self.get_domain(request)
         self.redirect_uri = self.redirect_uri.format(
             domain=domain_url, service=self._service_name
@@ -93,15 +92,17 @@ class OktaAuth(OauthAuth):
             "code": code,
             "redirect_uri": self.redirect_uri,
         }
-        query_params = requests.compat.urlencode(query_params)
+        # query_params = requests.compat.urlencode(query_params)
         try:
-            exchange = requests.post(
+            exchange = await self.post(
                 self._token_uri,
-                headers=headers,
                 data=query_params,
-                timeout=60,
-                auth=(OKTA_CLIENT_ID, OKTA_CLIENT_SECRET),
-            ).json()
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json"
+                },
+                auth=aiohttp.BasicAuth(OKTA_CLIENT_ID, OKTA_CLIENT_SECRET)
+            )
         except Exception as err:
             response = {
                 "message": f"Okta: Error Getting User Profile information: {err}"
@@ -127,11 +128,11 @@ class OktaAuth(OauthAuth):
 
         # Authorization flow successful, get userinfo and login user
         try:
-            data = requests.get(
+            data = await self.get(
                 self.userinfo_uri,
-                timeout=60,
-                headers={"Authorization": f"Bearer {access_token}"},
-            ).json()
+                token=access_token,
+                token_type="Bearer"
+            )
             userdata, uid = self.build_user_info(
                 data,
                 access_token,

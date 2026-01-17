@@ -47,7 +47,9 @@ excluded_default = [
     "/api/v1/logout",
     "/auth/login",
     "/auth/logout",
-    "/auth/login/callback"
+    "/auth/login/callback",
+    "/api/v1/forgot-password",
+    "/api/v1/reset-password"
 ]
 new_excluded = [
     e.strip() for e in list(config.get("ROUTES_EXCLUDED", fallback="").split(","))
@@ -326,6 +328,37 @@ ADFS_CLAIM_MAPPING = ad_mapping
 
 AZURE_AD_SERVER = config.get("AZURE_AD_SERVER", fallback="login.microsoftonline.com")
 AZURE_SESSION_TIMEOUT = config.get("AZURE_SESSION_TIMEOUT", fallback=120)
+
+
+# SAML
+SAML_PATH = config.get("SAML_PATH")
+SAML_SETTINGS = config.get("SAML_SETTINGS")
+if SAML_SETTINGS:
+    try:
+        SAML_SETTINGS = orjson.loads(SAML_SETTINGS)
+    except orjson.JSONDecodeError:
+        logging.exception(
+            "Auth: Invalid SAML Settings on *SAML_SETTINGS*"
+        )
+
+SAML_MAPPING = {
+    "email": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+    "first_name": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+    "last_name": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+    "username": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
+    "groups": "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups",
+    "object_id": "http://schemas.microsoft.com/identity/claims/objectidentifier",
+    "tenant_id": "http://schemas.microsoft.com/identity/claims/tenantid",
+}
+
+saml_mapping = config.get("SAML_MAPPING")
+if saml_mapping is not None:
+    try:
+        SAML_MAPPING = orjson.loads(saml_mapping)
+    except orjson.JSONDecodeError:
+        logging.exception(
+            "Auth: Invalid SAML Mapping on *SAML_MAPPING*"
+        )
 
 
 # Okta

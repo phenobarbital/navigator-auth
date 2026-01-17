@@ -71,7 +71,7 @@ class GithubAuth(OauthAuth):
                 data = await self.get(
                     self.userinfo_uri,
                     token=access_token,
-                    token_type="token",
+                    token_type="Bearer",
                     headers=headers,
                 )
                 if data:
