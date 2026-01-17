@@ -298,3 +298,33 @@ class UserAccount(Model):
         strict = True
         connection = None
         frozen = False
+
+
+class Client(Model):
+    client_id: int = Column(required=False, primary_key=True, db_default="auto", repr=False)
+    client: str = Column(required=False)
+    client_name: str = Column(required=True)
+    client_secret: str = Column(required=False, secret=True)
+    client_type: str = Column(required=True, default='public')
+    redirect_uris: list = Column(required=False, default_factory=list)
+    policy_uri: str = Column(required=False)
+    client_logo_uri: str = Column(required=False)
+    user_id: User = Column(required=True, fk="user_id|username")
+    default_scopes: list = Column(required=False, default_factory=list)
+    allowed_grant_types: list = Column(required=False, default_factory=list)
+    created_at: datetime = Column(required=False, default=datetime.now())
+    updated_at: datetime = Column(required=False, default=datetime.now())
+    is_active: bool = Column(required=True, default=True)
+    expiration_date: datetime = Column(required=False, default=datetime.now() + timedelta(days=365))
+
+    def __post_init__(self) -> None:
+        super(Client, self).__post_init__()
+        if not self.client and self.client_name:
+            self.client = slugify(self.client_name)
+
+    class Meta:
+        name = "clients"
+        schema = AUTH_DB_SCHEMA
+        strict = True
+        connection = None
+        frozen = False
