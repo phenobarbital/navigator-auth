@@ -8,11 +8,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "navigator-auth"
-version = "0.16.0"
+dynamic = ["version"]
 description = "Navigator Auth is an Authentication/Authorization Toolkit for aiohttp."
 readme = "README.md"
 requires-python = ">=3.9.16"
-license = { text = "Apache 2.0 License" }
+license = "Apache-2.0"
 authors = [
     { name = "Jesus Lara Gimenez", email = "jesuslarag@gmail.com" }
 ]
@@ -33,7 +33,6 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Framework :: AsyncIO",
     "Framework :: aiohttp",
-    "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
     "Cython>=3.0.11",
@@ -65,8 +64,13 @@ Funding = "https://paypal.me/phenobarbital"
 Tracker = "https://github.com/phenobarbital/navigator-auth/issues"
 Documentation = "https://github.com/phenobarbital/navigator-auth"
 
-[tool.setuptools]
-packages = ["navigator_auth"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["navigator_auth*"]
+exclude = ["tests*", "docs*", "examples*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "navigator_auth.version.__version__"}
 
 [dependency-groups]
 dev = [
