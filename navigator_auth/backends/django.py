@@ -4,6 +4,7 @@ Navigator Authentication using Django Session Backend
 description: read the Django session from Redis Backend
 and decrypt, after that, a session will be created.
 """
+from aiohttp import hdrs
 import base64
 import logging
 from collections.abc import Callable, Awaitable
@@ -226,6 +227,9 @@ class DjangoAuth(BaseAuthBackend):
         Basic Auth Middleware.
         Description: Basic Authentication for NoAuth, Basic, Token and Django.
         """
+        # avoid authorization backend on OPTION method:
+        if request.method == hdrs.METH_OPTIONS:
+            return await handler(request)
         # avoid check system routes
         if await self.verify_exceptions(request):
             return await handler(request)

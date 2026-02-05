@@ -1,12 +1,12 @@
 from functools import wraps
 import inspect
-from typing import Any, TypeVar, Union
+from typing import Any, TypeVar
 from collections.abc import Callable, Awaitable
 from aiohttp import web, hdrs
 from aiohttp.abc import AbstractView
 from navigator_session import get_session
 from .exceptions import AuthException
-from .conf import AUTH_SESSION_OBJECT, exclude_list
+from .conf import AUTH_SESSION_OBJECT
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -45,7 +45,7 @@ def allow_anonymous(handler: F) -> F:
     is not required for this endpoint.
 
     Args:
-        func: The handler function or class-based view to decorate.
+        handler: The handler function or class-based view to decorate.
 
     Returns:
         Callable: The decorated handler that allows anonymous access.
@@ -77,6 +77,9 @@ def user_session() -> Callable[[F], F]:
         @wraps(handler)
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
             request = args[0] if isinstance(args[0], web.Request) else args[-1]
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await handler(*args, **kwargs)
             session = await get_session(request, new=False)
             try:
                 user = session.decode("user")
@@ -95,6 +98,9 @@ def user_session() -> Callable[[F], F]:
         @wraps(method)
         async def wrapped_method(self, *args, **kwargs):
             request = self.request
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await method(self, *args, **kwargs)
             session = await get_session(request, new=False)
             try:
                 user = session.decode("user")
@@ -138,6 +144,9 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
             request = args[-1]
             if request is None or not isinstance(request, web.Request):
                 raise ValueError(f"web.Request was not found in arguments. {handler!s}")
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await handler(*args, **kwargs)
             if request.get("authenticated", False):
                 return await handler(*args, **kwargs)
             else:
@@ -167,6 +176,9 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
         @wraps(method)
         async def wrapped_method(self, *args, **kwargs):
             request = self.request
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await method(self, *args, **kwargs)
             if request.get("authenticated", False):
                 return await method(self, *args, **kwargs)
             app = request.app
@@ -209,6 +221,9 @@ def allowed_groups(groups: list, content_type: str = "application/json") -> Call
                 raise ValueError(
                     f"web.Request was not found in arguments. {handler!s}"
                 )
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await handler(*args, **kwargs)
             if request.get("authenticated", False) is False:
                 # check credentials:
                 raise web.HTTPUnauthorized(
@@ -261,6 +276,9 @@ def allowed_programs(
             request = args[-1]
             if request is None:
                 raise ValueError(f"web.Request was not found in arguments. {handler!s}")
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await handler(*args, **kwargs)
             if not request.get("authenticated", False):
                 raise web.HTTPUnauthorized(
                     reason=f"Access Denied to Handler {handler!s}",
@@ -296,6 +314,9 @@ def allowed_programs(
             request = self.request
             if request is None:
                 raise ValueError(f"web.Request was not found in arguments. {method!s}")
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await method(self, *args, **kwargs)
             if not request.get("authenticated", False):
                 raise web.HTTPUnauthorized(
                     reason=f"Access Denied to Handler {method!s}",
@@ -350,6 +371,9 @@ def apikey_required(content_type: str = "application/json") -> Callable:
             request = args[-1]
             if request is None:
                 raise ValueError(f"web.Request was not found in arguments. {handler!s}")
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await handler(*args, **kwargs)
             app = request.app
             try:
                 auth = app["auth"]
@@ -390,6 +414,9 @@ def apikey_required(content_type: str = "application/json") -> Callable:
             request = self.request
             if request is None:
                 raise ValueError(f"web.Request was not found in arguments. {method!s}")
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await method(self, *args, **kwargs)
             app = request.app
             try:
                 auth = app["auth"]
@@ -450,6 +477,9 @@ def allowed_organizations(
             request = args[-1]
             if request is None:
                 raise ValueError(f"web.Request was not found in arguments. {handler!s}")
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await handler(*args, **kwargs)
             if not request.get("authenticated", False):
                 raise web.HTTPUnauthorized(
                     reason=f"Access Denied to Handler {handler!s}",
@@ -481,6 +511,9 @@ def allowed_organizations(
             request = self.request
             if request is None:
                 raise ValueError(f"web.Request was not found in arguments. {method!s}")
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await method(self, *args, **kwargs)
             if not request.get("authenticated", False):
                 raise web.HTTPUnauthorized(
                     reason=f"Access Denied to Handler {method!s}",
@@ -503,6 +536,163 @@ def allowed_organizations(
                     reason="Access Denied",
                     headers={hdrs.CONTENT_TYPE: content_type, hdrs.CONNECTION: "keep-alive"},
                 )
+        return _wrapped
+
+    def _wrapper(handler: F):
+        # If the handler is a class-based view (subclass of AbstractView), wrap each HTTP method.
+        if inspect.isclass(handler) and issubclass(handler, AbstractView):
+            for method_name in hdrs.METH_ALL:
+                method = getattr(handler, method_name.lower(), None)
+                if method is not None and callable(method):
+                    setattr(handler, method_name.lower(), _wrap_method(method))
+            return handler
+        else:
+            return _wrap_function(handler)
+
+    return _wrapper
+
+
+def is_restricted(
+    users: list = None, groups: list = None, content_type: str = "application/json"
+) -> Callable:
+    """
+    Restrict access to specific Users or Groups.
+    Logic:
+      - If 'users' is provided, current user MUST be in the list.
+      - If 'groups' is provided, current user MUST have at least one group in the list.
+      - If both are provided, BOTH conditions must be met (Intersection).
+    """
+    def _wrap_function(handler):
+        @wraps(handler)
+        async def _wrapped(*args, **kwargs) -> web.StreamResponse:
+            # For function-based handlers, assume request is the last argument.
+            request = args[-1]
+            if request is None:
+                raise ValueError(f"web.Request was not found in arguments. {handler!s}")
+            # check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await handler(*args, **kwargs)
+            if not request.get("authenticated", False):
+                raise web.HTTPUnauthorized(
+                    reason=f"Access Denied to Handler {handler!s}",
+                    headers={
+                        hdrs.CONTENT_TYPE: content_type,
+                        hdrs.CONNECTION: "keep-alive",
+                    },
+                )
+            # 1. Get Session
+            session = await get_session(request)
+            # 2. Extract User Info
+            username = None
+            user_groups = set()
+            try:
+                # Try getting from cached session dict
+                userinfo = session[AUTH_SESSION_OBJECT]
+                username = userinfo.get("username")
+                if "groups" in userinfo:
+                    user_groups = set(userinfo["groups"])
+            except KeyError:
+                # Fallback to decoding the User object
+                try:
+                    user = session.decode("user")
+                    username = getattr(user, "username", None)
+                    if hasattr(user, "groups"):
+                        for g in user.groups:
+                            if hasattr(g, "group"):
+                                user_groups.add(g.group)
+                            elif hasattr(g, "group_name"):
+                                user_groups.add(g.group_name)
+                except (AttributeError, TypeError, RuntimeError):
+                    pass
+            # 3. Check Constraints
+            # User Check
+            if users is not None:
+                if not username or username not in users:
+                    raise web.HTTPUnauthorized(
+                        reason="Access Denied",
+                        headers={
+                            hdrs.CONTENT_TYPE: content_type,
+                            hdrs.CONNECTION: "keep-alive",
+                        },
+                    )
+            # Group Check
+            if groups is not None:
+                # user_groups must have intersection with allowed groups
+                if user_groups.isdisjoint(groups):
+                    raise web.HTTPUnauthorized(
+                        reason="Access Denied",
+                        headers={
+                            hdrs.CONTENT_TYPE: content_type,
+                            hdrs.CONNECTION: "keep-alive",
+                        },
+                    )
+            return await handler(*args, **kwargs)
+        return _wrapped
+
+    def _wrap_method(method):
+        @wraps(method)
+        async def _wrapped(self, *args, **kwargs) -> web.StreamResponse:
+            request = self.request
+            if request is None:
+                raise ValueError(f"web.Request was not found in arguments. {method!s}")
+            # check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await method(self, *args, **kwargs)
+            if not request.get("authenticated", False):
+                raise web.HTTPUnauthorized(
+                    reason=f"Access Denied to Handler {method!s}",
+                    headers={
+                        hdrs.CONTENT_TYPE: content_type,
+                        hdrs.CONNECTION: "keep-alive",
+                    },
+                )
+            # 1. Get Session
+            session = await get_session(request)
+            # 2. Extract User Info
+            username = None
+            user_groups = set()
+            try:
+                # Try getting from cached session dict
+                userinfo = session[AUTH_SESSION_OBJECT]
+                username = userinfo.get("username")
+                if "groups" in userinfo:
+                    user_groups = set(userinfo["groups"])
+            except KeyError:
+                # Fallback to decoding the User object
+                try:
+                    user = session.decode("user")
+                    username = getattr(user, "username", None)
+                    if hasattr(user, "groups"):
+                        for g in user.groups:
+                            if hasattr(g, "group"):
+                                user_groups.add(g.group)
+                            elif hasattr(g, "group_name"):
+                                user_groups.add(g.group_name)
+                except (AttributeError, TypeError, RuntimeError):
+                    pass
+            # 3. Check Constraints
+            # User Check
+            if users is not None:
+                if not username or username not in users:
+                    raise web.HTTPUnauthorized(
+                        reason="Access Denied",
+                        headers={
+                            hdrs.CONTENT_TYPE: content_type,
+                            hdrs.CONNECTION: "keep-alive",
+                        },
+                    )
+            # Group Check
+            if groups is not None:
+                # user_groups must have intersection with allowed groups
+                if user_groups.isdisjoint(groups):
+                    raise web.HTTPUnauthorized(
+                        reason="Access Denied",
+                        headers={
+                            hdrs.CONTENT_TYPE: content_type,
+                            hdrs.CONNECTION: "keep-alive",
+                        },
+                    )
+            return await method(self, *args, **kwargs)
         return _wrapped
 
     def _wrapper(handler: F):

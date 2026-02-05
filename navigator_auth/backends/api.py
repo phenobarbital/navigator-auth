@@ -3,6 +3,7 @@
 Navigator Authentication using an API Token.
 description: Single API Token Authentication
 """
+from aiohttp import hdrs
 from collections.abc import Callable, Awaitable
 import orjson
 from aiohttp import web
@@ -223,6 +224,9 @@ class APIKeyAuth(BaseAuthBackend):
     ) -> web.StreamResponse:
         request.user = None
         # avoid check system routes
+        # avoid authorization backend on OPTION method:
+        if request.method == hdrs.METH_OPTIONS:
+            return await handler(request)
         if await self.verify_exceptions(request):
             return await handler(request)
         try:

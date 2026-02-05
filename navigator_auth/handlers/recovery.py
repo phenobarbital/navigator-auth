@@ -1,9 +1,11 @@
 from datetime import datetime
 import secrets
+import asyncio
 import logging
 import importlib
 from typing import Optional
 from aiohttp import web
+from aiohttp_cors import CorsViewMixin
 try:
     import redis.asyncio as redis
 except ImportError:
@@ -11,13 +13,9 @@ except ImportError:
 from navconfig import config
 from navigator_auth.conf import (
     REDIS_URL,
-    AUTH_USER_MODEL,
-    AUTH_PWD_DIGEST,
-    AUTH_PWD_ALGORITHM,
-    AUTH_PWD_LENGTH
+    AUTH_USER_MODEL
 )
 from navigator_auth.libs.json import json_decoder
-from navigator_auth.exceptions import UserNotFound
 from navigator_auth.responses import JSONResponse
 
 class RecoveryTokenStorage:
@@ -47,7 +45,7 @@ class RecoveryTokenStorage:
         key = f"{self.prefix}{token}"
         await self.redis.delete(key)
 
-class ForgotPasswordHandler(web.View):
+class ForgotPasswordHandler(web.View, CorsViewMixin):
     async def post(self):
         data = await self.request.json()
         email = data.get('email')
@@ -104,9 +102,8 @@ class ForgotPasswordHandler(web.View):
             logging.exception(f"Error in ForgotPasswordHandler: {e}")
             return web.HTTPInternalServerError(reason="Internal Server Error")
 
-import asyncio
 
-class ResetPasswordHandler(web.View):
+class ResetPasswordHandler(web.View, CorsViewMixin):
     async def post(self):
         data = await self.request.json()
         token = data.get('token')

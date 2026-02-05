@@ -2,6 +2,7 @@
 
 Troc Authentication using RNC algorithm.
 """
+from aiohttp import hdrs
 from typing import Optional
 from collections.abc import Awaitable, Callable
 from aiohttp import web
@@ -220,6 +221,9 @@ class TrocToken(BaseAuthBackend):
         Partner Auth Middleware.
         Description: Basic Authentication for Partner Token Auth.
         """
+        # avoid authorization backend on OPTION method:
+        if request.method == hdrs.METH_OPTIONS:
+            return await handler(request)
         # avoid check system routes
         if await self.verify_exceptions(request):
             return await handler(request)
