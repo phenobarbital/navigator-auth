@@ -3,6 +3,7 @@
 Navigator Authentication using an API Token for partners.
 description: Single API Token Authentication
 """
+from aiohttp import hdrs
 from collections.abc import Callable, Awaitable
 import jwt
 from aiohttp import web
@@ -177,6 +178,9 @@ class TokenAuth(BaseAuthBackend):
         Token Auth Middleware.
         Description: Token Middleware.
         """
+        # avoid authorization backend on OPTION method:
+        if request.method == hdrs.METH_OPTIONS:
+            return await handler(request)
         # avoid check system routes
         if await self.verify_exceptions(request):
             return await handler(request)

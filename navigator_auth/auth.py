@@ -700,7 +700,6 @@ class AuthHandler:
         # avoid authorization backend on OPTION method:
         if request.method == hdrs.METH_OPTIONS:
             return True
-
         # Check for explicit exclude list matches
         for pattern in exclude_list:
             if fnmatch.fnmatch(request.path, pattern):
@@ -749,19 +748,19 @@ class AuthHandler:
         """
         if await self.verify_exceptions(request):
             return await handler(request)
-        logging.debug(":: AUTH MIDDLEWARE ::")
+        self.logger.debug(":: AUTH MIDDLEWARE ::")
         try:
             token = await self._idp.get_payload(request)
             _, payload = self._idp.decode_token(code=token)
         except Forbidden as err:
-            logging.error(
+            self.logger.error(
                 f"Auth Middleware: Access Denied: {err}"
             )
             raise self.Unauthorized(
                 reason=err.message
             ) from err
         except AuthExpired as err:
-            logging.error(
+            self.logger.error(
                 f"Auth Middleware: Credentials expired: {err}"
             )
             raise self.Unauthorized(
@@ -778,7 +777,7 @@ class AuthHandler:
                 try:
                     session = await get_session(request, payload, new=False)
                 except Exception as err:
-                    logging.error(str(err))
+                    self.logger.error(str(err))
                 if not session and AUTH_CREDENTIALS_REQUIRED is True:
                     raise self.Unauthorized(
                         reason="There is no Session or Authentication is missing"
@@ -787,7 +786,7 @@ class AuthHandler:
                     request.user = await self.get_session_user(session)
                     request["authenticated"] = True
                 except Exception as ex:  # pylint: disable=W0703
-                    logging.error(f"Missing User Object from Session: {ex}")
+                    self.logger.error(f"Missing User Object from Session: {ex}")
             elif self.secure_cookies is True:
                 session = await get_session(request, None, new=False)
                 if not session and AUTH_CREDENTIALS_REQUIRED is True:
