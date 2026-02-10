@@ -490,7 +490,7 @@ class AuthHandler:
             # missing User Data:
             userdata = {}
         else:
-            userdata = dict(session)
+            userdata = session.session_data()
         try:
             del userdata["user"]
         except KeyError:
