@@ -363,31 +363,28 @@ class AuthHandler:
             # to request to IDP provisioning service an bearer (jwt)
             # token with expiration of 30 minutes (default)
             user = request.user
-            session = None
-            if hasattr(request, "session"):
-                session = request.session
             payload = {
                 "user_id": user.id,
                 "username": user.username,
                 "user": user.id
             }
-            if session:
-                try:
+            if (session := request.session if hasattr(request, "session") else None):
+                with contextlib.suppress(AttributeError):
                     payload[SESSION_ID] = session.id
-                except AttributeError:
-                     # In case session is dict-like or other type
-                    pass
             token, exp, scheme = self._idp.create_ephemeral_token(data=payload)
-            return JSONResponse({
-                "token": token,
-                "expires_in": exp,
-                "token_type": scheme
-            }, status=200)
+            return JSONResponse(
+                {
+                    "token": token,
+                    "expires_in": exp,
+                    "token_type": scheme
+                },
+                status=200
+            )
         except Exception as err:
             raise self.auth_error(
                 reason=f"Error Creating Token: {err}",
                 exception=err
-            )
+            ) from err
 
     async def api_login(self, request: web.Request) -> web.Response:
         """Login.
@@ -583,11 +580,12 @@ class AuthHandler:
         # API Create Token
         router.add_route(
             "POST",
-            "/api/v1/auth_tokens/create",
+            "/api/v1/token/create",
             self.api_create_token,
             name="api_create_token"
         )
         # get the session information for a program (only)
+        # TODO: create a get_session_tenant method
         router.add_route(
             "GET",
             "/api/v1/session/{program}",
@@ -598,6 +596,16 @@ class AuthHandler:
         router.add_route(
             "GET", "/api/v1/user/session", self.get_session, name="api_session"
         )
+        
+        # User Session Vault
+        from .handlers.vault import VaultView
+        router.add_route(
+            "*", "/api/v1/user/vault", VaultView, name="api_user_vault"
+        )
+        router.add_route(
+            "*", "/api/v1/user/vault/{key}", VaultView, name="api_user_vault_key"
+        )
+
         ### get info about auth methods
         router.add_route(
             "GET",
@@ -853,7 +861,7 @@ class AuthHandler:
                                     # Output raw cookie string without "Set-Cookie: " prefix
                                     cookie_header = cookie.output(header='').strip()
                                     break
-                                
+
                                 if cookie_header:
                                     headers["Set-Cookie"] = cookie_header
                         except Exception as e:
