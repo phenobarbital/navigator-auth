@@ -7,6 +7,7 @@ from aiohttp.abc import AbstractView
 from navigator_session import get_session
 from .exceptions import AuthException
 from .conf import AUTH_SESSION_OBJECT
+from .vault.integration import _attach_vault_to_request
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -88,6 +89,7 @@ def user_session() -> Callable[[F], F]:
             if not user and request.get("user"):
                 user = request.get("user")
             request["session"] = session
+            _attach_vault_to_request(request, session)
             if hasattr(args[0], "session"):
                 args[0].session = session
                 args[0].user = user
@@ -114,6 +116,7 @@ def user_session() -> Callable[[F], F]:
             self.user = user
             request.session = session
             request.user = user
+            _attach_vault_to_request(request, session)
             return await method(self, *args, **kwargs)
         return wrapped_method
 
