@@ -19,6 +19,7 @@ from aiohttp import hdrs, web
 from aiohttp.web_urldispatcher import SystemRoute, StaticResource
 from navigator_session import SESSION_KEY, SessionHandler, get_session, SESSION_ID
 from .authorizations import authz_allow_hosts, authz_hosts, authz_useragent
+from .vault.integration import load_vault_for_session, setup_vault_tables, VAULT_SESSION_KEY
 from .backends.idp import IdentityProvider
 from .conf import (
     BASE_DIR,
@@ -131,6 +132,9 @@ class AuthHandler:
                 raise AuthException(
                     f"Error on Startup Auth Backend {name} init: {err.message}"
                 ) from err
+        # Create vault tables if they don't exist (non-blocking)
+        if "authdb" in app:
+            await setup_vault_tables(app["authdb"])
 
     async def on_cleanup(self, app):
         """
@@ -430,6 +434,22 @@ class AuthHandler:
                     reason=f"Error Creating User Session: {err.message}",
                     exception=err
                 ) from err
+            # Load vault for the authenticated session (non-blocking)
+            try:
+                session = await get_session(request, new=False)
+                user_id = userdata.get("user_id") if isinstance(userdata, dict) else getattr(userdata, "user_id", None)
+                if session and user_id:
+                    db_pool = request.app.get("authdb")
+                    redis = request.app.get("redis")
+                    if db_pool:
+                        vault = await load_vault_for_session(
+                            session, user_id=user_id,
+                            db_pool=db_pool, redis=redis,
+                        )
+                        if vault:
+                            session[VAULT_SESSION_KEY] = vault
+            except Exception:
+                pass  # Vault failure must not block login
             return response
 
     ### Auth Methods:
