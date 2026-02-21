@@ -360,21 +360,31 @@ class BaseAuthBackend(ABC):
                 stack_info=False
             )
 
+    async def _run_callbacks_sequentially(
+        self, request: web.Request, user: Callable, **kwargs
+    ) -> None:
+        """Run all auth callbacks sequentially in the background."""
+        for fn in self._callbacks:
+            try:
+                await self._safe_callback_wrapper(request, fn, user, **kwargs)
+            except Exception as ex:
+                self.logger.exception(
+                    f"Background Auth Callback Error in {fn.__name__}: {ex}",
+                    stack_info=False
+                )
+
     async def auth_successful_callback(
         self, request: web.Request, user: Callable, **kwargs
     ) -> None:
-        """Run callbacks in background without blocking login process."""
+        """Run callbacks in background sequentially without blocking login process."""
         if not self._callbacks:
             return
-        for fn in self._callbacks:
-            task = asyncio.create_task(
-                self._safe_callback_wrapper(request, fn, user, **kwargs)
-            )
-            # Add task to our set to prevent garbage collection
-            self._background_tasks.add(task)
-
-            # Remove task from set when it completes (cleanup)
-            task.add_done_callback(self._background_tasks.discard)
+            
+        task = asyncio.create_task(
+            self._run_callbacks_sequentially(request, user, **kwargs)
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     def threaded_function(
         self,

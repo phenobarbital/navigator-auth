@@ -17,7 +17,13 @@ import orjson
 from orjson import JSONDecodeError
 from aiohttp import hdrs, web
 from aiohttp.web_urldispatcher import SystemRoute, StaticResource
-from navigator_session import SESSION_KEY, SessionHandler, get_session, SESSION_ID
+from navigator_session import (
+    SESSION_KEY,
+    SessionHandler,
+    get_session,
+    SESSION_ID,
+    SESSION_STORAGE
+)
 from .authorizations import authz_allow_hosts, authz_hosts, authz_useragent
 from .vault.integration import load_vault_for_session, setup_vault_tables, VAULT_SESSION_KEY
 from .backends.idp import IdentityProvider
@@ -107,7 +113,7 @@ class AuthHandler:
         )
         # TODO: Session Support with parametrization (other backends):
         self._session = SessionHandler(
-            storage="redis", use_cookie=True
+            storage="redis", use_cookies=self.secure_cookies
         )  # pylint: disable=E1123
         ### JSON encoder
         self._json = JSONContent()
@@ -357,31 +363,28 @@ class AuthHandler:
             # to request to IDP provisioning service an bearer (jwt)
             # token with expiration of 30 minutes (default)
             user = request.user
-            session = None
-            if hasattr(request, "session"):
-                session = request.session
             payload = {
                 "user_id": user.id,
                 "username": user.username,
                 "user": user.id
             }
-            if session:
-                try:
+            if (session := request.session if hasattr(request, "session") else None):
+                with contextlib.suppress(AttributeError):
                     payload[SESSION_ID] = session.id
-                except AttributeError:
-                     # In case session is dict-like or other type
-                    pass
             token, exp, scheme = self._idp.create_ephemeral_token(data=payload)
-            return JSONResponse({
-                "token": token,
-                "expires_in": exp,
-                "token_type": scheme
-            }, status=200)
+            return JSONResponse(
+                {
+                    "token": token,
+                    "expires_in": exp,
+                    "token_type": scheme
+                },
+                status=200
+            )
         except Exception as err:
             raise self.auth_error(
                 reason=f"Error Creating Token: {err}",
                 exception=err
-            )
+            ) from err
 
     async def api_login(self, request: web.Request) -> web.Response:
         """Login.
@@ -577,11 +580,12 @@ class AuthHandler:
         # API Create Token
         router.add_route(
             "POST",
-            "/api/v1/auth_tokens/create",
+            "/api/v1/token/create",
             self.api_create_token,
             name="api_create_token"
         )
         # get the session information for a program (only)
+        # TODO: create a get_session_tenant method
         router.add_route(
             "GET",
             "/api/v1/session/{program}",
@@ -592,6 +596,16 @@ class AuthHandler:
         router.add_route(
             "GET", "/api/v1/user/session", self.get_session, name="api_session"
         )
+        
+        # User Session Vault
+        from .handlers.vault import VaultView
+        router.add_route(
+            "*", "/api/v1/user/vault", VaultView, name="api_user_vault"
+        )
+        router.add_route(
+            "*", "/api/v1/user/vault/{key}", VaultView, name="api_user_vault_key"
+        )
+
         ### get info about auth methods
         router.add_route(
             "GET",
@@ -786,7 +800,6 @@ class AuthHandler:
             raise self.Unauthorized(
                 reason=err.message, exception=err
             ) from err
-        except FailedAuth as err:
             raise self.ForbiddenAccess(
                 reason=err.message, exception=err
             ) from err
@@ -808,13 +821,64 @@ class AuthHandler:
                 except Exception as ex:  # pylint: disable=W0703
                     self.logger.error(f"Missing User Object from Session: {ex}")
             elif self.secure_cookies is True:
-                session = await get_session(request, None, new=False)
-                if not session and AUTH_CREDENTIALS_REQUIRED is True:
-                    raise self.Unauthorized(
-                        reason="There is no Session or Authentication is missing"
-                    )
-                request.user = await self.get_session_user(session)
-                request["authenticated"] = True
+                session = await get_session(request, None, new=True)
+                # verify if a user is in session:
+                try:
+                    user = await self.get_session_user(session)
+                    if user:
+                        request.user = user
+                        request["authenticated"] = True
+                    elif AUTH_CREDENTIALS_REQUIRED is True:
+                        # User is missing or not authenticated
+                        # we need to set the cookie for the new session
+                        # before raising the exception
+                        headers = {}
+                        try:
+                            # Create a dummy response to attach the cookie
+                            # Since we are raising an exception, we need to pass headers
+                            # But aiohttp exceptions takes headers as argument.
+                            # We can use the storage to get the cookie data.
+                            storage = request.get(SESSION_STORAGE)
+                            if storage and storage._use_cookies:
+                                cookie_data = {
+                                    "session_id": session.session_id
+                                }
+                                cookie_data = storage._encoder(cookie_data)
+                                # Manually construct the Set-Cookie header
+                                # This is a bit hacky but AbstractStorage doesn't expose a method
+                                # to get the cookie string directly easily without a response object.
+                                # However, we can create a temporary response, set the cookie,
+                                # and extract the header.
+                                tmp_response = web.Response()
+                                storage.save_cookie(
+                                    tmp_response,
+                                    cookie_data=cookie_data,
+                                    max_age=storage.max_age
+                                )
+                                # Get the Set-Cookie header
+                                cookie_header = None
+                                for cookie in tmp_response.cookies.values():
+                                    # Output raw cookie string without "Set-Cookie: " prefix
+                                    cookie_header = cookie.output(header='').strip()
+                                    break
+
+                                if cookie_header:
+                                    headers["Set-Cookie"] = cookie_header
+                        except Exception as e:
+                            self.logger.warning(f"Failed to set cookie on Unauthorized: {e}")
+
+                        raise self.Unauthorized(
+                            reason="There is no Session or Authentication is missing",
+                            headers=headers
+                        )
+                except web.HTTPException:
+                    raise
+                except Exception as err:
+                    self.logger.warning(f"Error checking User in Session: {err}")
+                    if AUTH_CREDENTIALS_REQUIRED is True:
+                        raise self.Unauthorized(
+                            reason="There is no Session or Authentication is missing"
+                        ) from err
         except AuthException as err:
             logging.error(
                 f"Auth Middleware: Invalid Signature,\
