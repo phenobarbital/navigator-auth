@@ -64,10 +64,10 @@ class base_middleware(ABC):
         # avoid authorization on exclude list
         if self.exclude_routes and self.excluding_routes(request):
             return True
-        if self.check_static is True:
-            return self.static_routes(request)
         if request.method == hdrs.METH_OPTIONS:
             return True
+        if self.check_static is True:
+            return self.static_routes(request)
         return False
 
     def get_authorization_header(
