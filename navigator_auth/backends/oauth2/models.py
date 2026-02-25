@@ -127,7 +127,7 @@ def token_expiration():
     return datetime.now() + timedelta(days=OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS)
 
 class OauthToken(BaseModel):
-    token_id: UUID = Field(primary_key=True, default_factory=token_uid)
+    token_id: UUID = Field(default_factory=token_uid, json_schema_extra={"primary_key": True})
     token_type: str = Field(default='Bearer')
     code: OauthAuthorizationCode = Field()
     client_id: OAuthClient = Field()
