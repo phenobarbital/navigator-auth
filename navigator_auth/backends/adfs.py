@@ -3,6 +3,7 @@
 Description: Backend Authentication/Authorization using Okta Service.
 """
 import base64
+from urllib.parse import quote
 from aiohttp import web
 import jwt
 
@@ -29,7 +30,8 @@ from ..conf import (
     AZURE_AD_SERVER,
     exclude_list,
     ADFS_MAPPING,
-    REDIS_AUTH_URL
+    REDIS_AUTH_URL,
+    ADFS_SAML_RELAY_RP
 )
 from .jwksutils import get_public_key
 from .external import ExternalAuth
@@ -319,6 +321,22 @@ class ADFSAuth(ExternalAuth):
             token = data["token"]
         except (KeyError, TypeError):
             token = None
+        # If ADFS_SAML_RELAY_RP is configured, redirect to ADFS
+        # IdP-initiated SSO to achieve SSO with a SAML SP.
+        # The browser still has the ADFS session cookie from the
+        # OIDC login, so ADFS will issue the SAML assertion
+        # without re-prompting for credentials.
+        if ADFS_SAML_RELAY_RP:
+            idp_sso_url = (
+                f"https://{self.server}/adfs/ls/"
+                f"?wa=wsignin1.0"
+                f"&wtrealm={quote(ADFS_SAML_RELAY_RP)}"
+            )
+            self.logger.info(
+                f"SAML Relay: redirecting to IdP-initiated SSO "
+                f"for RP '{ADFS_SAML_RELAY_RP}'"
+            )
+            return web.HTTPFound(idp_sso_url)
         return self.home_redirect(
             request,
             token=token,
