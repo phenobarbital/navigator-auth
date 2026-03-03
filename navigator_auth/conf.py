@@ -329,6 +329,11 @@ ADFS_CLAIM_MAPPING = ad_mapping
 AZURE_AD_SERVER = config.get("AZURE_AD_SERVER", fallback="login.microsoftonline.com")
 AZURE_SESSION_TIMEOUT = config.get("AZURE_SESSION_TIMEOUT", fallback=120)
 
+# ADFS SAML Relay: When set, after OIDC login the user is redirected
+# to ADFS IdP-initiated SSO for this Relying Party (entity ID),
+# enabling SSO with a third-party SAML SP without re-authentication.
+ADFS_SAML_RELAY_RP = config.get("ADFS_SAML_RELAY_RP", fallback=None)
+
 
 # SAML
 SAML_PATH = config.get("SAML_PATH")
