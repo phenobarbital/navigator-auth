@@ -510,12 +510,20 @@ class AuthHandler:
                 session = await self._session.storage.new_session(request, {})
         if isinstance(session, bool):
             # missing User Data:
-            userdata = {}
+            if request.get("authenticated", False):
+                userdata = dict(request.get("userdata", {}))
+                if not userdata and hasattr(request, "user") and request.user:
+                    try:
+                        userdata = request.user.to_dict() if hasattr(request.user, "to_dict") else dict(request.user)
+                    except Exception:
+                        userdata = {}
+            else:
+                userdata = {}
         else:
             userdata = session.session_data()
         try:
             del userdata["user"]
-        except KeyError:
+        except (KeyError, TypeError):
             pass
         return JSONResponse(userdata, status=200)
 
@@ -811,15 +819,68 @@ class AuthHandler:
                     session = await get_session(request, payload, new=False)
                 except Exception as err:
                     self.logger.error(str(err))
-                if not session and AUTH_CREDENTIALS_REQUIRED is True:
-                    raise self.Unauthorized(
-                        reason="There is no Session or Authentication is missing"
-                    )
-                try:
-                    request.user = await self.get_session_user(session)
-                    request["authenticated"] = True
-                except Exception as ex:  # pylint: disable=W0703
-                    self.logger.error(f"Missing User Object from Session: {ex}")
+                    session = False
+
+                if not session:
+                    self.logger.warning("Session Missing or Expired, recreating from Token")
+                    try:
+                        # 1. Create a new session with the valid token payload
+                        session = await get_session(request, payload, new=True)
+                        
+                        # 2. Extract Identifier (username, email or uid) from payload
+                        try:
+                            uid = payload[self._idp.username_attribute]
+                        except KeyError:
+                            try:
+                                uid = payload[self._idp.user_attribute]
+                            except KeyError:
+                                try:
+                                    uid = payload[self._idp.userid_attribute]
+                                except KeyError:
+                                    uid = payload.get("email")
+
+                        # 3. Try fetching the real User object
+                        user = None
+                        if uid:
+                            try:
+                                user = await self._idp.get_user(str(uid))
+                            except Exception as ex:
+                                self.logger.warning(f"Could not fetch user {uid} for recreated session: {ex}")
+                        
+                        # 4. Save User object inside session (or fallback to payload if not found)
+                        if not user:
+                            # Fallback to payload
+                            user = payload
+                        else:
+                            try:
+                                await session.save_encoded_data(request, 'user', user)
+                                user.is_authenticated = True
+                            except Exception as ex:
+                                self.logger.error(f"Error saving user in new session: {ex}")
+
+                        request.user = user
+                        request["userdata"] = payload  # Store payload explicitly
+                        request["authenticated"] = True
+
+                    except Exception as err:
+                        self.logger.error(f"Error creating fallback session: {err}")
+                        if AUTH_CREDENTIALS_REQUIRED is True:
+                            raise self.Unauthorized(
+                                reason="There is no Session or Authentication is missing",
+                            )
+
+                else:
+                    # Session exists, just load user
+                    try:
+                        user = await self.get_session_user(session)
+                        if not user and payload:
+                            # Fallback to payload
+                            user = payload
+                        request.user = user
+                        request["userdata"] = payload  # Store payload explicitly
+                        request["authenticated"] = True
+                    except Exception as ex:  # pylint: disable=W0703
+                        self.logger.error(f"Missing User Object from Session: {ex}")
             elif self.secure_cookies is True:
                 session = await get_session(request, None, new=False)
                 if not session and AUTH_CREDENTIALS_REQUIRED is True:

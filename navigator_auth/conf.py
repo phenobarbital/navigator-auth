@@ -330,8 +330,9 @@ AZURE_AD_SERVER = config.get("AZURE_AD_SERVER", fallback="login.microsoftonline.
 AZURE_SESSION_TIMEOUT = config.get("AZURE_SESSION_TIMEOUT", fallback=120)
 
 # ADFS SAML Relay: When set, after OIDC login the user is redirected
-# to ADFS IdP-initiated SSO for this Relying Party (entity ID),
-# enabling SSO with a third-party SAML SP without re-authentication.
+# to ADFS IdP-initiated SSO for this Relying Party (display name as
+# shown in ADFS Management), enabling SSO with a third-party SAML SP
+# without re-authentication. Example: "Network Ninja Production Management"
 ADFS_SAML_RELAY_RP = config.get("ADFS_SAML_RELAY_RP", fallback=None)
 
 

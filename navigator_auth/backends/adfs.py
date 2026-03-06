@@ -328,9 +328,8 @@ class ADFSAuth(ExternalAuth):
         # without re-prompting for credentials.
         if ADFS_SAML_RELAY_RP:
             idp_sso_url = (
-                f"https://{self.server}/adfs/ls/"
-                f"?wa=wsignin1.0"
-                f"&wtrealm={quote(ADFS_SAML_RELAY_RP)}"
+                f"https://{self.server}/adfs/ls/IdpInitiatedSignOn.aspx"
+                f"?loginToRp={quote(ADFS_SAML_RELAY_RP)}"
             )
             self.logger.info(
                 f"SAML Relay: redirecting to IdP-initiated SSO "
