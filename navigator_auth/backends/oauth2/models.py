@@ -3,11 +3,11 @@ from datetime import datetime, timedelta
 import json
 from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, field_validator
+
 # from asyncdb.models import Model, Field
 from ...identities import AuthUser
-from ...conf import (
-    OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS
-)
+from ...conf import OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS
+
 
 # Resource Owner:
 class OauthUser(BaseModel):
@@ -17,9 +17,9 @@ class OauthUser(BaseModel):
     family_name: str = Field()
     email: Optional[str] = Field(default=None)
     # Replicate required fields or add extra
-    
+
     # We can add a validator or constructor if needed later.
-    
+
     @property
     def first_name(self):
         return self.given_name
@@ -34,14 +34,15 @@ class OauthUser(BaseModel):
         return cls(
             user_id=user.user_id,
             username=user.username,
-            given_name=user.first_name or '',
-            family_name=user.last_name or '',
-            email=user.email
+            given_name=user.first_name or "",
+            family_name=user.last_name or "",
+            email=user.email,
         )
 
 
 def default_expiration():
     return datetime.now() + timedelta(days=365)
+
 
 class OAuthClient(BaseModel):
     """OAuthClient.
@@ -49,41 +50,36 @@ class OAuthClient(BaseModel):
     Application making requests to the OAuth2 Server on behalf of
     the Resource Owner.
     """
+
     client_id: str = Field()
     client_name: str = Field()
     client_secret: Optional[str] = Field(default=None)
     # Consider adding a field to distinguish between public and confidential clients.
-    client_type: str = Field(default='public')
+    client_type: str = Field(default="public")
     redirect_uris: list = Field(default_factory=list)
     policy_uri: Optional[str] = Field(default=None)
     client_logo_uri: Optional[str] = Field(default=None)
-    user: Optional[OauthUser] = Field(default=None) # Make optional for now or handle via validator
-    default_scopes: Union[str, list] = Field(default='default') # Can be list in DB
+    user: Optional[OauthUser] = Field(default=None)  # Make optional for now or handle via validator
+    default_scopes: Union[str, list] = Field(default="default")  # Can be list in DB
     allowed_grant_types: list = Field(default_factory=list)
-    created_at: datetime = Field(
-        default_factory=datetime.now
-    )
-    updated_at: datetime = Field(
-        default_factory=datetime.now
-    )
-    expiration_date: datetime = Field(
-        default_factory=default_expiration
-    )
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    expiration_date: datetime = Field(default_factory=default_expiration)
 
-    @field_validator('client_id', mode='before')
+    @field_validator("client_id", mode="before")
     def parse_client_id(cls, v):
         return str(v)
 
-    @field_validator('redirect_uris', 'allowed_grant_types', mode='before')
+    @field_validator("redirect_uris", "allowed_grant_types", mode="before")
     def parse_list(cls, v):
         if v is None:
             return []
         if isinstance(v, str):
-             # Try JSON load if it looks like a list? Or split?
-             try:
-                 return json.loads(v)
-             except:
-                 return [v]
+            # Try JSON load if it looks like a list? Or split?
+            try:
+                return json.loads(v)
+            except:
+                return [v]
         return v
 
     @property
@@ -94,12 +90,13 @@ class OAuthClient(BaseModel):
 def code_expiration():
     return datetime.now() + timedelta(minutes=2)
 
+
 class OauthAuthorizationCode(BaseModel):
     client_id: OAuthClient = Field()
     code: str = Field()
     nonce: Optional[str] = Field(default=None)
     redirect_uri: str = Field()
-    response_type: str = Field(default='code')
+    response_type: str = Field(default="code")
     scope: str = Field()
     state: str = Field()
     expires_at: datetime = Field(default_factory=code_expiration)
@@ -108,6 +105,7 @@ class OauthAuthorizationCode(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     used: bool = Field(default=False)
     used_at: datetime = Field(default_factory=datetime.now)
+
 
 class OauthRefreshToken(BaseModel):
     client_id: OAuthClient = Field()
@@ -123,12 +121,14 @@ class OauthRefreshToken(BaseModel):
 def token_uid():
     return uuid4()
 
+
 def token_expiration():
     return datetime.now() + timedelta(days=OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS)
 
+
 class OauthToken(BaseModel):
     token_id: UUID = Field(default_factory=token_uid, json_schema_extra={"primary_key": True})
-    token_type: str = Field(default='Bearer')
+    token_type: str = Field(default="Bearer")
     code: OauthAuthorizationCode = Field()
     client_id: OAuthClient = Field()
     refresh_token: OauthRefreshToken = Field()

@@ -8,9 +8,10 @@ from .models import OauthAuthorizationCode
 try:
     import redis.asyncio as redis
 except ImportError:
-    # Fallback to sync redis wrapped or error? 
+    # Fallback to sync redis wrapped or error?
     # The project seems to use redis-py, which has asyncio support since 4.2.0
     import redis
+
 
 class AuthorizationCodeStorage:
     def __init__(self, dsn: str = None):
@@ -21,22 +22,22 @@ class AuthorizationCodeStorage:
 
     async def save_code(self, code: OauthAuthorizationCode):
         key = f"{self.prefix}{code.code}"
-        
+
         if not code.expires_at:
-             return False
-        
+            return False
+
         # Calculate TTL
         # code.expires_at and code.created_at are datetime objects
         # We need to make sure they are aware or naive consistently.
         # Assuming Pydantic models return consistent datetime.
-        
+
         # Simple TTL calculation:
         now = code.created_at
         if code.expires_at > now:
-             remaining = code.expires_at - now
-             ttl = int(remaining.total_seconds())
+            remaining = code.expires_at - now
+            ttl = int(remaining.total_seconds())
         else:
-             ttl = 10 # Expired?
+            ttl = 10  # Expired?
 
         data = code.model_dump_json()
         await self.redis.set(key, data, ex=ttl)
@@ -53,13 +54,14 @@ class AuthorizationCodeStorage:
                 logging.error(f"Error decoding auth code from Redis: {e}")
                 return None
         return None
-    
+
     async def delete_code(self, code: str):
-         key = f"{self.prefix}{code}"
-         await self.redis.delete(key)
+        key = f"{self.prefix}{code}"
+        await self.redis.delete(key)
 
 
 from .models import OauthRefreshToken
+
 
 class RefreshTokenStorage:
     def __init__(self, dsn: str = None):
@@ -73,19 +75,19 @@ class RefreshTokenStorage:
         # Expiration in seconds
         # code.expires_at is datetime
         if not token.expires_at:
-             return False
-             
-        now = token.issued_at # or datetime.now
+            return False
+
+        now = token.issued_at  # or datetime.now
         if token.expires_at > now:
-             remaining = token.expires_at - now
-             ttl = int(remaining.total_seconds())
+            remaining = token.expires_at - now
+            ttl = int(remaining.total_seconds())
         else:
-             ttl = 10 
-             
+            ttl = 10
+
         data = token.model_dump_json()
         await self.redis.set(key, data, ex=ttl)
         return True
-        
+
     async def get_token(self, refresh_token: str) -> Optional[OauthRefreshToken]:
         key = f"{self.prefix}{refresh_token}"
         data = await self.redis.get(key)
@@ -99,5 +101,5 @@ class RefreshTokenStorage:
         return None
 
     async def delete_token(self, refresh_token: str):
-         key = f"{self.prefix}{refresh_token}"
-         await self.redis.delete(key)
+        key = f"{self.prefix}{refresh_token}"
+        await self.redis.delete(key)

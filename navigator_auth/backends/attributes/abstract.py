@@ -3,20 +3,20 @@ import logging
 from collections.abc import Iterable
 from abc import ABCMeta, abstractmethod
 
+
 class UserAttribute(metaclass=ABCMeta):
     """UserAttribute.
 
-        Interface for Set Custom User Attributes.
+    Interface for Set Custom User Attributes.
     """
+
     name: str
 
     def __call__(self, user: Iterable, userdata: dict, **kwargs) -> Tuple[str, Any]:
         try:
             return (self.name, self.get_value(user, userdata, **kwargs))
         except Exception as exc:
-            logging.warning(
-                f'Error getting user attribute {self.name}: {exc}'
-            )
+            logging.warning(f"Error getting user attribute {self.name}: {exc}")
             return self.name, None
 
     @abstractmethod

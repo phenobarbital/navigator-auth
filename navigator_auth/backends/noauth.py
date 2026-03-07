@@ -2,6 +2,7 @@
 
 Navigator Authentication using Anonymous Backend
 """
+
 import logging
 import uuid
 from aiohttp import web
@@ -55,22 +56,21 @@ class NoAuth(BaseAuthBackend):
         user.id = key
         user.add_group(Guest)
         user.set(self.username_attribute, f"Anonymous {key}")
-        logging.debug(
-            f"User Created > {user}"
-        )
+        logging.debug(f"User Created > {user}")
         payload = {
             self.session_key_property: key,
             self.user_property: None,
             self.username_attribute: f"Anonymous {key}",
             **userdata,
         }
-        token, exp, scheme = self._idp.create_token(data=payload, expiration=3600)
+        token, refresh_token, exp, scheme = self._idp.create_token(data=payload, expiration=3600)
         user.access_token = token
         user.token_type = scheme
         user.expires_in = exp
         await self.remember(request, key, userdata, user)
         return {
             "token": token,
+            "refresh_token": refresh_token,
             self.session_key_property: key,
             self.username_attribute: f"Anonymous {key}",
             "expires_in": exp,

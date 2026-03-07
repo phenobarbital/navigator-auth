@@ -4,6 +4,7 @@ Navigator Authentication using Django Session Backend
 description: read the Django session from Redis Backend
 and decrypt, after that, a session will be created.
 """
+
 from aiohttp import hdrs
 import base64
 import logging
@@ -21,12 +22,8 @@ from ..exceptions import (
     UserNotFound,
 )
 from ..identities import AuthUser, Column
-from ..conf import (
-    AUTH_CREDENTIALS_REQUIRED,
-    DJANGO_USER_MAPPING,
-    DJANGO_SESSION_URL,
-    DJANGO_SESSION_PREFIX
-)
+from ..conf import AUTH_CREDENTIALS_REQUIRED, DJANGO_USER_MAPPING, DJANGO_SESSION_URL, DJANGO_SESSION_PREFIX
+
 # User Identity
 from .abstract import BaseAuthBackend
 
@@ -57,15 +54,11 @@ class DjangoAuth(BaseAuthBackend):
         **kwargs,
     ):
         self._pool: Callable = None
-        super(DjangoAuth, self).__init__(
-            user_attribute, userid_attribute, password_attribute, **kwargs
-        )
+        super(DjangoAuth, self).__init__(user_attribute, userid_attribute, password_attribute, **kwargs)
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements."""
-        self._pool = aioredis.ConnectionPool.from_url(
-            DJANGO_SESSION_URL, decode_responses=True, encoding="utf-8"
-        )
+        self._pool = aioredis.ConnectionPool.from_url(DJANGO_SESSION_URL, decode_responses=True, encoding="utf-8")
 
     async def on_cleanup(self, app: web.Application):
         """Used to cleanup and shutdown any db connection."""
@@ -83,9 +76,7 @@ class DjangoAuth(BaseAuthBackend):
         try:
             if "Authorization" in request.headers:
                 try:
-                    scheme, _id = (
-                        request.headers.get("Authorization").strip().split(" ")
-                    )
+                    scheme, _id = request.headers.get("Authorization").strip().split(" ")
                 except ValueError as ex:
                     raise web.HTTPForbidden(
                         reason="Invalid authorization Header",
@@ -105,9 +96,7 @@ class DjangoAuth(BaseAuthBackend):
             async with aioredis.Redis(connection_pool=self._pool) as redis:
                 result = await redis.get(f"{DJANGO_SESSION_PREFIX}:{key}")
             if not result:
-                raise AuthException(
-                    "Django Auth: non-existing Session"
-                )
+                raise AuthException("Django Auth: non-existing Session")
             data = base64.b64decode(result)
             session_data = data.decode("utf-8").split(":", 1)
             user = orjson.loads(session_data[1])
@@ -115,9 +104,7 @@ class DjangoAuth(BaseAuthBackend):
                 if "user_id" not in user:
                     user["user_id"] = user[self._user_id_key]
             except KeyError:
-                logging.error(
-                    "DjangoAuth: Current User Data missing User ID"
-                )
+                logging.error("DjangoAuth: Current User Data missing User ID")
             session = {
                 "key": key,
                 "session_id": session_data[0],
@@ -137,9 +124,7 @@ class DjangoAuth(BaseAuthBackend):
         except (FailedAuth, InvalidAuth, UserNotFound):
             raise
         except Exception as e:
-            raise InvalidAuth(
-                str(e)
-            ) from e
+            raise InvalidAuth(str(e)) from e
 
     async def authenticate(self, request):
         """Authenticate against user credentials (django session id)."""
@@ -163,9 +148,7 @@ class DjangoAuth(BaseAuthBackend):
                 u = data[self.user_property]
                 username = u[self.userid_attribute]
             except KeyError as err:
-                raise InvalidAuth(
-                    f"Missing {self.userid_attribute} attribute: {err!s}", status=401
-                ) from err
+                raise InvalidAuth(f"Missing {self.userid_attribute} attribute: {err!s}", status=401) from err
             try:
                 user = await self.validate_user(login=username)
             except UserNotFound as err:
@@ -239,25 +222,17 @@ class DjangoAuth(BaseAuthBackend):
             if payload:
                 ## check if user has a session:
                 # load session information
-                session = await get_session(
-                    request, payload, new=False, ignore_cookie=True
-                )
+                session = await get_session(request, payload, new=False, ignore_cookie=True)
                 if not session and AUTH_CREDENTIALS_REQUIRED is True:
-                    raise self.Unauthorized(
-                        reason="There is no Session or Authentication is missing"
-                    )
+                    raise self.Unauthorized(reason="There is no Session or Authentication is missing")
                 try:
                     request.user = await self.get_session_user(session)
                     request["authenticated"] = True
                 except Exception as ex:  # pylint: disable=W0703
-                    self.logger.error(
-                        f"Missing User Object from Session: {ex}"
-                    )
+                    self.logger.error(f"Missing User Object from Session: {ex}")
             else:
                 if AUTH_CREDENTIALS_REQUIRED is True:
-                    raise self.Unauthorized(
-                        reason="There is no Session or Authentication is missing"
-                    )
+                    raise self.Unauthorized(reason="There is no Session or Authentication is missing")
         except Forbidden as err:
             self.logger.error("Auth Middleware: Access Denied")
             raise self.ForbiddenAccess(reason=err.message)
@@ -265,18 +240,12 @@ class DjangoAuth(BaseAuthBackend):
             self.logger.error("Django Auth: Auth Credentials were expired")
             raise self.Unauthorized(reason=err.message)
         except FailedAuth as err:
-            raise self.Unauthorized(
-                reason=f"{err.message}",
-                exception=err
-            )
+            raise self.Unauthorized(reason=f"{err.message}", exception=err)
         except AuthException as err:
             self.logger.error("Django Auth: Invalid Signature or secret")
             raise self.ForbiddenAccess(reason=err.message)
         except Exception as err:  # pylint: disable=W0703
             # self.logger.error(f"Bad Request: {err!s}")
             if AUTH_CREDENTIALS_REQUIRED is True:
-                raise self.auth_error(
-                    reason="Authentication Error",
-                    exception=err
-                )
+                raise self.auth_error(reason="Authentication Error", exception=err)
         return await handler(request)

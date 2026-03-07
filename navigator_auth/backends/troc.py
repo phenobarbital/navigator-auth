@@ -2,6 +2,7 @@
 
 Troc Authentication using RNC algorithm.
 """
+
 from aiohttp import hdrs
 from typing import Optional
 from collections.abc import Awaitable, Callable
@@ -22,7 +23,7 @@ from ..conf import (
     PARTNER_KEY,
     CYPHER_TYPE,
     AUTH_SUCCESSFUL_CALLBACKS,
-    TROCTOKEN_REDIRECT_URI
+    TROCTOKEN_REDIRECT_URI,
 )
 from .abstract import BaseAuthBackend
 from .basic import BasicUser
@@ -75,9 +76,7 @@ class TrocToken(BaseAuthBackend):
                 print(e)
                 return None
         except Exception as err:  # pylint: disable=W0703
-            self.logger.exception(
-                f"TrocAuth: Error getting payload: {err}"
-            )
+            self.logger.exception(f"TrocAuth: Error getting payload: {err}")
             raise
         return token
 
@@ -89,15 +88,10 @@ class TrocToken(BaseAuthBackend):
             try:
                 username = data[self.username_attribute]
             except KeyError as err:
-                raise InvalidAuth(
-                    f"Missing Username: {err!s}", status=412
-                ) from err
+                raise InvalidAuth(f"Missing Username: {err!s}", status=412) from err
             return data, username
         except Exception as err:
-            raise InvalidAuth(
-                f"Invalid Token: {err!s}",
-                status=401
-            ) from err
+            raise InvalidAuth(f"Invalid Token: {err!s}", status=401) from err
 
     async def authenticate(self, request):
         """Authenticate, refresh or return the user credentials."""
@@ -105,15 +99,9 @@ class TrocToken(BaseAuthBackend):
         try:
             token = await self.get_payload(request)
         except Exception as err:
-            raise AuthException(
-                str(err),
-                status=400
-            ) from err
+            raise AuthException(str(err), status=400) from err
         if not token:
-            raise InvalidAuth(
-                "Token: Missing Token",
-                status=401
-            )
+            raise InvalidAuth("Token: Missing Token", status=401)
         else:
             # getting user information
             try:
@@ -125,10 +113,7 @@ class TrocToken(BaseAuthBackend):
             except UserNotFound:
                 raise
             except Exception as err:
-                raise AuthException(
-                    err,
-                    status=500
-                ) from err
+                raise AuthException(err, status=500) from err
             try:
                 userdata = self.get_userdata(user)
                 try:
@@ -152,14 +137,15 @@ class TrocToken(BaseAuthBackend):
                     self.username_attribute: username,
                     "user_id": uid,
                     self.session_key_property: username,
-                    self.session_id_property: session.session_id
+                    self.session_id_property: session.session_id,
                 }
-                token, exp, scheme = self._idp.create_token(data=payload)
+                token, refresh_token, exp, scheme = self._idp.create_token(data=payload)
                 usr.access_token = token
                 usr.token_type = scheme
                 usr.expires_in = exp
-                userdata['expires_in'] = exp
-                userdata['token_type'] = scheme
+                userdata["refresh_token"] = refresh_token
+                userdata["expires_in"] = exp
+                userdata["token_type"] = scheme
                 ### check if any callbacks exists:
                 try:
                     if user and self._callbacks:
@@ -167,25 +153,19 @@ class TrocToken(BaseAuthBackend):
                         args = {
                             "username_attribute": self.username_attribute,
                             "userid_attribute": self.userid_attribute,
-                            "userdata": userdata
+                            "userdata": userdata,
                         }
                         await self.auth_successful_callback(request, user, **args)
                 except Exception as err:
                     self.logger.error(str(err))
                 # If redirect_uri is set:
-                if 'redirect_uri' in qs:
+                if "redirect_uri" in qs:
                     # redirect:
-                    redirect = qs.pop('redirect_uri', TROCTOKEN_REDIRECT_URI)
-                    return self.uri_redirect(
-                        request,
-                        token=token,
-                        uri=redirect
-                    )
+                    redirect = qs.pop("redirect_uri", TROCTOKEN_REDIRECT_URI)
+                    return self.uri_redirect(request, token=token, uri=redirect)
                 return {"token": token, **userdata}
             except Exception as err:  # pylint: disable=W0703
-                self.logger.exception(
-                    f"TROC Auth: Authentication Error: {err}"
-                )
+                self.logger.exception(f"TROC Auth: Authentication Error: {err}")
                 return False
 
     async def check_credentials(self, request: web.Request, username: str, data: dict):
@@ -195,10 +175,7 @@ class TrocToken(BaseAuthBackend):
         except UserNotFound:
             return False
         except Exception as err:
-            raise AuthException(
-                err,
-                status=500
-            ) from err
+            raise AuthException(err, status=500) from err
         userdata = self.get_userdata(user)
         try:
             # merging both session objects
@@ -227,9 +204,7 @@ class TrocToken(BaseAuthBackend):
         # avoid check system routes
         if await self.verify_exceptions(request):
             return await handler(request)
-        self.logger.debug(
-            f"MIDDLEWARE: {self.__class__.__name__}"
-        )
+        self.logger.debug(f"MIDDLEWARE: {self.__class__.__name__}")
         try:
             payload = None
             token = await self.get_payload(request)
@@ -237,7 +212,7 @@ class TrocToken(BaseAuthBackend):
                 return await handler(request)
             try:
                 data, username = await self.get_token(token)
-                magic = data.pop('magic', None)
+                magic = data.pop("magic", None)
                 # TODO: evaluate the Magic attribute in payload
                 if userdata := await self.check_credentials(request, username, data):
                     usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
@@ -248,46 +223,30 @@ class TrocToken(BaseAuthBackend):
             except InvalidAuth:
                 _, payload = self._idp.decode_token(code=token)
             if not payload and AUTH_CREDENTIALS_REQUIRED is True:
-                raise self.Unauthorized(
-                    reason="There is no Session or Authentication is missing"
-                )
+                raise self.Unauthorized(reason="There is no Session or Authentication is missing")
             ## check if user has a session:
             # load session information
-            session = await get_session(
-                request, payload, new=False, ignore_cookie=True
-            )
+            session = await get_session(request, payload, new=False, ignore_cookie=True)
             if not session and AUTH_CREDENTIALS_REQUIRED is True:
-                raise self.Unauthorized(
-                    reason="There is no Session or Authentication is missing"
-                )
+                raise self.Unauthorized(reason="There is no Session or Authentication is missing")
             try:
                 request.user = await self.get_session_user(session)
                 request["authenticated"] = True
             except UnboundLocalError:
                 pass
             except Exception as ex:  # pylint: disable=W0703
-                self.logger.error(
-                    f"Missing User Object from Session: {ex}"
-                )
+                self.logger.error(f"Missing User Object from Session: {ex}")
         except web.HTTPError:
             raise
         except Forbidden as err:
             self.logger.error("TROC Auth: Access Denied")
-            raise self.ForbiddenAccess(
-                reason=err.message
-            ) from err
+            raise self.ForbiddenAccess(reason=err.message) from err
         except AuthExpired as err:
             self.logger.error("TROC Auth: Credentials expired")
-            raise self.Unauthorized(
-                reason=err.message
-            ) from err
+            raise self.Unauthorized(reason=err.message) from err
         except FailedAuth as err:
-            raise self.ForbiddenAccess(
-                reason=err.message
-            ) from err
+            raise self.ForbiddenAccess(reason=err.message) from err
         except AuthException as err:
             self.logger.error("Invalid Signature or Authentication Failed")
-            raise self.ForbiddenAccess(
-                reason=err.message
-            ) from err
+            raise self.ForbiddenAccess(reason=err.message) from err
         return await handler(request)

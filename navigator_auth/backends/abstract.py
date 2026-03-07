@@ -20,11 +20,7 @@ from navigator_session import (
     SESSION_ID,
     SESSION_USER_PROPERTY,
 )
-from ..exceptions import (
-    AuthException,
-    InvalidAuth,
-    UserNotFound
-)
+from ..exceptions import AuthException, InvalidAuth, UserNotFound
 from ..conf import (
     AUTH_DEFAULT_SCHEME,
     AUTH_USERNAME_ATTRIBUTE,
@@ -33,9 +29,10 @@ from ..conf import (
     AUTH_SUCCESSFUL_CALLBACKS,
     exclude_list,
     PREFERRED_AUTH_SCHEME,
-    AUTH_REDIRECT_URI
+    AUTH_REDIRECT_URI,
 )
 from ..libs.json import json_encoder
+
 # Authenticated Identity
 from ..identities import Identity, AuthBackend
 from .idp import IdentityProvider
@@ -87,16 +84,14 @@ class BaseAuthBackend(ABC):
         if not self.username_attribute:
             self.username_attribute = AUTH_USERNAME_ATTRIBUTE
         # authentication scheme
-        self.scheme = kwargs.pop('scheme', AUTH_DEFAULT_SCHEME)
+        self.scheme = kwargs.pop("scheme", AUTH_DEFAULT_SCHEME)
         # user and group models
         # getting User and Group Models
         self.user_model: Model = kwargs["user_model"]
         # starts the Executor
         self.executor = ThreadPoolExecutor(max_workers=2)
         # logger
-        self.logger = logging.getLogger(
-            f"Auth.{self._service}"
-        )
+        self.logger = logging.getLogger(f"Auth.{self._service}")
         ## Backend Info:
         self._info = AuthBackend()
         self._info.name = self._service
@@ -126,36 +121,25 @@ class BaseAuthBackend(ABC):
         """Used to initialize Backend requirements."""
 
     async def on_cleanup(self, app: web.Application):
-        """"Cancel any pending background tasks on shutdown."""
-        if hasattr(self, '_background_tasks'):
+        """ "Cancel any pending background tasks on shutdown."""
+        if hasattr(self, "_background_tasks"):
             # Cancel all pending background tasks
             for task in self._background_tasks:
                 task.cancel()
 
             # Wait for all tasks to finish cancellation
             if self._background_tasks:
-                await asyncio.gather(
-                    *self._background_tasks,
-                    return_exceptions=True
-                )
+                await asyncio.gather(*self._background_tasks, return_exceptions=True)
 
     async def get_payload(self, request: web.Request):
         token = None
         if "Authorization" in request.headers:
             try:
-                scheme, token = request.headers.get(
-                    hdrs.AUTHORIZATION
-                ).strip().split(" ", 1)
+                scheme, token = request.headers.get(hdrs.AUTHORIZATION).strip().split(" ", 1)
             except ValueError as e:
-                raise AuthException(
-                    "Invalid Authentication Header",
-                    status=400
-                ) from e
+                raise AuthException("Invalid Authentication Header", status=400) from e
             if scheme != self.scheme:
-                raise AuthException(
-                    "Invalid Authentication Scheme",
-                    status=400
-                )
+                raise AuthException("Invalid Authentication Scheme", status=400)
         return token
 
     def queryparams(self, request: web.Request) -> dict:
@@ -164,35 +148,23 @@ class BaseAuthBackend(ABC):
     async def create_user(self, userdata) -> Identity:
         try:
             usr = self._ident(data=userdata)
-            self.logger.debug(
-                f"User Created > {usr.username}"
-            )
+            self.logger.debug(f"User Created > {usr.username}")
             return usr
         except Exception as err:
-            raise InvalidAuth(
-                f"Unable to created Session User: {err}"
-            ) from err
+            raise InvalidAuth(f"Unable to created Session User: {err}") from err
 
-    def get_user_mapping(
-        self,
-        user: dict,
-        mapping: dict
-    ) -> dict:
+    def get_user_mapping(self, user: dict, mapping: dict) -> dict:
         udata = {}
         for key, val in mapping.items():
             if key != self.password_attribute:
                 try:
                     udata[key] = user[val]
                 except (KeyError, AttributeError):
-                    self.logger.warning(
-                        f"Error UserData: asking for a non existing attribute: {key}"
-                    )
+                    self.logger.warning(f"Error UserData: asking for a non existing attribute: {key}")
         return udata
 
     def get_userdata(self, user: dict, **kwargs) -> dict:
-        userdata = self.get_user_mapping(
-            user=user, mapping=USER_MAPPING
-        )
+        userdata = self.get_user_mapping(user=user, mapping=USER_MAPPING)
         ### getting custom user attributes.
         for obj in self._user_attributes:
             try:
@@ -201,9 +173,7 @@ class BaseAuthBackend(ABC):
                 if key:
                     userdata[key] = value
             except (KeyError, AttributeError):
-                self.logger.warning(
-                    f"Error UserData: asking for a non-existing attribute: {key}"
-                )
+                self.logger.warning(f"Error UserData: asking for a non-existing attribute: {key}")
         return {AUTH_SESSION_OBJECT: userdata} if AUTH_SESSION_OBJECT else userdata
 
     def configure(self, app):
@@ -216,7 +186,7 @@ class BaseAuthBackend(ABC):
             "X-AUTH": message,
         }
         if exception:
-            headers['X-ERROR'] = str(exception)
+            headers["X-ERROR"] = str(exception)
         return headers
 
     def auth_error(
@@ -225,36 +195,29 @@ class BaseAuthBackend(ABC):
         exception: Exception = None,
         status: int = 400,
         headers: dict = None,
-        content_type: str = 'application/json',
+        content_type: str = "application/json",
         **kwargs,
     ) -> web.HTTPError:
         if headers:
-            headers = {
-                **self.default_headers(message=str(reason), exception=exception),
-                **headers
-            }
+            headers = {**self.default_headers(message=str(reason), exception=exception), **headers}
         else:
             headers = self.default_headers(message=str(reason), exception=exception)
         # TODO: process the exception object
         response_obj = {}
         if exception:
             response_obj["error"] = str(exception)
-        args = {
-            "content_type": content_type,
-            "headers": headers,
-            **kwargs
-        }
+        args = {"content_type": content_type, "headers": headers, **kwargs}
         if isinstance(reason, dict):
             response_obj = {**response_obj, **reason}
             args["content_type"] = "application/json"
             args["body"] = json_encoder(response_obj)
         else:
-            response_obj['reason'] = reason
+            response_obj["reason"] = reason
             args["reason"] = json_encoder(response_obj)
         # defining the error
         if args["content_type"] == "application/json":
-            args['body'] = args['reason']
-            del args['reason']
+            args["body"] = args["reason"]
+            del args["reason"]
         if status == 400:  # bad request
             obj = web.HTTPBadRequest(**args)
         elif status == 401:  # unauthorized
@@ -274,14 +237,10 @@ class BaseAuthBackend(ABC):
         return obj
 
     def ForbiddenAccess(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
-        return self.auth_error(
-            reason=reason, status=403, **kwargs
-        )
+        return self.auth_error(reason=reason, status=403, **kwargs)
 
     def Unauthorized(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
-        return self.auth_error(
-            reason=reason, status=401, **kwargs
-        )
+        return self.auth_error(reason=reason, status=401, **kwargs)
 
     async def validate_user(self, login: str = None, userid: int = None):
         # get the user based on Model
@@ -292,9 +251,7 @@ class BaseAuthBackend(ABC):
             elif userid:
                 user = await self._idp.user_from_id(userid)
             else:
-                raise UserNotFound(
-                    "Missing User Information"
-                )
+                raise UserNotFound("Missing User Information")
             return user
         except UserNotFound:
             raise
@@ -302,9 +259,7 @@ class BaseAuthBackend(ABC):
             self.logger.exception(err)
             raise
 
-    async def remember(
-        self, request: web.Request, identity: str, userdata: dict, user: Identity
-    ):
+    async def remember(self, request: web.Request, identity: str, userdata: dict, user: Identity):
         """
         Saves User Identity into request Object and session.
         """
@@ -318,14 +273,12 @@ class BaseAuthBackend(ABC):
                 session[self.session_key_property] = identity
                 request[self.session_id_property] = session.session_id
                 try:
-                    await session.save_encoded_data(request, 'user', user)
+                    await session.save_encoded_data(request, "user", user)
                 except RuntimeError as ex:
-                    print('Error Saving User ', ex)
+                    print("Error Saving User ", ex)
                 return session
             except Exception as err:
-                raise web.HTTPForbidden(
-                    reason=f"Error Creating User Session: {err!s}"
-                )
+                raise web.HTTPForbidden(reason=f"Error Creating User Session: {err!s}")
             # to allowing request.user.is_authenticated
         except Exception as err:  # pylint: disable=W0703
             self.logger.exception(err)
@@ -343,46 +296,30 @@ class BaseAuthBackend(ABC):
                 obj = getattr(mod, module)
                 fns.append(obj)
             except ImportError as e:
-                raise RuntimeError(
-                    f"Auth Callback: Error getting Callback Function: {fn}, {e!s}"
-                ) from e
+                raise RuntimeError(f"Auth Callback: Error getting Callback Function: {fn}, {e!s}") from e
         self._callbacks = fns
 
-    async def _safe_callback_wrapper(
-        self, request: web.Request, fn, user, **kwargs
-    ) -> None:
+    async def _safe_callback_wrapper(self, request: web.Request, fn, user, **kwargs) -> None:
         """Wrapper that handles exceptions for background callbacks."""
         try:
             await fn(request, user, self._user_model, **kwargs)
         except Exception as ex:
-            self.logger.exception(
-                f"Background Auth Callback Error in {fn.__name__}: {ex}",
-                stack_info=False
-            )
+            self.logger.exception(f"Background Auth Callback Error in {fn.__name__}: {ex}", stack_info=False)
 
-    async def _run_callbacks_sequentially(
-        self, request: web.Request, user: Callable, **kwargs
-    ) -> None:
+    async def _run_callbacks_sequentially(self, request: web.Request, user: Callable, **kwargs) -> None:
         """Run all auth callbacks sequentially in the background."""
         for fn in self._callbacks:
             try:
                 await self._safe_callback_wrapper(request, fn, user, **kwargs)
             except Exception as ex:
-                self.logger.exception(
-                    f"Background Auth Callback Error in {fn.__name__}: {ex}",
-                    stack_info=False
-                )
+                self.logger.exception(f"Background Auth Callback Error in {fn.__name__}: {ex}", stack_info=False)
 
-    async def auth_successful_callback(
-        self, request: web.Request, user: Callable, **kwargs
-    ) -> None:
+    async def auth_successful_callback(self, request: web.Request, user: Callable, **kwargs) -> None:
         """Run callbacks in background sequentially without blocking login process."""
         if not self._callbacks:
             return
-            
-        task = asyncio.create_task(
-            self._run_callbacks_sequentially(request, user, **kwargs)
-        )
+
+        task = asyncio.create_task(self._run_callbacks_sequentially(request, user, **kwargs))
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
@@ -419,9 +356,7 @@ class BaseAuthBackend(ABC):
                     user.is_authenticated = True
             return user
         except (AttributeError, RuntimeError) as ex:
-            self.logger.warning(
-                f"NAV: Unable to decode User session: {ex}"
-            )
+            self.logger.warning(f"NAV: Unable to decode User session: {ex}")
 
     async def verify_exceptions(self, request: web.Request) -> bool:
         # avoid authorization backend on OPTION method:
@@ -454,7 +389,7 @@ class BaseAuthBackend(ABC):
         ## Already Authenticated
         if request.get("authenticated", False) is True:
             return True
-        return False   # Assuming no authentication match by default
+        return False  # Assuming no authentication match by default
 
     def get_domain(self, request: web.Request) -> str:
         uri = urlparse(str(request.url))
@@ -483,16 +418,8 @@ class BaseAuthBackend(ABC):
         request[self.user_property].is_authenticated = True
         request["authenticated"] = True
 
-    def uri_redirect(
-        self,
-        request: web.Request,
-        token: str = None,
-        token_type: str = "Bearer",
-        uri: str = None
-    ):
-        headers = {
-            "x-authenticated": "true"
-        }
+    def uri_redirect(self, request: web.Request, token: str = None, token_type: str = "Bearer", uri: str = None):
+        headers = {"x-authenticated": "true"}
         self.get_finish_redirect_url(request)
         params = {}
         if token:
