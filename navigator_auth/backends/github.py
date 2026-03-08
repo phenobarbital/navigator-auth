@@ -2,6 +2,7 @@
 
 Description: Backend Authentication/Authorization using Okta Service.
 """
+
 import logging
 from aiohttp import web
 from ..conf import GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET
@@ -75,19 +76,11 @@ class GithubAuth(OauthAuth):
                     headers=headers,
                 )
                 if data:
-                    userdata, uid = self.build_user_info(
-                        data,
-                        access_token,
-                        mapping=self.user_mapping
-                    )
+                    userdata, uid = self.build_user_info(data, access_token, mapping=self.user_mapping)
                     # also, user information:
-                    data = await self.validate_user_info(
-                        request, uid, userdata, access_token
-                    )
+                    data = await self.validate_user_info(request, uid, userdata, access_token)
                     # Redirect User to HOME
-                    return self.home_redirect(
-                        request, token=data["token"], token_type="Bearer"
-                    )
+                    return self.home_redirect(request, token=data["token"], token_type="Bearer")
                 else:
                     return self.redirect(uri=self.login_failed_uri)
             except Exception as err:

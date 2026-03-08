@@ -4,6 +4,7 @@ Navigator Auth Configuration.
 # Import Config Class
 import base64
 import orjson
+import contextlib
 from cryptography import fernet
 from navconfig import config, BASE_DIR
 from navconfig.logging import logging
@@ -404,15 +405,8 @@ OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS = config.getint(
     "OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS", fallback=4
 )
 
-try:
+
+with contextlib.suppress(ImportError):
     from settings.settings import *  # pylint: disable=W0614,W0401 # noqa
-except ImportError as ex:
-    logging.error(
-        f'There is no "*settings/settings.py" module in project. {ex}'
-    )
-    try:
-        from settings import *  # pylint: disable=W0614,W0401 # noqa
-    except ImportError as ex:
-        logging.error(
-            f'There is no "*settings/__init__.py" module in project. {ex}'
-        )
+with contextlib.suppress(ImportError):
+    from settings import *  # pylint: disable=W0614,W0401 # noqa

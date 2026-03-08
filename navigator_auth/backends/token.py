@@ -3,6 +3,7 @@
 Navigator Authentication using an API Token for partners.
 description: Single API Token Authentication
 """
+
 from aiohttp import hdrs
 from collections.abc import Callable, Awaitable
 import jwt
@@ -45,13 +46,9 @@ class TokenAuth(BaseAuthBackend):
         try:
             if "Authorization" in request.headers:
                 try:
-                    scheme, token = (
-                        request.headers.get("Authorization").strip().split(" ", 1)
-                    )
+                    scheme, token = request.headers.get("Authorization").strip().split(" ", 1)
                 except ValueError as ex:
-                    raise AuthException(
-                        "Invalid authorization Header", status=400
-                    ) from ex
+                    raise AuthException("Invalid authorization Header", status=400) from ex
                 if scheme != self.scheme:
                     raise AuthException("Invalid Authorization Scheme", status=400)
                 try:
@@ -59,9 +56,7 @@ class TokenAuth(BaseAuthBackend):
                 except ValueError:
                     pass
         except Exception as err:  # pylint: disable=W0703
-            self.logger.error(
-                f"TokenAuth: Error getting payload: {err}"
-            )
+            self.logger.error(f"TokenAuth: Error getting payload: {err}")
             return [None, None]
         return [tenant, token]
 
@@ -73,31 +68,20 @@ class TokenAuth(BaseAuthBackend):
         """Authenticate, refresh or return the user credentials."""
         try:
             tenant, token = await self.get_payload(request)
-            self.logger.debug(
-                f"Tenant ID: {tenant}"
-            )
+            self.logger.debug(f"Tenant ID: {tenant}")
         except Exception as err:
             raise AuthException(err, status=400) from err
         if not tenant:
             # is another authorization backend
             return False
         if not token:
-            raise InvalidAuth(
-                "Invalid Credentials",
-                status=401
-            )
+            raise InvalidAuth("Invalid Credentials", status=401)
         else:
-            payload = jwt.decode(
-                token, AUTH_TOKEN_SECRET, algorithms=[AUTH_JWT_ALGORITHM], leeway=30
-            )
-            self.logger.debug(
-                f"Decoded Token: {payload!s}"
-            )
+            payload = jwt.decode(token, AUTH_TOKEN_SECRET, algorithms=[AUTH_JWT_ALGORITHM], leeway=30)
+            self.logger.debug(f"Decoded Token: {payload!s}")
             data = await self.check_token_info(request, tenant, payload)
             if not data:
-                raise InvalidAuth(
-                    f"Invalid Session: {token!s}", status=401
-                )
+                raise InvalidAuth(f"Invalid Session: {token!s}", status=401)
             # getting user information
             # making validation
             try:
@@ -105,9 +89,7 @@ class TokenAuth(BaseAuthBackend):
                 grants = data["grants"]
                 programs = data["programs"]
             except KeyError as err:
-                raise InvalidAuth(
-                    f"Missing attributes for Partner Token: {err!s}", status=401
-                ) from err
+                raise InvalidAuth(f"Missing attributes for Partner Token: {err!s}", status=401) from err
             # TODO: Validate that partner (tenants table):
             try:
                 userdata = dict(data)
@@ -129,13 +111,13 @@ class TokenAuth(BaseAuthBackend):
                     "tenant": tenant,
                     "id": data["name"],
                     "user_id": uid,
-                    self.session_id_property: session.session_id
+                    self.session_id_property: session.session_id,
                 }
-                token, exp, scheme = self._idp.create_token(data=user)
+                token, refresh_token, exp, scheme = self._idp.create_token(data=user)
                 usr.access_token = token
                 usr.token_type = scheme
                 usr.expires_in = exp
-                return {"token": f"{tenant}:{token}", **user}
+                return {"token": f"{tenant}:{token}", "refresh_token": refresh_token, **user}
             except Exception as err:  # pylint: disable=W0703
                 self.logger.exception(f"TokenAuth: Authentication Error: {err}")
                 return False
@@ -203,9 +185,7 @@ class TokenAuth(BaseAuthBackend):
                     try:
                         request[self.session_key_property] = payload["name"]
                         # TRUE because if data doesnt exists, returned
-                        session = await get_session(
-                            request, payload, new=True, ignore_cookie=True
-                        )
+                        session = await get_session(request, payload, new=True, ignore_cookie=True)
                         session["grants"] = result["grants"]
                         session["partner"] = result["partner"]
                         session["tenant"] = tenant
@@ -220,23 +200,14 @@ class TokenAuth(BaseAuthBackend):
                 raise
             except jwt.exceptions.ExpiredSignatureError as err:
                 self.logger.error(f"TokenAuth: token expired: {err!s}")
-                raise web.HTTPForbidden(
-                    reason=f"TokenAuth: token expired: {err!s}"
-                ) from err
+                raise web.HTTPForbidden(reason=f"TokenAuth: token expired: {err!s}") from err
             except jwt.exceptions.InvalidSignatureError as err:
                 self.logger.error(f"Invalid Credentials: {err!r}")
-                raise web.HTTPForbidden(
-                    reason=f"TokenAuth: Invalid or missing Credentials: {err!r}"
-                ) from err
+                raise web.HTTPForbidden(reason=f"TokenAuth: Invalid or missing Credentials: {err!r}") from err
             except jwt.exceptions.DecodeError as err:
                 self.logger.error(f"Invalid authorization token: {err!r}")
-                raise web.HTTPForbidden(
-                    reason=f"TokenAuth: Invalid authorization token: {err!r}"
-                ) from err
+                raise web.HTTPForbidden(reason=f"TokenAuth: Invalid authorization token: {err!r}") from err
             except AuthException as err:
                 self.logger.error("TokenAuth: Authentication failed.")
-                raise self.Unauthorized(
-                    reason="TokenAuth: Authentication failed.",
-                    exception=err
-                ) from err
+                raise self.Unauthorized(reason="TokenAuth: Authentication failed.", exception=err) from err
         return await handler(request)

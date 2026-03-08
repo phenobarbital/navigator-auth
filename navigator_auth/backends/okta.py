@@ -2,6 +2,7 @@
 
 Description: Backend Authentication/Authorization using Okta Service.
 """
+
 import aiohttp
 from aiohttp import web
 from okta_jwt_verifier import JWTVerifier
@@ -62,9 +63,7 @@ class OktaAuth(OauthAuth):
         APP_STATE = "ApplicationState"
         self.nonce = "SampleNonce"
         domain_url = self.get_domain(request)
-        self.redirect_uri = self.redirect_uri.format(
-            domain=domain_url, service=self._service_name
-        )
+        self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
         qs = {
             "client_id": f"{OKTA_CLIENT_ID}",
             # "client_secret": f"{OKTA_CLIENT_SECRET}",
@@ -79,9 +78,7 @@ class OktaAuth(OauthAuth):
 
     async def auth_callback(self, request: web.Request):
         domain_url = self.get_domain(request)
-        self.redirect_uri = self.redirect_uri.format(
-            domain=domain_url, service=self._service_name
-        )
+        self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
         code = request.query.get("code")
         if not code:
             response = {"message": "Auth Error: Okta Code not accessible"}
@@ -97,16 +94,11 @@ class OktaAuth(OauthAuth):
             exchange = await self.post(
                 self._token_uri,
                 data=query_params,
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept": "application/json"
-                },
-                auth=aiohttp.BasicAuth(OKTA_CLIENT_ID, OKTA_CLIENT_SECRET)
+                headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+                auth=aiohttp.BasicAuth(OKTA_CLIENT_ID, OKTA_CLIENT_SECRET),
             )
         except Exception as err:
-            response = {
-                "message": f"Okta: Error Getting User Profile information: {err}"
-            }
+            response = {"message": f"Okta: Error Getting User Profile information: {err}"}
             return web.json_response(response, status=403)
         # Get tokens and validate
         if not exchange.get("token_type"):
@@ -120,24 +112,14 @@ class OktaAuth(OauthAuth):
             response = {"message": "Okta: Access Token Invalid."}
             return web.json_response(response, status=403)
 
-        if not await is_id_token_valid(
-            id_token, self._issuer, OKTA_CLIENT_ID, self.nonce
-        ):
+        if not await is_id_token_valid(id_token, self._issuer, OKTA_CLIENT_ID, self.nonce):
             response = {"message": "Okta: ID Token Invalid."}
             return web.json_response(response, status=403)
 
         # Authorization flow successful, get userinfo and login user
         try:
-            data = await self.get(
-                self.userinfo_uri,
-                token=access_token,
-                token_type="Bearer"
-            )
-            userdata, uid = self.build_user_info(
-                data,
-                access_token,
-                mapping=self.user_mapping
-            )
+            data = await self.get(self.userinfo_uri, token=access_token, token_type="Bearer")
+            userdata, uid = self.build_user_info(data, access_token, mapping=self.user_mapping)
             # get user data
             data = await self.validate_user_info(request, uid, userdata, access_token)
             return self.home_redirect(request, token=data["token"], token_type="Bearer")

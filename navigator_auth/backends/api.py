@@ -3,28 +3,25 @@
 Navigator Authentication using an API Token.
 description: Single API Token Authentication
 """
+
 from aiohttp import hdrs
 from collections.abc import Callable, Awaitable
 import orjson
 from aiohttp import web
 from navigator_session import get_session
 from ..libs.cipher import Cipher
-from ..exceptions import (
-    AuthException,
-    InvalidAuth,
-    FailedAuth,
-    AuthExpired,
-    UserNotFound
-)
+from ..exceptions import AuthException, InvalidAuth, FailedAuth, AuthExpired, UserNotFound
 from ..conf import (
     AUTH_CREDENTIALS_REQUIRED,
     AUTH_USERID_ATTRIBUTE,
     AUTH_TOKEN_SECRET,
     AUTH_SESSION_OBJECT,
 )
+
 # Authenticated Entity
 from ..identities import AuthUser
 from .abstract import BaseAuthBackend
+
 
 class APIKeyUser(AuthUser):
     token: str
@@ -49,8 +46,8 @@ class APIKeyAuth(BaseAuthBackend):
         token = None
         mech = None
         try:
-            if 'X-API-KEY' in request.headers:
-                token = request.headers.get('X-API-KEY')
+            if "X-API-KEY" in request.headers:
+                token = request.headers.get("X-API-KEY")
                 mech = "api"
             elif "apikey" in request.rel_url.query:
                 token = request.rel_url.query["apikey"]
@@ -58,29 +55,19 @@ class APIKeyAuth(BaseAuthBackend):
             elif "Authorization" in request.headers:
                 # Bearer Token (jwt)
                 try:
-                    scheme, token = (
-                        request.headers.get("Authorization").strip().split(" ", 1)
-                    )
+                    scheme, token = request.headers.get("Authorization").strip().split(" ", 1)
                     mech = "bearer"
                 except ValueError as ex:
-                    raise AuthException(
-                        "Invalid authorization Header",
-                        status=400
-                    ) from ex
+                    raise AuthException("Invalid authorization Header", status=400) from ex
                 if scheme != self.scheme:
-                    raise AuthException(
-                        "Invalid Authorization Scheme",
-                        status=400
-                    )
+                    raise AuthException("Invalid Authorization Scheme", status=400)
                 if ":" in token:
                     # is an Partner Token, not API
                     return [None, None]
             else:
                 return [None, None]
         except Exception as err:  # pylint: disable=W0703
-            self.logger.exception(
-                f"API Key Auth: Error getting payload: {err}"
-            )
+            self.logger.exception(f"API Key Auth: Error getting payload: {err}")
             return None
         return [mech, token]
 
@@ -99,10 +86,7 @@ class APIKeyAuth(BaseAuthBackend):
             try:
                 payload = orjson.loads(self.cipher.decode(token))
             except (TypeError, ValueError):
-                raise InvalidAuth(
-                    "Invalid Token",
-                    status=401
-                )
+                raise InvalidAuth("Invalid Token", status=401)
         # getting user information
         return await self.check_token_info(request, payload)
 
@@ -120,20 +104,14 @@ class APIKeyAuth(BaseAuthBackend):
                 device_id = str(data["device_id"])
                 user_id = data["user_id"]
             except KeyError as err:
-                raise InvalidAuth(
-                    f"Missing attributes for API Key: {err!s}",
-                    status=401
-                ) from err
+                raise InvalidAuth(f"Missing attributes for API Key: {err!s}", status=401) from err
             try:
                 user = await self.validate_user(userid=user_id)
             except UserNotFound:
                 raise
             except Exception as err:  # pylint: disable=W0703
                 self.logger.exception(err)
-                raise AuthException(
-                    "Error on User Validation",
-                    status=401
-                ) from err
+                raise AuthException("Error on User Validation", status=401) from err
             userdata = self.get_userdata(user)
             # merging both session objects
             userdata[AUTH_SESSION_OBJECT] = {
@@ -143,17 +121,15 @@ class APIKeyAuth(BaseAuthBackend):
             try:
                 userdata[AUTH_USERID_ATTRIBUTE] = user_id
                 userdata[self.session_key_property] = device_id
-                userdata[self.username_attribute] = data.get('name', user_id)
-                userdata['auth_method'] = 'apikey'
-                userdata['token'] = token
+                userdata[self.username_attribute] = data.get("name", user_id)
+                userdata["auth_method"] = "apikey"
+                userdata["token"] = token
                 usr = await self.create_user(userdata)
                 # saving user-data into request:
                 await self.remember(request, device_id, userdata, usr)
                 return {"token": token, **userdata}
             except Exception as err:  # pylint: disable=W0703
-                self.logger.exception(
-                    f"API Key Auth: Authentication Error: {err}"
-                )
+                self.logger.exception(f"API Key Auth: Authentication Error: {err}")
                 return False
 
     async def check_token_info(self, request, payload):
@@ -198,10 +174,7 @@ class APIKeyAuth(BaseAuthBackend):
         except UserNotFound:
             return False
         except Exception as err:
-            raise AuthException(
-                err,
-                status=500
-            ) from err
+            raise AuthException(err, status=500) from err
         userdata = self.get_userdata(user)
         try:
             # merging both session objects
@@ -236,48 +209,27 @@ class APIKeyAuth(BaseAuthBackend):
         except KeyError:
             pass
         try:
-            if (userdata := await self.check_credentials(request)):
+            if userdata := await self.check_credentials(request):
                 try:
-                    userid = userdata.get('user_id')
-                    request[self.session_key_property] = userdata.get(
-                        self.session_key_property,
-                        userid
-                    )
-                    session = await get_session(
-                        request, userdata, new=True, ignore_cookie=True
-                    )
+                    userid = userdata.get("user_id")
+                    request[self.session_key_property] = userdata.get(self.session_key_property, userid)
+                    session = await get_session(request, userdata, new=True, ignore_cookie=True)
                     request.user = await self.get_session_user(session)
                     request["authenticated"] = True
                 except Exception as ex:  # pylint: disable=W0703
-                    self.logger.error(
-                        f"Missing User Object from Session: {ex}"
-                    )
+                    self.logger.error(f"Missing User Object from Session: {ex}")
         except web.HTTPError:
             raise
         except (FailedAuth, InvalidAuth) as err:
-            raise self.Unauthorized(
-                reason=f"API Key: {err.message!s}",
-                exception=err
-            ) from err
+            raise self.Unauthorized(reason=f"API Key: {err.message!s}", exception=err) from err
         except AuthExpired as err:
-            raise self.Unauthorized(
-                reason=f"API Key Expired: {err.message!s}",
-                exception=err
-            ) from err
+            raise self.Unauthorized(reason=f"API Key Expired: {err.message!s}", exception=err) from err
         except AuthException as err:
             if AUTH_CREDENTIALS_REQUIRED is True:
-                self.logger.error(
-                    f"Invalid authorization token: {err!r}"
-                )
-                raise self.Unauthorized(
-                    reason=f"API Key: Invalid authorization Key: {err!r}",
-                    exception=err
-                ) from err
+                self.logger.error(f"Invalid authorization token: {err!r}")
+                raise self.Unauthorized(reason=f"API Key: Invalid authorization Key: {err!r}", exception=err) from err
         except Exception as err:
             if AUTH_CREDENTIALS_REQUIRED is True:
                 self.logger.exception(f"Error on API Key Middleware: {err}")
-                raise self.auth_error(
-                    reason="API Auth Error",
-                    exception=err
-                ) from err
+                raise self.auth_error(reason="API Auth Error", exception=err) from err
         return await handler(request)

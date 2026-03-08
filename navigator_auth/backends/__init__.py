@@ -2,6 +2,7 @@
 
 Authentication Backends.
 """
+
 from .noauth import NoAuth
 from .basic import BasicAuth
 from .django import DjangoAuth
@@ -30,5 +31,5 @@ __all__ = (
     "AzureAuth",
     "GithubAuth",
     "Oauth2Provider",
-    "SAMLAuth"
+    "SAMLAuth",
 )
