@@ -9,12 +9,6 @@ COMPILE_ARGS = ["-O3"]
 
 extensions = [
     Extension(
-        name='navigator_auth.exceptions',
-        sources=['navigator_auth/exceptions.pyx'],
-        extra_compile_args=COMPILE_ARGS,
-        language="c"
-    ),
-    Extension(
         name='navigator_auth.libs.json',
         sources=['navigator_auth/libs/json.pyx'],
         extra_compile_args=COMPILE_ARGS,
