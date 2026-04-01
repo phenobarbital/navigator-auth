@@ -15,8 +15,8 @@ from functools import lru_cache
 from collections import defaultdict
 import hashlib
 import time
-import yaml
 import logging
+from yaml_rs import loads as yaml_loads
 
 from navigator_auth.abac.context import EvalContext
 from navigator_auth.abac.policies.environment import Environment
@@ -107,7 +107,7 @@ class PolicyLoader:
     def load_from_file(path: Path) -> List[ResourcePolicy]:
         """Load policies from YAML file."""
         with open(path, 'r') as f:
-            data = yaml.safe_load(f)
+            data = yaml_loads(f.read())
         return PolicyLoader.load_from_dict(data)
 
     @staticmethod
