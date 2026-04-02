@@ -77,10 +77,10 @@
     "feature": "policy-based-access-control",
     "spec": "sdd/specs/policy-based-access-control.spec.md",
     "title": "Ready-to-Use Policy Pack",
-    "status": "in-progress",
+    "status": "done",
     "started_at": "2026-04-02T00:00:00Z",
-    "completed_at": null,
-    "file": "sdd/tasks/active/TASK-007-policy-pack.md",
+    "completed_at": "2026-04-02T13:29:00Z",
+    "file": "sdd/tasks/completed/TASK-007-policy-pack.md",
     "depends_on": ["TASK-002"]
   },
   {
