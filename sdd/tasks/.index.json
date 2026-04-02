@@ -17,10 +17,10 @@
     "feature": "policy-based-access-control",
     "spec": "sdd/specs/policy-based-access-control.spec.md",
     "title": "YAML Policy Storage",
-    "status": "in-progress",
+    "status": "done",
     "started_at": "2026-04-02T00:00:00Z",
-    "completed_at": null,
-    "file": "sdd/tasks/active/TASK-002-yaml-policy-storage.md",
+    "completed_at": "2026-04-02T13:02:00Z",
+    "file": "sdd/tasks/completed/TASK-002-yaml-policy-storage.md",
     "depends_on": ["TASK-001"]
   },
   {
