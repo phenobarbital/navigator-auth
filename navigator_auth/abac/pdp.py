@@ -169,6 +169,9 @@ class PDP:
         self.app.router.add_post(
             "/api/v1/abac/is_allowed", pep.is_allowed
         )
+        self.app.router.add_post(
+            "/api/v1/abac/check", pep.check
+        )
         ## Policy Handler:
         self.app.router.add_view(
             r"/api/v1/abac/policies/{id:.*}", PolicyHandler,
