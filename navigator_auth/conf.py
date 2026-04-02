@@ -400,6 +400,23 @@ AUDIT_CREDENTIALS = {
 }
 
 
+## ABAC / PBAC Configuration
+# Business hours for time-based access control
+BUSINESS_HOURS_START = config.get("BUSINESS_HOURS_START", fallback="08:00")
+BUSINESS_HOURS_END = config.get("BUSINESS_HOURS_END", fallback="18:00")
+BUSINESS_DAYS = config.get("BUSINESS_DAYS", fallback="1,2,3,4,5")
+
+# Day segment boundaries (HH:MM-HH:MM)
+DAY_SEGMENT_MORNING = config.get("DAY_SEGMENT_MORNING", fallback="06:00-12:00")
+DAY_SEGMENT_AFTERNOON = config.get("DAY_SEGMENT_AFTERNOON", fallback="12:00-18:00")
+DAY_SEGMENT_EVENING = config.get("DAY_SEGMENT_EVENING", fallback="18:00-22:00")
+
+# YAML policy storage directory
+POLICY_STORAGE_DIR = config.get(
+    "POLICY_STORAGE_DIR",
+    fallback=str(BASE_DIR / "env" / "policies") if hasattr(BASE_DIR, '__truediv__') else None
+)
+
 ## Oauth Provider:
 OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS = config.getint(
     "OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS", fallback=4

@@ -1,0 +1,42 @@
+version: "1.0"
+defaults:
+  effect: deny
+policies:
+  - name: engineering_tools
+    effect: allow
+    description: "Engineering team can use all development tools during business hours."
+    resources:
+      - "tool:jira_*"
+      - "tool:github_*"
+      - "tool:confluence_*"
+      - "tool:jenkins_*"
+      - "tool:sonarqube_*"
+    actions:
+      - "tool:execute"
+      - "tool:list"
+      - "tool:configure"
+    subjects:
+      groups:
+        - engineering
+        - devops
+    conditions:
+      environment:
+        is_business_hours: true
+    priority: 30
+
+  - name: engineering_kb_access
+    effect: allow
+    description: "Engineering team can query and write to knowledge bases."
+    resources:
+      - "kb:*"
+      - "vector:*"
+    actions:
+      - "kb:query"
+      - "kb:write"
+      - "vector:search"
+      - "vector:insert"
+    subjects:
+      groups:
+        - engineering
+        - devops
+    priority: 25

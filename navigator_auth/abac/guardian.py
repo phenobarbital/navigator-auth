@@ -1,10 +1,12 @@
-from typing import List
+from typing import List, Optional
 from collections.abc import Callable
 from aiohttp import web
 from navigator.views import BaseHandler
 from navigator_session import get_session
+from navconfig.logging import logger
 from .errors import PreconditionFailed, AccessDenied
-from .policies import PolicyEffect
+from .policies import PolicyEffect, Environment
+from .context import EvalContext
 from .decorators import groups_protected
 
 class Guardian:
@@ -296,4 +298,144 @@ class PEP(BaseHandler):
             return self.json_response(
                 response=msg,
                 status=403
+            )
+
+    async def check(self, request: web.Request) -> web.Response:
+        """POST /api/v1/abac/check — PBAC decision endpoint.
+
+        Accepts a JSON body with:
+            - user: str (username or email)
+            - resource: str (e.g. "tool:jira_create")
+            - action: str (e.g. "tool:execute")
+
+        Returns:
+            JSON: {allowed, effect, policy, reason}
+        """
+        try:
+            data = await self.data(request)
+        except Exception as exc:
+            return self.json_response(
+                response={"error": f"Invalid request body: {exc}"},
+                status=400
+            )
+
+        user_id = data.get('user', '')
+        resource = data.get('resource', '')
+        action = data.get('action', '')
+
+        if not resource or not action:
+            return self.json_response(
+                response={"error": "Both 'resource' and 'action' are required."},
+                status=400
+            )
+
+        # Try resource-based evaluation via PolicyEvaluator first
+        try:
+            pdp = request.app.get('abac')
+            if pdp is None:
+                return self.json_response(
+                    response={"error": "ABAC system not configured"},
+                    status=503
+                )
+
+            # Build a lightweight EvalContext for the check
+            userinfo = {
+                'username': user_id,
+                'groups': data.get('groups', []),
+                'roles': data.get('roles', []),
+            }
+
+            # If the request is authenticated, enrich from session
+            if request.get("authenticated", False):
+                try:
+                    session = await get_session(request, new=False)
+                    from navigator_auth.conf import AUTH_SESSION_OBJECT
+                    session_userinfo = session.get(AUTH_SESSION_OBJECT, {})
+                    if session_userinfo:
+                        # Merge — session data wins for groups/roles if not provided
+                        if not userinfo.get('groups'):
+                            userinfo['groups'] = session_userinfo.get('groups', [])
+                        if not userinfo.get('roles'):
+                            userinfo['roles'] = session_userinfo.get('roles', [])
+                        if not userinfo.get('username'):
+                            userinfo['username'] = session_userinfo.get('username', '')
+                except Exception:
+                    pass
+
+            env = Environment()
+
+            # Try resource-type based evaluation (ResourcePolicy via PolicyEvaluator)
+            from navigator_auth.abac.policies.resources import ResourceType
+            from navigator_auth.abac.policies.evaluator import PolicyEvaluator
+
+            # Check if PDP has an evaluator attribute
+            evaluator = getattr(pdp, '_evaluator', None)
+            if evaluator and isinstance(evaluator, PolicyEvaluator):
+                # Parse resource type
+                parts = resource.split(':', 1)
+                if len(parts) == 2:
+                    try:
+                        resource_type = ResourceType(parts[0])
+                        resource_name = parts[1]
+                        ctx = EvalContext.__new__(EvalContext)
+                        ctx.userinfo = userinfo
+                        result = evaluator.check_access(
+                            ctx=ctx,
+                            resource_type=resource_type,
+                            resource_name=resource_name,
+                            action=action,
+                            env=env,
+                        )
+                        return self.json_response(
+                            response={
+                                "allowed": result.allowed,
+                                "effect": result.effect.name,
+                                "policy": result.matched_policy or "",
+                                "reason": result.reason,
+                            },
+                            status=200
+                        )
+                    except (ValueError, KeyError):
+                        pass
+
+            # Fallback: use PDP authorize flow
+            # Create a mock EvalContext from the provided data
+            guardian = self.get_guardian(request)
+            try:
+                policy = await guardian.is_allowed(
+                    request=request,
+                    resource=resource,
+                    action=action
+                )
+                allowed = bool(policy.effect)
+                return self.json_response(
+                    response={
+                        "allowed": allowed,
+                        "effect": PolicyEffect(policy.effect).name if policy.effect else "DENY",
+                        "policy": getattr(policy, 'rule', ''),
+                        "reason": getattr(policy, 'response', ''),
+                    },
+                    status=200
+                )
+            except (AccessDenied, PreconditionFailed) as exc:
+                return self.json_response(
+                    response={
+                        "allowed": False,
+                        "effect": "DENY",
+                        "policy": "",
+                        "reason": str(exc),
+                    },
+                    status=200
+                )
+
+        except Exception as exc:
+            logger.error(f"Error in /check endpoint: {exc}")
+            return self.json_response(
+                response={
+                    "allowed": False,
+                    "effect": "DENY",
+                    "policy": "",
+                    "reason": f"Internal error: {exc}",
+                },
+                status=500
             )
