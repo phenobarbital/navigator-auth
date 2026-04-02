@@ -42,20 +42,20 @@ DBPORT = config.get("DBPORT", fallback=5432)
 default_dsn = f"postgres://{DBUSER}:{DBPWD}@{DBHOST}:{DBPORT}/{DBNAME}"
 
 ### Exclude List:
-excluded_default = [
+AUTH_EXCLUDE_LIST_KEY = "auth_exclude_list"
+
+EXCLUDE_DEFAULTS: list[str] = [
     "/static/",
     "/api/v1/login",
     "/api/v1/logout",
-    "/auth/login",
-    "/auth/logout",
-    "/auth/login/callback",
     "/api/v1/forgot-password",
-    "/api/v1/reset-password"
+    "/api/v1/reset-password",
 ]
-new_excluded = [
-    e.strip() for e in list(config.get("ROUTES_EXCLUDED", fallback="").split(","))
+_extra_excluded = [
+    e.strip() for e in config.get("ROUTES_EXCLUDED", fallback="").split(",")
 ]
-exclude_list = excluded_default + new_excluded
+# Combined defaults used to seed per-app exclude lists.
+exclude_list = EXCLUDE_DEFAULTS + [e for e in _extra_excluded if e]
 
 # if false, force credentials are not required for using this system.
 AUTH_CREDENTIALS_REQUIRED = config.getboolean(
@@ -119,7 +119,7 @@ ALLOWED_HOSTS = [
 AUTH_REDIRECT_URI = config.get("AUTH_REDIRECT_URI", fallback="/")
 AUTH_FAILED_REDIRECT_URI = config.get("AUTH_FAILED_REDIRECT_URI", fallback="/login")
 AUTH_LOGIN_FAILED_URI = config.get("AUTH_LOGIN_FAILED_URI", fallback="/login")
-AUTH_LOGOUT_REDIRECT_URI = config.get("AUTH_LOGOUT_REDIRECT_URI", fallback="/logout")
+AUTH_LOGOUT_REDIRECT_URI = config.get("AUTH_LOGOUT_REDIRECT_URI", fallback="/oauth2/logout/complete")
 AUTH_SUCCESSFUL_CALLBACKS = ()
 
 # Enable authentication backends
@@ -390,15 +390,43 @@ GITHUB_CLIENT_SECRET = config.get("GITHUB_CLIENT_SECRET")
 ## Audit Backend
 # this is the backend for saving Authentication information
 ENABLE_AUDIT_LOG = config.getboolean('ENABLE_AUDIT_LOG', fallback=True)
+# Supported values: "log" (Python logger), "influx", or any asyncdb driver name
+# (e.g. "mongo", "pg", "redis").
 AUDIT_BACKEND = config.get('AUDIT_BACKEND', fallback='influx')
-AUDIT_CREDENTIALS = {
+
+# Driver-specific credentials.
+# For "influx":
+INFLUX_CREDENTIALS = {
     "host": config.get('INFLUX_HOST', fallback='localhost'),
     "port": config.get('INFLUX_PORT', fallback=8086),
     "bucket": config.get('INFLUX_DATABASE', fallback='navigator_audit'),
     "org": config.get('INFLUX_ORG', fallback='navigator'),
-    "token": config.get('INFLUX_TOKEN')
+    "token": config.get('INFLUX_TOKEN'),
 }
+# For any asyncdb driver (mongo, pg, etc.):
+AUDIT_DSN = config.get('AUDIT_DSN', fallback=None)
+AUDIT_TABLE = config.get('AUDIT_TABLE', fallback='audit_log')
 
+# Backwards-compatible alias
+AUDIT_CREDENTIALS = INFLUX_CREDENTIALS
+
+
+## ABAC / PBAC Configuration
+# Business hours for time-based access control
+BUSINESS_HOURS_START = config.get("BUSINESS_HOURS_START", fallback="08:00")
+BUSINESS_HOURS_END = config.get("BUSINESS_HOURS_END", fallback="18:00")
+BUSINESS_DAYS = config.get("BUSINESS_DAYS", fallback="1,2,3,4,5")
+
+# Day segment boundaries (HH:MM-HH:MM)
+DAY_SEGMENT_MORNING = config.get("DAY_SEGMENT_MORNING", fallback="06:00-12:00")
+DAY_SEGMENT_AFTERNOON = config.get("DAY_SEGMENT_AFTERNOON", fallback="12:00-18:00")
+DAY_SEGMENT_EVENING = config.get("DAY_SEGMENT_EVENING", fallback="18:00-22:00")
+
+# YAML policy storage directory
+POLICY_STORAGE_DIR = config.get(
+    "POLICY_STORAGE_DIR",
+    fallback=str(BASE_DIR / "env" / "policies") if hasattr(BASE_DIR, '__truediv__') else None
+)
 
 ## Oauth Provider:
 OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS = config.getint(

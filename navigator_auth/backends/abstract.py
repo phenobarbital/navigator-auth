@@ -27,7 +27,7 @@ from ..conf import (
     USER_MAPPING,
     AUTH_CREDENTIALS_REQUIRED,
     AUTH_SUCCESSFUL_CALLBACKS,
-    exclude_list,
+    AUTH_EXCLUDE_LIST_KEY,
     PREFERRED_AUTH_SCHEME,
     AUTH_REDIRECT_URI,
 )
@@ -363,8 +363,8 @@ class BaseAuthBackend(ABC):
         if request.method == hdrs.METH_OPTIONS:
             return True
 
-        # Check for explicit exclude list matches:
-        for pattern in exclude_list:
+        # Check for explicit exclude list matches (per-app, not global):
+        for pattern in request.app.get(AUTH_EXCLUDE_LIST_KEY, ()):
             if fnmatch.fnmatch(request.path, pattern):
                 return True
 

@@ -1,0 +1,32 @@
+version: "1.0"
+defaults:
+  effect: deny
+policies:
+  - name: readonly_agents
+    effect: allow
+    description: "Allow all authenticated users read-only access to AI agents (chat and query only)."
+    resources:
+      - "agent:*"
+    actions:
+      - "agent:chat"
+      - "agent:query"
+    subjects:
+      groups:
+        - "*"
+    priority: 15
+
+  - name: agent_configure_restricted
+    effect: deny
+    description: "Deny agent configuration to non-admin users."
+    resources:
+      - "agent:*"
+    actions:
+      - "agent:configure"
+    subjects:
+      groups:
+        - "*"
+      exclude_groups:
+        - admin
+        - superuser
+    priority: 50
+    enforcing: true

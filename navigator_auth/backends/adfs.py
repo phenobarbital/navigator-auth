@@ -29,7 +29,7 @@ from ..conf import (
     ADFS_LOGIN_REDIRECT_URL,
     AZURE_SESSION_TIMEOUT,
     AZURE_AD_SERVER,
-    exclude_list,
+    AUTH_EXCLUDE_LIST_KEY,
     ADFS_MAPPING,
     REDIS_AUTH_URL,
     ADFS_SAML_RELAY_RP,
@@ -94,11 +94,11 @@ class ADFSAuth(ExternalAuth):
             callback = ADFS_CALLBACK_REDIRECT_URL
             self.redirect_uri = "{domain}" + callback
             # Excluding Redirect for Authorization
-            exclude_list.append(self.redirect_uri)
+            app[AUTH_EXCLUDE_LIST_KEY].append(self.redirect_uri)
         else:
             callback = f"/auth/{self._service_name}/callback/"
             self.redirect_uri = "{domain}" + callback
-            exclude_list.append(callback)
+            app[AUTH_EXCLUDE_LIST_KEY].append(callback)
         # Login and Redirect Routes:
         router.add_route("GET", login, self.authenticate, name=f"{self._service_name}_login")
         # finish login (callback)

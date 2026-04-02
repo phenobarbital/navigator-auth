@@ -20,7 +20,7 @@ from ...conf import (
     AUTH_MISSING_ACCOUNT,
     AUTH_SUCCESSFUL_CALLBACKS,
     PREFERRED_AUTH_SCHEME,
-    exclude_list,
+    AUTH_EXCLUDE_LIST_KEY,
     REDIS_URL,
 )
 from navigator_session import get_session
@@ -89,8 +89,8 @@ class Oauth2Provider(BaseAuthBackend):
             name="nav_oauth2_authorize_alt",
         )
         ## added to excluded list:
-        exclude_list.append(self.authorize_uri)
-        exclude_list.append("/oauth2/authorize/")
+        app[AUTH_EXCLUDE_LIST_KEY].append(self.authorize_uri)
+        app[AUTH_EXCLUDE_LIST_KEY].append("/oauth2/authorize/")
         ## login
         router.add_route(
             "*",
@@ -98,7 +98,7 @@ class Oauth2Provider(BaseAuthBackend):
             self.auth_login,
             name="nav_oauth2_login",
         )
-        exclude_list.append(self.login_uri)
+        app[AUTH_EXCLUDE_LIST_KEY].append(self.login_uri)
 
         # Consent
         router.add_route(
@@ -115,7 +115,7 @@ class Oauth2Provider(BaseAuthBackend):
             self.token_request,
             name="nav_oauth2_token_request",
         )
-        exclude_list.append(self.token_uri)
+        app[AUTH_EXCLUDE_LIST_KEY].append(self.token_uri)
         # User Info
         router.add_route(
             "GET",
@@ -137,7 +137,7 @@ class Oauth2Provider(BaseAuthBackend):
             self.finish_logout,
             name="nav_oauth2_complete_logout",
         )
-        exclude_list.append(self.logout_redirect_uri)
+        app[AUTH_EXCLUDE_LIST_KEY].append(self.logout_redirect_uri)
         super(Oauth2Provider, self).configure(app)
 
     async def on_startup(self, app: web.Application):
@@ -574,7 +574,8 @@ class Oauth2Provider(BaseAuthBackend):
         pass
 
     async def finish_logout(self, request):
-        pass
+        """Handle the OAuth2 post-logout redirect."""
+        return web.Response(status=200, text="Logged out successfully")
 
     async def check_credentials(self, request):
         """Authentication and create a session."""

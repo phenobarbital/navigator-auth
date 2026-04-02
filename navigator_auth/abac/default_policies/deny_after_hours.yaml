@@ -1,0 +1,31 @@
+version: "1.0"
+defaults:
+  effect: deny
+policies:
+  - name: deny_sensitive_after_hours
+    effect: deny
+    description: "Deny sensitive operations (write, delete, configure) outside business hours."
+    resources:
+      - "tool:*"
+      - "kb:*"
+      - "vector:*"
+      - "agent:*"
+      - "mcp:*"
+    actions:
+      - "tool:configure"
+      - "kb:write"
+      - "kb:admin"
+      - "vector:insert"
+      - "vector:delete"
+      - "agent:configure"
+    subjects:
+      groups:
+        - "*"
+      exclude_groups:
+        - superuser
+        - admin
+    conditions:
+      environment:
+        is_business_hours: false
+    priority: 90
+    enforcing: true

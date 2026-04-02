@@ -23,6 +23,7 @@ from .authorizations import authz_allow_hosts, authz_hosts, authz_useragent
 from .vault.integration import load_vault_for_session, setup_vault_tables, VAULT_SESSION_KEY
 from .backends.idp import IdentityProvider
 from .conf import (
+    AUTH_EXCLUDE_LIST_KEY,
     BASE_DIR,
     AUTH_CREDENTIALS_REQUIRED,
     AUTH_USER_VIEW,
@@ -30,7 +31,6 @@ from .conf import (
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,
     USER_ATTRIBUTES,
-    AUTH_CLIENT_ID,
     default_dsn,
     REDIS_AUTH_URL,
     logging,
@@ -226,18 +226,6 @@ class AuthHandler:
         except Exception as err:
             print(err)
             raise web.HTTPUnauthorized(reason=f"Logout Error {err.message}")
-
-    async def login(self, request: web.Request) -> web.Response:
-        params = {
-            "client_id": AUTH_CLIENT_ID,
-            "destination": "http://navigator-dev.dev.local:5000",
-            "token_service": "/api/v1/oauth2/token",
-            "redirect_uri": "http://navigator-dev.dev.local:5000/auth/login",
-        }
-        return await self._parser.view(filename="auth/login.html", params=params)
-
-    async def logout(self, request: web.Request) -> web.Response:
-        pass
 
     def get_auth_backend(self, request: web.Request):
         if method := request.headers.get("X-Auth-Method", None):
@@ -533,13 +521,12 @@ class AuthHandler:
         # cleanup operations over Auth backend
         self.app.on_cleanup.append(self.on_cleanup)
         logging.debug(":::: Auth Handler Loaded ::::")
+        # Seed the per-app exclude list from defaults (avoids global mutation)
+        self.app[AUTH_EXCLUDE_LIST_KEY] = list(exclude_list)
         # register the Auth extension into the app
         self.app[self.name] = self
         ## Configure Routes
         router = self.app.router
-        # Login / Logout routes
-        router.add_route("GET", "/auth/login", self.login, name="nav_login")
-        router.add_route("GET", "/auth/logout", self.logout, name="nav_logout")
         # API Login
         router.add_route("GET", "/api/v1/login", self.api_login, name="api_login")
         router.add_route("POST", "/api/v1/login", self.api_login, name="api_login_post")
@@ -667,15 +654,15 @@ class AuthHandler:
         return self.auth_error(reason=reason, **kwargs, status=401)
 
     def add_exclude_list(self, path: str):
-        exclude_list.append(path)
+        self.app[AUTH_EXCLUDE_LIST_KEY].append(path)
 
     async def verify_exceptions(self, request: web.Request) -> bool:
         # avoid authorization backend on OPTION method:
         if request.method == hdrs.METH_OPTIONS:
             return True
 
-        # Check for explicit exclude list matches
-        for pattern in exclude_list:
+        # Check for explicit exclude list matches (per-app, not global)
+        for pattern in request.app.get(AUTH_EXCLUDE_LIST_KEY, ()):
             if fnmatch.fnmatch(request.path, pattern):
                 return True
 

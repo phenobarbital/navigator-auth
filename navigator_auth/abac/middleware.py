@@ -3,7 +3,7 @@ import fnmatch
 from aiohttp import web, hdrs
 from aiohttp.web_urldispatcher import SystemRoute
 from navconfig.logging import logging
-from navigator_auth.conf import exclude_list
+from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY
 
 
 exceptions = (
@@ -30,8 +30,8 @@ async def abac_middleware(
             return await handler(request)
     except Exception:  # pylint: disable=W0703
         pass
-    # avoid authorization on exclude list
-    for pattern in exclude_list:
+    # avoid authorization on exclude list (per-app, not global)
+    for pattern in request.app.get(AUTH_EXCLUDE_LIST_KEY, ()):
         if fnmatch.fnmatch(request.path, pattern):
             return await handler(request)
     # avoid authorization on exceptions
@@ -45,6 +45,11 @@ async def abac_middleware(
     ### get Guardian:
     try:
         response = await request.app['security'].authorize(request=request)
+    except (TypeError, KeyError) as ex:
+        ### there is no ABAC access backend enabled:
+        logging.warning(
+            f'ABAC Warning: there is no backend installed on this system: {ex}'
+        )
     except (TypeError, KeyError) as ex:
         ### there is no ABAC access backend enabled:
         logging.warning(

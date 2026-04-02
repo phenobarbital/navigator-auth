@@ -7,7 +7,7 @@ os.environ["NAV_API_HOST"] = "localhost" # Ensure host is set
 import logging
 from aiohttp import web
 from navigator_auth import AuthHandler
-from navigator_auth.conf import exclude_list
+from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY
 from navconfig import BASE_DIR
 # Configure other settings as needed
 
@@ -27,7 +27,7 @@ auth.setup(app)
 app.add_routes([
     web.get('/login', home)
 ])
-exclude_list.append('/login')
+app[AUTH_EXCLUDE_LIST_KEY].append('/login')
 
 if __name__ == '__main__':
     async def populate_client(app):

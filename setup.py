@@ -26,6 +26,12 @@ extensions = [
         extra_compile_args=COMPILE_ARGS,
         language="c++"
     ),
+    Extension(
+        name='navigator_auth.libs.policy_eval',
+        sources=['navigator_auth/libs/policy_eval.pyx'],
+        extra_compile_args=COMPILE_ARGS,
+        language="c"
+    ),
 ]
 
 class BuildExtensions(build_ext):
