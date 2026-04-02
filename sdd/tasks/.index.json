@@ -41,10 +41,10 @@
     "feature": "policy-based-access-control",
     "spec": "sdd/specs/policy-based-access-control.spec.md",
     "title": "Decorator Hardening for CBV",
-    "status": "in-progress",
+    "status": "done",
     "started_at": "2026-04-02T00:00:00Z",
-    "completed_at": null,
-    "file": "sdd/tasks/active/TASK-004-decorator-hardening.md",
+    "completed_at": "2026-04-02T13:06:00Z",
+    "file": "sdd/tasks/completed/TASK-004-decorator-hardening.md",
     "depends_on": []
   },
   {
