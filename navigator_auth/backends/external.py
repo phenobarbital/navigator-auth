@@ -27,7 +27,7 @@ from ..conf import (
     AUTH_SUCCESSFUL_CALLBACKS,
     PREFERRED_AUTH_SCHEME,
     AUTH_OAUTH2_REDIRECT_URL,
-    exclude_list,
+    AUTH_EXCLUDE_LIST_KEY,
     USER_MAPPING,
 )
 from .abstract import BaseAuthBackend
@@ -91,7 +91,7 @@ class ExternalAuth(BaseAuthBackend):
         )
         self._info.uri = f"/api/v1/auth/{self._service_name}/"
         ## added to excluded list:
-        exclude_list.append(f"/api/v1/auth/{self._service_name}/")
+        app[AUTH_EXCLUDE_LIST_KEY].append(f"/api/v1/auth/{self._service_name}/")
         self.finish_redirect_url: str = None
         self.failed_redirect_url: str = AUTH_FAILED_REDIRECT_URI
         ## alt login
@@ -101,7 +101,7 @@ class ExternalAuth(BaseAuthBackend):
             self.authenticate,
             name=f"{self._service_name}_alt_login",
         )
-        exclude_list.append(f"/auth/{self._service_name}/login")
+        app[AUTH_EXCLUDE_LIST_KEY].append(f"/auth/{self._service_name}/login")
         # finish login (callback)
         router.add_route(
             "GET",
@@ -109,7 +109,7 @@ class ExternalAuth(BaseAuthBackend):
             self.auth_callback,
             name=f"{self._service_name}_complete_login",
         )
-        exclude_list.append(f"/auth/{self._service_name}/callback/")
+        app[AUTH_EXCLUDE_LIST_KEY].append(f"/auth/{self._service_name}/callback/")
         # logout process
         router.add_route(
             "GET",
@@ -131,7 +131,7 @@ class ExternalAuth(BaseAuthBackend):
             self.check_credentials,
             name=f"{self._service_name}_check_credentials",
         )
-        exclude_list.append(check_credentials)
+        app[AUTH_EXCLUDE_LIST_KEY].append(check_credentials)
         super(ExternalAuth, self).configure(app)
 
     async def on_startup(self, app: web.Application):

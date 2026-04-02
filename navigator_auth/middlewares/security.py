@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable, Awaitable
 from aiohttp import web
 from aiohttp.web import middleware
@@ -24,6 +25,9 @@ async def security_middleware(
     Description: This middleware adds security headers to the response.
     """
     response = await handler(request)
+    if response is None:
+        logging.warning(f"security_middleware: handler returned None for {request.method} {request.path}")
+        return response
     if ENABLE_XSS_PROTECTION is True:
         response.headers['X-XSS-Protection'] = XSS_PROTECTION
     response.headers['X-Content-Type-Options'] = XCONTENT_TYPE_OPTIONS

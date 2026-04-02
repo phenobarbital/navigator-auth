@@ -10,7 +10,7 @@ from navigator_session import SESSION_KEY, SESSION_ID, SessionHandler, get_sessi
 from datamodel.exceptions import ValidationError
 
 # Authenticated Entity
-from ..conf import BASIC_USER_MAPPING, exclude_list
+from ..conf import AUTH_EXCLUDE_LIST_KEY, BASIC_USER_MAPPING
 from .abstract import BaseAuthBackend
 from ..exceptions import (
     AuthException,
@@ -48,7 +48,7 @@ class BasicAuth(BaseAuthBackend):
             self.check_credentials,
             name=f"{self._service_name}_check_credentials",
         )
-        exclude_list.append(check_credentials)
+        app[AUTH_EXCLUDE_LIST_KEY].append(check_credentials)
         super().configure(app)
 
     async def on_startup(self, app: web.Application):

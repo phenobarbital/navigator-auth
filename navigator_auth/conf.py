@@ -42,20 +42,20 @@ DBPORT = config.get("DBPORT", fallback=5432)
 default_dsn = f"postgres://{DBUSER}:{DBPWD}@{DBHOST}:{DBPORT}/{DBNAME}"
 
 ### Exclude List:
-excluded_default = [
+AUTH_EXCLUDE_LIST_KEY = "auth_exclude_list"
+
+EXCLUDE_DEFAULTS: list[str] = [
     "/static/",
     "/api/v1/login",
     "/api/v1/logout",
-    "/auth/login",
-    "/auth/logout",
-    "/auth/login/callback",
     "/api/v1/forgot-password",
-    "/api/v1/reset-password"
+    "/api/v1/reset-password",
 ]
-new_excluded = [
-    e.strip() for e in list(config.get("ROUTES_EXCLUDED", fallback="").split(","))
+_extra_excluded = [
+    e.strip() for e in config.get("ROUTES_EXCLUDED", fallback="").split(",")
 ]
-exclude_list = excluded_default + new_excluded
+# Combined defaults used to seed per-app exclude lists.
+exclude_list = EXCLUDE_DEFAULTS + [e for e in _extra_excluded if e]
 
 # if false, force credentials are not required for using this system.
 AUTH_CREDENTIALS_REQUIRED = config.getboolean(
@@ -390,14 +390,25 @@ GITHUB_CLIENT_SECRET = config.get("GITHUB_CLIENT_SECRET")
 ## Audit Backend
 # this is the backend for saving Authentication information
 ENABLE_AUDIT_LOG = config.getboolean('ENABLE_AUDIT_LOG', fallback=True)
+# Supported values: "log" (Python logger), "influx", or any asyncdb driver name
+# (e.g. "mongo", "pg", "redis").
 AUDIT_BACKEND = config.get('AUDIT_BACKEND', fallback='influx')
-AUDIT_CREDENTIALS = {
+
+# Driver-specific credentials.
+# For "influx":
+INFLUX_CREDENTIALS = {
     "host": config.get('INFLUX_HOST', fallback='localhost'),
     "port": config.get('INFLUX_PORT', fallback=8086),
     "bucket": config.get('INFLUX_DATABASE', fallback='navigator_audit'),
     "org": config.get('INFLUX_ORG', fallback='navigator'),
-    "token": config.get('INFLUX_TOKEN')
+    "token": config.get('INFLUX_TOKEN'),
 }
+# For any asyncdb driver (mongo, pg, etc.):
+AUDIT_DSN = config.get('AUDIT_DSN', fallback=None)
+AUDIT_TABLE = config.get('AUDIT_TABLE', fallback='audit_log')
+
+# Backwards-compatible alias
+AUDIT_CREDENTIALS = INFLUX_CREDENTIALS
 
 
 ## ABAC / PBAC Configuration

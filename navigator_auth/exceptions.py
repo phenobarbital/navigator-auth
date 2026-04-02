@@ -11,7 +11,7 @@ class AuthException(Exception):
         if 'stacktrace' in kwargs:
             self.stacktrace = kwargs['stacktrace']
         self.message = message
-        self.status = int(status)
+        self.status = status
 
     def __repr__(self):
         return f"{self.message}"

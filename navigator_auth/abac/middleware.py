@@ -3,7 +3,7 @@ import fnmatch
 from aiohttp import web, hdrs
 from aiohttp.web_urldispatcher import SystemRoute
 from navconfig.logging import logging
-from navigator_auth.conf import exclude_list
+from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY
 
 
 exceptions = (
@@ -30,14 +30,17 @@ async def abac_middleware(
             return await handler(request)
     except Exception:  # pylint: disable=W0703
         pass
-    # avoid authorization on exclude list
-    for pattern in exclude_list:
+    # avoid authorization on exclude list (per-app, not global)
+    for pattern in request.app.get(AUTH_EXCLUDE_LIST_KEY, ()):
         if fnmatch.fnmatch(request.path, pattern):
-            return await handler(request)
+            result = await handler(request)
+            if result is None:
+                logging.warning(f'ABAC Middleware (excluded): handler returned None for {request.path}')
+            return result
     # avoid authorization on exceptions
     if request.path in exceptions:
         return await handler(request)
-    logging.debug(' == ABAC MIDDLEWARE == ')
+    logging.debug(f' == ABAC MIDDLEWARE == {request.path}')
     ### verify if request is authenticated
     if request.get('authenticated', False) is False:
         logging.warning(f'Access to {request.path} is not Authenticated.')
@@ -50,4 +53,11 @@ async def abac_middleware(
         logging.warning(
             f'ABAC Warning: there is no backend installed on this system: {ex}'
         )
-    return await handler(request)
+    except Exception as ex:
+        logging.warning(
+            f'ABAC Middleware: unexpected error on {request.path}: {ex}'
+        )
+    result = await handler(request)
+    if result is None:
+        logging.warning(f'ABAC Middleware: handler returned None for {request.path}')
+    return result
