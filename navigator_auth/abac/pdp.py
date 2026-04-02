@@ -19,6 +19,7 @@ from .context import EvalContext
 from .guardian import Guardian, PEP
 from .policyhandler import PolicyHandler
 from .storages.abstract import AbstractStorage
+from .storages.yaml_storage import YAMLStorage
 from .audit import AuditLog
 from .middleware import abac_middleware
 
@@ -37,13 +38,15 @@ class PDP:
     def __init__(
         self,
         storage: AbstractStorage,
-        policies: Optional[List[Policy]] = None
+        policies: Optional[List[Policy]] = None,
+        yaml_storage: Optional[YAMLStorage] = None
     ):
         self._policies: list = []
         if isinstance(policies, list):
             self._policies = policies
         ### Loading an Storage and registering for Load Policies.
         self.storage = storage
+        self.yaml_storage = yaml_storage
         self.logger = logger
         self._auditlog = AuditLog()
 
@@ -58,26 +61,55 @@ class PDP:
         self._policies.sort(key=lambda policy: policy.priority)
 
     async def _load_policies(self):
-        # Load policies from storage
-        policies = await self.storage.load_policies()
+        # Load policies from DB storage
+        try:
+            policies = await self.storage.load_policies()
+            self._load_policy_dicts(policies)
+        except Exception as exc:
+            self.logger.error(f'Error loading policies from DB storage: {exc}')
+
+        # Load policies from YAML storage (if configured)
+        if self.yaml_storage is not None:
+            try:
+                yaml_policies = await self.yaml_storage.load_policies()
+                self._load_policy_dicts(yaml_policies)
+            except Exception as exc:
+                self.logger.error(
+                    f'Error loading policies from YAML storage: {exc}'
+                )
+
+        self._policies.sort(key=lambda policy: policy.priority)
+
+    def _load_policy_dicts(self, policies: list):
+        """Convert policy dicts from storage into Policy objects."""
         for policy in policies:
             try:
-                policy_type = policy['policy_type']
-                del policy['policy_type']
-            except KeyError:
-                policy_type = 'policy'
-            if policy['effect'] == 'ALLOW':
-                policy['effect'] = PolicyEffect.ALLOW
-            else:
-                policy['effect'] = PolicyEffect.DENY
-            if policy_type == 'policy':
-                p = Policy(**policy)
-            elif policy_type == 'file':
-                p = FilePolicy(**policy)
-            elif policy_type == 'object':
-                p = ObjectPolicy(**policy)
-            self._policies.append(p)
-        self._policies.sort(key=lambda policy: policy.priority)
+                policy = dict(policy)  # copy to avoid mutating storage data
+                try:
+                    policy_type = policy.pop('policy_type')
+                except KeyError:
+                    policy_type = 'policy'
+                if policy['effect'] == 'ALLOW':
+                    policy['effect'] = PolicyEffect.ALLOW
+                else:
+                    policy['effect'] = PolicyEffect.DENY
+                if policy_type == 'policy':
+                    p = Policy(**policy)
+                elif policy_type == 'file':
+                    p = FilePolicy(**policy)
+                elif policy_type == 'object':
+                    p = ObjectPolicy(**policy)
+                elif policy_type == 'resource':
+                    # ResourcePolicy from YAML — load via evaluator's PolicyLoader
+                    continue  # Handled separately by PolicyEvaluator
+                else:
+                    p = Policy(**policy)
+                self._policies.append(p)
+            except Exception as exc:
+                name = policy.get('name', 'unknown')
+                self.logger.error(
+                    f'Error loading policy "{name}": {exc}'
+                )
 
 
     async def on_startup(self, app: web.Application):
@@ -88,6 +120,8 @@ class PDP:
 
     async def on_shutdown(self, app: web.Application):
         await self.storage.close()
+        if self.yaml_storage is not None:
+            await self.yaml_storage.close()
 
     async def reload_policies(self):
         # Clear the current list of policies
