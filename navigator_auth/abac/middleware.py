@@ -33,14 +33,11 @@ async def abac_middleware(
     # avoid authorization on exclude list (per-app, not global)
     for pattern in request.app.get(AUTH_EXCLUDE_LIST_KEY, ()):
         if fnmatch.fnmatch(request.path, pattern):
-            result = await handler(request)
-            if result is None:
-                logging.warning(f'ABAC Middleware (excluded): handler returned None for {request.path}')
-            return result
+            return await handler(request)
     # avoid authorization on exceptions
     if request.path in exceptions:
         return await handler(request)
-    logging.debug(f' == ABAC MIDDLEWARE == {request.path}')
+    logging.debug(' == ABAC MIDDLEWARE == ')
     ### verify if request is authenticated
     if request.get('authenticated', False) is False:
         logging.warning(f'Access to {request.path} is not Authenticated.')
@@ -53,11 +50,9 @@ async def abac_middleware(
         logging.warning(
             f'ABAC Warning: there is no backend installed on this system: {ex}'
         )
-    except Exception as ex:
+    except (TypeError, KeyError) as ex:
+        ### there is no ABAC access backend enabled:
         logging.warning(
-            f'ABAC Middleware: unexpected error on {request.path}: {ex}'
+            f'ABAC Warning: there is no backend installed on this system: {ex}'
         )
-    result = await handler(request)
-    if result is None:
-        logging.warning(f'ABAC Middleware: handler returned None for {request.path}')
-    return result
+    return await handler(request)

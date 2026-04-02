@@ -574,7 +574,8 @@ class Oauth2Provider(BaseAuthBackend):
         pass
 
     async def finish_logout(self, request):
-        pass
+        """Handle the OAuth2 post-logout redirect."""
+        return web.Response(status=200, text="Logged out successfully")
 
     async def check_credentials(self, request):
         """Authentication and create a session."""

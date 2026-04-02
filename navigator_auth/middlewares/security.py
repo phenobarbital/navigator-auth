@@ -1,4 +1,3 @@
-import logging
 from collections.abc import Callable, Awaitable
 from aiohttp import web
 from aiohttp.web import middleware
@@ -26,7 +25,6 @@ async def security_middleware(
     """
     response = await handler(request)
     if response is None:
-        logging.warning(f"security_middleware: handler returned None for {request.method} {request.path}")
         return response
     if ENABLE_XSS_PROTECTION is True:
         response.headers['X-XSS-Protection'] = XSS_PROTECTION

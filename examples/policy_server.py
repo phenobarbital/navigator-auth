@@ -271,13 +271,17 @@ async def cookie_to_bearer_middleware(request: web.Request, handler):
 
     This allows browser-based navigation (cookie auth) to work with the
     auth middleware that expects an Authorization header.
+
+    Note: request.clone() drops _match_info, so we restore it after cloning.
     """
     if "Authorization" not in request.headers:
         token = request.cookies.get(AUTH_COOKIE)
         if token:
+            match_info = request._match_info
             request = request.clone(
                 headers={**request.headers, "Authorization": f"Bearer {token}"}
             )
+            request._match_info = match_info
     return await handler(request)
 
 
@@ -443,17 +447,17 @@ async def index(request):
     """Index page — redirects to /login if no valid token cookie."""
     token = _get_token_from_request(request)
     if not token:
-        return web.HTTPFound("/login")
+        return web.Response(status=302, headers={"Location": "/login"})
 
     # Decode the JWT locally to extract the username
     try:
         auth_handler = request.app["auth"]
         _, payload = auth_handler._idp.decode_token(token)
         if not payload:
-            return web.HTTPFound("/login")
+            return web.Response(status=302, headers={"Location": "/login"})
         username = payload.get("username", payload.get("sub", "authenticated"))
     except Exception:
-        return web.HTTPFound("/login")
+        return web.Response(status=302, headers={"Location": "/login"})
 
     body = INDEX_HTML.format(username=username)
     return web.Response(text=body, content_type="text/html")
@@ -463,7 +467,7 @@ async def login_page(request):
     """GET /login — render the login form."""
     # If already has a token, redirect to index
     if _get_token_from_request(request):
-        return web.HTTPFound("/")
+        return web.Response(status=302, headers={"Location": "/"})
     body = LOGIN_HTML.format(error="")
     return web.Response(text=body, content_type="text/html")
 
@@ -507,7 +511,7 @@ async def login_submit(request):
         return web.Response(text=body, content_type="text/html")
 
     # Set token cookie and redirect to index
-    response = web.HTTPFound("/")
+    response = web.Response(status=302, headers={"Location": "/"})
     response.set_cookie(
         AUTH_COOKIE, token, httponly=True, samesite="Lax", path="/"
     )
@@ -516,7 +520,7 @@ async def login_submit(request):
 
 async def logout(request):
     """GET /logout — clear the token cookie and redirect to login."""
-    response = web.HTTPFound("/login")
+    response = web.Response(status=302, headers={"Location": "/login"})
     response.del_cookie(AUTH_COOKIE, path="/")
     return response
 
