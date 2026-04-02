@@ -65,10 +65,10 @@
     "feature": "policy-based-access-control",
     "spec": "sdd/specs/policy-based-access-control.spec.md",
     "title": "Cython Fast Resource Evaluator",
-    "status": "in-progress",
+    "status": "done",
     "started_at": "2026-04-02T00:00:00Z",
-    "completed_at": null,
-    "file": "sdd/tasks/active/TASK-006-cython-fast-evaluator.md",
+    "completed_at": "2026-04-02T13:27:00Z",
+    "file": "sdd/tasks/completed/TASK-006-cython-fast-evaluator.md",
     "depends_on": ["TASK-001"]
   },
   {
