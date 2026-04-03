@@ -42,21 +42,23 @@ struct PolicyDef {
 #[derive(Debug, Deserialize, Clone, Default)]
 struct SubjectSpec {
     #[serde(default)]
-    groups: Vec<String>,
+    groups: HashSet<String>,
     #[serde(default)]
-    users: Vec<String>,
+    users: HashSet<String>,
     #[serde(default)]
-    roles: Vec<String>,
+    roles: HashSet<String>,
     #[serde(default)]
-    exclude_groups: Vec<String>,
+    exclude_groups: HashSet<String>,
     #[serde(default)]
-    exclude_users: Vec<String>,
+    exclude_users: HashSet<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
 struct ConditionSpec {
     #[serde(default)]
     environment: std::collections::HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    is_manager: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -87,14 +89,9 @@ struct EnvironmentContext {
 // Pattern matching
 // ---------------------------------------------------------------------------
 
-/// Match a resource name against a pattern (supports * wildcard, ? single char, and Regex).
-fn matches_pattern(pattern: &str, name: &str, regex_cache: Option<&HashMap<String, Regex>>) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-
-    // Regex metacharacters detection
-    let is_regex = pattern.contains('^')
+/// Check if a pattern string contains regex metacharacters.
+fn is_regex_pattern(pattern: &str) -> bool {
+    pattern.contains('^')
         || pattern.contains('$')
         || pattern.contains('(')
         || pattern.contains(')')
@@ -102,9 +99,33 @@ fn matches_pattern(pattern: &str, name: &str, regex_cache: Option<&HashMap<Strin
         || pattern.contains('{')
         || pattern.contains('[')
         || pattern.contains(']')
-        || pattern.contains('|');
+        || pattern.contains('|')
+}
 
-    if is_regex {
+/// Pre-compile all regex patterns found in the policy resource definitions.
+fn build_regex_cache(policies: &[PolicyDef]) -> HashMap<String, Regex> {
+    let mut cache = HashMap::new();
+    for policy in policies {
+        for pattern in &policy.resources {
+            if let Some((_, pname)) = pattern.split_once(':') {
+                if is_regex_pattern(pname) && !cache.contains_key(pname) {
+                    if let Ok(re) = Regex::new(pname) {
+                        cache.insert(pname.to_string(), re);
+                    }
+                }
+            }
+        }
+    }
+    cache
+}
+
+/// Match a resource name against a pattern (supports * wildcard, ? single char, and Regex).
+fn matches_pattern(pattern: &str, name: &str, regex_cache: Option<&HashMap<String, Regex>>) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+
+    if is_regex_pattern(pattern) {
         if let Some(cache) = regex_cache {
             if let Some(re) = cache.get(pattern) {
                 return re.is_match(name);
@@ -133,9 +154,12 @@ fn policy_covers_resource(
         return true; // No resource restriction
     }
     for pattern in &policy.resources {
+        if pattern == "*" || pattern == "*:*" {
+            return true;
+        }
         if let Some((ptype, pname)) = pattern.split_once(':') {
             if let Some((rtype, rname)) = resource.split_once(':') {
-                if ptype == rtype && matches_pattern(pname, rname, regex_cache) {
+                if (ptype == "*" || ptype == rtype) && matches_pattern(pname, rname, regex_cache) {
                     return true;
                 }
             }
@@ -149,7 +173,7 @@ fn policy_covers_action(policy: &PolicyDef, action: &str) -> bool {
     if policy.actions.is_empty() {
         return true;
     }
-    policy.actions.iter().any(|a| a == action)
+    policy.actions.iter().any(|a| a == "*" || a == action)
 }
 
 /// Check if a user matches the policy's subject specification.
@@ -190,49 +214,71 @@ fn matches_subject(policy: &PolicyDef, user: &UserContext) -> bool {
         && spec.roles.is_empty()
 }
 
+fn compare_json_nums(v1: &serde_json::Value, v2: &serde_json::Value) -> bool {
+    if let (Some(i1), Some(i2)) = (v1.as_i64(), v2.as_i64()) {
+        return i1 == i2;
+    }
+    if let (Some(f1), Some(f2)) = (v1.as_f64(), v2.as_f64()) {
+        return (f1 - f2).abs() < f64::EPSILON;
+    }
+    v1 == v2
+}
+
 /// Check environment conditions.
 fn matches_environment(policy: &PolicyDef, env: &EnvironmentContext) -> bool {
     for (key, expected) in &policy.conditions.environment {
-        match key.as_str() {
-            "is_business_hours" => {
-                if let Some(val) = expected.as_bool() {
-                    if env.is_business_hours != val {
+        let current_value: serde_json::Value = match key.as_str() {
+            "is_business_hours" => env.is_business_hours.into(),
+            "is_weekend" => env.is_weekend.into(),
+            "hour" => env.hour.into(),
+            "dow" => env.dow.into(),
+            "day_segment" => env.day_segment.clone().into(),
+            _ => continue, // Unknown conditions are ignored
+        };
+
+        if expected.is_array() {
+            // List match: current_value IN expected_list
+            let list = expected.as_array().unwrap();
+            if !list.iter().any(|item| compare_json_nums(&current_value, item)) {
+                return false;
+            }
+        } else if expected.is_object() {
+            // Range match: min <= current_value <= max
+            let obj = expected.as_object().unwrap();
+            if let Some(min) = obj.get("min") {
+                if let (Some(c), Some(m)) = (current_value.as_f64(), min.as_f64()) {
+                    if c < m {
                         return false;
                     }
                 }
             }
-            "is_weekend" => {
-                if let Some(val) = expected.as_bool() {
-                    if env.is_weekend != val {
+            if let Some(max) = obj.get("max") {
+                if let (Some(c), Some(m)) = (current_value.as_f64(), max.as_f64()) {
+                    if c > m {
                         return false;
                     }
                 }
             }
-            "hour" => {
-                if let Some(val) = expected.as_i64() {
-                    if env.hour != val as i32 {
-                        return false;
-                    }
-                }
+        } else {
+            // Exact match
+            if !compare_json_nums(&current_value, expected) {
+                return false;
             }
-            "dow" => {
-                if let Some(val) = expected.as_i64() {
-                    if env.dow != val as i32 {
-                        return false;
-                    }
-                }
-            }
-            "day_segment" => {
-                if let Some(val) = expected.as_str() {
-                    if env.day_segment != val {
-                        return false;
-                    }
-                }
-            }
-            _ => {} // Unknown conditions are ignored
         }
     }
     true
+}
+
+/// Check hierarchical conditions (e.g. Manager access)
+fn matches_hierarchy(policy: &PolicyDef, user: &UserContext, owner_reports_to: Option<&str>) -> bool {
+    if !policy.conditions.is_manager {
+        return true; // No hierarchy check required
+    }
+    // If is_manager is true, the current user must be the manager of the resource owner
+    if let Some(reports_to) = owner_reports_to {
+        return reports_to == user.username;
+    }
+    false
 }
 
 /// Evaluate whether a single resource is allowed by the policy set.
@@ -243,6 +289,7 @@ fn evaluate_resource(
     user: &UserContext,
     env: &EnvironmentContext,
     regex_cache: Option<&HashMap<String, Regex>>,
+    owner_reports_to: Option<&str>,
 ) -> EvaluationResult {
     let mut best_allow: Option<(i32, String)> = None;
     let mut best_deny: Option<(i32, String)> = None;
@@ -259,6 +306,9 @@ fn evaluate_resource(
             continue;
         }
         if !matches_environment(policy, env) {
+            continue;
+        }
+        if !matches_hierarchy(policy, user, owner_reports_to) {
             continue;
         }
 
@@ -399,27 +449,7 @@ fn filter_resources_batch(
         .unwrap_or_default();
 
     // Pre-compile regexes for all patterns
-    let mut regex_cache = HashMap::new();
-    for policy in &policies {
-        for pattern in &policy.resources {
-            if let Some((_, pname)) = pattern.split_once(':') {
-                let is_regex = pname.contains('^')
-                    || pname.contains('$')
-                    || pname.contains('(')
-                    || pname.contains(')')
-                    || pname.contains('+')
-                    || pname.contains('{')
-                    || pname.contains('[')
-                    || pname.contains(']')
-                    || pname.contains('|');
-                if is_regex && !regex_cache.contains_key(pname) {
-                    if let Ok(re) = Regex::new(pname) {
-                        regex_cache.insert(pname.to_string(), re);
-                    }
-                }
-            }
-        }
-    }
+    let regex_cache = build_regex_cache(&policies);
 
     // Parallel batch evaluation using rayon
     let results: Vec<(String, bool)> = py.allow_threads(|| {
@@ -433,6 +463,7 @@ fn filter_resources_batch(
                     &user,
                     &env,
                     Some(&regex_cache),
+                    None, // Batch filter doesn't support per-resource owner yet
                 );
                 (resource.clone(), result.allowed)
             })
@@ -463,7 +494,7 @@ fn filter_resources_batch(
 /// Returns:
 ///     Dict with {allowed: bool, effect: str, matched_policy: str, reason: str}
 #[pyfunction]
-#[pyo3(signature = (policies_json, resource, action, user_context, environment))]
+#[pyo3(signature = (policies_json, resource, action, user_context, environment, owner_reports_to=None))]
 fn evaluate_single(
     py: Python<'_>,
     policies_json: &str,
@@ -471,6 +502,7 @@ fn evaluate_single(
     action: &str,
     user_context: &Bound<'_, PyDict>,
     environment: &Bound<'_, PyDict>,
+    owner_reports_to: Option<String>,
 ) -> PyResult<PyObject> {
     // Parse policies
     let policies: Vec<PolicyDef> = serde_json::from_str(policies_json)
@@ -517,27 +549,7 @@ fn evaluate_single(
     };
 
     // Pre-compile regexes for all patterns
-    let mut regex_cache = HashMap::new();
-    for policy in &policies {
-        for pattern in &policy.resources {
-            if let Some((_, pname)) = pattern.split_once(':') {
-                let is_regex = pname.contains('^')
-                    || pname.contains('$')
-                    || pname.contains('(')
-                    || pname.contains(')')
-                    || pname.contains('+')
-                    || pname.contains('{')
-                    || pname.contains('[')
-                    || pname.contains(']')
-                    || pname.contains('|');
-                if is_regex && !regex_cache.contains_key(pname) {
-                    if let Ok(re) = Regex::new(pname) {
-                        regex_cache.insert(pname.to_string(), re);
-                    }
-                }
-            }
-        }
-    }
+    let regex_cache = build_regex_cache(&policies);
 
     // Single evaluation (no rayon needed)
     let result = py.allow_threads(|| {
@@ -548,6 +560,7 @@ fn evaluate_single(
             &user,
             &env,
             Some(&regex_cache),
+            owner_reports_to.as_deref(),
         )
     });
 
@@ -622,7 +635,7 @@ mod tests {
             resources: vec!["tool:*".into()],
             actions: vec!["tool:execute".into()],
             subjects: SubjectSpec {
-                groups: vec!["engineering".into()],
+                groups: ["engineering".to_string()].into_iter().collect(),
                 ..Default::default()
             },
             conditions: ConditionSpec::default(),
@@ -651,6 +664,7 @@ mod tests {
             &user,
             &env,
             None,
+            None,
         );
         assert!(result.allowed);
         assert_eq!(result.matched_policy, Some("allow_engineering".into()));
@@ -664,7 +678,7 @@ mod tests {
             resources: vec!["uri:epson.*$".into()],
             actions: vec![],
             subjects: SubjectSpec {
-                groups: vec!["*".into()],
+                groups: ["*".to_string()].into_iter().collect(),
                 ..Default::default()
             },
             conditions: ConditionSpec::default(),
@@ -684,7 +698,7 @@ mod tests {
             day_segment: "morning".into(),
         };
 
-        let result = evaluate_resource(&policies, "uri:epson_lx350", "uri:read", &user, &env, None);
+        let result = evaluate_resource(&policies, "uri:epson_lx350", "uri:read", &user, &env, None, None);
         assert!(!result.allowed);
         assert_eq!(result.matched_policy, Some("block_printers".into()));
     }

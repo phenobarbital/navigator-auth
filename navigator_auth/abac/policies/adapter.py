@@ -6,6 +6,8 @@ from navigator_auth.abac.policies.resource_policy import ResourcePolicy
 from navigator_auth.abac.policies.abstract import PolicyEffect
 from navigator_auth.abac.policies.resources import ResourceType, SubjectSpec
 
+logger = logging.getLogger(__name__)
+
 @dataclass
 class AdapterResult:
     policy: Optional[ResourcePolicy] = None
@@ -158,9 +160,12 @@ class PolicyAdapter:
                     final_actions.append(f"uri:{a.lower()}")
 
         # 4. Subjects
+        raw_subject = policy_dict.get('subject') or []
+        if isinstance(raw_subject, str):
+            raw_subject = [raw_subject]
         subjects_data = {
             'groups': set(policy_dict.get('groups') or []),
-            'users': set(policy_dict.get('subject') or [])
+            'users': set(raw_subject)
         }
         subjects = SubjectSpec.from_dict(subjects_data)
 
@@ -169,9 +174,14 @@ class PolicyAdapter:
         python_conditions = {}
         raw_context = policy_dict.get('context') or {}
         for k, v in raw_context.items():
-            # For now, we only support direct matches that can be evaluated in Rust
-            # More complex session/user attribute access will need Python post-filter (TBD)
             python_conditions[k] = v
+        if python_conditions:
+            logger.warning(
+                "Policy '%s': context conditions %s are not evaluated "
+                "by the Rust engine and will be ignored. "
+                "Python post-filter not yet implemented.",
+                name, list(python_conditions.keys())
+            )
 
         # 6. Create Policy
         try:

@@ -76,7 +76,7 @@ class PDP:
             policies = await self.storage.load_policies()
             self._load_policy_dicts(policies)
         except Exception as exc:
-            self.logger.error(f'Error loading policies from DB storage: {exc}')
+            self.logger.error('Error loading policies from DB storage: %s', exc)
 
         # Load policies from YAML storage (if configured)
         if self.yaml_storage is not None:
@@ -94,7 +94,7 @@ class PDP:
         """Convert all policy dicts and load into evaluator."""
         resource_policies, warnings = PolicyAdapter.adapt_batch(policies)
         for w in warnings:
-            self.logger.warning(f"Policy adaptation warning: {w}")
+            self.logger.warning("Policy adaptation warning: %s", w)
 
         # Also keep them in self._policies for backward compatibility
         # (mostly for filter_files which still uses them)
@@ -111,6 +111,9 @@ class PDP:
         await self._load_policies()
         # Register evaluator for handler-level access
         app['policy_evaluator'] = self._evaluator
+        # Start periodic reload if configured (must be in async context)
+        if ABAC_RELOAD_INTERVAL > 0:
+            self._reload_task = asyncio.ensure_future(self._periodic_reload())
 
     async def on_shutdown(self, app: web.Application):
         if self._reload_task:
@@ -131,7 +134,7 @@ class PDP:
             if db_policies:
                 policy_dicts.extend(db_policies)
         except Exception as exc:
-            self.logger.error(f'Reload: Error loading from DB: {exc}')
+            self.logger.error('Reload: Error loading from DB: %s', exc)
 
         # Re-load from YAML
         if self.yaml_storage is not None:
@@ -140,28 +143,26 @@ class PDP:
                 if yaml_policies:
                     policy_dicts.extend(yaml_policies)
             except Exception as exc:
-                self.logger.error(f'Reload: Error loading from YAML: {exc}')
+                self.logger.error('Reload: Error loading from YAML: %s', exc)
 
         # Convert and swap
         resource_policies, warnings = PolicyAdapter.adapt_batch(policy_dicts)
         for w in warnings:
-            self.logger.warning(f"Reload warning: {w}")
+            self.logger.warning("Reload warning: %s", w)
 
         # Build new index
         new_index = PolicyIndex()
         for p in resource_policies:
             new_index.add(p)
+        new_index.finalize()
 
-        # Serialize for Rust
-        new_json = self._evaluator._serialize_policies_from_index(new_index)
-
-        # Atomic swap
-        self._evaluator.swap_index(new_index, new_json)
+        # Atomic swap (serialization handled internally)
+        self._evaluator.swap_index(new_index)
 
         # Update local list for compatibility
         self._policies = resource_policies
 
-        self.logger.info(f"Hot-reloaded {len(resource_policies)} policies")
+        self.logger.info("Hot-reloaded %d policies", len(resource_policies))
         return len(resource_policies)
 
     async def _periodic_reload(self):
@@ -169,7 +170,7 @@ class PDP:
         if ABAC_RELOAD_INTERVAL <= 0:
             return
 
-        self.logger.info(f"Starting periodic ABAC reload (interval: {ABAC_RELOAD_INTERVAL}s)")
+        self.logger.info("Starting periodic ABAC reload (interval: %ds)", ABAC_RELOAD_INTERVAL)
         while True:
             try:
                 await asyncio.sleep(ABAC_RELOAD_INTERVAL)
@@ -177,7 +178,7 @@ class PDP:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                self.logger.error(f"Error during periodic policy reload: {exc}")
+                self.logger.error("Error during periodic policy reload: %s", exc)
 
     def setup(self, app: web.Application):
         if isinstance(app, web.Application):
@@ -200,10 +201,6 @@ class PDP:
         self.app.on_shutdown.append(
             self.on_shutdown
         )
-
-        # Start periodic reload if configured
-        if ABAC_RELOAD_INTERVAL > 0:
-            self._reload_task = asyncio.create_task(self._periodic_reload())
 
         # the backend add a middleware to the app
         mdl = self.app.middlewares
@@ -286,7 +283,7 @@ class PDP:
             self.logger.notice(f'Policy: {answer}')
             await self._auditlog.log(answer, PolicyEffect(answer.effect).name, user)
         except Exception as exc:
-            self.logger.warning(f'Error saving policy Log: {exc}')
+            self.logger.warning('Error saving policy Log: %s', exc)
 
     async def allowed_groups(
             self,
@@ -298,22 +295,21 @@ class PDP:
     ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
-        except KeyError:
-            member = False
+        except (KeyError, TypeError):
+            raise AccessDenied(
+                "Access Denied: no session information available"
+            )
+        member = False
         if "groups" in userinfo:
             member = bool(not set(userinfo["groups"]).isdisjoint(groups))
-        else:
+        elif user and hasattr(user, 'groups'):
             for group in user.groups:
                 if group.group in groups:
                     member = True
                     break
         if member is True:
-            ## TODO: Return an ABAC Response (allow/deny with )
-            # await self.auditlog(answer, PolicyEffect(effect).name , user)
             return effect
         else:
-            ## TODO migrate to a custom response.
-            # await self.auditlog.log(answer, PolicyEffect('deny').name , user)
             raise AccessDenied(
                 "Access Denied"
             )
@@ -327,33 +323,19 @@ class PDP:
     ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
-        except KeyError:
+        except (KeyError, TypeError):
             userinfo = None
         ctx = EvalContext(request, user, userinfo, session)
-        ctx.objects = files
-        # Get filtered policies based on targets from storage
-        # Filter policies that fit Inquiry by its attributes.
-        filtered = [p for p in self._policies if type(p) == FilePolicy and p.fits(ctx)]  # pylint: disable=C0123
-        self.logger.verbose(f'FILTERED POLICIES > {filtered!r}')
-        # no policies -> deny access!
-        if len(filtered) == 0:
+        # Delegate to the PolicyEvaluator (Rust-backed) for URI filtering.
+        # Each file is treated as a URI resource for policy evaluation.
+        result = self._evaluator.filter_resources(
+            ctx, ResourceType.URI, files, "uri:read"
+        )
+        if not result.allowed and not result.denied:
             raise PreconditionFailed(
                 "No Matching Policies were found, Deny access."
             )
-        _files = set(files)
-        denied_files_set = set()
-        for policy in filtered:
-            self.logger.notice(f'Filter Policy: {policy}')
-            #answer = await policy.allowed(ctx)
-            files_allowed = await asyncio.to_thread(policy.filter_files, ctx, Environment())
-            files_allowed_set = set(files_allowed)
-            if policy.effect == PolicyEffect.ALLOW:
-                _files = _files.intersection(files_allowed_set)
-            elif policy.effect == PolicyEffect.DENY:
-                denied_files = set(ctx.objects).difference(files_allowed_set)
-                denied_files_set = denied_files_set.union(denied_files)
-        final_allowed_files = list(_files.difference(denied_files_set))
-        return final_allowed_files
+        return result.allowed
 
     async def is_allowed(
             self,
@@ -370,6 +352,7 @@ class PDP:
 
         obj = kwargs.get('resource', None)
         action = kwargs.get('action', 'uri:read')
+        owner_reports_to = kwargs.get('owner_reports_to')
 
         if not obj:
             # If no resource specified, we use URI authorization from request
@@ -396,7 +379,7 @@ class PDP:
 
         # Delegate to evaluator
         result = self._evaluator.check_access(
-            ctx, rtype, rname, action
+            ctx, rtype, rname, action, owner_reports_to=owner_reports_to
         )
 
         response = PolicyResponse(
@@ -420,41 +403,38 @@ class PDP:
     ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
-        except KeyError:
+        except (KeyError, TypeError):
             userinfo = None
         ctx = EvalContext(request, user, userinfo, session)
         if not isinstance(objects, list):
             objects = [objects]
-        ctx.objects = objects
-        ctx.objectype = _type
-        # Get filtered policies based on targets from storage
-        # Filter policies that fit Inquiry by its attributes.
-        filtered = [p for p in self._policies if hasattr(p, '_filter') and p.fits(ctx)]
-        self.logger.verbose(f'FILTERED POLICIES > {filtered!r}')
-        # no policies -> deny access!
-        if len(filtered) == 0:
+
+        # Map the object type to a ResourceType (fallback to the string)
+        try:
+            resource_type = ResourceType(_type)
+        except ValueError:
+            resource_type = _type
+
+        # Delegate to the PolicyEvaluator for batch filtering
+        result = self._evaluator.filter_resources(
+            ctx, resource_type, objects, f"{_type}:read"
+        )
+        if not result.allowed and not result.denied:
             raise PreconditionFailed(
                 "No Matching Policies were found, Deny access."
             )
-        # we have policies - all of them should have allow, otherwise -> deny access
-        answer = False
-        for policy in filtered:
-            self.logger.notice(f'Policy: {policy!r}')
-            answer = await asyncio.to_thread(
-                policy._filter,
-                objects,
-                _type,
-                ctx,
-                Environment()
-            )
-            if answer.effect == effect:
-                await self.auditlog(answer, user)
-                ## return default effect:
-                return answer
-        if answer and answer.effect == PolicyEffect.DENY:
-            ## Audit Log
-            await self.auditlog(answer, user)
+
+        # Build response compatible with legacy callers
+        response = PolicyResponse(
+            effect=effect if result.allowed else PolicyEffect.DENY,
+            response="Filtered by PolicyEvaluator",
+            rule="evaluator",
+            actions=[f"{_type}:read"]
+        )
+        await self.auditlog(response, user)
+
+        if not result.allowed:
             raise AccessDenied(
-                f"Access Denied: {answer.response}"
+                f"Access Denied: no allowed objects of type '{_type}'"
             )
-        return answer
+        return response

@@ -239,3 +239,73 @@ class TestUnifiedPolicyEvaluation:
         r2 = evaluator.check_access(eval_context, ResourceType.TOOL, "tied", "tool:execute")
         assert r2.allowed is False
         assert r2.matched_policy == "deny_tied"
+
+    def test_hierarchical_manager_access(self, evaluator, eval_context, environment):
+        """Test 'is_manager' condition logic."""
+        policy = ResourcePolicy(
+            name="manager_card_access",
+            effect=PolicyEffect.ALLOW,
+            resources=["card:*"],
+            actions=["card:view"],
+            subjects={"groups": ["*"]},
+            priority=100,
+            # Hierarchical condition
+            environment={"is_manager": True} # In ResourcePolicy, we use environment dict for simple conditions
+        )
+        # Note: ResourcePolicy currently puts extra conditions into self._env_conditions.
+        # We need to make sure evaluator.py correctly picks up 'is_manager'.
+        
+        evaluator.load_policies([policy])
+        
+        # Test 1: Subject is the manager (eval_context user is jlara@trocglobal.com)
+        r1 = evaluator.check_access(
+            eval_context, ResourceType.CARD, "subordinate_card", "card:view",
+            owner_reports_to="jlara@trocglobal.com"
+        )
+        assert r1.allowed is True
+        assert r1.matched_policy == "manager_card_access"
+        
+        # Test 2: Subject is NOT the manager
+        r2 = evaluator.check_access(
+            eval_context, ResourceType.CARD, "other_card", "card:view",
+            owner_reports_to="someone_else"
+        )
+        assert r2.allowed is False
+
+    def test_time_and_day_range_rule(self, evaluator, eval_context):
+        """Test the requested rule: jlara only between 9-24, Mon-Sat."""
+        policy = ResourcePolicy(
+            name="jlara_limited_access",
+            effect=PolicyEffect.ALLOW,
+            resources=["*"],
+            actions=["uri:read"],
+            subjects={"users": ["jlara@trocglobal.com"]},
+            environment={
+                "hour": {"min": 9, "max": 24},
+                "dow": [0, 1, 2, 3, 4, 5] # Mon-Sat
+            },
+            priority=100
+        )
+        evaluator.load_policies([policy])
+        
+        # Test 1: jlara at 10 AM on Monday (Allowed)
+        env1 = Environment(hour=10, day_of_week=0)
+        r1 = evaluator.check_access(eval_context, ResourceType.URI, "/resource", "uri:read", env=env1)
+        assert r1.allowed is True
+        
+        # Test 2: jlara at 8 AM on Monday (Denied - too early)
+        env2 = Environment(hour=8, day_of_week=0)
+        r2 = evaluator.check_access(eval_context, ResourceType.URI, "/resource", "uri:read", env=env2)
+        assert r2.allowed is False
+        
+        # Test 3: jlara at 10 AM on Sunday (Denied - wrong day)
+        env3 = Environment(hour=10, day_of_week=6) # Sunday=6
+        r3 = evaluator.check_access(eval_context, ResourceType.URI, "/resource", "uri:read", env=env3)
+        assert r3.allowed is False
+        
+        # Test 4: someone else at 10 AM on Monday (Denied - wrong user)
+        # We need a context with different user
+        other_info = {"username": "other@example.com", "groups": []}
+        other_ctx = EvalContext(MagicMock(), MagicMock(), other_info, None)
+        r4 = evaluator.check_access(other_ctx, ResourceType.URI, "/resource", "uri:read", env=env1)
+        assert r4.allowed is False
