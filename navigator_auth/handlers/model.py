@@ -35,13 +35,15 @@ class ModelHandler(BaseView):
 
     def get_authmodel(self, model: str):
         try:
+            if "." not in model:
+                return self.model
             parts = model.split(".")
             name = parts[-1]
             classpath = ".".join(parts[:-1])
             module = importlib.import_module(classpath, package=name)
             obj = getattr(module, name)
             return obj
-        except ImportError:
+        except (ImportError, ValueError, AttributeError):
             ## Using fallback Model
             return self.model
 

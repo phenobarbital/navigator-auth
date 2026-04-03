@@ -3,7 +3,7 @@ import asyncio
 from aiohttp import web
 from navconfig.logging import logger
 from navigator_session import SessionData
-from navigator_auth.conf import AUTH_SESSION_OBJECT
+from navigator_auth.conf import AUTH_SESSION_OBJECT, ABAC_RELOAD_INTERVAL
 from .policies import (
     Resource,
     RequestResource,
@@ -16,7 +16,7 @@ from .policies import (
     Environment
 )
 from .policies.adapter import PolicyAdapter
-from .policies.evaluator import PolicyEvaluator
+from .policies.evaluator import PolicyEvaluator, PolicyIndex
 from .policies.resources import ResourceType
 from .errors import PreconditionFailed, AccessDenied
 from .context import EvalContext
@@ -54,6 +54,7 @@ class PDP:
         self.logger = logger
         self._auditlog = AuditLog()
         self._evaluator: PolicyEvaluator = PolicyEvaluator()
+        self._reload_task: Optional[asyncio.Task] = None
 
     @property
     def evaluator(self) -> PolicyEvaluator:
@@ -108,18 +109,75 @@ class PDP:
         """
         # Call the _load_policies function
         await self._load_policies()
+        # Register evaluator for handler-level access
+        app['policy_evaluator'] = self._evaluator
 
     async def on_shutdown(self, app: web.Application):
+        if self._reload_task:
+            self._reload_task.cancel()
+            with asyncio.suppress(asyncio.CancelledError):
+                await self._reload_task
         await self.storage.close()
         if self.yaml_storage is not None:
             await self.yaml_storage.close()
 
-    async def reload_policies(self):
-        # Clear the current list of policies
-        self._policies = []
+    async def reload_policies(self) -> int:
+        """Hot-reload policies from DB/YAML without restart."""
+        policy_dicts = []
 
-        # Call the _load_policies function
-        await self._load_policies()
+        # Re-load from DB
+        try:
+            db_policies = await self.storage.load_policies()
+            if db_policies:
+                policy_dicts.extend(db_policies)
+        except Exception as exc:
+            self.logger.error(f'Reload: Error loading from DB: {exc}')
+
+        # Re-load from YAML
+        if self.yaml_storage is not None:
+            try:
+                yaml_policies = await self.yaml_storage.load_policies()
+                if yaml_policies:
+                    policy_dicts.extend(yaml_policies)
+            except Exception as exc:
+                self.logger.error(f'Reload: Error loading from YAML: {exc}')
+
+        # Convert and swap
+        resource_policies, warnings = PolicyAdapter.adapt_batch(policy_dicts)
+        for w in warnings:
+            self.logger.warning(f"Reload warning: {w}")
+
+        # Build new index
+        new_index = PolicyIndex()
+        for p in resource_policies:
+            new_index.add(p)
+
+        # Serialize for Rust
+        new_json = self._evaluator._serialize_policies_from_index(new_index)
+
+        # Atomic swap
+        self._evaluator.swap_index(new_index, new_json)
+
+        # Update local list for compatibility
+        self._policies = resource_policies
+
+        self.logger.info(f"Hot-reloaded {len(resource_policies)} policies")
+        return len(resource_policies)
+
+    async def _periodic_reload(self):
+        """Background task for periodic policy reload."""
+        if ABAC_RELOAD_INTERVAL <= 0:
+            return
+
+        self.logger.info(f"Starting periodic ABAC reload (interval: {ABAC_RELOAD_INTERVAL}s)")
+        while True:
+            try:
+                await asyncio.sleep(ABAC_RELOAD_INTERVAL)
+                await self.reload_policies()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                self.logger.error(f"Error during periodic policy reload: {exc}")
 
     def setup(self, app: web.Application):
         if isinstance(app, web.Application):
@@ -142,14 +200,19 @@ class PDP:
         self.app.on_shutdown.append(
             self.on_shutdown
         )
+
+        # Start periodic reload if configured
+        if ABAC_RELOAD_INTERVAL > 0:
+            self._reload_task = asyncio.create_task(self._periodic_reload())
+
         # the backend add a middleware to the app
         mdl = self.app.middlewares
         # add the middleware for this backend Authentication
         mdl.append(abac_middleware)
         ### create the API endpoint for this ABAC
         pep = PEP()
-        self.app.router.add_get(
-            "/api/v1/abac/reload", pep.reload
+        self.app.router.add_post(
+            "/api/v1/abac/reload", PolicyHandler.reload
         )
         self.app.router.add_post(
             "/api/v1/abac/authorize", pep.authorize

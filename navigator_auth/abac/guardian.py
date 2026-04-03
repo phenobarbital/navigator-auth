@@ -33,7 +33,7 @@ class Guardian:
         try:
             session = await get_session(request, new=False)
         except RuntimeError as ex:
-            self._logger.error('NAV User Session system is not installed.')
+            logger.error('NAV User Session system is not installed.')
             raise PreconditionFailed(
                 reason="Missing User session for validating Access.",
                 exception=ex
@@ -43,7 +43,7 @@ class Guardian:
         except KeyError:
             user = None
         except AttributeError as ex:
-            self._logger.error(
+            logger.error(
                 f"User is not authenticated: {ex}"
             )
             user = None

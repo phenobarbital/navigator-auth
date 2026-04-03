@@ -15,8 +15,10 @@ from functools import lru_cache
 from collections import defaultdict
 import hashlib
 import time
+import json
 import yaml
 import logging
+from navigator_auth_pep import evaluate_single, filter_resources_batch
 
 from navigator_auth.abac.context import EvalContext
 from navigator_auth.abac.policies.environment import Environment
@@ -193,6 +195,7 @@ class PolicyEvaluator:
         self._cache_size = cache_size
         self._cache_ttl = cache_ttl_seconds
         self._cache: Dict[str, Tuple[EvaluationResult, float]] = {}
+        self._policies_json: str = "[]"
         self._stats = {
             'evaluations': 0,
             'cache_hits': 0,
@@ -203,7 +206,60 @@ class PolicyEvaluator:
         """Load policies into evaluator."""
         for policy in policies:
             self._index.add(policy)
+        self._rebuild_json_cache()
         logger.info(f"Loaded {len(policies)} policies")
+
+    def _rebuild_json_cache(self) -> None:
+        """Serialize all policies to JSON for Rust engine."""
+        self._policies_json = self._serialize_policies_from_index(self._index)
+
+    def _serialize_policies_from_index(self, index: PolicyIndex) -> str:
+        """Serialize all policies in an index to JSON for Rust engine."""
+        policies_data = []
+        for policy in index.all():
+            policies_data.append({
+                "name": policy.name,
+                "effect": "allow" if policy.effect == PolicyEffect.ALLOW else "deny",
+                "resources": [f"{p.resource_type.value if hasattr(p.resource_type, 'value') else p.resource_type}:{p.pattern}"
+                              for p in policy._resource_patterns],
+                "actions": list(policy._actions),
+                "subjects": {
+                    "groups": list(policy._subjects.groups),
+                    "users": list(policy._subjects.users),
+                    "roles": list(policy._subjects.roles),
+                    "exclude_groups": list(policy._subjects.exclude_groups),
+                    "exclude_users": list(policy._subjects.exclude_users),
+                },
+                "conditions": {"environment": policy._env_conditions},
+                "priority": policy.priority,
+                "enforcing": policy.enforcing,
+            })
+        return json.dumps(policies_data)
+
+    def swap_index(self, new_index: PolicyIndex, new_json: str) -> None:
+        """Atomically swap policy index and clear cache."""
+        self._index = new_index
+        self._policies_json = new_json
+        self._cache.clear()
+        self._stats['cache_hits'] = 0
+        self._stats['cache_misses'] = 0
+        logger.info(f"Policy index swapped successfully ({len(new_index.all())} policies)")
+
+    def _build_user_context(self, ctx: EvalContext) -> dict:
+        return {
+            "username": ctx.userinfo.get("username", "anonymous") if ctx.userinfo else "anonymous",
+            "groups": list(ctx.userinfo.get("groups", [])) if ctx.userinfo else [],
+            "roles": list(ctx.userinfo.get("roles", [])) if ctx.userinfo else [],
+        }
+
+    def _build_env_dict(self, env: Environment) -> dict:
+        return {
+            "hour": env.hour,
+            "dow": env.dow,
+            "is_business_hours": env.is_business_hours,
+            "is_weekend": env.is_weekend,
+            "day_segment": env.day_segment.value if hasattr(env.day_segment, 'value') else str(env.day_segment),
+        }
 
     def load_from_file(self, path: Path) -> None:
         """Load policies from YAML file."""
@@ -275,24 +331,14 @@ class PolicyEvaluator:
         Check if access is allowed for the given resource and action.
 
         This is the main entry point for permission checks.
-
-        Args:
-            ctx: Evaluation context with user info
-            resource_type: Type of resource (TOOL, KB, VECTOR, etc.)
-            resource_name: Specific resource name
-            action: Action being attempted
-            env: Optional environment (defaults to current time)
-
-        Returns:
-            EvaluationResult with allowed status and metadata
         """
         start_time = time.perf_counter()
         self._stats['evaluations'] += 1
 
         # Get user info for cache key
         try:
-            user_id = ctx.userinfo.get('username', ctx.userinfo.get('user_id', 'anonymous'))
-            user_groups = set(ctx.userinfo.get('groups', []))
+            user_id = ctx.userinfo.get('username', ctx.userinfo.get('user_id', 'anonymous')) if ctx.userinfo else 'anonymous'
+            user_groups = set(ctx.userinfo.get('groups', [])) if ctx.userinfo else set()
         except (AttributeError, TypeError):
             user_id = 'anonymous'
             user_groups = set()
@@ -307,8 +353,30 @@ class PolicyEvaluator:
         if env is None:
             env = Environment()
 
-        # Evaluate policies
-        result = self._evaluate_policies(ctx, env, resource_type, resource_name, action)
+        # Build context for Rust
+        user_ctx = self._build_user_context(ctx)
+        user_ctx["action"] = action
+        env_dict = self._build_env_dict(env)
+
+        # Evaluate via Rust
+        try:
+            result_dict = evaluate_single(
+                self._policies_json,
+                f"{resource_type.value if hasattr(resource_type, 'value') else resource_type}:{resource_name}",
+                action,
+                user_ctx,
+                env_dict,
+            )
+
+            result = EvaluationResult(
+                allowed=result_dict["allowed"],
+                effect=PolicyEffect.ALLOW if result_dict["allowed"] else PolicyEffect.DENY,
+                matched_policy=result_dict.get("matched_policy"),
+                reason=result_dict.get("reason", ""),
+            )
+        except Exception as e:
+            logger.error(f"Rust evaluation failed, falling back to Python: {e}")
+            result = self._evaluate_policies(ctx, env, resource_type, resource_name, action)
 
         # Record timing
         result.evaluation_time_ms = (time.perf_counter() - start_time) * 1000
@@ -442,32 +510,48 @@ class PolicyEvaluator:
         """
         Filter a list of resources by user permissions.
 
-        Efficient batch evaluation for filtering tools, KBs, etc.
-
-        Args:
-            ctx: Evaluation context
-            resource_type: Type of all resources
-            resource_names: List of resource names to filter
-            action: Action being attempted
-            env: Optional environment
-
-        Returns:
-            FilteredResources with allowed/denied lists
+        Efficient batch evaluation via Rust.
         """
-        result = FilteredResources()
-        policies_used = set()
+        if env is None:
+            env = Environment()
 
-        for name in resource_names:
-            eval_result = self.check_access(ctx, resource_type, name, action, env)
-            if eval_result.allowed:
-                result.allowed.append(name)
-            else:
-                result.denied.append(name)
-            if eval_result.matched_policy:
-                policies_used.add(eval_result.matched_policy)
+        # Build context for Rust
+        user_ctx = self._build_user_context(ctx)
+        user_ctx["action"] = action
+        env_dict = self._build_env_dict(env)
 
-        result.policies_applied = list(policies_used)
-        return result
+        # Format resources for Rust: "type:name"
+        rtype_prefix = f"{resource_type.value if hasattr(resource_type, 'value') else resource_type}:"
+        rust_resources = [f"{rtype_prefix}{name}" for name in resource_names]
+
+        try:
+            res_dict = filter_resources_batch(
+                self._policies_json,
+                rust_resources,
+                user_ctx,
+                env_dict
+            )
+
+            # Strip type prefix from results
+            prefix_len = len(rtype_prefix)
+            allowed = [r[prefix_len:] for r in res_dict.get('allowed', [])]
+            denied = [r[prefix_len:] for r in res_dict.get('denied', [])]
+
+            return FilteredResources(
+                allowed=allowed,
+                denied=denied
+            )
+        except Exception as e:
+            logger.error(f"Rust batch filter failed, falling back to Python: {e}")
+            # Fallback to serial Python evaluation (using cache)
+            result = FilteredResources()
+            for name in resource_names:
+                eval_result = self.check_access(ctx, resource_type, name, action, env)
+                if eval_result.allowed:
+                    result.allowed.append(name)
+                else:
+                    result.denied.append(name)
+            return result
 
     def get_stats(self) -> Dict[str, Any]:
         """Get evaluation statistics."""

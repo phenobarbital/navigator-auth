@@ -428,6 +428,9 @@ POLICY_STORAGE_DIR = config.get(
     fallback=str(BASE_DIR / "env" / "policies") if hasattr(BASE_DIR, '__truediv__') else None
 )
 
+# ABAC Hot-Reload Interval (seconds). Default: 0 (disabled).
+ABAC_RELOAD_INTERVAL = config.getint("ABAC_RELOAD_INTERVAL", fallback=0)
+
 ## Oauth Provider:
 OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS = config.getint(
     "OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS", fallback=4
