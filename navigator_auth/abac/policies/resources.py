@@ -20,6 +20,7 @@ class ResourceType(Enum):
     AGENT = "agent"
     MCP = "mcp"
     URI = "uri"
+    DATASET = "dataset"
 
 
 class ActionType(Enum):
@@ -43,6 +44,11 @@ class ActionType(Enum):
     AGENT_CHAT = "agent:chat"
     AGENT_QUERY = "agent:query"
     AGENT_CONFIGURE = "agent:configure"
+
+    # Dataset actions
+    DATASET_READ = "dataset:read"
+    DATASET_WRITE = "dataset:write"
+    DATASET_DELETE = "dataset:delete"
 
 
 @dataclass(frozen=True, slots=True)
