@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 from collections.abc import Callable
 from aiohttp import web
 from navigator.views import BaseHandler
@@ -8,6 +8,9 @@ from .errors import PreconditionFailed, AccessDenied
 from .policies import PolicyEffect, Environment
 from .context import EvalContext
 from .decorators import groups_protected
+from .policies.resources import ResourceType
+if TYPE_CHECKING:
+    from .policies.evaluator import FilteredResources
 
 class Guardian:
     """Guardian.
@@ -30,7 +33,7 @@ class Guardian:
         try:
             session = await get_session(request, new=False)
         except RuntimeError as ex:
-            self._logger.error('NAV User Session system is not installed.')
+            logger.error('NAV User Session system is not installed.')
             raise PreconditionFailed(
                 reason="Missing User session for validating Access.",
                 exception=ex
@@ -40,7 +43,7 @@ class Guardian:
         except KeyError:
             user = None
         except AttributeError as ex:
-            self._logger.error(
+            logger.error(
                 f"User is not authenticated: {ex}"
             )
             user = None
@@ -151,6 +154,68 @@ class Guardian:
             session=session,
             user=user,
             **kwargs
+        )
+
+    async def filter_resources(
+        self,
+        resources: List[str],
+        request: web.Request,
+        resource_type: ResourceType = ResourceType.TOOL,
+        action: str = "tool:execute",
+    ) -> "FilteredResources":
+        """Filter resources by PBAC policies for the authenticated user.
+
+        Follows the same pattern as filter_files(): extracts session,
+        builds EvalContext, delegates to PolicyEvaluator.filter_resources().
+
+        Args:
+            resources: List of resource name strings to filter.
+            request: The current aiohttp web request (must be authenticated).
+            resource_type: The type of resource being filtered (e.g., TOOL, DATASET).
+            action: The action being requested (e.g., "tool:execute").
+
+        Returns:
+            FilteredResources with .allowed and .denied lists.
+
+        Raises:
+            AccessDenied: If the user is not authenticated.
+            PreconditionFailed: If the session system is unavailable.
+        """
+        from .policies.evaluator import PolicyEvaluator, FilteredResources
+
+        self.is_authenticated(request=request)
+        session, user = await self.get_user(request)
+
+        # Extract evaluator from PDP
+        evaluator = getattr(self.pdp, '_evaluator', None)
+        if evaluator is None or not isinstance(evaluator, PolicyEvaluator):
+            # No PolicyEvaluator configured — allow all resources
+            return FilteredResources(allowed=list(resources), denied=[])
+
+        # Extract userinfo from session
+        try:
+            from navigator_auth.conf import AUTH_SESSION_OBJECT
+            userinfo = session[AUTH_SESSION_OBJECT]
+        except (KeyError, TypeError):
+            userinfo = {}
+
+        env = Environment()
+
+        # Build a lightweight EvalContext
+        ctx = EvalContext.__new__(EvalContext)
+        ctx.store = {}
+        ctx.store['request'] = request
+        ctx.store['user'] = user
+        ctx.store['userinfo'] = userinfo if isinstance(userinfo, dict) else {}
+        ctx.store['session'] = session
+        ctx._columns = list(ctx.store.keys())
+
+        return evaluator.filter_resources(
+            ctx=ctx,
+            resource_type=resource_type,
+            resource_names=resources,
+            action=action,
+            env=env,
         )
 
     async def filter(

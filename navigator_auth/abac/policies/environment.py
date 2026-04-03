@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as _dt
 import time as _time_mod
 from enum import Enum
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -94,10 +95,10 @@ class Environment(BaseModel):
     """
     time: float = Field(default_factory=_curtime)
     timestamp: _dt.datetime = Field(default_factory=_now)
-    dow: int = 0
-    day_of_week: int = 0
-    hour: int = 0
-    minute: int = 0
+    dow: Optional[int] = None
+    day_of_week: Optional[int] = None
+    hour: Optional[int] = None
+    minute: Optional[int] = None
     date: _dt.date = Field(default_factory=_today)
     day_segment: DaySegment = DaySegment.MORNING
     is_business_hours: bool = False
@@ -107,10 +108,21 @@ class Environment(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     def model_post_init(self, __context) -> None:
-        self.hour = self.timestamp.hour
-        self.minute = self.timestamp.minute
-        self.dow = self.timestamp.weekday()
-        self.day_of_week = self.dow
+        # Resolve hour/minute: use explicit value if provided, else from timestamp
+        if self.hour is None:
+            self.hour = self.timestamp.hour
+        if self.minute is None:
+            self.minute = self.timestamp.minute
+
+        # Resolve day of week: explicit value wins, else from timestamp
+        if self.dow is not None:
+            self.day_of_week = self.dow
+        elif self.day_of_week is not None:
+            self.dow = self.day_of_week
+        else:
+            self.dow = self.timestamp.weekday()
+            self.day_of_week = self.dow
+
         self.date = self.timestamp.date()
         self.is_weekend = self.dow >= 5
         self.day_segment = self._compute_segment()

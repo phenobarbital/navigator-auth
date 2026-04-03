@@ -20,6 +20,9 @@ class ResourceType(Enum):
     AGENT = "agent"
     MCP = "mcp"
     URI = "uri"
+    DATASET = "dataset"
+    WIDGET = "widget"
+    CARD = "card"
 
 
 class ActionType(Enum):
@@ -43,6 +46,17 @@ class ActionType(Enum):
     AGENT_CHAT = "agent:chat"
     AGENT_QUERY = "agent:query"
     AGENT_CONFIGURE = "agent:configure"
+
+    # Dataset actions
+    DATASET_READ = "dataset:read"
+    DATASET_WRITE = "dataset:write"
+    DATASET_DELETE = "dataset:delete"
+
+    # Widget and Card actions
+    WIDGET_VIEW = "widget:view"
+    WIDGET_EDIT = "widget:edit"
+    CARD_VIEW = "card:view"
+    CARD_EDIT = "card:edit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,12 +83,17 @@ class ResourcePattern:
     def from_string(cls, resource_str: str) -> 'ResourcePattern':
         """Parse 'type:pattern' string into ResourcePattern."""
         try:
-            type_str, pattern = resource_str.split(':', 1)
-            try:
-                resource_type = ResourceType(type_str)
-            except ValueError:
-                # Fallback for custom types or if defined as string
-                resource_type = type_str
+            if ':' in resource_str:
+                type_str, pattern = resource_str.split(':', 1)
+                try:
+                    resource_type = ResourceType(type_str)
+                except ValueError:
+                    # Fallback for custom types or if defined as string
+                    resource_type = type_str
+            else:
+                # Default to wildcard type if no colon present
+                resource_type = "*"
+                pattern = resource_str
             return cls(resource_type=resource_type, pattern=pattern)
         except (ValueError, KeyError) as e:
             raise ValueError(f"Invalid resource pattern: {resource_str}") from e

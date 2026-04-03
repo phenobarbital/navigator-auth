@@ -145,3 +145,6 @@ navigator_auth/exceptions.c
 uv.lock
 navigator-auth.code-workspace
 templates/.compiled
+
+# Git worktrees
+.claude/worktrees/

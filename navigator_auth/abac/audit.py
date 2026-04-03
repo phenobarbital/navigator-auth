@@ -44,7 +44,14 @@ class AuditLog:
 
     def __init__(self):
         self.host = socket.gethostbyname(socket.gethostname())
-        self._backend = AUDIT_BACKEND if ENABLE_AUDIT_LOG else "log"
+        if ENABLE_AUDIT_LOG:
+            # Automatic fallback for non-production environments to avoid noise
+            if ENVIRONMENT in ('development', 'testing') and AUDIT_BACKEND == 'influx':
+                self._backend = "log"
+            else:
+                self._backend = AUDIT_BACKEND
+        else:
+            self._backend = "log"
 
         if self._backend == "log":
             return
