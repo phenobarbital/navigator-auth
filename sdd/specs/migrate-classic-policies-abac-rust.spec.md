@@ -3,7 +3,7 @@
 **Feature ID**: FEAT-002
 **Date**: 2026-04-03
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 1.1.0
 
 ---
@@ -488,18 +488,18 @@ def sample_environment():
 
 ## 7. Open Questions
 
-- [ ] Should the periodic DB reload use a simple polling interval (e.g., every 60s) or
+- [x] Should the periodic DB reload use a simple polling interval (e.g., every 60s) or
   a smarter mechanism (version counter in DB)? Polling is simpler but adds DB load.
-  — *Owner: Jesus Lara*
-- [ ] How should unconvertible context conditions (`ctx.session.custom_field`) be handled?
+  — *Owner: Jesus Lara*: Polling interval every 60 seconds.
+- [x] How should unconvertible context conditions (`ctx.session.custom_field`) be handled?
   Current plan: drop with warning. Alternative: Python post-filter after Rust evaluation.
+  — *Owner: Jesus Lara*: python post-filter after rust evaluation.
+- [x] Should `FilePolicy.filter_files()` also route through Rust, or remain Python-only
+  since it involves filesystem I/O anyway?: remain python-only.
   — *Owner: Jesus Lara*
-- [ ] Should `FilePolicy.filter_files()` also route through Rust, or remain Python-only
-  since it involves filesystem I/O anyway?
-  — *Owner: Jesus Lara*
-- [ ] What regex syntax boundary to document? Rust's `regex` crate supports most Perl-style
+- [x] What regex syntax boundary to document? Rust's `regex` crate supports most Perl-style
   syntax except backreferences and lookaheads. This should be documented for policy authors.
-  — *Owner: Jesus Lara*
+  — *Owner: Jesus Lara*: Rust's regex with clear documentation.
 
 ---
 
