@@ -1,0 +1,24 @@
+version: "1.0"
+policies:
+  - name: "allow_by_yaml"
+    effect: "allow"
+    policy_type: "resource"
+    resources: 
+      - "tool:yaml_tool"
+    actions: 
+      - "tool:execute"
+    subjects:
+      groups: ["*"]
+    priority: 100
+
+  - name: "deny_by_yaml"
+    effect: "deny"
+    policy_type: "resource"
+    resources:
+      - "uri:/api/v1/forbidden/*"
+    actions:
+      - "uri:read"
+    subjects:
+      groups: ["*"]
+    priority: 200
+    enforcing: true

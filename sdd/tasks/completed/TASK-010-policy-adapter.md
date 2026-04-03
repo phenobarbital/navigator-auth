@@ -2,11 +2,11 @@
 
 **Feature**: migrate-classic-policies-abac-rust
 **Spec**: `sdd/specs/migrate-classic-policies-abac-rust.spec.md`
-**Status**: pending
+**Status**: in-progress
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: none
-**Assigned-to**: unassigned
+**Assigned-to**: session-python-task
 
 ---
 
@@ -224,10 +224,8 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: session-python-task
+**Date**: 2026-04-03
+**Notes**: Implemented `PolicyAdapter` in `navigator_auth/abac/policies/adapter.py`. The adapter handles conversion of classic Policy, FilePolicy, and ObjectPolicy dicts into the unified `ResourcePolicy` model. It also handles URN conversion, negated resources (creating separate DENY policies), and HTTP method mapping. Unit tests implemented in `tests/test_policy_adapter.py` cover all conversion paths.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

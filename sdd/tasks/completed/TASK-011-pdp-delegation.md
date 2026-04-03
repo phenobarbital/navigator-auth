@@ -2,11 +2,11 @@
 
 **Feature**: migrate-classic-policies-abac-rust
 **Spec**: `sdd/specs/migrate-classic-policies-abac-rust.spec.md`
-**Status**: pending
+**Status**: in-progress
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-009, TASK-010
-**Assigned-to**: unassigned
+**Assigned-to**: session-pdp-task
 
 ---
 
@@ -195,10 +195,14 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: session-pdp-task
+**Date**: 2026-04-03
+**Notes**: Rewired `PDP` to delegate all authorization decisions to `PolicyEvaluator`.
+- Modified `_load_policy_dicts` to use `PolicyAdapter.adapt_batch`.
+- Added `self._evaluator` and `evaluator` property.
+- Updated `authorize` and `is_allowed` to use `self._evaluator.check_access`.
+- Preserved backward compatibility with `PolicyResponse` and exception handling (`AccessDenied`, `PreconditionFailed`).
+- Integration tests implemented in `tests/test_pdp_delegation.py` pass.
+- Existing policy tests also pass.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

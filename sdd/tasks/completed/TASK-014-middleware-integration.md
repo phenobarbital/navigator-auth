@@ -2,11 +2,11 @@
 
 **Feature**: migrate-classic-policies-abac-rust
 **Spec**: `sdd/specs/migrate-classic-policies-abac-rust.spec.md`
-**Status**: pending
+**Status**: in-progress
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-011
-**Assigned-to**: unassigned
+**Assigned-to**: session-middleware-task
 
 ---
 
@@ -135,10 +135,13 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: session-middleware-task
+**Date**: 2026-04-03
+**Notes**: Integrated `PolicyEvaluator` into the aiohttp middleware flow.
+- Added `app['policy_evaluator'] = self._evaluator` in `PDP.on_startup` to make the evaluator accessible to all handlers.
+- Fixed a bug in `Guardian.get_user` where `self._logger` was used instead of the module-level `logger`.
+- Fixed a bug in `navigator_auth/abac/errors.py` where the deprecated `body` argument was used in `web.HTTPError` subclasses, causing test failures in strict mode.
+- Verified that handlers can successfully access `policy_evaluator` and perform `check_access` and `filter_resources` calls.
+- Verified that the main middleware authorization flow works end-to-end.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: Also fixed a few unrelated bugs in `guardian.py` and `errors.py` that were blocking integration tests.

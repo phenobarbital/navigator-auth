@@ -2,11 +2,11 @@
 
 **Feature**: migrate-classic-policies-abac-rust
 **Spec**: `sdd/specs/migrate-classic-policies-abac-rust.spec.md`
-**Status**: pending
+**Status**: in-progress
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
-**Assigned-to**: unassigned
+**Assigned-to**: session-rust-task
 
 ---
 
@@ -202,10 +202,8 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: session-rust-task
+**Date**: 2026-04-03
+**Notes**: Implemented regex support in Rust matching engine and added `evaluate_single` PyO3 function. Added regex crate to dependencies. All Rust and Python verification tests passed.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

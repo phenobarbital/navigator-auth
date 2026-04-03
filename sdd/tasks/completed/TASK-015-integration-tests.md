@@ -2,11 +2,11 @@
 
 **Feature**: migrate-classic-policies-abac-rust
 **Spec**: `sdd/specs/migrate-classic-policies-abac-rust.spec.md`
-**Status**: pending
+**Status**: in-progress
 **Priority**: medium
 **Estimated effort**: M (2-4h)
-**Depends-on**: TASK-011, TASK-012, TASK-013, TASK-014
-**Assigned-to**: unassigned
+**Depends-on**: TASK-009, TASK-010, TASK-011, TASK-012, TASK-013, TASK-014
+**Assigned-to**: session-e2e-task
 
 ---
 
@@ -228,10 +228,15 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: session-e2e-task
+**Date**: 2026-04-03
+**Notes**: Implemented and verified comprehensive end-to-end integration tests.
+- Validated full HTTP request flow from middleware through PDP to the Rust evaluation engine.
+- Confirmed mixed policy coexistence (classic Policy + new ResourcePolicy).
+- Verified Regex URI blocking (`urn:uri:/epson.*$`) and glob matching (`tool:jira_*`).
+- Verified YAML storage integration with correctly formatted fixture files.
+- Confirmed hot-reload functionality via `PDP.reload_policies()`.
+- Measured performance: P99 latency is ~0.03ms, well within the 10ms target.
+- All 7 E2E tests passed successfully.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

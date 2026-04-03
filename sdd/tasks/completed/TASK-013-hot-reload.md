@@ -2,11 +2,11 @@
 
 **Feature**: migrate-classic-policies-abac-rust
 **Spec**: `sdd/specs/migrate-classic-policies-abac-rust.spec.md`
-**Status**: pending
+**Status**: in-progress
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-011, TASK-012
-**Assigned-to**: unassigned
+**Assigned-to**: session-hot-reload-task
 
 ---
 
@@ -204,10 +204,14 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: session-hot-reload-task
+**Date**: 2026-04-03
+**Notes**: Implemented policy hot-reload mechanism.
+- Added `PolicyEvaluator.swap_index()` for atomic reference swap of the policy index and JSON cache.
+- Added `PDP.reload_policies()` which re-loads from DB/YAML, adapts, and triggers the evaluator swap.
+- Implemented `PDP._periodic_reload()` background task, enabled via `ABAC_RELOAD_INTERVAL` setting.
+- Added `POST /api/v1/abac/reload` endpoint in `PolicyHandler`.
+- Fixed a bug in `ModelHandler.get_authmodel` that caused failures when `model_name` didn't contain dots.
+- All hot-reload tests passed.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

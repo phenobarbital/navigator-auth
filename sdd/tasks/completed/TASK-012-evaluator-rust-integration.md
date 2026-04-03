@@ -2,11 +2,11 @@
 
 **Feature**: migrate-classic-policies-abac-rust
 **Spec**: `sdd/specs/migrate-classic-policies-abac-rust.spec.md`
-**Status**: pending
+**Status**: in-progress
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-009
-**Assigned-to**: unassigned
+**Assigned-to**: session-rust-integration-task
 
 ---
 
@@ -245,10 +245,14 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: session-rust-integration-task
+**Date**: 2026-04-03
+**Notes**: Integrated Rust engine into `PolicyEvaluator`. 
+- Added `_policies_json` cache rebuilt on policy load.
+- Updated `check_access` to delegate to Rust `evaluate_single` on cache miss.
+- Updated `filter_resources` to delegate to Rust `filter_resources_batch`.
+- Implemented robust fallback to Python evaluation if Rust fails or raises exceptions.
+- Added comprehensive tests in `tests/test_evaluator_rust.py` covering allowed/denied, batch filtering, and regex support.
+- All tests pass, including existing policy evaluation tests.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: Added explicit type checking for resource type in `_rebuild_json_cache` to handle both Enums and strings gracefully.
