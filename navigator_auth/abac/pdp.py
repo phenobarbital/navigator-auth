@@ -12,8 +12,12 @@ from .policies import (
     ObjectPolicy,
     FilePolicy,
     PolicyEffect,
+    PolicyResponse,
     Environment
 )
+from .policies.adapter import PolicyAdapter
+from .policies.evaluator import PolicyEvaluator
+from .policies.resources import ResourceType
 from .errors import PreconditionFailed, AccessDenied
 from .context import EvalContext
 from .guardian import Guardian, PEP
@@ -49,6 +53,11 @@ class PDP:
         self.yaml_storage = yaml_storage
         self.logger = logger
         self._auditlog = AuditLog()
+        self._evaluator: PolicyEvaluator = PolicyEvaluator()
+
+    @property
+    def evaluator(self) -> PolicyEvaluator:
+        return self._evaluator
 
     def policies(self):
         return self._policies
@@ -81,35 +90,17 @@ class PDP:
         self._policies.sort(key=lambda policy: policy.priority)
 
     def _load_policy_dicts(self, policies: list):
-        """Convert policy dicts from storage into Policy objects."""
-        for policy in policies:
-            try:
-                policy = dict(policy)  # copy to avoid mutating storage data
-                try:
-                    policy_type = policy.pop('policy_type')
-                except KeyError:
-                    policy_type = 'policy'
-                if policy['effect'] == 'ALLOW':
-                    policy['effect'] = PolicyEffect.ALLOW
-                else:
-                    policy['effect'] = PolicyEffect.DENY
-                if policy_type == 'policy':
-                    p = Policy(**policy)
-                elif policy_type == 'file':
-                    p = FilePolicy(**policy)
-                elif policy_type == 'object':
-                    p = ObjectPolicy(**policy)
-                elif policy_type == 'resource':
-                    # ResourcePolicy from YAML — load via evaluator's PolicyLoader
-                    continue  # Handled separately by PolicyEvaluator
-                else:
-                    p = Policy(**policy)
-                self._policies.append(p)
-            except Exception as exc:
-                name = policy.get('name', 'unknown')
-                self.logger.error(
-                    f'Error loading policy "{name}": {exc}'
-                )
+        """Convert all policy dicts and load into evaluator."""
+        resource_policies, warnings = PolicyAdapter.adapt_batch(policies)
+        for w in warnings:
+            self.logger.warning(f"Policy adaptation warning: {w}")
+
+        # Also keep them in self._policies for backward compatibility
+        # (mostly for filter_files which still uses them)
+        self._policies.extend(resource_policies)
+
+        # Load into evaluator
+        self._evaluator.load_policies(resource_policies)
 
 
     async def on_startup(self, app: web.Application):
@@ -193,40 +184,38 @@ class PDP:
     ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
-        except KeyError:
+        except (KeyError, TypeError):
             userinfo = None
         ctx = EvalContext(request, user, userinfo, session)
-        # Get filtered policies based on targets from storage
-        # Filter policies that fit Inquiry by its attributes.
-        filtered = [p for p in self._policies if type(p) == Policy and p.fits(ctx)]
-        self.logger.verbose(f'FILTERED POLICIES > {filtered!r}')
-        # no policies -> deny access!
-        if len(filtered) == 0:
-            raise PreconditionFailed(
-                "No Matching Policies were found, Deny access."
-            )
-        # we have policies - all of them should have allow effect, otherwise -> deny access!
-        answer = False
-        for policy in filtered:
-            self.logger.notice(f'Policy: {policy}')
-            #answer = await policy.allowed(ctx)
-            answer = await asyncio.to_thread(policy.evaluate, ctx, Environment())
-            if policy.enforcing is True:
-                # This policy will be enforced and return is mandatory.
-                await self.auditlog(answer, user)
-                ## return default effect:
-                return answer
-            if answer.effect == effect:
-                await self.auditlog(answer, user)
-                ## return default effect:
-                return answer
-        if answer and answer.effect == PolicyEffect.DENY:
-            ## Audit Log
-            await self.auditlog(answer, user)
-            raise AccessDenied(
-                f"Access Denied: {answer.response}"
-            )
-        return answer
+
+        # Map HTTP method to action
+        action = PolicyAdapter.METHOD_ACTION_MAP.get(request.method, "uri:read")
+
+        # Delegate to evaluator
+        result = self._evaluator.check_access(
+            ctx, ResourceType.URI, request.path, action
+        )
+
+        # auditlog expects an object with effect, response, rule
+        # EvaluationResult has allowed, effect, matched_policy, reason
+        response = PolicyResponse(
+            effect=result.effect,
+            response=result.reason,
+            rule=result.matched_policy or "default",
+            actions=[action]
+        )
+
+        await self.auditlog(response, user)
+
+        if not result.allowed:
+            if result.matched_policy:
+                raise AccessDenied(f"Access Denied: {result.reason}")
+            else:
+                raise PreconditionFailed(
+                    "No Matching Policies were found, Deny access."
+                )
+
+        return response
 
     ## Audit Log
     async def auditlog(self, answer, user):
@@ -312,54 +301,46 @@ class PDP:
     ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
-        except KeyError:
+        except (KeyError, TypeError):
             userinfo = None
         ctx = EvalContext(request, user, userinfo, session)
-        # Get filtered policies based on targets from storage
-        # Filter policies that fit Inquiry by its attributes.
+
         obj = kwargs.get('resource', None)
-        if obj:
-            if isinstance(obj, str):
-                ctx.objects = RequestResource(obj)
-            elif isinstance(obj, list):
-                ctx.objects = [RequestResource(r) for r in obj]
+        action = kwargs.get('action', 'uri:read')
+
+        if not obj:
+            # If no resource specified, we use URI authorization from request
+            return await self.authorize(request, session, user)
+
+        # Extract resource type and name from "type:name" or assume URI
+        if isinstance(obj, str):
+            if ':' in obj:
+                try:
+                    rtype_str, rname = obj.split(':', 1)
+                    rtype = ResourceType(rtype_str)
+                except (ValueError, KeyError):
+                    rtype = ResourceType.URI
+                    rname = obj
             else:
-                raise ValueError(
-                    f"Invalid type for Resource: {obj}:{type(obj)}"
-                )
-            filtered = [
-                p for p in self._policies if isinstance(p, ObjectPolicy) and p.fits(ctx)
-                # p for p in self._policies if p.fits(ctx)
-            ]
+                rtype = ResourceType.URI
+                rname = obj
         else:
-            filtered = [p for p in self._policies if p.fits(ctx)]
-        self.logger.verbose(f'FILTERED ALLOWED POLICIES > {filtered!r}')
-        # no policies -> deny access!
-        if len(filtered) == 0:
-            raise PreconditionFailed(
-                "No Matching Policies were found, Deny access."
-            )
-        # we have policies - all of them should have allow, otherwise -> deny access
-        answer = False
-        for policy in filtered:
-            self.logger.notice(f'Allowed Policy: {policy!r}')
-            answer = await asyncio.to_thread(
-                policy.is_allowed,
-                ctx,
-                Environment(),
-                **kwargs
-            )
-            if policy.enforcing is True:
-                # This policy will be enforced and return is mandatory.
-                await self.auditlog(answer, user)
-                return answer
-            if answer.effect == PolicyEffect.ALLOW:
-                await self.auditlog(answer, user)
-                ## return default effect:
-                return answer
-        ## Audit Log
-        await self.auditlog(answer, user)
-        return answer
+            raise ValueError(f"Invalid type for Resource: {obj}:{type(obj)}")
+
+        # Delegate to evaluator
+        result = self._evaluator.check_access(
+            ctx, rtype, rname, action
+        )
+
+        response = PolicyResponse(
+            effect=result.effect,
+            response=result.reason,
+            rule=result.matched_policy or "default",
+            actions=[action]
+        )
+
+        await self.auditlog(response, user)
+        return response
 
     async def filter_obj(
             self,
