@@ -380,7 +380,11 @@ class PDP:
             if ':' in obj:
                 try:
                     rtype_str, rname = obj.split(':', 1)
-                    rtype = ResourceType(rtype_str)
+                    try:
+                        rtype = ResourceType(rtype_str)
+                    except ValueError:
+                        # Fallback for custom types
+                        rtype = rtype_str
                 except (ValueError, KeyError):
                     rtype = ResourceType.URI
                     rname = obj

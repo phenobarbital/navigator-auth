@@ -21,6 +21,8 @@ class ResourceType(Enum):
     MCP = "mcp"
     URI = "uri"
     DATASET = "dataset"
+    WIDGET = "widget"
+    CARD = "card"
 
 
 class ActionType(Enum):
@@ -49,6 +51,12 @@ class ActionType(Enum):
     DATASET_READ = "dataset:read"
     DATASET_WRITE = "dataset:write"
     DATASET_DELETE = "dataset:delete"
+
+    # Widget and Card actions
+    WIDGET_VIEW = "widget:view"
+    WIDGET_EDIT = "widget:edit"
+    CARD_VIEW = "card:view"
+    CARD_EDIT = "card:edit"
 
 
 @dataclass(frozen=True, slots=True)

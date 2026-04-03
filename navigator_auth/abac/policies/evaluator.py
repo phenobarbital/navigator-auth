@@ -281,7 +281,8 @@ class PolicyEvaluator:
     ) -> str:
         """Generate cache key for evaluation."""
         groups_str = ','.join(sorted(user_groups))
-        key_data = f"{user_id}|{groups_str}|{resource_type.value}|{resource_name}|{action}"
+        rtype_val = resource_type.value if hasattr(resource_type, 'value') else resource_type
+        key_data = f"{user_id}|{groups_str}|{rtype_val}|{resource_name}|{action}"
         return hashlib.md5(key_data.encode()).hexdigest()
 
     def _check_cache(self, cache_key: str) -> Optional[EvaluationResult]:
