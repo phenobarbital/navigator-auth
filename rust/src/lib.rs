@@ -99,7 +99,10 @@ fn matches_pattern(pattern: &str, name: &str, regex_cache: Option<&HashMap<Strin
         || pattern.contains('(')
         || pattern.contains(')')
         || pattern.contains('+')
-        || pattern.contains('{');
+        || pattern.contains('{')
+        || pattern.contains('[')
+        || pattern.contains(']')
+        || pattern.contains('|');
 
     if is_regex {
         if let Some(cache) = regex_cache {
@@ -405,7 +408,10 @@ fn filter_resources_batch(
                     || pname.contains('(')
                     || pname.contains(')')
                     || pname.contains('+')
-                    || pname.contains('{');
+                    || pname.contains('{')
+                    || pname.contains('[')
+                    || pname.contains(']')
+                    || pname.contains('|');
                 if is_regex && !regex_cache.contains_key(pname) {
                     if let Ok(re) = Regex::new(pname) {
                         regex_cache.insert(pname.to_string(), re);
@@ -520,7 +526,10 @@ fn evaluate_single(
                     || pname.contains('(')
                     || pname.contains(')')
                     || pname.contains('+')
-                    || pname.contains('{');
+                    || pname.contains('{')
+                    || pname.contains('[')
+                    || pname.contains(']')
+                    || pname.contains('|');
                 if is_regex && !regex_cache.contains_key(pname) {
                     if let Ok(re) = Regex::new(pname) {
                         regex_cache.insert(pname.to_string(), re);
