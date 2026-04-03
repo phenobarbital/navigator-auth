@@ -16,14 +16,15 @@ import base64
 import secrets
 import warnings
 import pytest
+import pytest_asyncio
 from aiohttp import web
 from aiohttp.test_utils import TestServer, TestClient
 
-# Suppress aiohttp AppKey warnings (raised as errors by pyproject filterwarnings)
+# All tests share one event loop so the server stays alive across tests.
 pytestmark = [
     pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning"),
     pytest.mark.filterwarnings("ignore::DeprecationWarning"),
-    pytest.mark.asyncio,
+    pytest.mark.asyncio(loop_scope="module"),
 ]
 
 
@@ -59,38 +60,37 @@ TEST_EMAIL = "testbasicauth@example.com"
 TEST_FIRST_NAME = "Test"
 TEST_LAST_NAME = "BasicAuth"
 
-# Module-level state shared across tests
-_client: TestClient = None
-_app: web.Application = None
-
 
 # ---------------------------------------------------------------------------
-# Setup / Teardown at module level
+# Fixtures
 # ---------------------------------------------------------------------------
-async def _create_app_and_insert_user() -> TestClient:
-    """Build app, start server, insert test user."""
-    global _client, _app
-
+@pytest_asyncio.fixture(scope="module")
+async def live_app():
+    """
+    Build and start an aiohttp Application with AuthHandler (BasicAuth only).
+    Insert a test user into auth.users, yield the TestClient, then clean up.
+    """
     import navigator_auth.conf as conf
+    original_backends = conf.AUTHENTICATION_BACKENDS
     conf.AUTHENTICATION_BACKENDS = (
         "navigator_auth.backends.BasicAuth",
     )
 
     from navigator_auth import AuthHandler
 
-    _app = web.Application()
+    app = web.Application()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         auth = AuthHandler(secure_cookies=False)
-        auth.setup(_app)
+        auth.setup(app)
 
-    server = TestServer(_app)
-    _client = TestClient(server)
+    server = TestServer(app)
+    client = TestClient(server)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        await _client.start_server()
+        await client.start_server()
 
-    db_pool = _app.get("authdb")
+    db_pool = app.get("authdb")
     assert db_pool is not None, "PostgreSQL pool ('authdb') was not created"
 
     hashed = make_password(TEST_PASSWORD)
@@ -110,66 +110,30 @@ async def _create_app_and_insert_user() -> TestClient:
         )
         """
     )
-    return _client
 
+    yield client
 
-async def _cleanup():
-    """Remove test user and stop server."""
-    global _client, _app
-    if _app:
-        db_pool = _app.get("authdb")
-        if db_pool:
-            try:
-                await db_pool.execute(
-                    f"DELETE FROM auth.users WHERE username = '{TEST_USERNAME}'"
-                )
-            except Exception:
-                pass
-    if _client:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            await _client.close()
-    _client = None
-    _app = None
+    # Teardown
+    try:
+        await db_pool.execute(
+            f"DELETE FROM auth.users WHERE username = '{TEST_USERNAME}'"
+        )
+    except Exception:
+        pass
 
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        await client.close()
 
-async def _get_client() -> TestClient:
-    """Lazily initialize the test client (once per module)."""
-    global _client
-    if _client is None:
-        await _create_app_and_insert_user()
-    return _client
-
-
-@pytest.fixture(autouse=True)
-async def _ensure_server():
-    """Ensure the server is running before each test and clean up at the end."""
-    await _get_client()
-    yield
-    # Don't clean up between tests – cleanup happens at module end
-
-
-def teardown_module(module):
-    """Synchronous teardown hook; schedules async cleanup."""
-    import asyncio
-    if _client is not None:
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(_cleanup())
-            else:
-                loop.run_until_complete(_cleanup())
-        except Exception:
-            pass
+    conf.AUTHENTICATION_BACKENDS = original_backends
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-async def test_successful_login_json():
+async def test_successful_login_json(live_app: TestClient):
     """POST JSON credentials returns 200 with token."""
-    client = await _get_client()
-    resp = await client.post(
+    resp = await live_app.post(
         "/api/v1/login",
         json={"username": TEST_USERNAME, "password": TEST_PASSWORD},
         headers={"X-Auth-Method": "BasicAuth"},
@@ -180,10 +144,9 @@ async def test_successful_login_json():
     assert data.get("username") == TEST_USERNAME
 
 
-async def test_successful_login_form():
+async def test_successful_login_form(live_app: TestClient):
     """POST form-encoded credentials returns 200 with token."""
-    client = await _get_client()
-    resp = await client.post(
+    resp = await live_app.post(
         "/api/v1/login",
         data={"username": TEST_USERNAME, "password": TEST_PASSWORD},
         headers={"X-Auth-Method": "BasicAuth"},
@@ -193,10 +156,9 @@ async def test_successful_login_form():
     assert "token" in data
 
 
-async def test_successful_login_query_params():
+async def test_successful_login_query_params(live_app: TestClient):
     """GET with query-string credentials returns 200 with token."""
-    client = await _get_client()
-    resp = await client.get(
+    resp = await live_app.get(
         "/api/v1/login",
         params={"username": TEST_USERNAME, "password": TEST_PASSWORD},
         headers={"X-Auth-Method": "BasicAuth"},
@@ -206,10 +168,9 @@ async def test_successful_login_query_params():
     assert "token" in data
 
 
-async def test_wrong_password():
+async def test_wrong_password(live_app: TestClient):
     """Wrong password returns 403 (FailedAuth)."""
-    client = await _get_client()
-    resp = await client.post(
+    resp = await live_app.post(
         "/api/v1/login",
         json={"username": TEST_USERNAME, "password": "WrongPassword!"},
         headers={"X-Auth-Method": "BasicAuth"},
@@ -219,10 +180,9 @@ async def test_wrong_password():
     )
 
 
-async def test_nonexistent_user():
+async def test_nonexistent_user(live_app: TestClient):
     """Unknown username returns 401/403."""
-    client = await _get_client()
-    resp = await client.post(
+    resp = await live_app.post(
         "/api/v1/login",
         json={"username": "no_such_user_xyz", "password": "anything"},
         headers={"X-Auth-Method": "BasicAuth"},
@@ -232,10 +192,9 @@ async def test_nonexistent_user():
     )
 
 
-async def test_missing_credentials():
+async def test_missing_credentials(live_app: TestClient):
     """Empty body returns 401 (InvalidAuth: Missing Credentials)."""
-    client = await _get_client()
-    resp = await client.post(
+    resp = await live_app.post(
         "/api/v1/login",
         json={},
         headers={"X-Auth-Method": "BasicAuth"},
@@ -245,10 +204,9 @@ async def test_missing_credentials():
     )
 
 
-async def test_missing_password():
+async def test_missing_password(live_app: TestClient):
     """Username but no password returns 401."""
-    client = await _get_client()
-    resp = await client.post(
+    resp = await live_app.post(
         "/api/v1/login",
         json={"username": TEST_USERNAME},
         headers={"X-Auth-Method": "BasicAuth"},
@@ -258,10 +216,9 @@ async def test_missing_password():
     )
 
 
-async def test_missing_username():
+async def test_missing_username(live_app: TestClient):
     """Password but no username returns 401."""
-    client = await _get_client()
-    resp = await client.post(
+    resp = await live_app.post(
         "/api/v1/login",
         json={"password": TEST_PASSWORD},
         headers={"X-Auth-Method": "BasicAuth"},
