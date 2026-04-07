@@ -26,15 +26,20 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install --system cibuildwheel twine cython setuptools-rust
+          uv pip install --system cibuildwheel twine cython maturin
 
-      - name: Build wheels on Ubuntu
+      - name: Pre-build Rust extension for all Python versions
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cd rust && maturin build --release -o ../dist --universal2 && cd ..
+
+      - name: Build wheels on Ubuntu (Cython only, Rust pre-built)
         if: matrix.os == 'ubuntu-latest'
         env:
           CIBW_ARCHS: x86_64
           CIBW_BUILD: "cp3{10,11,12,13}-*"
           CIBW_SKIP: "*-musllinux_*"
-          CIBW_BEFORE_BUILD: "pip install setuptools-rust cython"
+          CIBW_BEFORE_BUILD: "pip install cython"
         run: |
           cibuildwheel --platform linux --output-dir dist
 
