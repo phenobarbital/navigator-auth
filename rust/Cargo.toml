@@ -8,6 +8,9 @@ description = "High-performance PEP batch filter for navigator-auth PBAC"
 name = "navigator_auth_pep"
 crate-type = ["cdylib"]
 
+[package.metadata.maturin]
+module-name = "navigator_auth.navigator_auth_pep"
+
 [dependencies]
 pyo3 = { version = "0.22", features = ["extension-module"] }
 serde = { version = "1.0", features = ["derive"] }
