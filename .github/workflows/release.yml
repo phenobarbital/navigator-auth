@@ -26,7 +26,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install --system cibuildwheel twine cython
+          uv pip install --system cibuildwheel twine cython maturin
+
+      - name: Build Rust extension with maturin
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        run: |
+          cd rust && maturin build --release -o ../dist && cd ..
 
       - name: Build wheels on Ubuntu
         if: matrix.os == 'ubuntu-latest'
@@ -34,6 +39,7 @@ jobs:
           CIBW_ARCHS: x86_64
           CIBW_BUILD: "cp3{10,11,12,13}-*"
           CIBW_SKIP: "*-musllinux_*"
+          CIBW_BEFORE_BUILD: "pip install maturin"
         run: |
           cibuildwheel --platform linux --output-dir dist
 
