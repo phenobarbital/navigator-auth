@@ -31,7 +31,7 @@ jobs:
       - name: Pre-build Rust extension for all Python versions
         if: matrix.os == 'ubuntu-latest'
         run: |
-          cd rust && maturin build --release -o ../dist --universal2 && cd ..
+          cd rust && maturin build --release -o ../dist && cd ..
 
       - name: Build wheels on Ubuntu (Cython only, Rust pre-built)
         if: matrix.os == 'ubuntu-latest'
