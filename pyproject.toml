@@ -71,7 +71,10 @@ Documentation = "https://github.com/phenobarbital/navigator-auth"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["navigator_auth*"]
-exclude = ["tests*", "docs*", "examples*"]
+exclude = ["tests*", "docs*", "examples*", "navigator_auth.rs_pep", "navigator_auth.rs_pep.*"]
+
+[tool.setuptools.exclude-package-data]
+navigator_auth = ["rs_pep/*.toml", "rs_pep/*.lock", "rs_pep/src/*", "rs_pep/src/**"]
 
 [tool.setuptools.dynamic]
 version = {attr = "navigator_auth.version.__version__"}
