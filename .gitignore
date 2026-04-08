@@ -148,3 +148,4 @@ templates/.compiled
 
 # Git worktrees
 .claude/worktrees/
+.worktrees/
