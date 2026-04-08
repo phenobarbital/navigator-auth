@@ -18,7 +18,11 @@ import time
 import json
 import yaml
 import logging
-from navigator_auth.rs_pep import evaluate_single, filter_resources_batch
+try:
+    from rs_pep import evaluate_single, filter_resources_batch
+except ImportError:
+    evaluate_single = None
+    filter_resources_batch = None
 
 from navigator_auth.abac.context import EvalContext
 from navigator_auth.abac.policies.environment import Environment

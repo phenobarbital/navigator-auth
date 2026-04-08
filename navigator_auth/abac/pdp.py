@@ -246,6 +246,9 @@ class PDP:
             userinfo = session[AUTH_SESSION_OBJECT]
         except (KeyError, TypeError):
             userinfo = None
+        # Fallback: use userinfo as user when user object is missing
+        if user is None and isinstance(userinfo, dict) and userinfo:
+            user = userinfo
         ctx = EvalContext(request, user, userinfo, session)
 
         # Map HTTP method to action
@@ -325,6 +328,8 @@ class PDP:
             userinfo = session[AUTH_SESSION_OBJECT]
         except (KeyError, TypeError):
             userinfo = None
+        if user is None and isinstance(userinfo, dict) and userinfo:
+            user = userinfo
         ctx = EvalContext(request, user, userinfo, session)
         # Delegate to the PolicyEvaluator (Rust-backed) for URI filtering.
         # Each file is treated as a URI resource for policy evaluation.
@@ -348,6 +353,8 @@ class PDP:
             userinfo = session[AUTH_SESSION_OBJECT]
         except (KeyError, TypeError):
             userinfo = None
+        if user is None and isinstance(userinfo, dict) and userinfo:
+            user = userinfo
         ctx = EvalContext(request, user, userinfo, session)
 
         obj = kwargs.get('resource', None)
@@ -405,6 +412,8 @@ class PDP:
             userinfo = session[AUTH_SESSION_OBJECT]
         except (KeyError, TypeError):
             userinfo = None
+        if user is None and isinstance(userinfo, dict) and userinfo:
+            user = userinfo
         ctx = EvalContext(request, user, userinfo, session)
         if not isinstance(objects, list):
             objects = [objects]

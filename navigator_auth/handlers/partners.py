@@ -23,7 +23,7 @@ class PartnerKey(Model):
     partner: str = Column(required=True)
     issuer: str = Column(required=True, default='navigator')
     token: str = Column(required=True)
-    created_at: datetime = Column(required=False, default=datetime.now())
+    created_at: datetime = Column(required=False, default=datetime.now)
     revoked: bool = Column(default=False)
     enabled: bool = Column(default=True)
     grants: dict = Column(default_factory=dict)

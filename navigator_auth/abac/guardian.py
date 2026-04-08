@@ -4,6 +4,7 @@ from aiohttp import web
 from navigator.views import BaseHandler
 from navigator_session import get_session
 from navconfig.logging import logger
+from navigator_auth.conf import AUTH_SESSION_OBJECT
 from .errors import PreconditionFailed, AccessDenied
 from .policies import PolicyEffect, Environment
 from .context import EvalContext
@@ -47,6 +48,18 @@ class Guardian:
                 f"User is not authenticated: {ex}"
             )
             user = None
+        # Fallback: extract user info from session object when user is None
+        if user is None:
+            try:
+                userinfo = session[AUTH_SESSION_OBJECT]
+                if isinstance(userinfo, dict) and userinfo:
+                    user = userinfo
+                    logger.debug(
+                        "ABAC: user object not in session, "
+                        "using session userinfo as fallback."
+                    )
+            except (KeyError, TypeError):
+                pass
         return (session, user)
 
     async def authorize(self, request: web.Request):

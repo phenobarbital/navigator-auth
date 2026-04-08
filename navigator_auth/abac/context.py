@@ -18,7 +18,7 @@ class EvalContext(dict, MutableMapping):
         **kwargs
     ):
         ## initialize the mutable mapping:
-        self.store = dict()
+        self.store = {}
         self.store['request'] = request
         self.store['ip_addr'] = request.remote
         self.store['method'] = request.method
@@ -35,8 +35,12 @@ class EvalContext(dict, MutableMapping):
             else:
                 self.store['is_authenticated'] = False
         self.store['user'] = user
-        if isinstance(user, BaseModel):
+        if user is None:
+            self.store['user_keys'] = []
+        elif isinstance(user, BaseModel):
             self.store['user_keys'] = user.get_fields()
+        elif isinstance(user, dict):
+            self.store['user_keys'] = list(user.keys())
         else:
             self.store['user_keys'] = user.__dict__.keys()
         self.store['userinfo'] = userinfo

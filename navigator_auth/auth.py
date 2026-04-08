@@ -326,11 +326,11 @@ class AuthHandler:
             # to request to IDP provisioning service an bearer (jwt)
             # token with expiration of 30 minutes (default)
             user = request.user
-            payload = {"user_id": user.id, "username": user.username, "user": user.id}
+            payload = {"user_id": user.user_id, "username": user.username, "user": user.user_id}
             if session := request.session if hasattr(request, "session") else None:
                 with contextlib.suppress(AttributeError):
                     payload[SESSION_ID] = session.id
-            token, exp, scheme = self._idp.create_ephemeral_token(data=payload)
+            token, _, exp, scheme = self._idp.create_ephemeral_token(data=payload)
             return JSONResponse({"token": token, "expires_in": exp, "token_type": scheme}, status=200)
         except Exception as err:
             raise self.auth_error(reason=f"Error Creating Token: {err}", exception=err) from err
@@ -368,9 +368,15 @@ class AuthHandler:
             # at now: create the user-session
             try:
                 response = JSONResponse(userdata, status=200)
-                await self._session.storage.load_session(request, userdata, response=response)
+                await self._session.storage.load_session(
+                    request,
+                    userdata,
+                    response=response
+                )
             except Exception as err:
-                raise self.Unauthorized(reason=f"Error Creating User Session: {err.message}", exception=err) from err
+                raise self.Unauthorized(
+                    reason=f"Error Creating User Session: {err.message}", exception=err
+                ) from err
             # Load vault for the authenticated session (non-blocking)
             try:
                 session = await get_session(request, new=False)
@@ -387,9 +393,13 @@ class AuthHandler:
                     if refresh_token and redis:
                         try:
                             # 3 months = 90 days = 7776000 seconds
-                            await redis.setex(f"auth:refresh_token:{refresh_token}", 7776000, str(user_id))
+                            await redis.setex(
+                                f"auth:refresh_token:{refresh_token}", 7776000, str(user_id)
+                            )
                         except Exception as e:
-                            self.logger.error(f"Failed to save refresh token to redis: {e}")
+                            self.logger.error(
+                                f"Failed to save refresh token to redis: {e}"
+                            )
 
                     if db_pool:
                         vault = await load_vault_for_session(
@@ -487,17 +497,13 @@ class AuthHandler:
         """
         Get the current User ID from Request
         """
-        data = request.get(self.user_property, None)
-        if data:
+        if data := request.get(self.user_property, None):
             return data
         else:
             raise web.HTTPForbidden(reason="Auth: User Data is missing on Request.")
 
     def setup(self, app: web.Application) -> web.Application:
-        if isinstance(app, web.Application):
-            self.app = app  # register the app into the Extension
-        else:
-            self.app = app.get_app()  # Nav Application
+        self.app = app if isinstance(app, web.Application) else app.get_app()
         ## load the Session System
         # configuring Session Object
         self._session.setup(self.app)
@@ -509,13 +515,17 @@ class AuthHandler:
             redis = RedisStorage(driver="redis", dsn=REDIS_AUTH_URL)
             redis.configure(self.app)  # pylint: disable=E1123
         except RuntimeError as ex:
-            raise web.HTTPServerError(reason=f"Error creating Redis connection: {ex}")
+            raise web.HTTPServerError(
+                reason=f"Error creating Redis connection: {ex}"
+            ) from ex
         ## getting Database Connection:
         try:
             pool = PostgresStorage(driver="pg", dsn=default_dsn)
             pool.configure(self.app)  # pylint: disable=E1123
         except RuntimeError as ex:
-            raise web.HTTPServerError(reason=f"Error creating Database connection: {ex}")
+            raise web.HTTPServerError(
+                reason=f"Error creating Database connection: {ex}"
+            ) from ex
         # startup operations over extension backend
         self.app.on_startup.append(self.auth_startup)
         # cleanup operations over Auth backend
@@ -708,6 +718,21 @@ class AuthHandler:
         Description: Basic Authentication for NoAuth, Basic, Token and Django.
         """
         if await self.verify_exceptions(request):
+            # Still attempt authentication if a token is present,
+            # so downstream middlewares (e.g. ABAC) see authenticated=True.
+            if hdrs.AUTHORIZATION in request.headers:
+                try:
+                    token = await self._idp.get_payload(request)
+                    _, payload = self._idp.decode_token(code=token)
+                    if payload:
+                        session = await get_session(request, payload, new=False)
+                        if session:
+                            user = await self.get_session_user(session)
+                            if user:
+                                request.user = user
+                                request["authenticated"] = True
+                except Exception:
+                    pass  # Best-effort: if token is invalid, proceed unauthenticated
             return await handler(request)
         self.logger.debug(":: AUTH MIDDLEWARE ::")
         try:
@@ -756,21 +781,23 @@ class AuthHandler:
                             except Exception as ex:
                                 self.logger.warning(f"Could not fetch user {uid} for recreated session: {ex}")
 
-                        # 4. Save User object inside session (or fallback to payload if not found)
+                        # 4. Save User object inside session (raise if not found)
                         if not user:
-                            # Fallback to payload
-                            user = payload
-                        else:
-                            try:
-                                await session.save_encoded_data(request, "user", user)
-                                user.is_authenticated = True
-                            except Exception as ex:
-                                self.logger.error(f"Error saving user in new session: {ex}")
+                            raise self.Unauthorized(
+                                reason=f"Unable to resolve user object for '{uid}' from token payload.",
+                            )
+                        try:
+                            await session.save_encoded_data(request, "user", user)
+                            user.is_authenticated = True
+                        except Exception as ex:
+                            self.logger.error(f"Error saving user in new session: {ex}")
 
                         request.user = user
                         request["userdata"] = payload  # Store payload explicitly
                         request["authenticated"] = True
 
+                    except web.HTTPException:
+                        raise
                     except Exception as err:
                         self.logger.error(f"Error creating fallback session: {err}")
                         if AUTH_CREDENTIALS_REQUIRED is True:
@@ -782,18 +809,42 @@ class AuthHandler:
                     # Session exists, just load user
                     try:
                         user = await self.get_session_user(session)
-                        if not user and payload:
-                            # Fallback to payload
-                            user = payload
+                        if not user:
+                            # Try resolving user from payload via IDP
+                            if uid := (
+                                payload.get(self._idp.username_attribute)
+                                or payload.get(self._idp.userid_attribute)
+                                or payload.get("email")
+                            ):
+                                try:
+                                    user = await self._idp.get_user(str(uid))
+                                    await session.save_encoded_data(
+                                        request,
+                                        "user",
+                                        user
+                                    )
+                                    user.is_authenticated = True
+                                except Exception as ex:
+                                    self.logger.warning(
+                                        f"Could not resolve user '{uid}' from payload: {ex}"
+                                    )
+                        if not user:
+                            raise self.Unauthorized(
+                                reason="Unable to resolve user object from session or token payload.",
+                            )
                         request.user = user
                         request["userdata"] = payload  # Store payload explicitly
                         request["authenticated"] = True
+                    except web.HTTPException:
+                        raise
                     except Exception as ex:  # pylint: disable=W0703
                         self.logger.error(f"Missing User Object from Session: {ex}")
             elif self.secure_cookies is True:
                 session = await get_session(request, None, new=False)
                 if not session and AUTH_CREDENTIALS_REQUIRED is True:
-                    raise self.Unauthorized(reason="There is no Session or Authentication is missing")
+                    raise self.Unauthorized(
+                        reason="There is no Session or Authentication is missing"
+                    )
                 # verify if a user is in session:
                 try:
                     user = await self.get_session_user(session)
@@ -809,7 +860,9 @@ class AuthHandler:
                 except Exception as err:
                     self.logger.warning(f"Error checking User in Session: {err}")
                     if AUTH_CREDENTIALS_REQUIRED is True:
-                        raise self.Unauthorized(reason="There is no Session or Authentication is missing") from err
+                        raise self.Unauthorized(
+                            reason="Error checking User in Session"
+                        ) from err
         except AuthException as err:
             logging.error(
                 f"Auth Middleware: Invalid Signature,\
