@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Setup.py for Cython and Rust extension support.
 
-Note: Rust extension (navigator_auth_pep) is built separately with maturin.
+Note: Rust extension (rs_pep) is built separately with maturin.
 See .github/workflows/release.yml for the full build pipeline.
 For local development, install the Rust extension with:
     cd rust && maturin develop --release

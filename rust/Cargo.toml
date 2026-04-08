@@ -1,15 +1,15 @@
 [package]
-name = "navigator_auth_pep"
+name = "rs_pep"
 version = "0.1.0"
 edition = "2021"
 description = "High-performance PEP batch filter for navigator-auth PBAC"
 
 [lib]
-name = "navigator_auth_pep"
+name = "rs_pep"
 crate-type = ["cdylib"]
 
 [package.metadata.maturin]
-module-name = "navigator_auth.navigator_auth_pep"
+module-name = "navigator_auth.rs_pep"
 
 [dependencies]
 pyo3 = { version = "0.22", features = ["extension-module"] }
