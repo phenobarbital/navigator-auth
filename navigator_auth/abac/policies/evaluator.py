@@ -19,10 +19,12 @@ import json
 import yaml
 import logging
 try:
-    from rs_pep import evaluate_single, filter_resources_batch
+    from navigator_auth.rs_pep import evaluate_single, filter_resources_batch
+    _RS_PEP_AVAILABLE = True
 except ImportError:
     evaluate_single = None
     filter_resources_batch = None
+    _RS_PEP_AVAILABLE = False
 
 from navigator_auth.abac.context import EvalContext
 from navigator_auth.abac.policies.environment import Environment
@@ -195,6 +197,11 @@ class PolicyEvaluator:
         cache_size: int = 1024,
         cache_ttl_seconds: int = 300
     ):
+        if not _RS_PEP_AVAILABLE:
+            raise RuntimeError(
+                "The 'rs_pep' Rust extension is required but not installed. "
+                "Install it with: maturin develop --release (from the rs_pep directory)"
+            )
         self._index = PolicyIndex()
         self._default_effect = default_effect
         self._cache_size = cache_size
