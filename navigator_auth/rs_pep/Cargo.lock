@@ -103,7 +103,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "navigator_auth_pep"
+name = "rs_pep"
 version = "0.1.0"
 dependencies = [
  "glob-match",

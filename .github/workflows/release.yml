@@ -24,9 +24,16 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
       - name: Install dependencies
         run: |
-          uv pip install --system cibuildwheel twine cython maturin
+          uv pip install --system cibuildwheel twine cython setuptools-rust
 
       - name: Build wheels on Ubuntu
         if: matrix.os == 'ubuntu-latest'
@@ -34,7 +41,9 @@ jobs:
           CIBW_ARCHS: x86_64
           CIBW_BUILD: "cp3{10,11,12,13}-*"
           CIBW_SKIP: "*-musllinux_*"
-          CIBW_BEFORE_BUILD: "pip install cython maturin"
+          CIBW_BEFORE_BUILD: "curl https://sh.rustup.rs -sSf | sh -s -- -y && pip install cython setuptools-rust"
+          CIBW_ENVIRONMENT: "PATH=/root/.cargo/bin:$PATH"
+          RUST_SUBPACKAGE_PATH: navigator_auth/rs_pep
         run: |
           cibuildwheel --platform linux --output-dir dist
 

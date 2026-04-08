@@ -576,7 +576,7 @@ fn evaluate_single(
 
 /// Navigator Auth PEP module — high-performance batch resource filtering.
 #[pymodule]
-fn navigator_auth_pep(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn rs_pep(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(filter_resources_batch, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_single, m)?)?;
     Ok(())

@@ -9,12 +9,12 @@ from .version import __author__, __description__, __title__, __version__, get_ve
 from .auth import AuthHandler
 from .uv import install_uvloop
 
-# Try to import the Rust extension (navigator_auth_pep)
+# Try to import the Rust PEP extension
 try:
-    import navigator_auth_pep
+    from navigator_auth import rs_pep
 except ImportError:
-    navigator_auth_pep = None
+    rs_pep = None
 
 install_uvloop()
 
-__all__ = ("AuthHandler", "navigator_auth_pep")
+__all__ = ("AuthHandler", "rs_pep")
