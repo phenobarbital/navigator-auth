@@ -26,6 +26,7 @@ except ImportError:
     filter_resources_batch = None
     _RS_PEP_AVAILABLE = False
 
+from navigator_auth.conf import ABAC_DEFAULT_EFFECT
 from navigator_auth.abac.context import EvalContext
 from navigator_auth.abac.policies.environment import Environment
 from navigator_auth.abac.policies import PolicyEffect
@@ -193,7 +194,6 @@ class PolicyEvaluator:
 
     def __init__(
         self,
-        default_effect: PolicyEffect = PolicyEffect.DENY,
         cache_size: int = 1024,
         cache_ttl_seconds: int = 300
     ):
@@ -203,7 +203,7 @@ class PolicyEvaluator:
                 "Install it with: maturin develop --release (from the rs_pep directory)"
             )
         self._index = PolicyIndex()
-        self._default_effect = default_effect
+        self._default_effect = ABAC_DEFAULT_EFFECT
         self._cache_size = cache_size
         self._cache_ttl = cache_ttl_seconds
         self._cache: Dict[str, Tuple[EvaluationResult, float]] = {}
@@ -408,7 +408,8 @@ class PolicyEvaluator:
                 action,
                 user_ctx,
                 env_dict,
-                owner_reports_to=owner_reports_to
+                owner_reports_to=owner_reports_to,
+                default_effect=self._default_effect,
             )
 
             result = EvaluationResult(
@@ -438,119 +439,6 @@ class PolicyEvaluator:
             self._update_cache(cache_key, result)
 
         return result
-
-    def _evaluate_policies(
-        self,
-        ctx: EvalContext,
-        env: Environment,
-        resource_type: ResourceType,
-        resource_name: str,
-        action: str
-    ) -> EvaluationResult:
-        """
-        Internal policy evaluation logic.
-
-        Order of evaluation:
-        1. Enforcing DENY policies (immediate deny if matched)
-        2. Enforcing ALLOW policies (immediate allow if matched)
-        3. Regular policies by priority
-        4. Default effect if no policy matched
-        """
-        # 1. Check enforcing policies first
-        for policy in self._index.get_enforcing():
-            if not policy.covers_resource(resource_type, resource_name):
-                continue
-            if not policy.covers_action(action):
-                continue
-
-            response = policy.is_allowed(
-                ctx, env,
-                resource_type=resource_type,
-                resource_name=resource_name,
-                action=action
-            )
-
-            if response.effect == PolicyEffect.DENY and policy.effect == PolicyEffect.DENY:
-                # Enforcing DENY matched
-                return EvaluationResult(
-                    allowed=False,
-                    effect=PolicyEffect.DENY,
-                    matched_policy=policy.name,
-                    reason=response.response
-                )
-            elif response.effect == PolicyEffect.ALLOW and policy.effect == PolicyEffect.ALLOW:
-                # Enforcing ALLOW matched
-                return EvaluationResult(
-                    allowed=True,
-                    effect=PolicyEffect.ALLOW,
-                    matched_policy=policy.name,
-                    reason=response.response
-                )
-
-        # 2. Evaluate regular policies for this resource type
-        allow_matched = None
-        deny_matched = None
-
-        for policy in self._index.get_for_resource_type(resource_type):
-            if policy.enforcing:
-                continue  # Already evaluated
-            if not policy.covers_resource(resource_type, resource_name):
-                continue
-            if not policy.covers_action(action):
-                continue
-
-            response = policy.is_allowed(
-                ctx, env,
-                resource_type=resource_type,
-                resource_name=resource_name,
-                action=action
-            )
-
-            # Track matches
-            if response.effect == PolicyEffect.ALLOW and policy.effect == PolicyEffect.ALLOW:
-                if allow_matched is None or policy.priority > allow_matched[1]:
-                    allow_matched = (policy, policy.priority, response)
-            elif response.effect == PolicyEffect.DENY and policy.effect == PolicyEffect.DENY:
-                if deny_matched is None or policy.priority > deny_matched[1]:
-                    deny_matched = (policy, policy.priority, response)
-
-        # 3. Determine final result
-        # DENY takes precedence at equal priority
-        if deny_matched and allow_matched:
-            if deny_matched[1] >= allow_matched[1]:
-                policy, _, response = deny_matched
-                return EvaluationResult(
-                    allowed=False,
-                    effect=PolicyEffect.DENY,
-                    matched_policy=policy.name,
-                    reason=response.response
-                )
-
-        if allow_matched:
-            policy, _, response = allow_matched
-            return EvaluationResult(
-                allowed=True,
-                effect=PolicyEffect.ALLOW,
-                matched_policy=policy.name,
-                reason=response.response
-            )
-
-        if deny_matched:
-            policy, _, response = deny_matched
-            return EvaluationResult(
-                allowed=False,
-                effect=PolicyEffect.DENY,
-                matched_policy=policy.name,
-                reason=response.response
-            )
-
-        # 4. Default effect (no policy matched)
-        return EvaluationResult(
-            allowed=(self._default_effect == PolicyEffect.ALLOW),
-            effect=self._default_effect,
-            matched_policy=None,
-            reason=f"No matching policy, default: {self._default_effect.name}"
-        )
 
     def filter_resources(
         self,
@@ -582,7 +470,8 @@ class PolicyEvaluator:
                 self._policies_json,
                 rust_resources,
                 user_ctx,
-                env_dict
+                env_dict,
+                default_effect=self._default_effect,
             )
 
             # Strip type prefix from results

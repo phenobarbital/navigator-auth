@@ -564,7 +564,6 @@ def create_app() -> web.Application:
 
     # --- PolicyEvaluator (high-performance resource-based evaluation) ---
     evaluator = PolicyEvaluator(
-        default_effect=PolicyEffect.DENY,
         cache_size=1024,
         cache_ttl_seconds=300,
     )

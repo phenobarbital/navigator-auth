@@ -428,6 +428,9 @@ POLICY_STORAGE_DIR = config.get(
     fallback=str(BASE_DIR / "env" / "policies") if hasattr(BASE_DIR, '__truediv__') else None
 )
 
+# Default effect when no policies match a request ("deny" or "allow").
+ABAC_DEFAULT_EFFECT = config.get("ABAC_DEFAULT_EFFECT", fallback="deny")
+
 # ABAC Hot-Reload Interval (seconds). Default: 0 (disabled).
 ABAC_RELOAD_INTERVAL = config.getint("ABAC_RELOAD_INTERVAL", fallback=0)
 

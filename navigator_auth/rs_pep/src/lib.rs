@@ -290,6 +290,7 @@ fn evaluate_resource(
     env: &EnvironmentContext,
     regex_cache: Option<&HashMap<String, Regex>>,
     owner_reports_to: Option<&str>,
+    default_effect: &str,
 ) -> EvaluationResult {
     let mut best_allow: Option<(i32, String)> = None;
     let mut best_deny: Option<(i32, String)> = None;
@@ -366,12 +367,15 @@ fn evaluate_resource(
             matched_policy: Some(dn),
             reason: "Matched Deny policy".into(),
         },
-        (None, None) => EvaluationResult {
-            allowed: false,
-            effect: "deny".into(),
-            matched_policy: None,
-            reason: "Default deny (no policies matched)".into(),
-        },
+        (None, None) => {
+            let is_allow = default_effect.eq_ignore_ascii_case("allow");
+            EvaluationResult {
+                allowed: is_allow,
+                effect: default_effect.to_lowercase(),
+                matched_policy: None,
+                reason: format!("No policies matched, default: {}", default_effect.to_lowercase()),
+            }
+        }
     }
 }
 
@@ -390,13 +394,14 @@ fn evaluate_resource(
 /// Returns:
 ///     Dict with "allowed" and "denied" lists of resource strings.
 #[pyfunction]
-#[pyo3(signature = (policies_json, resources, user_context, environment))]
+#[pyo3(signature = (policies_json, resources, user_context, environment, default_effect="deny"))]
 fn filter_resources_batch(
     py: Python<'_>,
     policies_json: &str,
     resources: Vec<String>,
     user_context: &Bound<'_, PyDict>,
     environment: &Bound<'_, PyDict>,
+    default_effect: &str,
 ) -> PyResult<PyObject> {
     // Parse policies
     let policies: Vec<PolicyDef> = serde_json::from_str(policies_json)
@@ -464,6 +469,7 @@ fn filter_resources_batch(
                     &env,
                     Some(&regex_cache),
                     None, // Batch filter doesn't support per-resource owner yet
+                    default_effect,
                 );
                 (resource.clone(), result.allowed)
             })
@@ -494,7 +500,7 @@ fn filter_resources_batch(
 /// Returns:
 ///     Dict with {allowed: bool, effect: str, matched_policy: str, reason: str}
 #[pyfunction]
-#[pyo3(signature = (policies_json, resource, action, user_context, environment, owner_reports_to=None))]
+#[pyo3(signature = (policies_json, resource, action, user_context, environment, owner_reports_to=None, default_effect="deny"))]
 fn evaluate_single(
     py: Python<'_>,
     policies_json: &str,
@@ -503,6 +509,7 @@ fn evaluate_single(
     user_context: &Bound<'_, PyDict>,
     environment: &Bound<'_, PyDict>,
     owner_reports_to: Option<String>,
+    default_effect: &str,
 ) -> PyResult<PyObject> {
     // Parse policies
     let policies: Vec<PolicyDef> = serde_json::from_str(policies_json)
@@ -561,6 +568,7 @@ fn evaluate_single(
             &env,
             Some(&regex_cache),
             owner_reports_to.as_deref(),
+            default_effect,
         )
     });
 
@@ -665,6 +673,7 @@ mod tests {
             &env,
             None,
             None,
+            "deny",
         );
         assert!(result.allowed);
         assert_eq!(result.matched_policy, Some("allow_engineering".into()));
@@ -698,7 +707,7 @@ mod tests {
             day_segment: "morning".into(),
         };
 
-        let result = evaluate_resource(&policies, "uri:epson_lx350", "uri:read", &user, &env, None, None);
+        let result = evaluate_resource(&policies, "uri:epson_lx350", "uri:read", &user, &env, None, None, "deny");
         assert!(!result.allowed);
         assert_eq!(result.matched_policy, Some("block_printers".into()));
     }
