@@ -36,6 +36,27 @@ from navigator_auth.abac.policies.resource_policy import ResourcePolicy
 logger = logging.getLogger(__name__)
 
 
+def _coerce_default_effect(value: Any) -> str:
+    """Normalize a default_effect value to 'allow' or 'deny'.
+
+    Accepts either a string ('allow'/'deny', case-insensitive) or a
+    PolicyEffect enum. Kept permissive for backward compatibility with
+    callers written against pre-0.20.9 APIs that stored enums.
+    """
+    if value is None:
+        return "deny"
+    name = getattr(value, "name", None)
+    if isinstance(name, str):
+        normalized = name.strip().lower()
+        if normalized in ("allow", "deny"):
+            return normalized
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("allow", "deny"):
+            return normalized
+    return "deny"
+
+
 @dataclass
 class EvaluationResult:
     """Result of policy evaluation with metadata."""
@@ -203,7 +224,7 @@ class PolicyEvaluator:
                 "Install it with: maturin develop --release (from the rs_pep directory)"
             )
         self._index = PolicyIndex()
-        self._default_effect = ABAC_DEFAULT_EFFECT
+        self._default_effect = _coerce_default_effect(ABAC_DEFAULT_EFFECT)
         self._cache_size = cache_size
         self._cache_ttl = cache_ttl_seconds
         self._cache: Dict[str, Tuple[EvaluationResult, float]] = {}
@@ -409,7 +430,7 @@ class PolicyEvaluator:
                 user_ctx,
                 env_dict,
                 owner_reports_to=owner_reports_to,
-                default_effect=self._default_effect,
+                default_effect=_coerce_default_effect(self._default_effect),
             )
 
             result = EvaluationResult(
@@ -471,7 +492,7 @@ class PolicyEvaluator:
                 rust_resources,
                 user_ctx,
                 env_dict,
-                default_effect=self._default_effect,
+                default_effect=_coerce_default_effect(self._default_effect),
             )
 
             # Strip type prefix from results
