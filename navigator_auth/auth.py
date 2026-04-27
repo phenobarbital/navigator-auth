@@ -753,7 +753,7 @@ class AuthHandler:
                     session = await get_session(request, payload, new=False)
                 except Exception as err:
                     self.logger.error(str(err))
-                    session = False
+                    session = None
 
                 if not session:
                     self.logger.warning("Session Missing or Expired, recreating from Token")

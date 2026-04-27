@@ -356,7 +356,7 @@ class AzureAuth(ExternalAuth):
             # return session information:
             try:
                 session = await get_session(request)
-                if isinstance(session, bool):
+                if not session:
                     # Empty Session
                     session = {}
                 sessioninfo = {**data, **userdata}
