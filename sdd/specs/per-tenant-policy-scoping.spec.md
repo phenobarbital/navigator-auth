@@ -3,7 +3,7 @@
 **Feature ID**: FEAT-092
 **Date**: 2026-06-16
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: review
 **Target version**: 1.1.0
 
 ---
@@ -78,10 +78,27 @@ default). This rule is applied in the Rust evaluator as an additional predicate
 in `evaluate_resource`, alongside the existing resource/action/subject/env
 checks. The policy JSON gains two fields; the request gains a tenant dict.
 
-The tenant of a **request** is resolved (in priority order) from:
+**`org_id` and `client_id` are always resolved together as a single tenant pair**
+(resolved decision, Open Q2): a request never carries one without the other —
+both come from the same source, and both must satisfy `matches_tenant`.
+
+The tenant of a **request** is resolved (in priority order) from
+(resolved decision, Open Q1):
 1. explicit `org_id`/`client_id` kwargs passed to `is_allowed`/`filter_obj`,
-2. the session user info (`userinfo['org_id']` / `userinfo['client_id']`),
-3. fallback to the global default `1`.
+2. request **headers** `X-Org-Id` / `X-Client-Id` (for service-to-service
+   calls) — **trusted only when set by the gateway**; see security note below,
+3. the session user info (`userinfo['org_id']` / `userinfo['client_id']`),
+4. fallback to the global default `1` (resolved decision, Open Q3 — an
+   unknown/unset tenant falls back to **global policies only**, it does **not**
+   fail closed).
+
+> **Header trust (security).** `X-Org-Id`/`X-Client-Id` let a service impersonate
+> any tenant, so they MUST be treated as untrusted unless the deployment strips
+> and re-injects them at a trusted edge (reverse proxy / API gateway). A config
+> flag `ABAC_TENANT_TRUST_HEADERS` (default **false**) gates header resolution;
+> when disabled, the header source is skipped entirely and resolution falls
+> through to session `userinfo`. When both `org_id` and `client_id` headers are
+> present they are taken as a pair; a partial header set is ignored.
 
 ### Component Diagram
 
@@ -227,10 +244,14 @@ args), keeping the Python call sites stable.
 - **Depends on**: Module 1
 
 ### Module 4: EvalContext + PDP tenant resolution
-- **Path**: `navigator_auth/abac/context.py`, `navigator_auth/abac/pdp.py`
-- **Responsibility**: `EvalContext` resolves and stores `org_id`/`client_id`
-  (explicit kwarg → `userinfo` → default `1`). `PDP.authorize`, `is_allowed`,
-  `filter_obj`, `filter_files` pass the resolved tenant into the evaluator calls.
+- **Path**: `navigator_auth/abac/context.py`, `navigator_auth/abac/pdp.py`,
+  `navigator_auth/conf.py`
+- **Responsibility**: `EvalContext` resolves and stores `org_id`/`client_id` as a
+  **pair** in the order kwarg → `X-Org-Id`/`X-Client-Id` headers (only when
+  `ABAC_TENANT_TRUST_HEADERS` is true) → `userinfo` → default `1`. Coerce to
+  `int` with a `1` fallback. Add `ABAC_TENANT_TRUST_HEADERS` (default `False`) to
+  `conf.py`. `PDP.authorize`, `is_allowed`, `filter_obj`, `filter_files` pass the
+  resolved tenant into the evaluator calls.
 - **Depends on**: Module 3
 
 ### Module 5: Rust tenant-aware evaluation
@@ -248,6 +269,20 @@ args), keeping the Python call sites stable.
   backward-compat; ensure existing tests still pass.
 - **Depends on**: Modules 1–5
 
+### Module 7 *(Phase 2 — follow-up)*: SQL-side filtering + per-tenant evaluators
+- **Path**: `navigator_auth/abac/storages/pg.py`, `navigator_auth/abac/pdp.py`,
+  `navigator_auth/abac/policies/evaluator.py`
+- **Responsibility**: For deployments with large per-tenant policy volumes, add an
+  optional path that (a) prefetches only `org_id IN (1, :req_org) AND client_id IN
+  (1, :req_client)` from SQL via a parameterized `load_policies(org_id, client_id)`
+  overload, and (b) maintains a small LRU of **per-tenant evaluator instances**
+  (each holding only that tenant's + global policies) instead of one shared
+  evaluator. Public API (`is_allowed`, `filter_obj`, `check_access`) is unchanged;
+  Phase 1's in-engine `matches_tenant` remains the correctness backstop.
+  Gated by `ABAC_TENANT_SQL_FILTERING` (default `False`).
+- **Depends on**: Phase 1 complete (Modules 1–6). Ships as a separate PR/iteration;
+  **not required** for the Phase 1 acceptance criteria.
+
 ---
 
 ## 4. Test Specification
@@ -261,7 +296,9 @@ args), keeping the Python call sites stable.
 | `test_adapter_negated_inherits_tenant` | M2 | The auto-generated `_negated` deny policy keeps the parent tenant. |
 | `test_serialize_includes_tenant` | M3 | `_serialize_policies_from_index` JSON contains `org_id`/`client_id`. |
 | `test_cache_key_tenant_isolation` | M3 | Same user/resource but different `org_id` produce different cache keys. |
-| `test_evalcontext_tenant_resolution` | M4 | Resolution order kwarg > userinfo > default `1`. |
+| `test_evalcontext_tenant_resolution` | M4 | Resolution order kwarg > header > userinfo > default `1`. |
+| `test_evalcontext_header_gated` | M4 | `X-Org-Id` header is ignored when `ABAC_TENANT_TRUST_HEADERS=False`; honored when `True`. |
+| `test_evalcontext_partial_header_ignored` | M4 | A request with only `X-Org-Id` (no `X-Client-Id`) ignores the header pair and falls through. |
 | `test_rust_matches_tenant_global` | M5 | `org_id=1` policy matches any request tenant (Rust unit test). |
 | `test_rust_matches_tenant_exact` | M5 | `org_id=5` policy matches only `req_org=5`, denies `req_org=7`. |
 
@@ -308,7 +345,7 @@ def ctx_tenant_5(make_request):
 - [ ] `PolicyAdapter` carries tenant onto policies in all `_adapt_*` paths, incl. `_negated`.
 - [ ] Serialized policy JSON includes `org_id`/`client_id`.
 - [ ] `PolicyEvaluator.check_access` / `filter_resources` accept tenant and pass it to Rust; cache key is tenant-aware.
-- [ ] `EvalContext`/`PDP` resolve tenant as kwarg > `userinfo` > default `1`.
+- [ ] `EvalContext`/`PDP` resolve tenant (as a pair) in order kwarg > header > `userinfo` > default `1`, with headers gated by `ABAC_TENANT_TRUST_HEADERS` (default off).
 - [ ] Rust `evaluate_resource` applies `matches_tenant`; `org_id=1`/`client_id=1` are global.
 - [ ] Tenant A cannot use Tenant B's tenant-specific policies (integration test green).
 - [ ] Global (`1`) policies apply to all tenants (integration test green).
@@ -353,6 +390,15 @@ def ctx_tenant_5(make_request):
   `owner_reports_to=None`; tenant is independent and read from `user_context`, so
   no interaction, but verify the dict is threaded in both PyO3 functions.
 
+### Configuration Keys (navigator_auth.conf / navconfig)
+
+| Key | Default | Description |
+|---|---|---|
+| `ABAC_TENANT_TRUST_HEADERS` | `False` | Allow `X-Org-Id`/`X-Client-Id` headers to set the request tenant. Enable only behind a trusted gateway that strips client-supplied values. |
+| `ABAC_TENANT_HEADER_ORG` | `"X-Org-Id"` | Header name for org id (overridable). |
+| `ABAC_TENANT_HEADER_CLIENT` | `"X-Client-Id"` | Header name for client id (overridable). |
+| `ABAC_TENANT_SQL_FILTERING` | `False` | *(Phase 2)* Enable SQL-side prefetch + per-tenant evaluator instances. |
+
 ### External Dependencies
 
 | Package | Version | Reason |
@@ -365,20 +411,24 @@ No new dependencies.
 
 ---
 
-## 7. Open Questions
+## 7. Resolved Decisions
 
-- [ ] Should the request tenant be resolvable from a **header** (e.g.
-  `X-Org-Id`) in addition to session `userinfo`, for service-to-service calls?
-  — *Owner: Jesus Lara*
-- [ ] Is `org_id` alone sufficient as the primary tenant boundary, with
-  `client_id` as an optional sub-scope, or are both always required together?
-  — *Owner: Jesus Lara*
-- [ ] If policy volume per tenant grows large, do we move to **SQL-side filtering
-  + per-tenant evaluator instances** (a follow-up spec)? Current design favors a
-  single in-engine filter. — *Owner: Jesus Lara*
-- [ ] Should a request with an **unknown/unset** tenant fail closed (deny) or fall
-  back to global (`1`) policies only? Current design falls back to `1`.
-  — *Owner: Jesus Lara*
+> All open questions from the initial draft were resolved on 2026-06-16.
+
+- [x] **Q1 — Header resolution.** Yes. The request tenant is resolvable from
+  `X-Org-Id` / `X-Client-Id` headers for service-to-service calls, gated behind
+  `ABAC_TENANT_TRUST_HEADERS` (default `False`) and trusted only when injected by
+  a trusted edge. Resolution order: kwarg → headers → `userinfo` → default `1`.
+- [x] **Q2 — Tenant granularity.** `org_id` **and** `client_id` are always used
+  **together** as a single tenant pair. A policy is in scope only when both
+  dimensions satisfy `matches_tenant`; requests never carry one without the other.
+- [x] **Q3 — Unknown tenant.** Fall back to **global (`1`) policies only** — do
+  **not** fail closed. An unset/unknown tenant behaves like a default-tenant
+  request and sees only `org_id=1 AND client_id=1` policies.
+- [x] **Q4 — Scaling to SQL-side filtering.** Yes — adopted as **Phase 2**
+  (Module 7). Phase 1 ships the in-engine filter (correctness + simple
+  hot-reload); Phase 2 adds SQL-side prefetch + per-tenant evaluator instances for
+  large policy volumes, behind the same public API.
 
 ---
 
@@ -400,3 +450,4 @@ No new dependencies.
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-06-16 | Jesus Lara | Initial draft — per-tenant policy scoping (default `1` = global/inheritable). |
+| 0.2 | 2026-06-16 | Jesus Lara | Resolved all open questions: header resolution (gated), org+client as a pair, global fallback on unknown tenant, Phase 2 SQL-side filtering (Module 7). |
