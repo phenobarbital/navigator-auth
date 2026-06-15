@@ -130,7 +130,7 @@ def test_cache_key_tenant_isolation():
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Sonnet 4.6)
+**Date**: 2026-06-16
+**Notes**: Added `org_id`/`client_id` fields to `_serialize_policies_from_index` (using `getattr` for safety). Extended `check_access` and `filter_resources` with `org_id`/`client_id` params (default 1), injecting into `user_ctx` for Rust. Extended `_make_cache_key` with `org_id`/`client_id` for tenant isolation. Also removed pre-existing unused `lru_cache` import.
 **Deviations from spec**: none

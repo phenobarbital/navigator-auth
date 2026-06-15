@@ -264,7 +264,7 @@
     "feature": "per-tenant-policy-scoping",
     "spec": "sdd/specs/per-tenant-policy-scoping.spec.md",
     "title": "Evaluator tenant serialization + request injection + cache key",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "M",
     "depends_on": ["TASK-016"],
@@ -272,7 +272,8 @@
     "parallelism_notes": "Freezes the JSON contract consumed by TASK-020 (Rust). Only touches evaluator.py; disjoint from adapter.py (TASK-017).",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-16T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-018-evaluator-tenant-serialization.md"
+    "completed_at": "2026-06-16T00:00:00Z",
+    "file": "sdd/tasks/completed/TASK-018-evaluator-tenant-serialization.md"
   },
   {
     "id": "TASK-019",
