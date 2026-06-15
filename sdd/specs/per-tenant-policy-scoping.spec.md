@@ -3,7 +3,7 @@
 **Feature ID**: FEAT-092
 **Date**: 2026-06-16
 **Author**: Jesus Lara
-**Status**: review
+**Status**: approved
 **Target version**: 1.1.0
 
 ---
