@@ -1,10 +1,10 @@
 import re
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, List, Tuple, Union, Any, Set
+from typing import Optional, List, Tuple, Any
 from navigator_auth.abac.policies.resource_policy import ResourcePolicy
 from navigator_auth.abac.policies.abstract import PolicyEffect
-from navigator_auth.abac.policies.resources import ResourceType, SubjectSpec
+from navigator_auth.abac.policies.resources import SubjectSpec
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,19 @@ class PolicyAdapter:
 
     # Regex metacharacters for detection
     RE_METAS = r'[\^\$\(\)\+\{\}\[\]\|\?\\]'
+
+    @staticmethod
+    def _tenant(policy_dict: dict) -> Tuple[int, int]:
+        """Extract and coerce tenant pair from policy dict. Defaults to (1, 1)."""
+        def _coerce(v: Any) -> int:
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return 1
+        return (
+            _coerce(policy_dict.get("org_id", 1)),
+            _coerce(policy_dict.get("client_id", 1)),
+        )
 
     @staticmethod
     def _convert_urn(urn_str: str) -> Tuple[str, bool]:
@@ -96,6 +109,8 @@ class PolicyAdapter:
         if isinstance(effect, str):
             effect = PolicyEffect.ALLOW if effect.upper() == 'ALLOW' else PolicyEffect.DENY
 
+        org_id, client_id = PolicyAdapter._tenant(policy_dict)
+
         try:
             # Re-initialize to ensure it's a valid ResourcePolicy
             p = ResourcePolicy(
@@ -108,7 +123,9 @@ class PolicyAdapter:
                 conditions=policy_dict.get('conditions'),
                 environment=policy_dict.get('environment'),
                 priority=policy_dict.get('priority', 0),
-                enforcing=policy_dict.get('enforcing', False)
+                enforcing=policy_dict.get('enforcing', False),
+                org_id=org_id,
+                client_id=client_id,
             )
             return AdapterResult(policy=p)
         except Exception as e:
@@ -119,6 +136,9 @@ class PolicyAdapter:
         """Convert classic Policy dict."""
         warnings = []
         name = policy_dict.get('name', 'unnamed')
+
+        # 0. Tenant
+        org_id, client_id = PolicyAdapter._tenant(policy_dict)
 
         # 1. Effect
         effect_str = str(policy_dict.get('effect', 'ALLOW')).upper()
@@ -195,13 +215,16 @@ class PolicyAdapter:
                 conditions=conditions,
                 environment=policy_dict.get('environment'),
                 priority=policy_dict.get('priority', 0),
-                enforcing=policy_dict.get('enforcing', False)
+                enforcing=policy_dict.get('enforcing', False),
+                org_id=org_id,
+                client_id=client_id,
             )
             # Attach python conditions for later use
             if python_conditions:
                 p.python_conditions = python_conditions
 
             # 7. Handle Negated Resources (create separate DENY policies)
+            # Negated deny inherits the SAME tenant as the parent (security requirement).
             if negated_resources:
                 deny_policy = ResourcePolicy(
                     name=f"{name}_negated",
@@ -213,7 +236,9 @@ class PolicyAdapter:
                     conditions=conditions,
                     environment=policy_dict.get('environment'),
                     priority=policy_dict.get('priority', 0) + 1, # Higher priority
-                    enforcing=True # Enforce the deny
+                    enforcing=True, # Enforce the deny
+                    org_id=org_id,
+                    client_id=client_id,
                 )
                 return AdapterResult(policy=p, warnings=warnings, additional_policies=[deny_policy])
 
