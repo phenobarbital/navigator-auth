@@ -282,7 +282,7 @@
     "feature": "per-tenant-policy-scoping",
     "spec": "sdd/specs/per-tenant-policy-scoping.spec.md",
     "title": "EvalContext + PDP tenant resolution (kwarg -> header -> userinfo -> 1)",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "M",
     "depends_on": ["TASK-018"],
@@ -290,7 +290,8 @@
     "parallelism_notes": "Python-only (context.py/pdp.py/conf.py); disjoint from TASK-020 (Rust lib.rs). Both depend on the TASK-018 JSON contract and can run concurrently in separate worktrees.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-16T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-019-evalcontext-pdp-tenant-resolution.md"
+    "completed_at": "2026-06-16T00:00:00Z",
+    "file": "sdd/tasks/completed/TASK-019-evalcontext-pdp-tenant-resolution.md"
   },
   {
     "id": "TASK-020",

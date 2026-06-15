@@ -135,7 +135,7 @@ index → `done`. 7. Fill Completion Note.
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Sonnet 4.6)
+**Date**: 2026-06-16
+**Notes**: Added `_resolve_tenant` helper (kwarg > header > userinfo > default 1) and `_load_tenant_conf` lazy loader to `context.py`. `EvalContext.__init__` gains `org_id`/`client_id` keyword-only args (after `*args`) and stores resolved pair in `store`. `conf.py` gains `ABAC_TENANT_TRUST_HEADERS` (default False), `ABAC_TENANT_HEADER_ORG`, `ABAC_TENANT_HEADER_CLIENT`, `ABAC_TENANT_SQL_FILTERING`. `pdp.py` `authorize`, `filter_files`, `is_allowed`, `filter_obj` all forward `ctx.org_id`/`ctx.client_id` to evaluator calls. Also removed pre-existing unused imports in pdp.py.
 **Deviations from spec**: none
