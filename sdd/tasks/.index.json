@@ -228,7 +228,7 @@
     "feature": "per-tenant-policy-scoping",
     "spec": "sdd/specs/per-tenant-policy-scoping.spec.md",
     "title": "ResourcePolicy tenant attributes (org_id / client_id)",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "S",
     "depends_on": [],
@@ -236,7 +236,8 @@
     "parallelism_notes": "Foundational data-contract change in resource_policy.py; all other tasks depend on it.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-16T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-016-resourcepolicy-tenant-attrs.md"
+    "completed_at": "2026-06-16T00:00:00Z",
+    "file": "sdd/tasks/completed/TASK-016-resourcepolicy-tenant-attrs.md"
   },
   {
     "id": "TASK-017",

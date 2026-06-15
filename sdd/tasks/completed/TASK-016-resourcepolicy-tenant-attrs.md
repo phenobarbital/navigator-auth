@@ -105,9 +105,7 @@ def test_resourcepolicy_tenant_explicit():
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Sonnet 4.6)
+**Date**: 2026-06-16
+**Notes**: Added `org_id: int = 1` and `client_id: int = 1` params to `ResourcePolicy.__init__`, assigned as `self.org_id`/`self.client_id` before resource pattern parsing. Also removed pre-existing unused `Optional` import (ruff clean).
 **Deviations from spec**: none
