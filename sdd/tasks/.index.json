@@ -246,7 +246,7 @@
     "feature": "per-tenant-policy-scoping",
     "spec": "sdd/specs/per-tenant-policy-scoping.spec.md",
     "title": "PolicyAdapter carries tenant onto policies",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "S",
     "depends_on": ["TASK-016"],
@@ -254,7 +254,8 @@
     "parallelism_notes": "Only touches adapter.py — disjoint files from TASK-018 (evaluator.py), so technically parallelizable after TASK-016; spec recommends per-spec sequential to avoid churn on the JSON contract.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-16T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-017-adapter-carries-tenant.md"
+    "completed_at": "2026-06-16T00:00:00Z",
+    "file": "sdd/tasks/completed/TASK-017-adapter-carries-tenant.md"
   },
   {
     "id": "TASK-018",

@@ -119,7 +119,7 @@ index → `done`. 7. Fill Completion Note.
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Sonnet 4.6)
+**Date**: 2026-06-16
+**Notes**: Added `_tenant()` static helper that coerces `org_id`/`client_id` to `int` with `1` fallback. Applied to `_adapt_resource` and `_adapt_classic` (including the negated DENY policy). `_adapt_file` and `_adapt_object` call `_adapt_classic` so they automatically inherit tenant. Also cleaned pre-existing unused imports.
 **Deviations from spec**: none
