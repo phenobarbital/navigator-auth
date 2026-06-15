@@ -5,15 +5,9 @@ from navconfig.logging import logger
 from navigator_session import SessionData
 from navigator_auth.conf import AUTH_SESSION_OBJECT, ABAC_RELOAD_INTERVAL
 from .policies import (
-    Resource,
-    RequestResource,
-    ActionKey,
     Policy,
-    ObjectPolicy,
-    FilePolicy,
     PolicyEffect,
     PolicyResponse,
-    Environment
 )
 from .policies.adapter import PolicyAdapter
 from .policies.evaluator import PolicyEvaluator, PolicyIndex
@@ -254,9 +248,10 @@ class PDP:
         # Map HTTP method to action
         action = PolicyAdapter.METHOD_ACTION_MAP.get(request.method, "uri:read")
 
-        # Delegate to evaluator
+        # Delegate to evaluator (pass resolved tenant from context)
         result = self._evaluator.check_access(
-            ctx, ResourceType.URI, request.path, action
+            ctx, ResourceType.URI, request.path, action,
+            org_id=ctx.org_id, client_id=ctx.client_id,
         )
 
         # auditlog expects an object with effect, response, rule
@@ -334,7 +329,8 @@ class PDP:
         # Delegate to the PolicyEvaluator (Rust-backed) for URI filtering.
         # Each file is treated as a URI resource for policy evaluation.
         result = self._evaluator.filter_resources(
-            ctx, ResourceType.URI, files, "uri:read"
+            ctx, ResourceType.URI, files, "uri:read",
+            org_id=ctx.org_id, client_id=ctx.client_id,
         )
         if not result.allowed and not result.denied:
             raise PreconditionFailed(
@@ -347,6 +343,8 @@ class PDP:
             request: web.Request,
             session: SessionData = None,
             user: Any = None,
+            org_id: Any = None,
+            client_id: Any = None,
             **kwargs
     ):
         try:
@@ -355,7 +353,7 @@ class PDP:
             userinfo = None
         if user is None and isinstance(userinfo, dict) and userinfo:
             user = userinfo
-        ctx = EvalContext(request, user, userinfo, session)
+        ctx = EvalContext(request, user, userinfo, session, org_id=org_id, client_id=client_id)
 
         obj = kwargs.get('resource', None)
         action = kwargs.get('action', 'uri:read')
@@ -384,9 +382,10 @@ class PDP:
         else:
             raise ValueError(f"Invalid type for Resource: {obj}:{type(obj)}")
 
-        # Delegate to evaluator
+        # Delegate to evaluator (pass resolved tenant from context)
         result = self._evaluator.check_access(
-            ctx, rtype, rname, action, owner_reports_to=owner_reports_to
+            ctx, rtype, rname, action, owner_reports_to=owner_reports_to,
+            org_id=ctx.org_id, client_id=ctx.client_id,
         )
 
         response = PolicyResponse(
@@ -424,9 +423,10 @@ class PDP:
         except ValueError:
             resource_type = _type
 
-        # Delegate to the PolicyEvaluator for batch filtering
+        # Delegate to the PolicyEvaluator for batch filtering (pass resolved tenant)
         result = self._evaluator.filter_resources(
-            ctx, resource_type, objects, f"{_type}:read"
+            ctx, resource_type, objects, f"{_type}:read",
+            org_id=ctx.org_id, client_id=ctx.client_id,
         )
         if not result.allowed and not result.denied:
             raise PreconditionFailed(
