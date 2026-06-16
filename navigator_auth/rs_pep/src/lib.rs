@@ -37,6 +37,17 @@ struct PolicyDef {
     priority: i32,
     #[serde(default)]
     enforcing: bool,
+    // Tenant scope fields (FEAT-092). Default = 1 (global/inheritable).
+    // Old JSON without these fields deserializes to global scope — backward compatible.
+    #[serde(default = "default_tenant")]
+    org_id: i64,
+    #[serde(default = "default_tenant")]
+    client_id: i64,
+}
+
+/// Serde default for tenant fields: 1 = global/inheritable sentinel.
+fn default_tenant() -> i64 {
+    1
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -281,6 +292,19 @@ fn matches_hierarchy(policy: &PolicyDef, user: &UserContext, owner_reports_to: O
     false
 }
 
+/// Check whether a policy's tenant scope matches the request tenant (FEAT-092).
+///
+/// A policy is in scope when its org_id / client_id is 1 (global/inheritable)
+/// OR exactly matches the request tenant value.
+/// Both dimensions must satisfy the predicate simultaneously.
+///
+/// This is the cheapest predicate (two integer comparisons) and must be applied
+/// first in `evaluate_resource` to short-circuit before regex/glob matching.
+fn matches_tenant(policy: &PolicyDef, req_org: i64, req_client: i64) -> bool {
+    (policy.org_id == 1 || policy.org_id == req_org)
+        && (policy.client_id == 1 || policy.client_id == req_client)
+}
+
 /// Evaluate whether a single resource is allowed by the policy set.
 fn evaluate_resource(
     policies: &[PolicyDef],
@@ -291,11 +315,17 @@ fn evaluate_resource(
     regex_cache: Option<&HashMap<String, Regex>>,
     owner_reports_to: Option<&str>,
     default_effect: &str,
+    req_org: i64,
+    req_client: i64,
 ) -> EvaluationResult {
     let mut best_allow: Option<(i32, String)> = None;
     let mut best_deny: Option<(i32, String)> = None;
 
     for policy in policies {
+        // Tenant check first — cheapest predicate, short-circuits before regex/glob (FEAT-092).
+        if !matches_tenant(policy, req_org, req_client) {
+            continue;
+        }
         // Check conditions
         if !policy_covers_resource(policy, resource, regex_cache) {
             continue;
@@ -453,6 +483,16 @@ fn filter_resources_batch(
         .map(|v| v.extract::<String>().unwrap_or_default())
         .unwrap_or_default();
 
+    // Parse request tenant from user_context (FEAT-092). Default: 1 (global).
+    let req_org: i64 = user_context
+        .get_item("org_id")?
+        .map(|v| v.extract::<i64>().unwrap_or(1))
+        .unwrap_or(1);
+    let req_client: i64 = user_context
+        .get_item("client_id")?
+        .map(|v| v.extract::<i64>().unwrap_or(1))
+        .unwrap_or(1);
+
     // Pre-compile regexes for all patterns
     let regex_cache = build_regex_cache(&policies);
 
@@ -470,6 +510,8 @@ fn filter_resources_batch(
                     Some(&regex_cache),
                     None, // Batch filter doesn't support per-resource owner yet
                     default_effect,
+                    req_org,
+                    req_client,
                 );
                 (resource.clone(), result.allowed)
             })
@@ -555,6 +597,16 @@ fn evaluate_single(
             .unwrap_or_default(),
     };
 
+    // Parse request tenant from user_context (FEAT-092). Default: 1 (global).
+    let req_org: i64 = user_context
+        .get_item("org_id")?
+        .map(|v| v.extract::<i64>().unwrap_or(1))
+        .unwrap_or(1);
+    let req_client: i64 = user_context
+        .get_item("client_id")?
+        .map(|v| v.extract::<i64>().unwrap_or(1))
+        .unwrap_or(1);
+
     // Pre-compile regexes for all patterns
     let regex_cache = build_regex_cache(&policies);
 
@@ -569,6 +621,8 @@ fn evaluate_single(
             Some(&regex_cache),
             owner_reports_to.as_deref(),
             default_effect,
+            req_org,
+            req_client,
         )
     });
 
@@ -628,6 +682,8 @@ mod tests {
             conditions: ConditionSpec::default(),
             priority: 0,
             enforcing: false,
+            org_id: 1,
+            client_id: 1,
         };
         assert!(policy_covers_resource(&policy, "tool:jira_create", None));
         assert!(policy_covers_resource(&policy, "tool:github_pr", None));
@@ -649,6 +705,8 @@ mod tests {
             conditions: ConditionSpec::default(),
             priority: 10,
             enforcing: false,
+            org_id: 1,
+            client_id: 1,
         }];
 
         let user = UserContext {
@@ -674,6 +732,8 @@ mod tests {
             None,
             None,
             "deny",
+            1, // req_org = global
+            1, // req_client = global
         );
         assert!(result.allowed);
         assert_eq!(result.matched_policy, Some("allow_engineering".into()));
@@ -693,6 +753,8 @@ mod tests {
             conditions: ConditionSpec::default(),
             priority: 100,
             enforcing: true,
+            org_id: 1,
+            client_id: 1,
         }];
         let user = UserContext {
             username: "testuser".into(),
@@ -707,8 +769,130 @@ mod tests {
             day_segment: "morning".into(),
         };
 
-        let result = evaluate_resource(&policies, "uri:epson_lx350", "uri:read", &user, &env, None, None, "deny");
+        let result = evaluate_resource(&policies, "uri:epson_lx350", "uri:read", &user, &env, None, None, "deny", 1, 1);
         assert!(!result.allowed);
         assert_eq!(result.matched_policy, Some("block_printers".into()));
+    }
+
+    // -----------------------------------------------------------------------
+    // Tenant-scoping tests (FEAT-092)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_matches_tenant_global() {
+        // A policy with org_id=1 and client_id=1 matches ANY request tenant.
+        let p = PolicyDef {
+            name: "global".into(),
+            effect: "allow".into(),
+            resources: vec![],
+            actions: vec![],
+            subjects: SubjectSpec::default(),
+            conditions: ConditionSpec::default(),
+            priority: 0,
+            enforcing: false,
+            org_id: 1,
+            client_id: 1,
+        };
+        assert!(matches_tenant(&p, 5, 3), "global policy must match tenant (5, 3)");
+        assert!(matches_tenant(&p, 7, 9), "global policy must match tenant (7, 9)");
+        assert!(matches_tenant(&p, 1, 1), "global policy must match global tenant");
+    }
+
+    #[test]
+    fn test_matches_tenant_exact() {
+        // org_id=5, client_id=1 (client still global): matches req_org=5, not req_org=7.
+        let p = PolicyDef {
+            name: "tenant5".into(),
+            effect: "allow".into(),
+            resources: vec![],
+            actions: vec![],
+            subjects: SubjectSpec::default(),
+            conditions: ConditionSpec::default(),
+            priority: 0,
+            enforcing: false,
+            org_id: 5,
+            client_id: 1,
+        };
+        assert!(matches_tenant(&p, 5, 99), "should match req_org=5 with global client");
+        assert!(!matches_tenant(&p, 7, 99), "should NOT match req_org=7");
+        assert!(!matches_tenant(&p, 1, 99), "req_org=1 ≠ policy.org_id=5, 1 is NOT a wildcard for requests");
+    }
+
+    #[test]
+    fn test_matches_tenant_both_dimensions_required() {
+        // Both org AND client must match (or be global).
+        let p = PolicyDef {
+            name: "tenant5_client3".into(),
+            effect: "allow".into(),
+            resources: vec![],
+            actions: vec![],
+            subjects: SubjectSpec::default(),
+            conditions: ConditionSpec::default(),
+            priority: 0,
+            enforcing: false,
+            org_id: 5,
+            client_id: 3,
+        };
+        assert!(matches_tenant(&p, 5, 3));
+        assert!(!matches_tenant(&p, 5, 99), "client mismatch must exclude policy");
+        assert!(!matches_tenant(&p, 99, 3), "org mismatch must exclude policy");
+    }
+
+    #[test]
+    fn test_evaluate_resource_tenant_isolation() {
+        // A tenant-5 deny should NOT affect tenant-7 requests.
+        let policies = vec![
+            PolicyDef {
+                name: "global_allow".into(),
+                effect: "allow".into(),
+                resources: vec!["tool:*".into()],
+                actions: vec!["tool:execute".into()],
+                subjects: SubjectSpec {
+                    groups: ["engineering".to_string()].into_iter().collect(),
+                    ..Default::default()
+                },
+                conditions: ConditionSpec::default(),
+                priority: 1,
+                enforcing: false,
+                org_id: 1,
+                client_id: 1,
+            },
+            PolicyDef {
+                name: "t5_block_jira".into(),
+                effect: "deny".into(),
+                resources: vec!["tool:jira_*".into()],
+                actions: vec!["tool:execute".into()],
+                subjects: SubjectSpec {
+                    groups: ["engineering".to_string()].into_iter().collect(),
+                    ..Default::default()
+                },
+                conditions: ConditionSpec::default(),
+                priority: 10,
+                enforcing: true,
+                org_id: 5,
+                client_id: 1,
+            },
+        ];
+
+        let user = UserContext {
+            username: "alice".into(),
+            groups: vec!["engineering".into()],
+            roles: vec![],
+        };
+        let env = EnvironmentContext {
+            hour: 10,
+            dow: 2,
+            is_business_hours: true,
+            is_weekend: false,
+            day_segment: "morning".into(),
+        };
+
+        // Tenant 5 should be denied by the enforcing deny policy.
+        let r5 = evaluate_resource(&policies, "tool:jira_create", "tool:execute", &user, &env, None, None, "deny", 5, 1);
+        assert!(!r5.allowed, "tenant 5 must be denied jira by enforcing policy");
+
+        // Tenant 7 should not see the tenant-5 deny — only the global allow applies.
+        let r7 = evaluate_resource(&policies, "tool:jira_create", "tool:execute", &user, &env, None, None, "deny", 7, 1);
+        assert!(r7.allowed, "tenant 7 must be allowed jira (only sees global allow)");
     }
 }
