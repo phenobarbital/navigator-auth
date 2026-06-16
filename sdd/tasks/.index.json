@@ -300,7 +300,7 @@
     "feature": "per-tenant-policy-scoping",
     "spec": "sdd/specs/per-tenant-policy-scoping.spec.md",
     "title": "Rust tenant-aware evaluation (matches_tenant predicate)",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "M",
     "depends_on": ["TASK-018"],
@@ -308,7 +308,8 @@
     "parallelism_notes": "Rust-only (rs_pep/src/lib.rs); fully disjoint from all Python tasks. Depends only on the frozen JSON contract from TASK-018; runs concurrently with TASK-019.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-16T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-020-rust-tenant-aware-evaluation.md"
+    "completed_at": "2026-06-16T00:00:00Z",
+    "file": "sdd/tasks/completed/TASK-020-rust-tenant-aware-evaluation.md"
   },
   {
     "id": "TASK-021",

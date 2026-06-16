@@ -135,7 +135,7 @@ fn test_matches_tenant_exact() {
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Sonnet 4.6)
+**Date**: 2026-06-16
+**Notes**: Added `org_id`/`client_id` to `PolicyDef` with `#[serde(default = "default_tenant")]` (default fn returns 1). Added `matches_tenant` predicate. Updated `evaluate_resource` signature with `req_org`/`req_client` params; `matches_tenant` called first (before resource/action/subject checks). Both `filter_resources_batch` and `evaluate_single` parse `org_id`/`client_id` from `user_context` (default 1). Added 4 Rust unit tests: `test_matches_tenant_global`, `test_matches_tenant_exact`, `test_matches_tenant_both_dimensions_required`, `test_evaluate_resource_tenant_isolation`. `cargo test` passes (10/10). `maturin develop --release` builds cleanly.
 **Deviations from spec**: none
