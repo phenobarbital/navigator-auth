@@ -663,8 +663,45 @@ class AuthHandler:
     def Unauthorized(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
         return self.auth_error(reason=reason, **kwargs, status=401)
 
-    def add_exclude_list(self, path: str):
-        self.app[AUTH_EXCLUDE_LIST_KEY].append(path)
+    def add_exclude_list(self, path: str) -> None:
+        """Idempotent: append path only if not already present.
+
+        Args:
+            path: URL pattern (fnmatch glob) to add to the per-app exclude list.
+        """
+        lst: list[str] = self.app[AUTH_EXCLUDE_LIST_KEY]
+        if path not in lst:
+            lst.append(path)
+
+    def remove_exclude_list(self, path: str) -> None:
+        """Idempotent: remove path from the per-app exclude list if present.
+
+        Args:
+            path: URL pattern to remove.  No-op if not in the list.
+        """
+        lst: list[str] = self.app[AUTH_EXCLUDE_LIST_KEY]
+        try:
+            lst.remove(path)
+        except ValueError:
+            pass
+
+    def register_exclusions(self, paths: Iterable[str]) -> None:
+        """Bulk idempotent add of multiple paths to the per-app exclude list.
+
+        Args:
+            paths: Iterable of URL patterns (fnmatch globs) to add.
+        """
+        for path in paths:
+            self.add_exclude_list(path)
+
+    def unregister_exclusions(self, paths: Iterable[str]) -> None:
+        """Bulk idempotent remove of multiple paths from the per-app exclude list.
+
+        Args:
+            paths: Iterable of URL patterns to remove.
+        """
+        for path in paths:
+            self.remove_exclude_list(path)
 
     async def verify_exceptions(self, request: web.Request) -> bool:
         # avoid authorization backend on OPTION method:
