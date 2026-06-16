@@ -15,18 +15,47 @@ class pgStorage(DBStorage):
     driver: str = 'pg'
     timeout: int = 10
 
-    async def load_policies(self):
-        policy_table = """
-        SELECT policy_id, policy_type, name, resource, actions, conditions, effect, groups,
-        context, environment, description, enforcing, objects, objects_attr,
-        priority, org_id, client_id
-        FROM auth.policies WHERE enabled = TRUE;"""
-        async with self.connection() as conn:
-            result, error = await conn.query(policy_table)
-            if error:
-                raise ConfigError(
-                    f"ABAC: Error loading policies: {error}"
-                )
+    async def load_policies(
+        self,
+        org_id: Optional[int] = None,
+        client_id: Optional[int] = None,
+    ):
+        """Load enabled policies from the database.
+
+        When *org_id* and *client_id* are both provided (ABAC_TENANT_SQL_FILTERING
+        mode), only the global sentinel rows (org_id=1, client_id=1) plus the
+        specific tenant's rows are fetched.  This keeps per-tenant evaluator
+        instances small for deployments with many tenants.
+
+        Leave both *None* (the default) to load every enabled policy — the
+        Phase-1 / backward-compatible behaviour.
+        """
+        if org_id is not None and client_id is not None:
+            # Parameterized: global + this tenant only.
+            policy_table = """
+            SELECT policy_id, policy_type, name, resource, actions, conditions,
+                   effect, groups, context, environment, description, enforcing,
+                   objects, objects_attr, priority, org_id, client_id
+            FROM auth.policies
+            WHERE enabled = TRUE
+              AND org_id IN (1, $1)
+              AND client_id IN (1, $2);"""
+            async with self.connection() as conn:
+                result, error = await conn.query(policy_table, org_id, client_id)
+        else:
+            # No tenant filter — load everything (Phase-1 / YAML-storage path).
+            policy_table = """
+            SELECT policy_id, policy_type, name, resource, actions, conditions,
+                   effect, groups, context, environment, description, enforcing,
+                   objects, objects_attr, priority, org_id, client_id
+            FROM auth.policies WHERE enabled = TRUE;"""
+            async with self.connection() as conn:
+                result, error = await conn.query(policy_table)
+
+        if error:
+            raise ConfigError(
+                f"ABAC: Error loading policies: {error}"
+            )
         return result
 
 

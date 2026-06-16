@@ -1,9 +1,14 @@
-from typing import List, Optional, Union, Any
+from typing import List, Optional, Union, Any, Tuple
+from collections import OrderedDict
 import asyncio
 from aiohttp import web
 from navconfig.logging import logger
 from navigator_session import SessionData
-from navigator_auth.conf import AUTH_SESSION_OBJECT, ABAC_RELOAD_INTERVAL
+from navigator_auth.conf import (
+    AUTH_SESSION_OBJECT,
+    ABAC_RELOAD_INTERVAL,
+    ABAC_TENANT_SQL_FILTERING,
+)
 from .policies import (
     Policy,
     PolicyEffect,
@@ -20,6 +25,9 @@ from .storages.abstract import AbstractStorage
 from .storages.yaml_storage import YAMLStorage
 from .audit import AuditLog
 from .middleware import abac_middleware
+
+# Maximum number of per-tenant evaluator instances kept in the LRU.
+_TENANT_EVALUATOR_LRU_SIZE = 128
 
 
 async def find_deny_policy(ctx, policies):
@@ -49,6 +57,11 @@ class PDP:
         self._auditlog = AuditLog()
         self._evaluator: PolicyEvaluator = PolicyEvaluator()
         self._reload_task: Optional[asyncio.Task] = None
+        # Per-tenant evaluator LRU (ABAC_TENANT_SQL_FILTERING mode).
+        # Keyed by (org_id, client_id) tuple; evicts LRU entries when full.
+        self._tenant_evaluators: OrderedDict[
+            Tuple[int, int], PolicyEvaluator
+        ] = OrderedDict()
 
     @property
     def evaluator(self) -> PolicyEvaluator:
@@ -97,6 +110,103 @@ class PDP:
         # Load into evaluator
         self._evaluator.load_policies(resource_policies)
 
+
+    async def _get_tenant_evaluator(
+        self, org_id: int, client_id: int
+    ) -> PolicyEvaluator:
+        """Return a per-tenant PolicyEvaluator, building and caching it if needed.
+
+        Only active when ``ABAC_TENANT_SQL_FILTERING`` is ``True``.  The LRU is
+        bounded by ``_TENANT_EVALUATOR_LRU_SIZE``; the oldest entry is evicted
+        when the cache is full.  Global scope ``(1, 1)`` is served by the shared
+        evaluator directly (no separate entry).
+
+        Falls back to the shared evaluator on any DB error (fail-open in the
+        conservative Phase-1 direction).
+        """
+        if org_id == 1 and client_id == 1:
+            return self._evaluator
+
+        key = (org_id, client_id)
+        if key in self._tenant_evaluators:
+            # LRU: move to end (most recently used)
+            self._tenant_evaluators.move_to_end(key)
+            return self._tenant_evaluators[key]
+
+        # Build a new per-tenant evaluator from the DB
+        try:
+            tenant_ev = await self._build_tenant_evaluator(org_id, client_id)
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to build tenant evaluator for (%s, %s): %s — "
+                "falling back to shared evaluator",
+                org_id, client_id, exc,
+            )
+            return self._evaluator
+
+        # Evict oldest entry if LRU is full
+        if len(self._tenant_evaluators) >= _TENANT_EVALUATOR_LRU_SIZE:
+            self._tenant_evaluators.popitem(last=False)
+
+        self._tenant_evaluators[key] = tenant_ev
+        return tenant_ev
+
+    async def _build_tenant_evaluator(
+        self, org_id: int, client_id: int
+    ) -> PolicyEvaluator:
+        """Fetch global + tenant rows from DB and build a fresh PolicyEvaluator."""
+        policy_dicts = []
+
+        # DB: only global + this tenant (parameterized query in pgStorage)
+        db_policies = await self.storage.load_policies(
+            org_id=org_id, client_id=client_id,
+        )
+        if db_policies:
+            policy_dicts.extend(db_policies)
+
+        # YAML layer is always fully loaded (usually small)
+        if self.yaml_storage is not None:
+            try:
+                yaml_policies = await self.yaml_storage.load_policies()
+                if yaml_policies:
+                    policy_dicts.extend(yaml_policies)
+            except Exception as exc:
+                self.logger.warning(
+                    "Tenant evaluator: YAML load failed: %s", exc
+                )
+
+        resource_policies, warnings = PolicyAdapter.adapt_batch(policy_dicts)
+        for w in warnings:
+            self.logger.warning("Tenant evaluator adapt warning: %s", w)
+
+        ev = PolicyEvaluator()
+        ev.load_policies(resource_policies)
+        self.logger.debug(
+            "Built per-tenant evaluator for (%s, %s): %d policies",
+            org_id, client_id, len(resource_policies),
+        )
+        return ev
+
+    def _invalidate_tenant_evaluators(self) -> int:
+        """Clear the per-tenant evaluator LRU.  Called by reload_policies."""
+        count = len(self._tenant_evaluators)
+        self._tenant_evaluators.clear()
+        self.logger.debug("Invalidated %d per-tenant evaluator(s)", count)
+        return count
+
+    def get_evaluator_for(
+        self, org_id: int = 1, client_id: int = 1
+    ) -> PolicyEvaluator:
+        """Synchronous helper for tests — returns the shared evaluator.
+
+        In async contexts use ``_get_tenant_evaluator`` instead.
+        The shared evaluator always has the global policy set and is the
+        correct fallback when SQL filtering is disabled.
+        """
+        if not ABAC_TENANT_SQL_FILTERING:
+            return self._evaluator
+        # For sync callers, return shared evaluator (tenant LRU requires async)
+        return self._evaluator
 
     async def on_startup(self, app: web.Application):
         """Signal Handler for loading Policies from Storage.
@@ -152,6 +262,13 @@ class PDP:
 
         # Atomic swap (serialization handled internally)
         self._evaluator.swap_index(new_index)
+
+        # Invalidate per-tenant LRU so stale evaluators are rebuilt on next access
+        if self._tenant_evaluators:
+            n_evicted = self._invalidate_tenant_evaluators()
+            self.logger.debug(
+                "Reload: invalidated %d per-tenant evaluator(s)", n_evicted
+            )
 
         # Update local list for compatibility
         self._policies = resource_policies
@@ -248,8 +365,14 @@ class PDP:
         # Map HTTP method to action
         action = PolicyAdapter.METHOD_ACTION_MAP.get(request.method, "uri:read")
 
+        # Select evaluator: per-tenant (when SQL filtering enabled) or shared
+        if ABAC_TENANT_SQL_FILTERING:
+            evaluator = await self._get_tenant_evaluator(ctx.org_id, ctx.client_id)
+        else:
+            evaluator = self._evaluator
+
         # Delegate to evaluator (pass resolved tenant from context)
-        result = self._evaluator.check_access(
+        result = evaluator.check_access(
             ctx, ResourceType.URI, request.path, action,
             org_id=ctx.org_id, client_id=ctx.client_id,
         )
@@ -326,9 +449,14 @@ class PDP:
         if user is None and isinstance(userinfo, dict) and userinfo:
             user = userinfo
         ctx = EvalContext(request, user, userinfo, session)
+        # Select evaluator: per-tenant (when SQL filtering enabled) or shared
+        if ABAC_TENANT_SQL_FILTERING:
+            evaluator = await self._get_tenant_evaluator(ctx.org_id, ctx.client_id)
+        else:
+            evaluator = self._evaluator
         # Delegate to the PolicyEvaluator (Rust-backed) for URI filtering.
         # Each file is treated as a URI resource for policy evaluation.
-        result = self._evaluator.filter_resources(
+        result = evaluator.filter_resources(
             ctx, ResourceType.URI, files, "uri:read",
             org_id=ctx.org_id, client_id=ctx.client_id,
         )
@@ -382,8 +510,14 @@ class PDP:
         else:
             raise ValueError(f"Invalid type for Resource: {obj}:{type(obj)}")
 
+        # Select evaluator: per-tenant (when SQL filtering enabled) or shared
+        if ABAC_TENANT_SQL_FILTERING:
+            evaluator = await self._get_tenant_evaluator(ctx.org_id, ctx.client_id)
+        else:
+            evaluator = self._evaluator
+
         # Delegate to evaluator (pass resolved tenant from context)
-        result = self._evaluator.check_access(
+        result = evaluator.check_access(
             ctx, rtype, rname, action, owner_reports_to=owner_reports_to,
             org_id=ctx.org_id, client_id=ctx.client_id,
         )
@@ -423,8 +557,14 @@ class PDP:
         except ValueError:
             resource_type = _type
 
+        # Select evaluator: per-tenant (when SQL filtering enabled) or shared
+        if ABAC_TENANT_SQL_FILTERING:
+            evaluator = await self._get_tenant_evaluator(ctx.org_id, ctx.client_id)
+        else:
+            evaluator = self._evaluator
+
         # Delegate to the PolicyEvaluator for batch filtering (pass resolved tenant)
-        result = self._evaluator.filter_resources(
+        result = evaluator.filter_resources(
             ctx, resource_type, objects, f"{_type}:read",
             org_id=ctx.org_id, client_id=ctx.client_id,
         )
