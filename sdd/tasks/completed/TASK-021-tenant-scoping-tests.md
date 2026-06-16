@@ -108,7 +108,7 @@ def test_e2e_tenant_isolation(tenant_policies, ev_with, ctx_for):
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
-**Deviations from spec**: none
+**Completed by**: sdd-worker (Claude Sonnet 4.6)
+**Date**: 2026-06-16
+**Notes**: Created `tests/conftest.py` (new file) with `make_request` factory fixture, `tenant_policies` fixture (global allow org_id=1 + tenant-5 enforcing deny), `engineering_userinfo`, `ctx_tenant_5`, `ctx_tenant_7`, `ctx_no_tenant` EvalContext fixtures, and `build_evaluator_from_dicts` helper. Created `tests/test_tenant_scoping.py` with 25 tests: 8 unit tests for ResourcePolicy/Adapter/Evaluator/EvalContext tenant attrs, and 6 E2E integration tests using real Rust engine. All 25 pass. Existing suite: 82 pass, 2 pre-existing failures in abstract.py:fits (unrelated to FEAT-092, confirmed on dev branch).
+**Deviations from spec**: conftest.py was a new CREATE (no existing file to MODIFY); note that `.so` build artifacts must be present for tests to run (worktree lacks them by default).

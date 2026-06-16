@@ -318,7 +318,7 @@
     "feature": "per-tenant-policy-scoping",
     "spec": "sdd/specs/per-tenant-policy-scoping.spec.md",
     "title": "Integration tests & fixtures for tenant scoping",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "M",
     "depends_on": ["TASK-016", "TASK-017", "TASK-018", "TASK-019", "TASK-020"],
@@ -326,7 +326,8 @@
     "parallelism_notes": "End-to-end validation through the real Rust engine; requires all Phase-1 implementation tasks complete.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-16T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-021-tenant-scoping-tests.md"
+    "completed_at": "2026-06-16T02:20:00Z",
+    "file": "sdd/tasks/completed/TASK-021-tenant-scoping-tests.md"
   },
   {
     "id": "TASK-022",
