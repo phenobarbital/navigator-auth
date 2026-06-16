@@ -1,4 +1,4 @@
-from typing import List, Union, Dict, Set, Optional
+from typing import List, Union, Dict, Set
 from navigator_auth.abac.policies.abstract import AbstractPolicy, PolicyEffect, PolicyResponse
 from navigator_auth.abac.context import EvalContext
 from navigator_auth.abac.policies.environment import Environment
@@ -36,8 +36,14 @@ class ResourcePolicy(AbstractPolicy):
         environment: dict = None,
         priority: int = 0,
         enforcing: bool = False,
+        org_id: int = 1,
+        client_id: int = 1,
         **kwargs
     ):
+        # Tenant scope — 1 is the global/inheritable sentinel
+        self.org_id = org_id
+        self.client_id = client_id
+
         # Parse resources into ResourcePattern objects
         self._resource_patterns: List[ResourcePattern] = []
         if resources:

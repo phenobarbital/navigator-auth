@@ -434,6 +434,27 @@ ABAC_DEFAULT_EFFECT = config.get("ABAC_DEFAULT_EFFECT", fallback="deny")
 # ABAC Hot-Reload Interval (seconds). Default: 0 (disabled).
 ABAC_RELOAD_INTERVAL = config.getint("ABAC_RELOAD_INTERVAL", fallback=0)
 
+# ---------------------------------------------------------------------------
+# Per-tenant policy scoping (FEAT-092)
+# ---------------------------------------------------------------------------
+
+# Allow X-Org-Id / X-Client-Id request headers to set the request tenant.
+# SECURITY: enable ONLY when headers are stripped and re-injected by a trusted
+# edge (reverse proxy / API gateway).  Default: False.
+ABAC_TENANT_TRUST_HEADERS = config.getboolean(
+    "ABAC_TENANT_TRUST_HEADERS", fallback=False
+)
+
+# Header names for tenant resolution (overridable per deployment).
+ABAC_TENANT_HEADER_ORG = config.get("ABAC_TENANT_HEADER_ORG", fallback="X-Org-Id")
+ABAC_TENANT_HEADER_CLIENT = config.get("ABAC_TENANT_HEADER_CLIENT", fallback="X-Client-Id")
+
+# (Phase 2) SQL-side prefetch + per-tenant evaluator instances.
+# Default: False (Phase-1 in-engine filtering is the backstop).
+ABAC_TENANT_SQL_FILTERING = config.getboolean(
+    "ABAC_TENANT_SQL_FILTERING", fallback=False
+)
+
 ## Oauth Provider:
 OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS = config.getint(
     "OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS", fallback=4
