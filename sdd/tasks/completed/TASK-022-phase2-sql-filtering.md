@@ -100,7 +100,7 @@ Phase 1. 6. Move to `completed/`, index → `done`. 7. Fill Completion Note.
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
-**Deviations from spec**: none
+**Completed by**: sdd-worker (Claude Sonnet 4.6)
+**Date**: 2026-06-16
+**Notes**: Added parameterized `load_policies(org_id=None, client_id=None)` to `pgStorage` using `$1`/`$2` placeholder syntax (asyncdb/asyncpg style). Added per-tenant PolicyEvaluator LRU (OrderedDict, bounded by `_TENANT_EVALUATOR_LRU_SIZE=128`) to PDP with `_get_tenant_evaluator`, `_build_tenant_evaluator`, `_invalidate_tenant_evaluators` methods. `reload_policies` now clears the LRU after swapping the shared index. All four PDP entry-points (`authorize`, `filter_files`, `is_allowed`, `filter_obj`) delegate to per-tenant evaluator when `ABAC_TENANT_SQL_FILTERING=True`. 12 unit tests pass; 2 live-DB tests marked skip pending PostgreSQL fixture. Phase-1 tests unaffected (94 pass, 2 pre-existing failures in abstract.py).
+**Deviations from spec**: evaluator.py needed no changes (already supports per-tenant instantiation via `load_policies`). conf.py already had `ABAC_TENANT_SQL_FILTERING` from TASK-019.

@@ -336,7 +336,7 @@
     "feature": "per-tenant-policy-scoping",
     "spec": "sdd/specs/per-tenant-policy-scoping.spec.md",
     "title": "(Phase 2) SQL-side filtering + per-tenant evaluator instances",
-    "status": "in-progress",
+    "status": "done",
     "priority": "low",
     "effort": "L",
     "depends_on": ["TASK-016", "TASK-017", "TASK-018", "TASK-019", "TASK-020", "TASK-021"],
@@ -344,6 +344,7 @@
     "parallelism_notes": "Follow-up phase, not required for Phase-1 acceptance. Behind ABAC_TENANT_SQL_FILTERING flag; start only after Phase 1 is merged and validated.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-16T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-022-phase2-sql-filtering.md"
+    "completed_at": "2026-06-16T02:30:00Z",
+    "file": "sdd/tasks/completed/TASK-022-phase2-sql-filtering.md"
   }
 ]
