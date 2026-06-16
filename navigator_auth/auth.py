@@ -102,6 +102,8 @@ class AuthHandler:
         self._json = JSONContent()
         # Logger Backend
         self.logger = logging.getLogger(name="Nav.Auth")
+        # Exclude-provider registry for restart re-hydration (FEAT-241 M2)
+        self._exclude_providers: list[Callable[[], Awaitable[Iterable[str]]]] = []
 
     @property
     def session(self):
@@ -120,6 +122,15 @@ class AuthHandler:
         # Create vault tables if they don't exist (non-blocking)
         if "authdb" in app:
             await setup_vault_tables(app["authdb"])
+        # Re-hydrate exclude-provider paths after each startup (FEAT-241 M2):
+        for provider in self._exclude_providers:
+            try:
+                paths = await provider()
+                self.register_exclusions(paths)
+            except Exception as exc:
+                self.logger.warning(
+                    "AuthHandler: exclude provider %r failed: %s", provider, exc
+                )
 
     async def on_cleanup(self, app):
         """
@@ -702,6 +713,24 @@ class AuthHandler:
         """
         for path in paths:
             self.remove_exclude_list(path)
+
+    def add_exclude_provider(
+        self, provider: Callable[[], Awaitable[Iterable[str]]]
+    ) -> None:
+        """Register an async callable that yields auth-exempt paths.
+
+        On each server startup, AuthHandler will call every registered provider
+        and pass the yielded paths to ``register_exclusions()``. This re-hydrates
+        runtime exemptions after a restart.
+
+        Providers are called in registration order.  A failing provider is
+        logged at WARNING and does NOT abort startup — other providers still run.
+
+        Args:
+            provider: Async callable with no arguments returning an iterable of
+                      path strings (fnmatch glob patterns accepted).
+        """
+        self._exclude_providers.append(provider)
 
     async def verify_exceptions(self, request: web.Request) -> bool:
         # avoid authorization backend on OPTION method:
