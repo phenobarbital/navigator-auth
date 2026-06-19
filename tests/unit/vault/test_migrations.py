@@ -118,7 +118,7 @@ class TestEnsureVaultTables:
         pool_ctx.__aenter__ = AsyncMock(return_value=conn)
         pool_ctx.__aexit__ = AsyncMock(return_value=False)
         pool = MagicMock()
-        pool.acquire = MagicMock(return_value=pool_ctx)
+        pool.acquire = AsyncMock(return_value=pool_ctx)
 
         await ensure_vault_tables(pool)
 

@@ -121,18 +121,9 @@ class TestPlainTokenStrategy:
         result = await self.strategy.validate("tok", "Bearer", None)
         assert result == {"token": "tok", "scheme": "Bearer"}
 
-    def test_enforce_uses_credentials_required(self):
+    def test_enforce_always_required(self):
         request = make_mocked_request("GET", "/api")
-        with patch(
-            "navigator_auth.middlewares.strategies.AUTH_CREDENTIALS_REQUIRED",
-            True,
-        ):
-            assert self.strategy.should_enforce(request, ()) is True
-        with patch(
-            "navigator_auth.middlewares.strategies.AUTH_CREDENTIALS_REQUIRED",
-            False,
-        ):
-            assert self.strategy.should_enforce(request, ()) is False
+        assert self.strategy.should_enforce(request, ()) is True
 
 
 class TestTrocTokenStrategy:

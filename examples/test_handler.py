@@ -149,7 +149,6 @@ for route in list(app.router.routes()):
 
 if __name__ == '__main__':
     try:
-        print(TestHandler, type(TestHandler))
         web.run_app(
             app, host='localhost', port=5000, handle_signals=True
         )

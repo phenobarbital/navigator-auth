@@ -7,7 +7,7 @@ from typing import Any
 import jwt
 from aiohttp import web
 
-from navigator_auth.conf import AUTH_CREDENTIALS_REQUIRED, SECRET_KEY
+from navigator_auth.conf import SECRET_KEY
 
 
 class TokenStrategy(ABC):
@@ -126,8 +126,8 @@ class PlainTokenStrategy(TokenStrategy):
         return {"token": token, "scheme": scheme}
 
     def should_enforce(self, request: web.Request, protected_routes: tuple) -> bool:
-        """Return ``True`` when ``AUTH_CREDENTIALS_REQUIRED`` is ``True``."""
-        return AUTH_CREDENTIALS_REQUIRED is True
+        """Authentication is always enforced."""
+        return True
 
 
 class TrocTokenStrategy(TokenStrategy):
@@ -252,8 +252,8 @@ class JWTStrategy(TokenStrategy):
             ) from err
 
     def should_enforce(self, request: web.Request, protected_routes: tuple) -> bool:
-        """Return ``True`` when ``AUTH_CREDENTIALS_REQUIRED`` is ``True``."""
-        return AUTH_CREDENTIALS_REQUIRED is True
+        """Authentication is always enforced."""
+        return True
 
 
 class DjangoSessionStrategy(TokenStrategy):

@@ -2,8 +2,6 @@
 
 Authentication Backends.
 """
-
-from .noauth import NoAuth
 from .basic import BasicAuth
 from .django import DjangoAuth
 from .troc import TrocToken
@@ -19,7 +17,6 @@ from .saml import SAMLAuth
 
 
 __all__ = (
-    "NoAuth",
     "BasicAuth",
     "DjangoAuth",
     "TrocToken",

@@ -22,8 +22,11 @@ from ..exceptions import (
     UserNotFound,
 )
 from ..identities import AuthUser, Column
-from ..conf import AUTH_CREDENTIALS_REQUIRED, DJANGO_USER_MAPPING, DJANGO_SESSION_URL, DJANGO_SESSION_PREFIX
-
+from ..conf import (
+    DJANGO_USER_MAPPING,
+    DJANGO_SESSION_URL,
+    DJANGO_SESSION_PREFIX
+)
 # User Identity
 from .abstract import BaseAuthBackend
 
@@ -208,7 +211,7 @@ class DjangoAuth(BaseAuthBackend):
     ) -> web.StreamResponse:
         """
         Basic Auth Middleware.
-        Description: Basic Authentication for NoAuth, Basic, Token and Django.
+        Description: Basic Authentication for Basic, Token and Django.
         """
         # avoid authorization backend on OPTION method:
         if request.method == hdrs.METH_OPTIONS:
@@ -222,17 +225,22 @@ class DjangoAuth(BaseAuthBackend):
             if payload:
                 ## check if user has a session:
                 # load session information
-                session = await get_session(request, payload, new=False, ignore_cookie=True)
-                if not session and AUTH_CREDENTIALS_REQUIRED is True:
-                    raise self.Unauthorized(reason="There is no Session or Authentication is missing")
+                session = await get_session(
+                    request, payload, new=False, ignore_cookie=True
+                )
+                if not session:
+                    raise self.Unauthorized(
+                        reason="There is no Session or Authentication is missing"
+                    )
                 try:
                     request.user = await self.get_session_user(session)
                     request["authenticated"] = True
                 except Exception as ex:  # pylint: disable=W0703
                     self.logger.error(f"Missing User Object from Session: {ex}")
             else:
-                if AUTH_CREDENTIALS_REQUIRED is True:
-                    raise self.Unauthorized(reason="There is no Session or Authentication is missing")
+                raise self.Unauthorized(
+                    reason="There is no Session or Authentication is missing"
+                )
         except Forbidden as err:
             self.logger.error("Auth Middleware: Access Denied")
             raise self.ForbiddenAccess(reason=err.message)
@@ -245,7 +253,8 @@ class DjangoAuth(BaseAuthBackend):
             self.logger.error("Django Auth: Invalid Signature or secret")
             raise self.ForbiddenAccess(reason=err.message)
         except Exception as err:  # pylint: disable=W0703
-            # self.logger.error(f"Bad Request: {err!s}")
-            if AUTH_CREDENTIALS_REQUIRED is True:
-                raise self.auth_error(reason="Authentication Error", exception=err)
+            raise self.auth_error(
+                reason="Authentication Error",
+                exception=err
+            )
         return await handler(request)
