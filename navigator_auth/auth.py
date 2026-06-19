@@ -765,7 +765,7 @@ class AuthHandler:
                 return True
 
         ### Allow Anonymous Access
-        if request.get("allow_anonymous", False) is True:
+        if getattr(request, "allow_anonymous", False) is True:
             return True
 
         ## Already Authenticated
@@ -810,7 +810,6 @@ class AuthHandler:
         except AuthExpired as err:
             self.logger.error(f"Auth Middleware: Credentials expired: {err}")
             raise self.Unauthorized(reason=err.message, exception=err) from err
-            raise self.ForbiddenAccess(reason=err.message, exception=err) from err
         try:
             if payload:
                 ## check if user has a session:

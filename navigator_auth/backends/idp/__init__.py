@@ -142,29 +142,30 @@ class IdentityProvider:
         except (KeyError, ValidationError, TypeError, ValueError) as ex:
             raise InvalidAuth("Invalid credentials for User") from ex
         try:
-            if self.check_password(pwd, password):
+            if self.check_password(pwd, password, login=login):
                 # return the user Object
                 return user
             else:
-                raise FailedAuth("Basic Auth: Invalid Credentials")
+                raise FailedAuth(f"Basic Auth: Invalid Credentials for user {login}")
         except (InvalidAuth, FailedAuth, UserNotFound) as err:
             self.logger.error(err)
             raise
         except Exception as err:
             raise InvalidAuth(f"Unknown Error: {err}") from err
 
-    def check_password(self, current_password, password):
+    def check_password(self, current_password, password, login: str = None):
+        who = f" for user {login}" if login else ""
         try:
             if current_password is None:
-                raise InvalidAuth("User: Password cannot be null.", status=412)
+                raise InvalidAuth(f"User: Password cannot be null{who}.", status=412)
             algorithm, iterations, salt, _ = current_password.split("$", 3)
         except ValueError as ex:
             if str(ex).startswith("not enough values to unpack"):
                 raise InvalidAuth(
-                    "Invalid Password: user password doesn't match \
-                    algorithm requirements"
+                    f"Invalid Password{who}: stored password doesn't match "
+                    "algorithm requirements"
                 ) from ex
-            raise InvalidAuth(f"Basic Auth: Invalid Credentials: {ex}") from ex
+            raise InvalidAuth(f"Basic Auth: Invalid Credentials{who}: {ex}") from ex
         assert algorithm == AUTH_PWD_ALGORITHM
         compare_hash = self.set_password(
             password,
