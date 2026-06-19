@@ -44,6 +44,17 @@ async def load_vault_for_session(
     Returns:
         SessionVault instance, or None if loading fails.
     """
+    # The vault stores rows keyed by an integer ``user_id``. Some auth
+    # backends populate ``user_id`` with the username (a str) instead of the
+    # numeric PK. Coerce here and skip vault loading when it is not an
+    # integer — the vault is optional and must never raise on these users.
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        logger.debug(
+            "Skipping vault load: non-integer user_id %r", user_id
+        )
+        return None
     try:
         session_uuid = str(session.session_id)
         vault = await SessionVault.load_for_session(

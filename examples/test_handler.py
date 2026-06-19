@@ -31,7 +31,6 @@ async def handle(request):
     name = request.match_info.get('name', "Anonymous")
     try:
         session = await get_session(request)
-        print('WHICH SESSION > ', session)
         if session:
             name = session.session.get('username', str(session.id))
     except Exception:
