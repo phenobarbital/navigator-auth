@@ -229,3 +229,26 @@ class TestDjangoSessionStrategy:
         token, scheme = self.strategy.extract(request)
         assert token is None
         assert scheme is None
+
+    @pytest.mark.asyncio
+    async def test_validate_decodes_session(self):
+        import base64
+        session_payload = base64.b64encode(b'abc123:{"user_id":7,"name":"django_user"}')
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=session_payload)
+        app = web.Application()
+        app["redis"] = mock_redis
+        result = await self.strategy.validate("SESSID", "django", app)
+        assert result["user_id"] == 7
+        assert result["session_id"] == "abc123"
+        assert result["key"] == "SESSID"
+        mock_redis.get.assert_called_once_with("nav_session:SESSID")
+
+    @pytest.mark.asyncio
+    async def test_validate_missing_session(self):
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+        app = web.Application()
+        app["redis"] = mock_redis
+        with pytest.raises(web.HTTPBadRequest, match="Invalid Django Session"):
+            await self.strategy.validate("BADSESS", "django", app)

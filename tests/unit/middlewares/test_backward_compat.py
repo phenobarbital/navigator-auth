@@ -47,6 +47,30 @@ class TestTokenMiddlewareCompat:
         )
         assert "/health" in mw.exclude_routes
 
+    @pytest.mark.asyncio
+    async def test_user_fn_receives_three_args(self):
+        """Original token_middleware called user_fn(token, scheme, request)."""
+        from navigator_auth.middlewares.token import token_middleware
+        from aiohttp.test_utils import make_mocked_request
+
+        received = {}
+
+        async def user_fn(token, scheme, request):
+            received["token"] = token
+            received["scheme"] = scheme
+            return {"id": 1}
+
+        mw = token_middleware(user_fn=user_fn)
+        mw.protected_routes = ()
+        request = make_mocked_request(
+            "GET", "/api",
+            headers={"Authorization": "Bearer mytoken"},
+        )
+        handler = AsyncMock(return_value=web.Response(text="ok"))
+        await mw(request, handler)
+        assert received["token"] == "mytoken"
+        assert received["scheme"] == "Bearer"
+
 
 class TestTrocMiddlewareCompat:
     def test_old_import_works(self):

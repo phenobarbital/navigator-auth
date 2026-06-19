@@ -1,7 +1,6 @@
 """Pluggable token strategies for the unified auth middleware."""
 import base64
 import json
-import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -9,9 +8,6 @@ import jwt
 from aiohttp import web
 
 from navigator_auth.conf import AUTH_CREDENTIALS_REQUIRED, SECRET_KEY
-
-
-logger = logging.getLogger(__name__)
 
 
 class TokenStrategy(ABC):
