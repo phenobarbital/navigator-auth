@@ -23,6 +23,11 @@ class ResourceType(Enum):
     DATASET = "dataset"
     WIDGET = "widget"
     CARD = "card"
+    # ── FEAT-091 (QuerySource pbac-support) ─────────────────────────
+    SLUG = "slug"
+    DATASOURCE = "datasource"
+    DRIVER = "driver"
+    RAW_QUERY = "raw_query"
 
 
 class ActionType(Enum):
@@ -57,6 +62,15 @@ class ActionType(Enum):
     WIDGET_EDIT = "widget:edit"
     CARD_VIEW = "card:view"
     CARD_EDIT = "card:edit"
+
+    # ── FEAT-091 (QuerySource pbac-support) ─────────────────────────
+    SLUG_EXECUTE = "slug:execute"
+    SLUG_LIST = "slug:list"
+    DATASOURCE_USE = "datasource:use"
+    DATASOURCE_LIST = "datasource:list"
+    DRIVER_USE = "driver:use"
+    DRIVER_LIST = "driver:list"
+    RAW_QUERY_EXECUTE = "raw_query:execute"
 
 
 @dataclass(frozen=True, slots=True)

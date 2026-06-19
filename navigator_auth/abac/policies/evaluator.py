@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Set, Tuple, Any
 from dataclasses import dataclass, field
 from pathlib import Path
-from functools import lru_cache
 from collections import defaultdict
 import hashlib
 import time
@@ -270,6 +269,9 @@ class PolicyEvaluator:
                 },
                 "priority": policy.priority,
                 "enforcing": policy.enforcing,
+                # Tenant scope — 1 = global/inheritable sentinel (FEAT-092)
+                "org_id": getattr(policy, "org_id", 1),
+                "client_id": getattr(policy, "client_id", 1),
             })
         return json.dumps(policies_data)
 
@@ -329,13 +331,19 @@ class PolicyEvaluator:
         resource_type: ResourceType,
         resource_name: str,
         action: str,
-        env_dict: dict = None
+        env_dict: dict = None,
+        org_id: int = 1,
+        client_id: int = 1,
     ) -> str:
-        """Generate cache key for evaluation."""
+        """Generate cache key for evaluation.
+
+        Tenant (org_id/client_id) is part of the key — two tenants must never
+        share a cached decision (security requirement, FEAT-092).
+        """
         groups_str = ','.join(sorted(user_groups))
         rtype_val = resource_type.value if hasattr(resource_type, 'value') else resource_type
         env_str = json.dumps(env_dict, sort_keys=True) if env_dict else ""
-        key_data = f"{user_id}|{groups_str}|{rtype_val}|{resource_name}|{action}|{env_str}"
+        key_data = f"{user_id}|{groups_str}|{rtype_val}|{resource_name}|{action}|{env_str}|{org_id}|{client_id}"
         return hashlib.md5(key_data.encode()).hexdigest()
 
     def _check_cache(self, cache_key: str) -> Optional[EvaluationResult]:
@@ -386,15 +394,23 @@ class PolicyEvaluator:
         resource_name: str,
         action: str,
         env: Environment = None,
-        owner_reports_to: str = None
+        owner_reports_to: str = None,
+        org_id: int = 1,
+        client_id: int = 1,
     ) -> EvaluationResult:
         """
         Check if access is allowed for the given resource and action.
 
         This is the main entry point for permission checks.
+        ``org_id`` / ``client_id`` scope this evaluation to a specific tenant
+        (default 1 = global; backward compatible with single-tenant deployments).
         """
         start_time = time.perf_counter()
         self._stats['evaluations'] += 1
+
+        # Coerce tenant to int (callers may pass str from session)
+        org_id = int(org_id) if org_id is not None else 1
+        client_id = int(client_id) if client_id is not None else 1
 
         # Create environment if not provided
         if env is None:
@@ -410,9 +426,14 @@ class PolicyEvaluator:
             user_groups = set()
 
         # Check cache (Hierarchy checks are NOT cached easily if owner_reports_to varies)
+        # Tenant is included in the cache key for isolation — two tenants must never
+        # share a cached decision (security requirement, FEAT-092).
         cache_key = None
         if not owner_reports_to:
-            cache_key = self._make_cache_key(user_id, user_groups, resource_type, resource_name, action, env_dict=env_dict)
+            cache_key = self._make_cache_key(
+                user_id, user_groups, resource_type, resource_name, action,
+                env_dict=env_dict, org_id=org_id, client_id=client_id,
+            )
             cached_result = self._check_cache(cache_key)
             if cached_result:
                 return cached_result
@@ -420,6 +441,9 @@ class PolicyEvaluator:
         # Build context for Rust
         user_ctx = self._build_user_context(ctx)
         user_ctx["action"] = action
+        # Thread tenant into the Rust engine via user_ctx (FEAT-092)
+        user_ctx["org_id"] = org_id
+        user_ctx["client_id"] = client_id
 
         # Evaluate via Rust engine (mandatory — no Python fallback per spec)
         try:
@@ -467,19 +491,29 @@ class PolicyEvaluator:
         resource_type: ResourceType,
         resource_names: List[str],
         action: str,
-        env: Environment = None
+        env: Environment = None,
+        org_id: int = 1,
+        client_id: int = 1,
     ) -> FilteredResources:
         """
         Filter a list of resources by user permissions.
 
         Efficient batch evaluation via Rust.
+        ``org_id`` / ``client_id`` scope filtering to a tenant (default 1 = global).
         """
         if env is None:
             env = Environment()
 
+        # Coerce tenant to int
+        org_id = int(org_id) if org_id is not None else 1
+        client_id = int(client_id) if client_id is not None else 1
+
         # Build context for Rust
         user_ctx = self._build_user_context(ctx)
         user_ctx["action"] = action
+        # Thread tenant into the Rust engine via user_ctx (FEAT-092)
+        user_ctx["org_id"] = org_id
+        user_ctx["client_id"] = client_id
         env_dict = self._build_env_dict(env)
 
         # Format resources for Rust: "type:name"

@@ -1,4 +1,5 @@
 from functools import wraps
+import fnmatch
 import inspect
 from typing import Any, TypeVar
 from collections.abc import Callable, Awaitable
@@ -6,8 +7,25 @@ from aiohttp import web, hdrs
 from aiohttp.abc import AbstractView
 from navigator_session import get_session
 from .exceptions import AuthException
-from .conf import AUTH_SESSION_OBJECT
+from .conf import AUTH_SESSION_OBJECT, AUTH_EXCLUDE_LIST_KEY
 from .vault.integration import _attach_vault_to_request
+
+
+def _is_path_excluded(request: web.Request) -> bool:
+    """Return True if the request path is in the per-app auth exclude list.
+
+    Uses the same fnmatch semantics as AuthHandler.verify_exceptions so that
+    glob patterns (e.g. ``/api/v1/forms/*/render/*``) match correctly.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        True if the path matches any pattern in ``app[AUTH_EXCLUDE_LIST_KEY]``,
+        False otherwise (including when the key is not present).
+    """
+    exclude_list = request.app.get(AUTH_EXCLUDE_LIST_KEY, [])
+    return any(fnmatch.fnmatch(request.path, pattern) for pattern in exclude_list)
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -150,6 +168,9 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
             # avoid check on OPTION method:
             if request.method == hdrs.METH_OPTIONS:
                 return await handler(*args, **kwargs)
+            # Short-circuit for explicitly excluded paths (public form URLs etc.)
+            if _is_path_excluded(request) or getattr(request, "allow_anonymous", False):
+                return await handler(*args, **kwargs)
             if request.get("authenticated", False):
                 return await handler(*args, **kwargs)
             else:
@@ -181,6 +202,9 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
             request = self.request
             # avoid check on OPTION method:
             if request.method == hdrs.METH_OPTIONS:
+                return await method(self, *args, **kwargs)
+            # Short-circuit for explicitly excluded paths (public form URLs etc.)
+            if _is_path_excluded(request) or getattr(request, "allow_anonymous", False):
                 return await method(self, *args, **kwargs)
             if request.get("authenticated", False):
                 return await method(self, *args, **kwargs)
