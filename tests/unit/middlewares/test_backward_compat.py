@@ -5,10 +5,8 @@ constructor signatures after they were refactored to delegate to
 UnifiedAuthMiddleware.
 """
 import pytest
-import warnings
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from aiohttp import web
-from aiohttp.test_utils import make_mocked_request
 
 
 class TestAPIKeyMiddlewareCompat:
