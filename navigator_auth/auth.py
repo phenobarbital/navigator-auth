@@ -102,6 +102,8 @@ class AuthHandler:
         self._json = JSONContent()
         # Logger Backend
         self.logger = logging.getLogger(name="Nav.Auth")
+        # Exclude-provider registry for restart re-hydration (FEAT-241 M2)
+        self._exclude_providers: list[Callable[[], Awaitable[Iterable[str]]]] = []
 
     @property
     def session(self):
@@ -120,6 +122,15 @@ class AuthHandler:
         # Create vault tables if they don't exist (non-blocking)
         if "authdb" in app:
             await setup_vault_tables(app["authdb"])
+        # Re-hydrate exclude-provider paths after each startup (FEAT-241 M2):
+        for provider in self._exclude_providers:
+            try:
+                paths = await provider()
+                self.register_exclusions(paths)
+            except Exception as exc:
+                self.logger.warning(
+                    "AuthHandler: exclude provider %r failed: %s", provider, exc
+                )
         # Auto-fetch Azure Service Tag IP ranges for allowed_ips backend
         if AZURE_SERVICE_TAGS:
             await self._load_azure_service_tags()
@@ -700,8 +711,63 @@ class AuthHandler:
     def Unauthorized(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
         return self.auth_error(reason=reason, **kwargs, status=401)
 
-    def add_exclude_list(self, path: str):
-        self.app[AUTH_EXCLUDE_LIST_KEY].append(path)
+    def add_exclude_list(self, path: str) -> None:
+        """Idempotent: append path only if not already present.
+
+        Args:
+            path: URL pattern (fnmatch glob) to add to the per-app exclude list.
+        """
+        lst: list[str] = self.app[AUTH_EXCLUDE_LIST_KEY]
+        if path not in lst:
+            lst.append(path)
+
+    def remove_exclude_list(self, path: str) -> None:
+        """Idempotent: remove path from the per-app exclude list if present.
+
+        Args:
+            path: URL pattern to remove.  No-op if not in the list.
+        """
+        lst: list[str] = self.app[AUTH_EXCLUDE_LIST_KEY]
+        try:
+            lst.remove(path)
+        except ValueError:
+            pass
+
+    def register_exclusions(self, paths: Iterable[str]) -> None:
+        """Bulk idempotent add of multiple paths to the per-app exclude list.
+
+        Args:
+            paths: Iterable of URL patterns (fnmatch globs) to add.
+        """
+        for path in paths:
+            self.add_exclude_list(path)
+
+    def unregister_exclusions(self, paths: Iterable[str]) -> None:
+        """Bulk idempotent remove of multiple paths from the per-app exclude list.
+
+        Args:
+            paths: Iterable of URL patterns to remove.
+        """
+        for path in paths:
+            self.remove_exclude_list(path)
+
+    def add_exclude_provider(
+        self, provider: Callable[[], Awaitable[Iterable[str]]]
+    ) -> None:
+        """Register an async callable that yields auth-exempt paths.
+
+        On each server startup, AuthHandler will call every registered provider
+        and pass the yielded paths to ``register_exclusions()``. This re-hydrates
+        runtime exemptions after a restart.
+
+        Providers are called in registration order.  A failing provider is
+        logged at WARNING and does NOT abort startup — other providers still run.
+
+        Args:
+            provider: Async callable with no arguments returning an iterable of
+                      path strings (fnmatch glob patterns accepted).
+        """
+        self._exclude_providers.append(provider)
 
     async def verify_exceptions(self, request: web.Request) -> bool:
         # avoid authorization backend on OPTION method:
@@ -736,7 +802,7 @@ class AuthHandler:
                 return True
 
         ### Allow Anonymous Access
-        if request.get("allow_anonymous", False) is True:
+        if getattr(request, "allow_anonymous", False) is True:
             return True
 
         ## Already Authenticated
@@ -781,7 +847,6 @@ class AuthHandler:
         except AuthExpired as err:
             self.logger.error(f"Auth Middleware: Credentials expired: {err}")
             raise self.Unauthorized(reason=err.message, exception=err) from err
-            raise self.ForbiddenAccess(reason=err.message, exception=err) from err
         try:
             if payload:
                 ## check if user has a session:
