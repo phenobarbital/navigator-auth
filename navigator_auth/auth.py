@@ -19,17 +19,17 @@ from orjson import JSONDecodeError
 from aiohttp import hdrs, web
 from aiohttp.web_urldispatcher import SystemRoute, StaticResource
 from navigator_session import SESSION_KEY, SessionHandler, get_session, SESSION_ID
-from .authorizations import authz_allow_hosts, authz_hosts, authz_useragent
+from .authorizations import authz_allow_hosts, authz_allowed_ips, authz_hosts, authz_useragent
 from .vault.integration import load_vault_for_session, setup_vault_tables, VAULT_SESSION_KEY
 from .backends.idp import IdentityProvider
 from .conf import (
     AUTH_EXCLUDE_LIST_KEY,
     BASE_DIR,
-    AUTH_CREDENTIALS_REQUIRED,
     AUTH_USER_VIEW,
     AUTHENTICATION_BACKENDS,
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,
+    AZURE_SERVICE_TAGS,
     USER_ATTRIBUTES,
     default_dsn,
     REDIS_AUTH_URL,
@@ -131,6 +131,39 @@ class AuthHandler:
                 self.logger.warning(
                     "AuthHandler: exclude provider %r failed: %s", provider, exc
                 )
+        # Auto-fetch Azure Service Tag IP ranges for allowed_ips backend
+        if AZURE_SERVICE_TAGS:
+            await self._load_azure_service_tags()
+
+    async def _load_azure_service_tags(self):
+        """Fetch Azure Service Tag IPs and inject into allowed_ips backend."""
+        ip_backend = None
+        for backend in self._authz_backends:
+            if isinstance(backend, authz_allowed_ips):
+                ip_backend = backend
+                break
+        if ip_backend is None:
+            self.logger.warning(
+                "AZURE_SERVICE_TAGS configured but 'allowed_ips' backend "
+                "is not in AUTHORIZATION_BACKENDS — skipping IP fetch"
+            )
+            return
+        try:
+            from .authorizations.azure_service_tags import (
+                fetch_service_tag_prefixes,
+            )
+            prefixes = await fetch_service_tag_prefixes(AZURE_SERVICE_TAGS)
+            if prefixes:
+                ip_backend.add_networks(prefixes)
+            else:
+                self.logger.warning(
+                    "azure_service_tags: no prefixes returned for "
+                    f"tags {AZURE_SERVICE_TAGS}"
+                )
+        except Exception as exc:
+            self.logger.error(
+                f"Failed to load Azure Service Tags: {exc}"
+            )
 
     async def on_cleanup(self, app):
         """
@@ -182,7 +215,11 @@ class AuthHandler:
                 b.append(authz_allow_hosts())
             elif backend == "authz_hosts":
                 b.append(authz_hosts())
-            elif backend == "useragent":
+            elif backend == 'allowed_ips':
+                b.append(authz_allowed_ips())
+            elif backend == 'authz_allowed_ips':
+                b.append(authz_allowed_ips())
+            elif backend == 'useragent':
                 b.append(authz_useragent())
             elif backend == "authz_useragent":
                 b.append(authz_useragent())
@@ -781,7 +818,7 @@ class AuthHandler:
     ) -> web.StreamResponse:
         """
         Basic Auth Middleware.
-        Description: Basic Authentication for NoAuth, Basic, Token and Django.
+        Description: Basic Authentication for Basic, Token and Django.
         """
         if await self.verify_exceptions(request):
             # Still attempt authentication if a token is present,
@@ -823,10 +860,8 @@ class AuthHandler:
                 if not session:
                     self.logger.warning("Session Missing or Expired, recreating from Token")
                     try:
-                        # 1. Create a new session with the valid token payload
                         session = await get_session(request, payload, new=True)
 
-                        # 2. Extract Identifier (username, email or uid) from payload
                         try:
                             uid = payload[self._idp.username_attribute]
                         except KeyError:
@@ -838,7 +873,6 @@ class AuthHandler:
                                 except KeyError:
                                     uid = payload.get("email")
 
-                        # 3. Try fetching the real User object
                         user = None
                         if uid:
                             try:
@@ -846,7 +880,6 @@ class AuthHandler:
                             except Exception as ex:
                                 self.logger.warning(f"Could not fetch user {uid} for recreated session: {ex}")
 
-                        # 4. Save User object inside session (raise if not found)
                         if not user:
                             raise self.Unauthorized(
                                 reason=f"Unable to resolve user object for '{uid}' from token payload.",
@@ -858,24 +891,21 @@ class AuthHandler:
                             self.logger.error(f"Error saving user in new session: {ex}")
 
                         request.user = user
-                        request["userdata"] = payload  # Store payload explicitly
+                        request["userdata"] = payload
                         request["authenticated"] = True
 
                     except web.HTTPException:
                         raise
                     except Exception as err:
                         self.logger.error(f"Error creating fallback session: {err}")
-                        if AUTH_CREDENTIALS_REQUIRED is True:
-                            raise self.Unauthorized(
-                                reason="There is no Session or Authentication is missing",
-                            )
+                        raise self.Unauthorized(
+                            reason="There is no Session or Authentication is missing",
+                        )
 
                 else:
-                    # Session exists, just load user
                     try:
                         user = await self.get_session_user(session)
                         if not user:
-                            # Try resolving user from payload via IDP
                             if uid := (
                                 payload.get(self._idp.username_attribute)
                                 or payload.get(self._idp.userid_attribute)
@@ -898,7 +928,7 @@ class AuthHandler:
                                 reason="Unable to resolve user object from session or token payload.",
                             )
                         request.user = user
-                        request["userdata"] = payload  # Store payload explicitly
+                        request["userdata"] = payload
                         request["authenticated"] = True
                     except web.HTTPException:
                         raise
@@ -906,7 +936,7 @@ class AuthHandler:
                         self.logger.error(f"Missing User Object from Session: {ex}")
             elif self.secure_cookies is True:
                 session = await get_session(request, None, new=False)
-                if not session and AUTH_CREDENTIALS_REQUIRED is True:
+                if not session:
                     raise self.Unauthorized(
                         reason="There is no Session or Authentication is missing"
                     )
@@ -916,7 +946,7 @@ class AuthHandler:
                     if user:
                         request.user = user
                         request["authenticated"] = True
-                    elif AUTH_CREDENTIALS_REQUIRED is True:
+                    else:
                         raise self.Unauthorized(
                             reason="There is no Session or Authentication is missing",
                         )
@@ -924,10 +954,9 @@ class AuthHandler:
                     raise
                 except Exception as err:
                     self.logger.warning(f"Error checking User in Session: {err}")
-                    if AUTH_CREDENTIALS_REQUIRED is True:
-                        raise self.Unauthorized(
-                            reason="Error checking User in Session"
-                        ) from err
+                    raise self.Unauthorized(
+                        reason="Error checking User in Session"
+                    ) from err
         except AuthException as err:
             logging.error(
                 f"Auth Middleware: Invalid Signature,\

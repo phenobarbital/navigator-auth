@@ -12,7 +12,6 @@ from navigator_session import get_session
 from ..libs.cipher import Cipher
 from ..exceptions import AuthException, InvalidAuth, FailedAuth, AuthExpired, UserNotFound
 from ..conf import (
-    AUTH_CREDENTIALS_REQUIRED,
     AUTH_USERID_ATTRIBUTE,
     AUTH_TOKEN_SECRET,
     AUTH_SESSION_OBJECT,
@@ -20,6 +19,7 @@ from ..conf import (
 
 # Authenticated Entity
 from ..identities import AuthUser
+from ..libs.sanitize import sanitize_request
 from .abstract import BaseAuthBackend
 
 
@@ -225,11 +225,17 @@ class APIKeyAuth(BaseAuthBackend):
         except AuthExpired as err:
             raise self.Unauthorized(reason=f"API Key Expired: {err.message!s}", exception=err) from err
         except AuthException as err:
-            if AUTH_CREDENTIALS_REQUIRED is True:
-                self.logger.error(f"Invalid authorization token: {err!r}")
-                raise self.Unauthorized(reason=f"API Key: Invalid authorization Key: {err!r}", exception=err) from err
+            self.logger.error(
+                f"Invalid authorization token: {err!r}"
+            )
+            raise self.Unauthorized(
+                reason=f"API Key: Invalid authorization Key: {err!r}",
+                exception=err
+            ) from err
         except Exception as err:
-            if AUTH_CREDENTIALS_REQUIRED is True:
-                self.logger.exception(f"Error on API Key Middleware: {err}")
-                raise self.auth_error(reason="API Auth Error", exception=err) from err
-        return await handler(request)
+            self.logger.exception(f"Error on API Key Middleware: {err}")
+            raise self.auth_error(
+                reason="API Auth Error",
+                exception=err
+            ) from err
+        return await handler(sanitize_request(request))

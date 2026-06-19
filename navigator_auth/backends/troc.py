@@ -19,12 +19,12 @@ from ..exceptions import (
     UserNotFound,
 )
 from ..conf import (
-    AUTH_CREDENTIALS_REQUIRED,
     PARTNER_KEY,
     CYPHER_TYPE,
     AUTH_SUCCESSFUL_CALLBACKS,
     TROCTOKEN_REDIRECT_URI,
 )
+from ..libs.sanitize import sanitize_request
 from .abstract import BaseAuthBackend
 from .basic import BasicUser
 
@@ -219,16 +219,22 @@ class TrocToken(BaseAuthBackend):
                     usr.id = username
                     usr.set(self.username_attribute, username)
                     self._set_user_request(request, usr)
-                    return await handler(request)
+                    return await handler(sanitize_request(request))
             except InvalidAuth:
                 _, payload = self._idp.decode_token(code=token)
-            if not payload and AUTH_CREDENTIALS_REQUIRED is True:
-                raise self.Unauthorized(reason="There is no Session or Authentication is missing")
+            if not payload:
+                raise self.Unauthorized(
+                    reason="There is no Session or Authentication is missing"
+                )
             ## check if user has a session:
             # load session information
-            session = await get_session(request, payload, new=False, ignore_cookie=True)
-            if not session and AUTH_CREDENTIALS_REQUIRED is True:
-                raise self.Unauthorized(reason="There is no Session or Authentication is missing")
+            session = await get_session(
+                request, payload, new=False, ignore_cookie=True
+            )
+            if not session:
+                raise self.Unauthorized(
+                    reason="There is no Session or Authentication is missing"
+                )
             try:
                 request.user = await self.get_session_user(session)
                 request["authenticated"] = True
@@ -248,5 +254,7 @@ class TrocToken(BaseAuthBackend):
             raise self.ForbiddenAccess(reason=err.message) from err
         except AuthException as err:
             self.logger.error("Invalid Signature or Authentication Failed")
-            raise self.ForbiddenAccess(reason=err.message) from err
-        return await handler(request)
+            raise self.ForbiddenAccess(
+                reason=err.message
+            ) from err
+        return await handler(sanitize_request(request))

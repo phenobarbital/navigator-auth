@@ -24,7 +24,7 @@ async def ensure_vault_tables(db_pool: Any) -> None:
     """
     sql_file = SQL_DIR / "001_create_vault_tables.sql"
     sql = sql_file.read_text()
-    
+
     ctx = db_pool.acquire()
     if hasattr(ctx, "__aenter__"):
         async with ctx as conn:
@@ -40,5 +40,5 @@ async def ensure_vault_tables(db_pool: Any) -> None:
                 await conn.release()
             else:
                 await conn.close()
-    
+
     logger.info("Vault tables ensured.")

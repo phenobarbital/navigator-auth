@@ -2,7 +2,6 @@
 
 Authentication Backends.
 """
-
 from .noauth import NoAuth
 from .basic import BasicAuth
 from .django import DjangoAuth

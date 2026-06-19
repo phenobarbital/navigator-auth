@@ -57,10 +57,8 @@ _extra_excluded = [
 # Combined defaults used to seed per-app exclude lists.
 exclude_list = EXCLUDE_DEFAULTS + [e for e in _extra_excluded if e]
 
-# if false, force credentials are not required for using this system.
-AUTH_CREDENTIALS_REQUIRED = config.getboolean(
-    "AUTH_CREDENTIALS_REQUIRED", fallback=True
-)
+# AUTH_CREDENTIALS_REQUIRED has been removed (SOC2).
+# Authentication is always enforced and cannot be disabled via environment.
 
 # Security Headers:
 ENABLE_XFRAME_OPTIONS = config.getboolean('ENABLE_XFRAME_OPTIONS', fallback=True)
@@ -130,6 +128,33 @@ AUTHORIZATION_BACKENDS = [
     for e in list(
         config.get("AUTHORIZATION_BACKENDS", fallback="allow_hosts").split(",")
     )
+]
+
+### Allowed IPs (individual IPs or CIDR ranges, comma-separated):
+ALLOWED_IPS = [
+    e.strip()
+    for e in config.get(
+        "ALLOWED_IPS", section="auth", fallback=""
+    ).split(",")
+    if e.strip()
+]
+
+### Trusted proxy IPs (for X-Forwarded-For resolution):
+ALLOWED_IP_TRUSTED_PROXIES = [
+    e.strip()
+    for e in config.get(
+        "ALLOWED_IP_TRUSTED_PROXIES", section="auth", fallback=""
+    ).split(",")
+    if e.strip()
+]
+
+### Azure Service Tags to auto-fetch on startup (e.g. "PowerBI,PowerQueryOnline"):
+AZURE_SERVICE_TAGS = [
+    e.strip()
+    for e in config.get(
+        "AZURE_SERVICE_TAGS", section="auth", fallback=""
+    ).split(",")
+    if e.strip()
 ]
 
 ### Allowed User-Agents:

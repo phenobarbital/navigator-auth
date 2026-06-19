@@ -25,7 +25,6 @@ from ..conf import (
     AUTH_DEFAULT_SCHEME,
     AUTH_USERNAME_ATTRIBUTE,
     USER_MAPPING,
-    AUTH_CREDENTIALS_REQUIRED,
     AUTH_SUCCESSFUL_CALLBACKS,
     AUTH_EXCLUDE_LIST_KEY,
     PREFERRED_AUTH_SCHEME,
@@ -71,8 +70,7 @@ class BaseAuthBackend(ABC):
         self._service = self.__class__.__name__
         self._session = None
         self._app: web.Application = None  # reference for Application
-        # force using of credentials
-        self.credentials_required: bool = AUTH_CREDENTIALS_REQUIRED
+        self.credentials_required: bool = True
         self._credentials = None
         self.user_property = SESSION_USER_PROPERTY
         if user_attribute:
