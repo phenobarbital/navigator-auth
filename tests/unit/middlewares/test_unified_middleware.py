@@ -31,6 +31,10 @@ class TestUnifiedMiddleware:
         assert mw.strategy is not None
         assert mw.protected_routes == ("/api/data",)
 
+    def test_new_style_middleware_version(self):
+        mw = UnifiedAuthMiddleware(strategy=DummyStrategy())
+        assert getattr(mw, "__middleware_version__", None) == 1
+
     @pytest.mark.asyncio
     async def test_skips_unprotected_route(self):
         user_fn = AsyncMock(return_value={"id": 1})
@@ -41,9 +45,7 @@ class TestUnifiedMiddleware:
         )
         request = make_mocked_request("GET", "/api/public")
         handler = AsyncMock(return_value=web.Response(text="ok"))
-        app = web.Application()
-        inner = await mw.middleware(app, handler)
-        resp = await inner(request)
+        resp = await mw(request, handler)
         assert resp.status == 200
         user_fn.assert_not_called()
 
@@ -55,10 +57,8 @@ class TestUnifiedMiddleware:
         )
         request = make_mocked_request("GET", "/api/data")
         handler = AsyncMock()
-        app = web.Application()
-        inner = await mw.middleware(app, handler)
         with pytest.raises(web.HTTPForbidden, match="Missing credentials"):
-            await inner(request)
+            await mw(request, handler)
 
     @pytest.mark.asyncio
     async def test_authenticated_sets_user(self):
@@ -75,9 +75,7 @@ class TestUnifiedMiddleware:
             headers={"X-Test-Token": "VALID"},
         )
         handler = AsyncMock(return_value=web.Response(text="ok"))
-        app = web.Application()
-        inner = await mw.middleware(app, handler)
-        await inner(request)
+        await mw(request, handler)
         handler.assert_called_once()
         called_request = handler.call_args[0][0]
         assert called_request.user == {"id": 1}
@@ -90,15 +88,27 @@ class TestUnifiedMiddleware:
         )
         request = make_mocked_request("GET", "/api/data?apikey=SECRET&page=1")
         handler = AsyncMock(return_value=web.Response(text="ok"))
-        app = web.Application()
-        inner = await mw.middleware(app, handler)
-        await inner(request)
+        await mw(request, handler)
         called_request = handler.call_args[0][0]
         assert "apikey" not in dict(called_request.query)
         assert called_request.query.get("page") == "1"
 
     @pytest.mark.asyncio
     async def test_no_user_fn_still_works(self):
+        mw = UnifiedAuthMiddleware(
+            strategy=DummyStrategy(),
+            protected_routes=("/api/data",),
+        )
+        request = make_mocked_request(
+            "GET", "/api/data",
+            headers={"X-Test-Token": "VALID"},
+        )
+        handler = AsyncMock(return_value=web.Response(text="ok"))
+        await mw(request, handler)
+        handler.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_legacy_factory_pattern(self):
         mw = UnifiedAuthMiddleware(
             strategy=DummyStrategy(),
             protected_routes=("/api/data",),

@@ -1,7 +1,6 @@
 """Unified auth middleware driven by pluggable TokenStrategy."""
-from typing import Optional, Any
+from typing import Optional
 from collections.abc import Callable, Awaitable, Coroutine
-import logging
 from aiohttp import web
 from navigator_session import SESSION_USER_PROPERTY
 from ..libs.sanitize import sanitize_request
@@ -10,7 +9,17 @@ from .strategies import TokenStrategy
 
 
 class UnifiedAuthMiddleware(base_middleware):
-    """Single middleware that handles all token-based auth via a strategy."""
+    """Single middleware that handles all token-based auth via a strategy.
+
+    Uses the new-style aiohttp middleware API (__middleware_version__ = 1)
+    to avoid deprecation warnings. Registered directly as an app middleware:
+
+        app = web.Application(middlewares=[
+            UnifiedAuthMiddleware(strategy=MyStrategy(), user_fn=my_fn)
+        ])
+    """
+
+    __middleware_version__ = 1
 
     def __init__(
         self,
@@ -32,25 +41,32 @@ class UnifiedAuthMiddleware(base_middleware):
         if exclude_routes:
             self.exclude_routes = exclude_routes
 
+    async def __call__(
+        self,
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
+        if await self.valid_routes(request):
+            return await handler(request)
+
+        token, scheme = self.strategy.extract(request)
+
+        if self.strategy.should_enforce(request, self.protected_routes):
+            if not token:
+                raise web.HTTPForbidden(reason="Missing credentials")
+            payload = await self.strategy.validate(token, scheme, request.app)
+            if self._fn:
+                user = await self._fn(payload, request)
+                if not user:
+                    raise web.HTTPForbidden(reason="Access Restricted")
+                request[self.user_property] = user
+                request.user = user
+
+        return await handler(sanitize_request(request))
+
     async def middleware(self, app, handler):
+        """Backward-compatible factory pattern for legacy registration."""
         @web.middleware
         async def mw(request):
-            if await self.valid_routes(request):
-                return await handler(request)
-
-            token, scheme = self.strategy.extract(request)
-
-            if self.strategy.should_enforce(request, self.protected_routes):
-                if not token:
-                    raise web.HTTPForbidden(reason="Missing credentials")
-                payload = await self.strategy.validate(token, scheme, app)
-                if self._fn:
-                    user = await self._fn(payload, request)
-                    if not user:
-                        raise web.HTTPForbidden(reason="Access Restricted")
-                    request[self.user_property] = user
-                    request.user = user
-
-            return await handler(sanitize_request(request))
-
+            return await self.__call__(request, handler)
         return mw
