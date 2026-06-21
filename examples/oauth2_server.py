@@ -1,9 +1,19 @@
 """Example OAuth2 authorization-server application.
 
-FEAT-093 TASK-023: Test client now uses a fixed opaque string ``client_uid``
-(``nav_test_client``) instead of the integer ``client_id=1``.  This mirrors
-the production model where the public identifier on the wire is always an
-opaque string.
+FEAT-093 production-grade 3LO demonstration:
+
+  - client_id is an opaque string uid (never an integer).
+  - PKCE S256 enforced for the public client.
+  - Refresh token rotation with reuse-detection.
+  - RFC 7009 /oauth2/revoke endpoint.
+  - Per-app consent grants (/oauth2/grants).
+  - Scope-gated /oauth2/userinfo claims.
+  - Scope ↔ ABAC composition via @scope_required.
+
+Run with:
+    python examples/oauth2_server.py
+
+Then open http://localhost:5000/login to start the 3LO flow.
 """
 
 import os
@@ -41,51 +51,94 @@ app[AUTH_EXCLUDE_LIST_KEY].append('/login')
 
 
 if __name__ == '__main__':
-    async def populate_client(app):
-        """Register a test OAuth2 client using an opaque string client_uid."""
+    async def populate_clients(app):
+        """Register test OAuth2 clients on startup.
+
+        FEAT-093 3LO model:
+          - public_client   : S256 PKCE required, no secret, authorization_code only.
+          - confidential_client : has secret, supports authorization_code + client_credentials.
+
+        Both use opaque string client_id values (never integers).
+        client_pk is None for in-memory clients (no DB PK needed).
+        """
         try:
             auth_handler = app.get('auth')
             if auth_handler and 'Oauth2Provider' in auth_handler.backends:
                 provider = auth_handler.backends['Oauth2Provider']
                 from navigator_auth.backends.oauth2.models import OauthUser, OAuthClient
 
-                # Mock resource-owner user (used for client_credentials only).
-                user = OauthUser(
+                # Resource-owner placeholder — only used as metadata for the client,
+                # NEVER as the source of user_id in 3LO tokens.
+                resource_owner = OauthUser(
                     user_id=35,
                     username="testuser",
                     given_name="Test",
                     family_name="User",
                 )
 
-                # FEAT-093 TASK-023: client_id is now the PUBLIC opaque uid.
-                # Integer PK is irrelevant for in-memory / Redis stores.
-                client = OAuthClient(
-                    client_id="nav_test_client",          # opaque public uid
-                    client_name="TROC Navigator",
-                    client_secret="test_client_secret",
+                # --- Public client (S256 PKCE required) ---
+                public_client = OAuthClient(
+                    client_id="nav_public_client",       # opaque uid — appears on wire
+                    client_pk=None,                      # no int PK for in-memory store
+                    client_name="Navigator Web App",
+                    client_secret=None,                  # public: no secret
                     client_type="public",
                     redirect_uris=["http://localhost:5000/static/callback.html"],
                     policy_uri="",
                     client_logo_uri="",
-                    user=user,
+                    user=resource_owner,
                     default_scopes=["default", "profile", "email", "offline_access"],
-                    allowed_grant_types=["authorization_code", "client_credentials"],
+                    allowed_grant_types=["authorization_code"],
+                )
+
+                # --- Confidential client (authorization_code + client_credentials) ---
+                confidential_client = OAuthClient(
+                    client_id="nav_confidential_client",
+                    client_pk=None,
+                    client_name="Navigator Service",
+                    client_secret="confidential_s3cr3t",
+                    client_type="confidential",
+                    redirect_uris=["http://localhost:5000/static/callback.html"],
+                    policy_uri="",
+                    client_logo_uri="",
+                    user=resource_owner,
+                    default_scopes=["default", "profile", "email", "offline_access"],
+                    allowed_grant_types=[
+                        "authorization_code",
+                        "client_credentials",
+                        "refresh_token",
+                    ],
                 )
 
                 db = app.get('authdb')
-                if db:
-                    async with await db.acquire() as conn:
-                        from navigator_auth.models import Client as ClientModel
-                        ClientModel.Meta.connection = conn
+                for client in (public_client, confidential_client):
+                    if db:
+                        async with await db.acquire() as conn:
+                            from navigator_auth.models import Client as ClientModel
+                            ClientModel.Meta.connection = conn
+                            await provider.client_storage.save_client(client)
+                    else:
                         await provider.client_storage.save_client(client)
-                else:
-                    # Memory / Redis storage — no DB connection needed.
-                    await provider.client_storage.save_client(client)
+                    print(
+                        f"Registered client: {client.client_id!r} "
+                        f"(type={client.client_type}, "
+                        f"grants={client.allowed_grant_types})"
+                    )
 
-                print(f"Test Client Created: {client.client_id} / {client.client_secret}")
+                print()
+                print("3LO flow (public client + PKCE S256):")
+                print(
+                    "  GET http://localhost:5000/oauth2/authorize"
+                    "?response_type=code"
+                    "&client_id=nav_public_client"
+                    "&redirect_uri=http://localhost:5000/static/callback.html"
+                    "&scope=default+profile+email+offline_access"
+                    "&state=test_state"
+                    "&code_challenge=<S256_hash>&code_challenge_method=S256"
+                )
         except Exception as e:
-            print(f"Error populating client: {e}")
-            logging.exception("populate_client failed")
+            print(f"Error populating clients: {e}")
+            logging.exception("populate_clients failed")
 
-    app.on_startup.append(populate_client)
+    app.on_startup.append(populate_clients)
     web.run_app(app, host='localhost', port=5000)
