@@ -3,7 +3,7 @@
 **Feature ID**: FEAT-094
 **Date**: 2026-06-22
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 1.3.0
 
 > **Inputs:** `sdd/proposals/oauth2-introspection-device-grant.brainstorm.md`
@@ -72,10 +72,10 @@ foundation, is cheap and consistent; building them before/around it would mean r
 - OpenID Connect, DPoP/mTLS, Dynamic Client Registration, Token Exchange, CIBA (still deferred).
 - Re-litigating FEAT-093 mechanics (owner-binding, PKCE, rotation, ABAC composition) — consumed
   as-is.
-- A bearer-token (service-token) auth mode for `/introspect` beyond client_credentials, unless
-  Open Question OQ1 is resolved to add it.
-- Surfacing FEAT-093 ABAC *effective* scopes in introspection responses, unless OQ5 resolves to
-  include them (default: strict RFC 7662 claims only).
+- A bearer-token (service-token) auth mode for `/introspect` beyond client_credentials
+  (**resolved D1: client_credentials only**).
+- Surfacing FEAT-093 ABAC *effective* scopes in introspection responses (**resolved D5: strict
+  RFC 7662 claims only**, `OAUTH_INTROSPECT_INCLUDE_ABAC_SCOPES=False`).
 - `POST /oauth2/revoke` (RFC 7009) — already owned by FEAT-093 Module 5.
 
 ---
@@ -183,6 +183,8 @@ class OauthDeviceCode(BaseModel):
     client_pk: Optional[int] = None        # internal surrogate PK (FK target on the DB row)
     scopes: list[str] = []                 # requested, filtered to client allow-list
     status: DeviceCodeStatus = DeviceCodeStatus.PENDING
+    code_challenge: Optional[str] = None        # D4: PKCE — required (S256) for public clients
+    code_challenge_method: Optional[str] = None # 'S256' enforced for public clients
     user_id: Optional[int] = None          # set ONLY at approval, from the authenticated session
     granted_scopes: list[str] = []         # set at approval (consent result)
     auth_code: Optional[str] = None        # D-2: internal owner-bound auth-code carrier ref
@@ -252,15 +254,20 @@ def poll_decision(dc: OauthDeviceCode, now: datetime) -> str: ...     # 'slow_do
 - **Responsibility**: `POST /oauth2/device_authorization` (+ exclude-list). Validate `client_id`
   (resolve `client_uid`); filter `scope` to the client allow-list (`invalid_scope` on unknown).
   Generate `device_code` (`secrets.token_urlsafe`) and `user_code` (M1 helper, regenerate on
-  collision). Persist a `pending` `OauthDeviceCode` (TTL from `OAUTH_DEVICE_CODE_TTL`). Return the
+  collision). **PKCE (D4):** capture `code_challenge`/`code_challenge_method`; for **public**
+  clients require PKCE **S256** (reject missing/`plain` per FEAT-093 `OAUTH_REQUIRE_PKCE_PUBLIC`).
+  Persist a `pending` `OauthDeviceCode` (TTL from `OAUTH_DEVICE_CODE_TTL`). Return the
   RFC 8628 payload: `device_code`, `user_code`, `verification_uri` (`OAUTH_DEVICE_VERIFICATION_URI`
   or derived), `verification_uri_complete` (`?user_code=…`), `expires_in`, `interval`.
-- **Depends on**: Module 1.
+- **Depends on**: Module 1; FEAT-093 PKCE helper (`oauth2/pkce.py`).
 
 ### Module 4: Device verification surface (RFC 8628 §3.3)
 - **Path**: `oauth2/backend.py`
-- **Responsibility**: `GET/POST /oauth2/device` accepts/normalizes `user_code` (case-insensitive,
-  hyphen-stripped) under rate-limit + lockout (anti-brute-force; generic error on bad/locked).
+- **Responsibility**: `GET/POST /oauth2/device` — a **dedicated verification page** (D2:
+  user_code entry, pre-filled from `verification_uri_complete`, + confirm). Accepts/normalizes
+  `user_code` (case-insensitive, hyphen-stripped) under **Redis-backed** rate-limit + lockout
+  (D3: `OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS=5` / `OAUTH_DEVICE_LOCKOUT_TTL=300`; counters in Redis
+  so limits hold across workers; anti-brute-force; generic error on bad/locked).
   Require an authenticated session (reuse `/oauth2/login`); reuse `/oauth2/consent` with
   `GrantStorage` consent-skip. On approval: stamp the device record `status=approved`, `user_id`
   (from session — owner-binding), `granted_scopes`; **D-2:** mint an internal owner-bound
@@ -273,10 +280,12 @@ def poll_decision(dc: OauthDeviceCode, now: datetime) -> str: ...     # 'slow_do
   `token_request`. Resolve `device_code`; enforce client match. Run the M1 `poll_decision` state
   machine: too-soon ⇒ `slow_down` (bump interval, update `last_polled_at`); `pending` ⇒
   `authorization_pending`; `denied` ⇒ `access_denied`; expired/unknown ⇒ `expired_token`;
-  `approved` ⇒ **delegate to the existing `authorization_code` exchange** via the stored
-  `auth_code` carrier (owner-bound token + refresh iff `offline_access`), then mark the
-  device_code `consumed` (single-use). Standard OAuth error envelopes throughout.
-- **Depends on**: Modules 1, 3, 4.
+  `approved` ⇒ **verify PKCE** (D4: `code_verifier` against stored `code_challenge` via the
+  FEAT-093 helper, `hmac.compare_digest`; `invalid_grant` on mismatch) then **delegate to the
+  existing `authorization_code` exchange** via the stored `auth_code` carrier (owner-bound token +
+  refresh iff `offline_access`), then mark the device_code `consumed` (single-use). Standard OAuth
+  error envelopes throughout.
+- **Depends on**: Modules 1, 3, 4; FEAT-093 PKCE helper.
 
 ### Module 6: Tests, docs, example
 - **Path**: `tests/`, `documentation/oauth.md`, `examples/oauth2_server.py`
@@ -302,6 +311,8 @@ def poll_decision(dc: OauthDeviceCode, now: datetime) -> str: ...     # 'slow_do
 | `test_introspect_requires_client_auth` | M2 | unauthenticated/bad secret ⇒ `401 invalid_client`; missing token ⇒ `400 invalid_request` |
 | `test_device_authorization_response` | M3 | returns device_code/user_code/verification_uri(_complete)/expires_in/interval; scope filtered |
 | `test_device_invalid_scope` | M3 | scope outside client allow-list ⇒ `invalid_scope` |
+| `test_device_public_requires_pkce` | M3 | D4 — public client without `code_challenge` (or `plain`) ⇒ rejected |
+| `test_device_pkce_verify` | M5 | D4 — correct `code_verifier` passes; mismatch ⇒ `invalid_grant` |
 | `test_device_user_code_lockout` | M4 | repeated bad `user_code` entries ⇒ rate-limit + lockout, generic error |
 | `test_device_approval_binds_user` | M4 | approval stamps `user_id` from session (never `client.user`) + `granted_scopes` |
 | `test_device_consent_skip_with_grant` | M4 | existing unrevoked `OauthGrant` covering scopes skips consent |
@@ -358,6 +369,9 @@ def confidential_introspect_client():   # client_secret set; the resource-server
       approval binds `user_id` from the **authenticated session** (never `client.user`).
 - [ ] Device polling implements `authorization_pending` / `slow_down` (interval bump) /
       `access_denied` / `expired_token` per RFC 8628 §3.5.
+- [ ] Public device clients **require PKCE S256** (D4): `code_challenge` captured at
+      `/device_authorization`, `code_verifier` verified at token polling
+      (`hmac.compare_digest`); missing/`plain`/mismatch rejected.
 - [ ] Approved device polling issues an **owner-bound** access token (refresh **iff**
       `offline_access`) by delegating to the existing `authorization_code` exchange (D-2).
 - [ ] No new runtime dependency; constant-time comparisons for `device_code`/`user_code`/secret;
@@ -418,24 +432,29 @@ def confidential_introspect_client():   # client_secret set; the resource-server
 
 ---
 
-## 7. Open Questions
+## 7. Resolved Decisions
 
-> Carried from the brainstorm; none block starting Module 1/2. Resolve M3–M5 questions before
-> those modules.
+> All five brainstorm open questions resolved with Jesus Lara on 2026-06-22. None block
+> implementation.
 
-- [ ] **OQ1** — Should `/introspect` also accept a **bearer** service token (scope `introspect`)
-      in addition to client_credentials? Round-1 chose client_credentials; confirm whether a
-      bearer fallback is needed. — *Owner: Jesus Lara*
-- [ ] **OQ2** — Device verification UI: a **dedicated `/oauth2/device` page** (user_code entry +
-      confirm) vs redirect into the existing consent UI with `user_code` pre-filled via
-      `verification_uri_complete`? — *Owner: Jesus Lara*
-- [ ] **OQ3** — Exact rate-limit/lockout policy and where counters live (Redis vs in-process);
-      defaults proposed in §6 (`5` attempts / `300s`). — *Owner: Jesus Lara*
-- [ ] **OQ4** — Does the device grant **require PKCE** for public clients (RFC 8628 permits it;
-      FEAT-093 mandates S256 on auth-code)? Mirroring it adds rigor at some client-complexity
-      cost. — *Owner: Jesus Lara*
-- [ ] **OQ5** — Should introspection include FEAT-093 **effective ABAC scopes**, or stay strict
-      RFC 7662 (`OAUTH_INTROSPECT_INCLUDE_ABAC_SCOPES=False` default)? — *Owner: Jesus Lara*
+- **D1 — Introspection caller auth:** **client_credentials only** (confidential client_id +
+  client_secret). No bearer service-token mode. Each resource server must be a confidential
+  client. (was OQ1)
+- **D2 — Device verification UI:** a **dedicated `/oauth2/device` page** (user_code entry,
+  pre-filled via `verification_uri_complete`, + confirm), then login + consent. Not a redirect
+  into the auth-code consent UI. (was OQ2)
+- **D3 — Rate-limit/lockout:** **Redis-backed** counters (shared across workers); defaults
+  `OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS=5`, `OAUTH_DEVICE_LOCKOUT_TTL=300`. (was OQ3)
+- **D4 — Device PKCE:** device grant **requires PKCE S256 for public clients**, mirroring
+  FEAT-093 auth-code (`OAUTH_REQUIRE_PKCE_PUBLIC`). `code_challenge` captured at
+  `/device_authorization`; `code_verifier` verified at token polling (`hmac.compare_digest`);
+  missing/`plain`/mismatch rejected. (was OQ4)
+- **D5 — Introspection scopes:** **strict RFC 7662 claims**; do not expose FEAT-093 effective
+  ABAC scopes (`OAUTH_INTROSPECT_INCLUDE_ABAC_SCOPES=False`). (was OQ5)
+
+### Open Questions
+
+- *(none — all resolved above)*
 
 ---
 
@@ -461,3 +480,4 @@ def confidential_introspect_client():   # client_secret set; the resource-server
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-06-22 | Jesus Lara | Initial draft from brainstorm (Option A + Option D shortcuts); FEAT-093 hard prerequisite; 5 open questions carried |
+| 0.2 | 2026-06-22 | Jesus Lara | Resolved D1–D5 (client_credentials-only introspect; dedicated device page; Redis lockout 5/300; device PKCE S256 required for public clients; strict RFC 7662 claims); folded device PKCE into model/M3/M5/tests/AC; status → approved |
