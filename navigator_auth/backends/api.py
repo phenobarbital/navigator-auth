@@ -68,7 +68,12 @@ class APIKeyAuth(BaseAuthBackend):
                 return [None, None]
         except Exception as err:  # pylint: disable=W0703
             self.logger.exception(f"API Key Auth: Error getting payload: {err}")
-            return None
+            # Return the (mech, token) pair shape even on error: callers do
+            # `mech, token = await self.get_payload(request)`, so returning a
+            # bare `None` raises "cannot unpack non-iterable NoneType object",
+            # which surfaces as a misleading 500/"API Auth Error" instead of
+            # cleanly deferring to the next auth backend.
+            return [None, None]
         return [mech, token]
 
     async def reconnect(self):
