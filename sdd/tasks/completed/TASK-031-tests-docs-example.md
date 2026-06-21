@@ -2,7 +2,7 @@
 
 **Feature**: Production-grade 3LO (Three-Legged OAuth2)
 **Spec**: `sdd/specs/oauth2-3lo-implementation.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-023, TASK-024, TASK-025, TASK-026, TASK-027, TASK-028, TASK-029, TASK-030
@@ -95,9 +95,21 @@ class TestThreeLO:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: sdd-worker (claude-sonnet-4-6)
+**Date**: 2026-06-22
 **Notes**:
+- Added four in-memory storage classes (MemoryAuthCodeStorage, MemoryRefreshTokenStorage,
+  MemoryGrantStorage, MemoryAccessTokenStorage) and three fixtures (memory_oauth_storages,
+  public_client, confidential_client) to tests/conftest.py.
+- Created tests/test_oauth2_integration.py with 24 tests including both mandatory acceptance
+  gates: test_user_id_survives_refresh (B1/user_id binding across rotation) and
+  test_cache_regression_two_tokens (scope-key cache isolation §11.4).
+- Full documentation/oauth.md overhaul: client_id/client_pk distinction, PKCE S256 3LO flow,
+  refresh token rotation with reuse detection, RFC 7009 revocation, consent grants API,
+  scope-ABAC composition, valid scope registry (OAUTH_SCOPES/OAUTH_SCOPE_ACTIONS), FAQ.
+- Updated examples/oauth2_server.py to register both public and confidential clients
+  demonstrating the full FEAT-093 3LO model with correct client_id/client_pk semantics.
+- Key correctness details: OauthRefreshToken field is .refresh_token (not .token);
+  OauthGrant field is .client_id (not .client_uid); both resolved in memory storages.
+- All 64 tests in test_scope_abac.py + test_oauth2_integration.py pass.
 **Deviations from spec**: none
