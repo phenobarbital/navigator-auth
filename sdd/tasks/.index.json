@@ -422,7 +422,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P0 Correctness — resource-owner binding + B1–B5",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -432,7 +432,8 @@
     "parallelism_notes": "Core rewrite of backend.py/models.py; gates all later phases. Shared hot files ⇒ sequential.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-22T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-024-p0-owner-binding-bugfixes.md"
+    "completed_at": "2026-06-22T02:00:00Z",
+    "file": "sdd/tasks/completed/TASK-024-p0-owner-binding-bugfixes.md"
   },
   {
     "id": "TASK-025",

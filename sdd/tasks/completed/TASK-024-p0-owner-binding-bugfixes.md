@@ -111,9 +111,19 @@ class TestP0:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: sdd-worker (claude-sonnet-4-6)
+**Date**: 2026-06-22
 **Notes**:
-**Deviations from spec**: none
+- `backend.py` fully rewritten: user_id from session/auth_code at every grant type,
+  B1-B5 implemented, confidential client secret verification via hmac.compare_digest,
+  PKCE S256 verification hooked in (calls pkce.py), all `auth_code.client_id`/`rt.client_id`
+  references renamed to `.client`.
+- `code_backend.py` extended with mark_used(), revoke_token(), revoke_chain(), list_tokens(),
+  GrantStorage, AccessTokenStorage (covers TASK-026/027 storage needs too).
+- `pkce.py` created (S256 only; plain rejected) — TASK-025 module created here since
+  backend.py imports it immediately.
+- `conf.py` extended with 6 new OAUTH_* constants.
+- 27 tests: 26 pass, 1 skipped (fakeredis not installed in env).
+**Deviations from spec**: pkce.py created as part of TASK-024 commit (ahead of TASK-025)
+because backend.py imports it; TASK-025 will add the conf.py OAUTH_REQUIRE_PKCE_PUBLIC
+test and refine the authorize() PKCE capture path.
