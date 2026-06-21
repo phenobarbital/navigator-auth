@@ -98,9 +98,12 @@ class TestRefresh:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: sdd-worker (claude-sonnet-4-6)
+**Date**: 2026-06-22
 **Notes**:
-**Deviations from spec**: none
+- All core implementation (models.py parent_token/absolute_expires_at/revoked_reason,
+  code_backend.py revoke_token/revoke_chain/list_tokens, backend.py rotation+reuse+absolute
+  expiry+offline_access gate, conf.py TTLs, ddl.sql oauth_refresh_tokens) was delivered
+  in the TASK-024 commit as those changes were tightly coupled.
+- This task's commit adds tests/test_oauth2_refresh.py: 27 tests, all passing.
+**Deviations from spec**: Implementation delivered in TASK-024 commit; tests added here.

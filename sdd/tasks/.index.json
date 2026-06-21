@@ -462,7 +462,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P2 — Refresh hardening + durable storage",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -472,7 +472,8 @@
     "parallelism_notes": "Edits backend.py/code_backend.py/models.py from TASK-024; sequential.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-22T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-026-refresh-rotation-storage.md"
+    "completed_at": "2026-06-22T03:00:00Z",
+    "file": "sdd/tasks/completed/TASK-026-refresh-rotation-storage.md"
   },
   {
     "id": "TASK-027",
