@@ -545,7 +545,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P5 \u2014 Scope \u2194 ABAC composition",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -556,7 +556,8 @@
     "parallelism_notes": "ABAC files share nothing with oauth2 modules but depend on TASK-029 surfacing scopes/client_id; per-spec worktree keeps it sequential.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-22T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-030-scope-abac-integration.md"
+    "completed_at": "2026-06-22T01:50:00Z",
+    "file": "sdd/tasks/completed/TASK-030-scope-abac-integration.md"
   },
   {
     "id": "TASK-031",

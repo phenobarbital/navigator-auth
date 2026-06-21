@@ -111,9 +111,16 @@ class TestScopeABAC:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: sdd-worker (Claude claude-sonnet-4-6)
+**Date**: 2026-06-22
 **Notes**:
+- Added `@scope_required(*scopes)` decorator to `abac/decorators.py` mirroring `groups_protected` pattern; raises `web.HTTPForbidden(reason='insufficient_scope')`.
+- Added `Guardian.has_scope(request, scopes)` to `abac/guardian.py`; raises `AccessDenied(reason='insufficient_scope')`.
+- Added `scopes: Optional[list] = None` to `AbstractPolicy.__init__`; `self.scopes = scopes or []`.
+- Added `scope_condition` to both `Policy.evaluate()` and `ObjectPolicy.evaluate()` as an AND-gate.
+- Fixed `_make_cache_key` in `evaluator.py`: added `scope_key: frozenset` and `client_uid: str` as distinct components; updated call site to extract from `ctx.userinfo`.
+- Added `scopes` column to both SELECT queries and `ModelPolicy` in `storages/pg.py`.
+- `ddl.sql` already had the `scopes` column from TASK-023.
+- Added `OAUTH_SCOPES` (list) and `OAUTH_SCOPE_ACTIONS` (dict) to `conf.py`.
+- 40 tests all passing in `tests/test_scope_abac.py`.
 **Deviations from spec**: none
