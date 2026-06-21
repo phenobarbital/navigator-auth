@@ -435,27 +435,52 @@ signature changes (all call sites updated). No public endpoint signatures change
 
 ## Open Questions
 
-- [ ] **`create_token` shape (B1):** the function returns a 4-tuple
-  `(jwt, refresh, exp, scheme)` with absolute `exp`. Add `expires_in` seconds by extending
-  the return / payload, or compute `int(exp - now)` at each OAuth2 call site without
-  touching the IdP signature? — *Owner: Jesus Lara*
-- [ ] **`aud` claim & `jti` emission:** should `create_token` set `aud` (`'user'` vs `'app'`)
-  and `jti` for OAuth2-issued tokens centrally, or should the OAuth2 backend inject these
-  into `data` before calling `create_token`? Confirm `IdentityProvider.decode_token` returns
-  `scope`/`jti`/`aud` in the payload for the resource-server path. — *Owner: Jesus Lara*
-- [ ] **Per-request `jti` revocation cost:** with "check on every request," what TTL for the
-  in-process revocation cache balances immediacy vs storage load? Define the cache + its
-  invalidation on `/revoke` and per-app revoke. — *Owner: Jesus Lara*
-- [ ] **Auth-code storage tier:** codes stay Redis-only in prod, but tests need a memory
-  tier. Add `MemoryAuthorizationCodeStorage` (and memory grant/refresh/jti stores) selected
-  by `OAUTH2_CLIENT_STORAGE=memory`. Confirm this is the intended test path. —
-  *Owner: Jesus Lara*
-- [ ] **FEAT-092 coordination:** confirm the merge order / shared-symbol contract for
-  `abac/storages/pg.py` (`ModelPolicy`), `evaluator.py` (`_make_cache_key`), and the
-  `auth.policies` table between this feature's P5 and the tenant-scoping work. —
-  *Owner: Jesus Lara*
-- [ ] **`OAUTH_SCOPES` semantics:** is an empty registry "reject all unknown scopes" or
-  "allow any client `default_scopes`"? Spec §5.1 leans toward rejecting unknown scopes once a
-  registry exists. Confirm the default-empty behavior. — *Owner: Jesus Lara*
-- [ ] **`AUTH_LOGOUT_REDIRECT_URI`:** confirm the config key name/existence for `logout`
-  teardown redirect. — *Owner: Jesus Lara*
+_All seven open questions were resolved against the code on 2026-06-22 (decisions below).
+None remain blocking for `/sdd-spec`._
+
+- [x] **Q1 — `create_token` shape (B1).** Confirmed 4-tuple
+  `(jwt_token, refresh_token, exp, scheme)`, `exp` absolute UTC timestamp
+  (`idp/__init__.py:292,304`). **Decision:** compute
+  `expires_in = int(exp - datetime.now(timezone.utc).timestamp())` at the OAuth2 token call
+  site; **do not change the IdP signature** (shared by all backends). The `refresh_token`
+  element returned by `create_token` is ignored by the OAuth2 path, which mints/persists its
+  own via the rotation store.
+- [x] **Q2 — `aud` claim & `jti` emission.** Finding: `create_token` **deletes `aud`** from
+  incoming `data` (`idp:282`) and never re-adds it ⇒ tokens carry no `aud` today; `jti` is
+  *not* deleted, so it survives via `**data`. `decode_token` returns the full payload, so any
+  minted `scope`/`jti`/`aud` is readable resource-server-side. **Decision:** inject
+  `jti=str(uuid4())` through the `data` dict (no IdP change); add one minimal,
+  backward-compatible `audience: str = None` kwarg to `create_token` (sets `payload['aud']`
+  only when provided). OAuth2 passes `audience='user'` (3LO) / `'app'` (client_credentials);
+  existing callers default to no-aud. Do **not** enforce `aud` verification in `decode_token`
+  (propagate only).
+- [x] **Q3 — per-request `jti` revocation cost.** **Decision:** in-process TTL cache
+  (jti→revoked), **default TTL 30s** via new config `OAUTH_REVOCATION_CACHE_TTL`. `/revoke`
+  and per-app grant revoke **evict the affected jti immediately** (instant in-process,
+  ≤TTL cross-process). Durable store is source of truth; cache absorbs repeat hits. Exposure
+  bounded to 30s against ~1h access tokens.
+- [x] **Q4 — auth-code storage tier.** Confirmed `AuthorizationCodeStorage` /
+  `RefreshTokenStorage` are **Redis-only, no ABC, no memory tier** (`code_backend.py`).
+  **Decision:** add `Memory*` implementations for code/refresh/grant/jti stores plus a small
+  factory honoring `OAUTH2_CLIENT_STORAGE` (mirrors the `ClientStorage` selector). Tests run
+  `OAUTH2_CLIENT_STORAGE=memory`; prod keeps codes in Redis (short TTL), grants/refresh/jti
+  in the durable tier.
+- [x] **Q5 — FEAT-092 coordination.** **Resolved: completed, not in-flight** — TASK-016…022
+  live in `sdd/tasks/completed/`. Two carryovers for P5: (1) `_make_cache_key`
+  (`evaluator.py:327`) already includes `org_id`/`client_id` **tenant ints** — a *different*
+  concept from the OAuth2 requesting-app `client_id` (string); the §11.4 fix must add a
+  **distinct** `scope_key=frozenset(scopes)` + OAuth `client_id`, not overload the tenant
+  param (one call site, `evaluator.py:433`). (2) `ModelPolicy` is `strict=True` and
+  `load_policies` uses **two explicit SELECT column lists** (`pg.py:35-42`, `47-51`) — adding
+  `Policy.scopes` requires the field on `ModelPolicy`, `scopes` in **both** SELECTs, and the
+  `auth.policies.scopes` DDL column.
+- [x] **Q6 — `OAUTH_SCOPES` semantics.** **Decision (reject, per spec §5.1 step 4):** a
+  requested scope outside `client.default_scopes` ⇒ `invalid_scope`. When `OAUTH_SCOPES` is
+  **non-empty** it is the authoritative registry — any requested scope not in it ⇒
+  `invalid_scope`. When **empty** (default), skip the registry check and validate only
+  against the client allow-list. `offline_access` must be in the client's `default_scopes`
+  to be grantable.
+- [x] **Q7 — `AUTH_LOGOUT_REDIRECT_URI`.** **Resolved: already exists** (`conf.py:120`,
+  fallback `/oauth2/logout/complete`), imported at `backend.py:19`, used as
+  `self.logout_redirect_uri` at `backend.py:70`. No new config — just implement teardown +
+  redirect.
