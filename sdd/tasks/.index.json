@@ -404,14 +404,14 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "Client identifier disambiguation (client_uid)",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "M",
     "depends_on": [],
     "parallel": false,
     "parallelism_notes": "Foundational data-model change touching models/ddl/storage; everything depends on it. Per-spec single worktree.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T00:00:00Z",
     "file": "sdd/tasks/active/TASK-023-client-id-disambiguation.md"
   },
   {
@@ -421,7 +421,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P0 Correctness — resource-owner binding + B1–B5",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -429,8 +429,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Core rewrite of backend.py/models.py; gates all later phases. Shared hot files ⇒ sequential.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T00:00:00Z",
     "file": "sdd/tasks/active/TASK-024-p0-owner-binding-bugfixes.md"
   },
   {
@@ -440,7 +440,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P1 — PKCE (S256)",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "M",
     "depends_on": [
@@ -448,8 +448,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Edits backend.py token branch built in TASK-024; sequential.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T00:00:00Z",
     "file": "sdd/tasks/active/TASK-025-pkce-s256.md"
   },
   {
@@ -459,7 +459,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P2 — Refresh hardening + durable storage",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -467,8 +467,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Edits backend.py/code_backend.py/models.py from TASK-024; sequential.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T00:00:00Z",
     "file": "sdd/tasks/active/TASK-026-refresh-rotation-storage.md"
   },
   {
@@ -478,7 +478,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P3 — Grants, consent-skip, revocation, jti tracking, per-app revoke",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -487,8 +487,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Builds on refresh storage + backend; shares code_backend.py/backend.py/ddl.sql.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T00:00:00Z",
     "file": "sdd/tasks/active/TASK-027-grants-revocation-jti.md"
   },
   {
@@ -498,7 +498,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P4 — userinfo / logout / config",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "medium",
     "effort": "M",
     "depends_on": [
@@ -507,8 +507,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Edits backend.py stubs + conf.py; depends on jti store from TASK-027.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T00:00:00Z",
     "file": "sdd/tasks/active/TASK-028-userinfo-logout-config.md"
   },
   {
@@ -518,7 +518,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "IdP audience + resource-server bearer backend",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "M",
     "depends_on": [
@@ -527,8 +527,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Edits idp + api.py; needs AccessTokenStorage from TASK-027 for jti check.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T00:00:00Z",
     "file": "sdd/tasks/active/TASK-029-idp-audience-resource-server.md"
   },
   {
@@ -538,7 +538,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P5 — Scope ↔ ABAC composition",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -547,8 +547,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "ABAC files share nothing with oauth2 modules but depend on TASK-029 surfacing scopes/client_id; per-spec worktree keeps it sequential.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T00:00:00Z",
     "file": "sdd/tasks/active/TASK-030-scope-abac-integration.md"
   },
   {
@@ -558,7 +558,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "End-to-end tests, docs, and example server",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -573,8 +573,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Final integration coverage + docs; depends on all modules.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T00:00:00Z",
     "file": "sdd/tasks/active/TASK-031-tests-docs-example.md"
   }
 ]
