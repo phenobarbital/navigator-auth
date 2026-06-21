@@ -503,6 +503,10 @@ OAUTH_REFRESH_ROTATION = config.getboolean("OAUTH_REFRESH_ROTATION", fallback=Tr
 # Require PKCE for public clients (default: True per FEAT-093 spec).
 OAUTH_REQUIRE_PKCE_PUBLIC = config.getboolean("OAUTH_REQUIRE_PKCE_PUBLIC", fallback=True)
 
+# Revocation cache TTL in seconds (default: 30 s).
+# Controls how long a jti revocation marker survives independently of the token's remaining TTL.
+OAUTH_REVOCATION_CACHE_TTL = config.getint("OAUTH_REVOCATION_CACHE_TTL", fallback=30)
+
 
 with contextlib.suppress(ImportError):
     from settings.settings import *  # pylint: disable=W0614,W0401 # noqa
