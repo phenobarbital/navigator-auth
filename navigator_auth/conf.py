@@ -485,6 +485,24 @@ OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS = config.getint(
     "OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS", fallback=4
 )
 
+# Access token TTL in seconds (default: 1 hour).
+OAUTH_ACCESS_TOKEN_TTL = config.getint("OAUTH_ACCESS_TOKEN_TTL", fallback=3600)
+
+# Authorization code TTL in seconds (default: 10 minutes).
+OAUTH_CODE_TTL = config.getint("OAUTH_CODE_TTL", fallback=600)
+
+# Refresh token sliding TTL in seconds (default: 30 days).
+OAUTH_REFRESH_TOKEN_TTL = config.getint("OAUTH_REFRESH_TOKEN_TTL", fallback=2592000)
+
+# Refresh token absolute maximum lifetime in seconds (default: 90 days).
+OAUTH_REFRESH_ABSOLUTE_TTL = config.getint("OAUTH_REFRESH_ABSOLUTE_TTL", fallback=7776000)
+
+# Enable refresh token rotation on every use (default: True).
+OAUTH_REFRESH_ROTATION = config.getboolean("OAUTH_REFRESH_ROTATION", fallback=True)
+
+# Require PKCE for public clients (default: True per FEAT-093 spec).
+OAUTH_REQUIRE_PKCE_PUBLIC = config.getboolean("OAUTH_REQUIRE_PKCE_PUBLIC", fallback=True)
+
 
 with contextlib.suppress(ImportError):
     from settings.settings import *  # pylint: disable=W0614,W0401 # noqa
