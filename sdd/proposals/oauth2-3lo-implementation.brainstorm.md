@@ -82,6 +82,61 @@ scopes)** triple, and scopes must **compose with ABAC** (effective permission =
 
 ---
 
+## Client Identifier Model (resolved 2026-06-22)
+
+**Problem.** `client_id` is overloaded four ways, and the current code papers over the
+collision with a lossy `int()` cast:
+
+| # | Where | Type | Meaning |
+|---|-------|------|---------|
+| 1 | `auth.clients.client_id` (`ddl.sql:3`) | `BIGINT` PK | Internal surrogate key |
+| 2 | `OAuthClient.client_id` (`models.py:54`) | `str` | *Intended* OAuth2 public id — but `PostgresClientStorage._get_client_db:84` does `int(client_id)` to look it up, so today the public id **must be the stringified integer PK** (examples use `client_id=1`) |
+| 3 | `OauthAuthorizationCode.client_id` / `OauthRefreshToken.client_id` (`models.py:95,111`) | `OAuthClient` object | Not an id at all — the whole client; hence the spec's confusing `auth_code.client_id.client_id` |
+| 4 | `_make_cache_key(... client_id)` (`evaluator.py:336`) / `auth.policies.client_id` | `int` | FEAT-092 **tenant** identifier — a different domain |
+
+Using the historical integer PK (#1) as the wire OAuth identifier (#2) is the misconception
+to eliminate: sequential-int client ids are **enumerable**, **DB-coupled** (can't migrate or
+rotate without breaking integrations), and force the brittle `int()` cast that silently
+returns `None` for any real (non-numeric) `client_id`.
+
+**Decision.** Separate the surrogate key from the protocol identifier.
+
+- **Surrogate PK stays internal.** `auth.clients.client_id` (`BIGINT`) remains the primary
+  key and the **FK target** for the new tables:
+  `client_id INTEGER REFERENCES auth.clients(client_id)` on
+  `oauth_grants` / `oauth_refresh_tokens` / `oauth_access_tokens`. It is never exposed on the
+  wire. (FK-on-PK strategy chosen.)
+- **New opaque public identifier.** Add
+  `auth.clients.client_uid VARCHAR(255) NOT NULL UNIQUE` — generated at registration
+  (`secrets.token_urlsafe` / `uuid4`), non-enumerable, stable across environments. This is:
+  the wire `client_id` apps send to `authorize`/`token`; the token `client_id` **claim**;
+  `userinfo['client_id']`; the ABAC service-principal identity (`client_credentials`); and
+  the OAuth component of the §11.4 cache key. Backfill existing rows with a generated
+  `client_uid`; give the example/test client a fixed known value.
+- **Model naming to kill the overload (rename to clarify roles):**
+  - `OAuthClient.client_id: str` = the public id (= `client_uid`); keep the str validator.
+  - Add `OAuthClient.client_pk: int` = the surrogate PK (from DB; `None` for memory/redis),
+    used only to build FK rows for grants/tokens.
+  - Rename the `OAuthClient`-typed fields on `OauthAuthorizationCode`, `OauthRefreshToken`,
+    and `OauthToken` from `client_id` → **`client`**, so the spec's
+    `auth_code.client_id.client_id == client_id` becomes the readable
+    `auth_code.client.client_id == client_id`.
+- **Storage fix.** `PostgresClientStorage._get_client_db` (and `_save_client_db`) look up by
+  `client_uid` (drop the `int(client_id)` coercion); map row `client_id`→`client_pk`,
+  row `client_uid`→`client_id`. `navigator_auth/models.py` `Client` model gains `client_uid`.
+  Memory/Redis storages already key by string — they key by `client_uid`.
+
+**This is the same nuance flagged in Q5:** the OAuth `client_id` (now the `client_uid`
+string) is distinct from the FEAT-092 tenant `client_id` (int) in `_make_cache_key`. The
+§11.4 fix must add the public `client_uid` string as a **separate** cache-key component, not
+overload the tenant param.
+
+**Migration:** no production OAuth data exists, so generate `client_uid` for any existing
+rows and update `examples/oauth2_server.py` (+ static callback) to register/use a string
+`client_uid`. No live integrations break.
+
+---
+
 ## Options Explored
 
 ### Option A: Incremental in-place hardening (hand-rolled, phased P0–P5)
@@ -389,10 +444,11 @@ user_ABAC_permissions` (both gates must pass; DENY always wins).
 | Affected Component | Impact Type | Notes |
 |---|---|---|
 | `navigator_auth/backends/oauth2/backend.py` | modifies | Core endpoint rewrite (authorize/consent/token/userinfo/logout) + new revoke/grants; highest contention file |
-| `navigator_auth/backends/oauth2/models.py` | modifies | Add `user_id` to AuthCode + RefreshToken; add `parent_token`/`absolute_expires_at`; new `OauthGrant`; drop `client.user` reliance |
+| `navigator_auth/backends/oauth2/models.py` | modifies | Add `user_id` to AuthCode + RefreshToken; add `parent_token`/`absolute_expires_at`; new `OauthGrant`; drop `client.user` reliance; **`OAuthClient.client_id`=public `client_uid` + new `client_pk:int`; rename nested `client_id`→`client`** |
 | `navigator_auth/backends/oauth2/code_backend.py` | extends | Extend RefreshTokenStorage (rotate/revoke/revoke_chain/list); add memory tier; `user_id` on codes |
-| `navigator_auth/backends/oauth2/client_backend.py` | depends on | `ClientStorage` ABC pattern is the template for new `GrantStorage` + jti store |
-| `navigator_auth/backends/oauth2/ddl.sql` | extends | `auth.oauth_grants`, `auth.oauth_refresh_tokens`, `auth.oauth_access_tokens`; `auth.policies.scopes` |
+| `navigator_auth/backends/oauth2/client_backend.py` | modifies | **Look up by `client_uid` (drop `int()` cast)**, map `client_id`↔`client_pk`; `ClientStorage` ABC pattern is also the template for new `GrantStorage` + jti store |
+| `navigator_auth/models.py` | modifies | `Client` model gains `client_uid` (unique public id) |
+| `navigator_auth/backends/oauth2/ddl.sql` | extends | **`auth.clients.client_uid VARCHAR UNIQUE` + backfill**; `auth.oauth_grants`, `auth.oauth_refresh_tokens`, `auth.oauth_access_tokens` (FK `client_id INTEGER`→PK); `auth.policies.scopes` |
 | `navigator_auth/backends/idp/__init__.py` | modifies | Emit `jti`/`aud`; expose `expires_in` seconds (B1); keep 4-tuple callers working |
 | `navigator_auth/backends/api.py` | modifies | Resource-server bearer path: populate scopes/client_id, per-request `jti` revocation check |
 | `navigator_auth/abac/context.py` | extends | `userinfo['scopes']`/`client_id`; `ctx.set(...)` (already supports) |
@@ -407,8 +463,10 @@ user_ABAC_permissions` (both gates must pass; DENY always wins).
 | `tests/` | extends | New OAuth2 3LO + scope↔ABAC test suites (memory storages) |
 
 **Breaking changes:** authorization codes and refresh tokens now **require** `user_id`
-(schema-breaking, but no production data per the cutover decision); `_make_cache_key`
-signature changes (all call sites updated). No public endpoint signatures change.
+(schema-breaking, but no production data per the cutover decision); the wire `client_id` is
+now the opaque `client_uid` string rather than the integer PK (apps must use it — no live
+integrations exist); nested-model field `client_id`→`client`; `_make_cache_key` signature
+changes (all call sites updated). No public **endpoint** signatures change.
 
 ---
 
@@ -468,9 +526,10 @@ None remain blocking for `/sdd-spec`._
 - [x] **Q5 — FEAT-092 coordination.** **Resolved: completed, not in-flight** — TASK-016…022
   live in `sdd/tasks/completed/`. Two carryovers for P5: (1) `_make_cache_key`
   (`evaluator.py:327`) already includes `org_id`/`client_id` **tenant ints** — a *different*
-  concept from the OAuth2 requesting-app `client_id` (string); the §11.4 fix must add a
-  **distinct** `scope_key=frozenset(scopes)` + OAuth `client_id`, not overload the tenant
-  param (one call site, `evaluator.py:433`). (2) `ModelPolicy` is `strict=True` and
+  concept from the OAuth2 requesting-app identifier (the public `client_uid` string — see the
+  Client Identifier Model section); the §11.4 fix must add a **distinct**
+  `scope_key=frozenset(scopes)` + the `client_uid` string, not overload the tenant param
+  (one call site, `evaluator.py:433`). (2) `ModelPolicy` is `strict=True` and
   `load_policies` uses **two explicit SELECT column lists** (`pg.py:35-42`, `47-51`) — adding
   `Policy.scopes` requires the field on `ModelPolicy`, `scopes` in **both** SELECTs, and the
   `auth.policies.scopes` DDL column.
