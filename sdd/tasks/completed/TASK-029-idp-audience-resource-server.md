@@ -95,9 +95,14 @@ class TestBearer:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: sdd-worker (claude-sonnet-4-6)
+**Date**: 2026-06-22
 **Notes**:
-**Deviations from spec**: none
+- idp/__init__.py: create_token gets additive audience kwarg (default None); when provided
+  sets payload['aud']; existing callers unchanged. 4-tuple return preserved.
+- backends/api.py: get_token_info bearer branch now injects scopes/client_id/token_type
+  into the payload; per-request jti revocation via AccessTokenStorage.is_revoked().
+- backend.py already passes audience='user' (3LO) and audience='app' (2LO) since TASK-024.
+- tests/test_resource_server_bearer.py: 21 tests, all passing.
+**Deviations from spec**: None; audience kwarg on backend.py was implemented in TASK-024
+as that commit rewrote backend.py.

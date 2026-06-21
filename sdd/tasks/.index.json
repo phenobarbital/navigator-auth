@@ -524,7 +524,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "IdP audience + resource-server bearer backend",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "M",
     "depends_on": [
@@ -535,7 +535,8 @@
     "parallelism_notes": "Edits idp + api.py; needs AccessTokenStorage from TASK-027 for jti check.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-22T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-029-idp-audience-resource-server.md"
+    "completed_at": "2026-06-22T04:30:00Z",
+    "file": "sdd/tasks/completed/TASK-029-idp-audience-resource-server.md"
   },
   {
     "id": "TASK-030",
