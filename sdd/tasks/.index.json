@@ -503,7 +503,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P4 — userinfo / logout / config",
-    "status": "in-progress",
+    "status": "done",
     "priority": "medium",
     "effort": "M",
     "depends_on": [
@@ -514,7 +514,8 @@
     "parallelism_notes": "Edits backend.py stubs + conf.py; depends on jti store from TASK-027.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-22T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-028-userinfo-logout-config.md"
+    "completed_at": "2026-06-22T04:00:00Z",
+    "file": "sdd/tasks/completed/TASK-028-userinfo-logout-config.md"
   },
   {
     "id": "TASK-029",

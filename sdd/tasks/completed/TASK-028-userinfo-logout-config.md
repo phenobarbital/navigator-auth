@@ -87,9 +87,15 @@ class TestUserinfoLogout:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: sdd-worker (claude-sonnet-4-6)
+**Date**: 2026-06-22
 **Notes**:
-**Deviations from spec**: none
+- userinfo (scope-gated claims, jti revocation check, 401 on invalid/expired/revoked),
+  logout (session teardown + redirect), and finish_logout (200 OK) implemented in
+  backend.py in TASK-024 commit.
+- OAUTH_ACCESS_TOKEN_TTL added in TASK-024 conf.py commit.
+- OAUTH_REVOCATION_CACHE_TTL (30s) added to conf.py in this commit.
+- tests/test_oauth2_userinfo_logout.py: 23 tests, all passing.
+**Deviations from spec**: backend.py implementation delivered in TASK-024 commit;
+OAUTH_ACCESS_TOKEN_TTL also added in TASK-024. This task added OAUTH_REVOCATION_CACHE_TTL
+and the test file.
