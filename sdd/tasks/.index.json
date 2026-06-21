@@ -21,7 +21,9 @@
     "started_at": "2026-04-02T00:00:00Z",
     "completed_at": "2026-04-02T13:02:00Z",
     "file": "sdd/tasks/completed/TASK-002-yaml-policy-storage.md",
-    "depends_on": ["TASK-001"]
+    "depends_on": [
+      "TASK-001"
+    ]
   },
   {
     "id": "TASK-003",
@@ -33,7 +35,9 @@
     "started_at": "2026-04-02T00:00:00Z",
     "completed_at": "2026-04-02T13:04:00Z",
     "file": "sdd/tasks/completed/TASK-003-pdp-yaml-integration.md",
-    "depends_on": ["TASK-002"]
+    "depends_on": [
+      "TASK-002"
+    ]
   },
   {
     "id": "TASK-004",
@@ -57,7 +61,9 @@
     "started_at": "2026-04-02T00:00:00Z",
     "completed_at": "2026-04-02T13:10:00Z",
     "file": "sdd/tasks/completed/TASK-005-rust-pep-batch-filter.md",
-    "depends_on": ["TASK-001"]
+    "depends_on": [
+      "TASK-001"
+    ]
   },
   {
     "id": "TASK-006",
@@ -69,7 +75,9 @@
     "started_at": "2026-04-02T00:00:00Z",
     "completed_at": "2026-04-02T13:27:00Z",
     "file": "sdd/tasks/completed/TASK-006-cython-fast-evaluator.md",
-    "depends_on": ["TASK-001"]
+    "depends_on": [
+      "TASK-001"
+    ]
   },
   {
     "id": "TASK-007",
@@ -81,7 +89,9 @@
     "started_at": "2026-04-02T00:00:00Z",
     "completed_at": "2026-04-02T13:29:00Z",
     "file": "sdd/tasks/completed/TASK-007-policy-pack.md",
-    "depends_on": ["TASK-002"]
+    "depends_on": [
+      "TASK-002"
+    ]
   },
   {
     "id": "TASK-008",
@@ -93,7 +103,9 @@
     "started_at": "2026-04-02T00:00:00Z",
     "completed_at": "2026-04-02T13:34:00Z",
     "file": "sdd/tasks/completed/TASK-008-rest-check-endpoint.md",
-    "depends_on": ["TASK-003"]
+    "depends_on": [
+      "TASK-003"
+    ]
   },
   {
     "id": "TASK-009",
@@ -141,7 +153,10 @@
     "status": "done",
     "priority": "high",
     "effort": "L",
-    "depends_on": ["TASK-009", "TASK-010"],
+    "depends_on": [
+      "TASK-009",
+      "TASK-010"
+    ],
     "parallel": false,
     "parallelism_notes": "Modifies pdp.py which depends on adapter (TASK-010) and Rust evaluate_single (TASK-009)",
     "assigned_to": "session-pdp-task",
@@ -159,7 +174,9 @@
     "status": "done",
     "priority": "high",
     "effort": "M",
-    "depends_on": ["TASK-009"],
+    "depends_on": [
+      "TASK-009"
+    ],
     "parallel": false,
     "parallelism_notes": "Modifies evaluator.py, depends on Rust changes (TASK-009)",
     "assigned_to": "session-rust-integration-task",
@@ -177,7 +194,10 @@
     "status": "done",
     "priority": "medium",
     "effort": "M",
-    "depends_on": ["TASK-011", "TASK-012"],
+    "depends_on": [
+      "TASK-011",
+      "TASK-012"
+    ],
     "parallel": false,
     "parallelism_notes": "Modifies pdp.py and evaluator.py, must run after delegation and integration tasks",
     "assigned_to": "session-hot-reload-task",
@@ -195,7 +215,9 @@
     "status": "done",
     "priority": "medium",
     "effort": "S",
-    "depends_on": ["TASK-011"],
+    "depends_on": [
+      "TASK-011"
+    ],
     "parallel": false,
     "parallelism_notes": "Modifies middleware.py and pdp.py, depends on PDP delegation being complete",
     "assigned_to": "session-middleware-task",
@@ -213,7 +235,14 @@
     "status": "done",
     "priority": "medium",
     "effort": "M",
-    "depends_on": ["TASK-009", "TASK-010", "TASK-011", "TASK-012", "TASK-013", "TASK-014"],
+    "depends_on": [
+      "TASK-009",
+      "TASK-010",
+      "TASK-011",
+      "TASK-012",
+      "TASK-013",
+      "TASK-014"
+    ],
     "parallel": false,
     "parallelism_notes": "Final validation, depends on all implementation tasks being complete",
     "assigned_to": "session-e2e-task",
@@ -249,7 +278,9 @@
     "status": "done",
     "priority": "high",
     "effort": "S",
-    "depends_on": ["TASK-016"],
+    "depends_on": [
+      "TASK-016"
+    ],
     "parallel": false,
     "parallelism_notes": "Only touches adapter.py — disjoint files from TASK-018 (evaluator.py), so technically parallelizable after TASK-016; spec recommends per-spec sequential to avoid churn on the JSON contract.",
     "assigned_to": "sdd-worker",
@@ -267,7 +298,9 @@
     "status": "done",
     "priority": "high",
     "effort": "M",
-    "depends_on": ["TASK-016"],
+    "depends_on": [
+      "TASK-016"
+    ],
     "parallel": false,
     "parallelism_notes": "Freezes the JSON contract consumed by TASK-020 (Rust). Only touches evaluator.py; disjoint from adapter.py (TASK-017).",
     "assigned_to": "sdd-worker",
@@ -285,7 +318,9 @@
     "status": "done",
     "priority": "high",
     "effort": "M",
-    "depends_on": ["TASK-018"],
+    "depends_on": [
+      "TASK-018"
+    ],
     "parallel": true,
     "parallelism_notes": "Python-only (context.py/pdp.py/conf.py); disjoint from TASK-020 (Rust lib.rs). Both depend on the TASK-018 JSON contract and can run concurrently in separate worktrees.",
     "assigned_to": "sdd-worker",
@@ -303,7 +338,9 @@
     "status": "done",
     "priority": "high",
     "effort": "M",
-    "depends_on": ["TASK-018"],
+    "depends_on": [
+      "TASK-018"
+    ],
     "parallel": true,
     "parallelism_notes": "Rust-only (rs_pep/src/lib.rs); fully disjoint from all Python tasks. Depends only on the frozen JSON contract from TASK-018; runs concurrently with TASK-019.",
     "assigned_to": "sdd-worker",
@@ -321,7 +358,13 @@
     "status": "done",
     "priority": "high",
     "effort": "M",
-    "depends_on": ["TASK-016", "TASK-017", "TASK-018", "TASK-019", "TASK-020"],
+    "depends_on": [
+      "TASK-016",
+      "TASK-017",
+      "TASK-018",
+      "TASK-019",
+      "TASK-020"
+    ],
     "parallel": false,
     "parallelism_notes": "End-to-end validation through the real Rust engine; requires all Phase-1 implementation tasks complete.",
     "assigned_to": "sdd-worker",
@@ -339,12 +382,199 @@
     "status": "done",
     "priority": "low",
     "effort": "L",
-    "depends_on": ["TASK-016", "TASK-017", "TASK-018", "TASK-019", "TASK-020", "TASK-021"],
+    "depends_on": [
+      "TASK-016",
+      "TASK-017",
+      "TASK-018",
+      "TASK-019",
+      "TASK-020",
+      "TASK-021"
+    ],
     "parallel": false,
     "parallelism_notes": "Follow-up phase, not required for Phase-1 acceptance. Behind ABAC_TENANT_SQL_FILTERING flag; start only after Phase 1 is merged and validated.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-16T00:00:00Z",
     "completed_at": "2026-06-16T02:30:00Z",
     "file": "sdd/tasks/completed/TASK-022-phase2-sql-filtering.md"
+  },
+  {
+    "id": "TASK-023",
+    "slug": "client-id-disambiguation",
+    "feature_id": "FEAT-093",
+    "feature": "oauth2-3lo-implementation",
+    "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
+    "title": "Client identifier disambiguation (client_uid)",
+    "status": "pending",
+    "priority": "high",
+    "effort": "M",
+    "depends_on": [],
+    "parallel": false,
+    "parallelism_notes": "Foundational data-model change touching models/ddl/storage; everything depends on it. Per-spec single worktree.",
+    "assigned_to": null,
+    "started_at": null,
+    "file": "sdd/tasks/active/TASK-023-client-id-disambiguation.md"
+  },
+  {
+    "id": "TASK-024",
+    "slug": "p0-owner-binding-bugfixes",
+    "feature_id": "FEAT-093",
+    "feature": "oauth2-3lo-implementation",
+    "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
+    "title": "P0 Correctness — resource-owner binding + B1–B5",
+    "status": "pending",
+    "priority": "high",
+    "effort": "L",
+    "depends_on": [
+      "TASK-023"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Core rewrite of backend.py/models.py; gates all later phases. Shared hot files ⇒ sequential.",
+    "assigned_to": null,
+    "started_at": null,
+    "file": "sdd/tasks/active/TASK-024-p0-owner-binding-bugfixes.md"
+  },
+  {
+    "id": "TASK-025",
+    "slug": "pkce-s256",
+    "feature_id": "FEAT-093",
+    "feature": "oauth2-3lo-implementation",
+    "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
+    "title": "P1 — PKCE (S256)",
+    "status": "pending",
+    "priority": "high",
+    "effort": "M",
+    "depends_on": [
+      "TASK-024"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Edits backend.py token branch built in TASK-024; sequential.",
+    "assigned_to": null,
+    "started_at": null,
+    "file": "sdd/tasks/active/TASK-025-pkce-s256.md"
+  },
+  {
+    "id": "TASK-026",
+    "slug": "refresh-rotation-storage",
+    "feature_id": "FEAT-093",
+    "feature": "oauth2-3lo-implementation",
+    "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
+    "title": "P2 — Refresh hardening + durable storage",
+    "status": "pending",
+    "priority": "high",
+    "effort": "L",
+    "depends_on": [
+      "TASK-024"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Edits backend.py/code_backend.py/models.py from TASK-024; sequential.",
+    "assigned_to": null,
+    "started_at": null,
+    "file": "sdd/tasks/active/TASK-026-refresh-rotation-storage.md"
+  },
+  {
+    "id": "TASK-027",
+    "slug": "grants-revocation-jti",
+    "feature_id": "FEAT-093",
+    "feature": "oauth2-3lo-implementation",
+    "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
+    "title": "P3 — Grants, consent-skip, revocation, jti tracking, per-app revoke",
+    "status": "pending",
+    "priority": "high",
+    "effort": "L",
+    "depends_on": [
+      "TASK-024",
+      "TASK-026"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Builds on refresh storage + backend; shares code_backend.py/backend.py/ddl.sql.",
+    "assigned_to": null,
+    "started_at": null,
+    "file": "sdd/tasks/active/TASK-027-grants-revocation-jti.md"
+  },
+  {
+    "id": "TASK-028",
+    "slug": "userinfo-logout-config",
+    "feature_id": "FEAT-093",
+    "feature": "oauth2-3lo-implementation",
+    "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
+    "title": "P4 — userinfo / logout / config",
+    "status": "pending",
+    "priority": "medium",
+    "effort": "M",
+    "depends_on": [
+      "TASK-024",
+      "TASK-027"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Edits backend.py stubs + conf.py; depends on jti store from TASK-027.",
+    "assigned_to": null,
+    "started_at": null,
+    "file": "sdd/tasks/active/TASK-028-userinfo-logout-config.md"
+  },
+  {
+    "id": "TASK-029",
+    "slug": "idp-audience-resource-server",
+    "feature_id": "FEAT-093",
+    "feature": "oauth2-3lo-implementation",
+    "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
+    "title": "IdP audience + resource-server bearer backend",
+    "status": "pending",
+    "priority": "high",
+    "effort": "M",
+    "depends_on": [
+      "TASK-024",
+      "TASK-027"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Edits idp + api.py; needs AccessTokenStorage from TASK-027 for jti check.",
+    "assigned_to": null,
+    "started_at": null,
+    "file": "sdd/tasks/active/TASK-029-idp-audience-resource-server.md"
+  },
+  {
+    "id": "TASK-030",
+    "slug": "scope-abac-integration",
+    "feature_id": "FEAT-093",
+    "feature": "oauth2-3lo-implementation",
+    "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
+    "title": "P5 — Scope ↔ ABAC composition",
+    "status": "pending",
+    "priority": "high",
+    "effort": "L",
+    "depends_on": [
+      "TASK-024",
+      "TASK-029"
+    ],
+    "parallel": false,
+    "parallelism_notes": "ABAC files share nothing with oauth2 modules but depend on TASK-029 surfacing scopes/client_id; per-spec worktree keeps it sequential.",
+    "assigned_to": null,
+    "started_at": null,
+    "file": "sdd/tasks/active/TASK-030-scope-abac-integration.md"
+  },
+  {
+    "id": "TASK-031",
+    "slug": "tests-docs-example",
+    "feature_id": "FEAT-093",
+    "feature": "oauth2-3lo-implementation",
+    "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
+    "title": "End-to-end tests, docs, and example server",
+    "status": "pending",
+    "priority": "high",
+    "effort": "L",
+    "depends_on": [
+      "TASK-023",
+      "TASK-024",
+      "TASK-025",
+      "TASK-026",
+      "TASK-027",
+      "TASK-028",
+      "TASK-029",
+      "TASK-030"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Final integration coverage + docs; depends on all modules.",
+    "assigned_to": null,
+    "started_at": null,
+    "file": "sdd/tasks/active/TASK-031-tests-docs-example.md"
   }
 ]
