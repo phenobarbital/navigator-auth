@@ -482,7 +482,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P3 — Grants, consent-skip, revocation, jti tracking, per-app revoke",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -493,7 +493,8 @@
     "parallelism_notes": "Builds on refresh storage + backend; shares code_backend.py/backend.py/ddl.sql.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-22T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-027-grants-revocation-jti.md"
+    "completed_at": "2026-06-22T03:30:00Z",
+    "file": "sdd/tasks/completed/TASK-027-grants-revocation-jti.md"
   },
   {
     "id": "TASK-028",

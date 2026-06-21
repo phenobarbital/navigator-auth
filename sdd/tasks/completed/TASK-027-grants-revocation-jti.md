@@ -97,9 +97,13 @@ class TestGrantsRevoke:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: sdd-worker (claude-sonnet-4-6)
+**Date**: 2026-06-22
 **Notes**:
-**Deviations from spec**: none
+- OauthGrant and OauthAccessTokenRecord models added in TASK-023 commit.
+- GrantStorage, AccessTokenStorage (Redis-backed) + factory functions added in TASK-024 commit.
+- consent upsert/skip, jti mint, /revoke (RFC 7009), grants API (GET + DELETE cascade) added in backend.py in TASK-024.
+- DDL oauth_grants and oauth_access_tokens added in TASK-023 commit.
+- This task adds tests/test_oauth2_grants_revoke.py: 33 tests, all passing.
+**Deviations from spec**: Implementation split across TASK-023/024 commits;
+tests added here per task scope.
