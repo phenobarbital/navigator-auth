@@ -442,7 +442,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "P1 — PKCE (S256)",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "M",
     "depends_on": [
@@ -452,7 +452,8 @@
     "parallelism_notes": "Edits backend.py token branch built in TASK-024; sequential.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-22T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-025-pkce-s256.md"
+    "completed_at": "2026-06-22T02:30:00Z",
+    "file": "sdd/tasks/completed/TASK-025-pkce-s256.md"
   },
   {
     "id": "TASK-026",

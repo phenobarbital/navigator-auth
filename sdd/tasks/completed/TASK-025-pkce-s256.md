@@ -88,9 +88,15 @@ class TestPKCE:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: sdd-worker (claude-sonnet-4-6)
+**Date**: 2026-06-22
 **Notes**:
-**Deviations from spec**: none
+- pkce.py (pure S256 verifier, hmac.compare_digest, plain rejected) was created
+  as part of TASK-024 commit since backend.py imports it immediately.
+- OAUTH_REQUIRE_PKCE_PUBLIC=True added to conf.py in TASK-024 commit.
+- backend.py PKCE capture/verify already implemented in TASK-024 commit.
+- This commit adds tests/test_oauth2_pkce.py: 21 tests (21 pass).
+  Covers RFC 7636 test vector, round-trip, edge cases (None/empty),
+  plain/unknown method rejection, config flag presence.
+**Deviations from spec**: pkce.py and conf.py changes were in TASK-024 commit;
+TASK-025 only required adding the test file.
