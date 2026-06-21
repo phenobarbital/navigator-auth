@@ -507,6 +507,33 @@ OAUTH_REQUIRE_PKCE_PUBLIC = config.getboolean("OAUTH_REQUIRE_PKCE_PUBLIC", fallb
 # Controls how long a jti revocation marker survives independently of the token's remaining TTL.
 OAUTH_REVOCATION_CACHE_TTL = config.getint("OAUTH_REVOCATION_CACHE_TTL", fallback=30)
 
+# ---------------------------------------------------------------------------
+# OAuth2 Scope registry (FEAT-093 TASK-030)
+# ---------------------------------------------------------------------------
+# Comma-separated list of valid scope identifiers (reject unknown at authorize per D5).
+# Override via environment: OAUTH_SCOPES="default,profile,email,offline_access,read,write"
+_oauth_scopes_raw = config.get(
+    "OAUTH_SCOPES",
+    fallback="default,profile,email,offline_access,read,write,admin",
+)
+OAUTH_SCOPES: list[str] = [s.strip() for s in _oauth_scopes_raw.split(",") if s.strip()]
+
+# Action → required scope(s) mapping.
+# Format: "action_name:scope1+scope2,...".  Multiple scopes per action are AND-ed.
+# Override via environment: OAUTH_SCOPE_ACTIONS="tool:execute:default,kb:query:default+read"
+_oauth_scope_actions_raw = config.get("OAUTH_SCOPE_ACTIONS", fallback="")
+OAUTH_SCOPE_ACTIONS: dict[str, list[str]] = {}
+if _oauth_scope_actions_raw.strip():
+    for _entry in _oauth_scope_actions_raw.split(","):
+        _entry = _entry.strip()
+        if ":" in _entry:
+            # Last colon separates action from scope list; earlier colons are part of action.
+            _parts = _entry.rsplit(":", 1)
+            _action_key = _parts[0].strip()
+            _scope_list = [s.strip() for s in _parts[1].split("+") if s.strip()]
+            if _action_key and _scope_list:
+                OAUTH_SCOPE_ACTIONS[_action_key] = _scope_list
+
 
 with contextlib.suppress(ImportError):
     from settings.settings import *  # pylint: disable=W0614,W0401 # noqa

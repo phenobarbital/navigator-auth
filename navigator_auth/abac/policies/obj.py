@@ -114,11 +114,24 @@ class ObjectPolicy(AbstractPolicy):
             # No context requirements in the policy, so this condition true by default
             context_condition = True
 
+        # FEAT-093 TASK-030: Check if token scopes satisfy the policy's required scopes.
+        scope_condition = False
+        if self.scopes:
+            try:
+                token_scopes = set(ctx.userinfo.get("scopes", []) if ctx.userinfo else [])
+                if set(self.scopes).issubset(token_scopes):
+                    scope_condition = True
+            except (KeyError, TypeError, AttributeError):
+                pass
+        else:
+            # No scope requirement → condition satisfied by default.
+            scope_condition = True
+
         # If all conditions are true, set is_allowed to True
         # print('EVALUATION > ')
         # print(groups_condition, environment_condition, context_condition, subject_condition)
         if (groups_condition and environment_condition
-            and context_condition and subject_condition):
+            and context_condition and subject_condition and scope_condition):
             return PolicyResponse(
                 effect=PolicyEffect.ALLOW,
                 response=f"Access {self.effect} by {self.name}",

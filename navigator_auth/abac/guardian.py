@@ -1,4 +1,4 @@
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 from collections.abc import Callable
 from aiohttp import web
 from navigator.views import BaseHandler
@@ -61,6 +61,43 @@ class Guardian:
             except (KeyError, TypeError):
                 pass
         return (session, user)
+
+    async def has_scope(self, request: web.Request, scopes: list) -> bool:
+        """has_scope.
+
+            Check if the bearer token in the request carries ALL the required scopes.
+
+        FEAT-093 TASK-030: effective scope = granted_scopes ∩ user_ABAC.  This method
+        enforces the scope-ceiling gate (the first half of the intersection).
+
+        Args:
+            request (web.Request): Web request (must be authenticated + bearer).
+            scopes (list): Required scope strings.  ALL must be present (AND).
+
+        Returns:
+            True when all scopes are present.
+
+        Raises:
+            AccessDenied(reason='insufficient_scope'): when any scope is missing.
+        """
+        self.is_authenticated(request=request)
+        try:
+            from navigator_auth.conf import AUTH_SESSION_OBJECT
+            from navigator_session import get_session
+            session = await get_session(request, new=False)
+            userinfo = session.get(AUTH_SESSION_OBJECT, {}) if session else {}
+        except Exception:
+            userinfo = {}
+
+        token_scopes = set(userinfo.get("scopes", []) if userinfo else [])
+        required = set(scopes)
+
+        if required.issubset(token_scopes):
+            return True
+
+        raise AccessDenied(
+            reason="insufficient_scope",
+        )
 
     async def authorize(self, request: web.Request):
         """authorize.
