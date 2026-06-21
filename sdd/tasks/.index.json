@@ -404,7 +404,7 @@
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
     "title": "Client identifier disambiguation (client_uid)",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "M",
     "depends_on": [],
@@ -412,7 +412,8 @@
     "parallelism_notes": "Foundational data-model change touching models/ddl/storage; everything depends on it. Per-spec single worktree.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-22T00:00:00Z",
-    "file": "sdd/tasks/active/TASK-023-client-id-disambiguation.md"
+    "completed_at": "2026-06-22T01:00:00Z",
+    "file": "sdd/tasks/completed/TASK-023-client-id-disambiguation.md"
   },
   {
     "id": "TASK-024",
