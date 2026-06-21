@@ -2,7 +2,7 @@
 
 **Date**: 2026-06-22
 **Author**: Jesus Lara
-**Status**: exploration
+**Status**: accepted
 **Recommended Option**: A
 
 > **Naming note:** the invocation slug `device-authorization-grant-rfc7662` conflates two
