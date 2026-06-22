@@ -629,7 +629,7 @@
     "feature_id": "FEAT-094",
     "feature": "oauth2-introspection-device-grant",
     "spec": "sdd/specs/oauth2-introspection-device-grant.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "M",
     "depends_on": [
@@ -639,7 +639,8 @@
     "parallelism_notes": "Serializes on backend.py/conf.py with TASK-033/035/036 and needs TASK-032 storage/model.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-22T13:00:00Z",
-    "file": "sdd/tasks/active/TASK-034-device-authorization-endpoint.md"
+    "completed_at": "2026-06-22T14:30:00Z",
+    "file": "sdd/tasks/completed/TASK-034-device-authorization-endpoint.md"
   },
   {
     "id": "TASK-035",
