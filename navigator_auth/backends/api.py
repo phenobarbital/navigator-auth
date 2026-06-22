@@ -67,6 +67,9 @@ class APIKeyAuth(BaseAuthBackend):
             else:
                 return [None, None]
         except Exception as err:  # pylint: disable=W0703
+            self.logger.exception(
+                f"API Key Auth: Error getting payload: {err}"
+            )
             self.logger.exception(f"API Key Auth: Error getting payload: {err}")
             # Return the (mech, token) pair shape even on error: callers do
             # `mech, token = await self.get_payload(request)`, so returning a
