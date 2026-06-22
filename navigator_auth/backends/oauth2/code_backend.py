@@ -182,23 +182,33 @@ class RefreshTokenStorage:
         return True
 
     async def revoke_chain(self, refresh_token: str) -> None:
-        """Walk the parent_token chain and revoke every token.
+        """Revoke every refresh token in the same family.
+
+        On reuse-detection the entire token family must be invalidated, not
+        just the ancestors reachable via ``parent_token``. We therefore revoke
+        ALL live tokens that belong to the same ``(user_id, client_id)`` pair,
+        which guarantees every descendant (and sibling) is also killed. This
+        mirrors the in-memory implementation used in the tests.
 
         Used when a replayed / reused token is detected (TASK-026).
         Also called by the per-app grant revocation endpoint (TASK-027).
         """
-        visited = set()
-        current = refresh_token
+        root = await self.get_token(refresh_token)
+        if not root:
+            return
 
-        while current and current not in visited:
-            visited.add(current)
-            obj = await self.get_token(current)
-            if not obj:
-                break
-            if not obj.revoked:
-                await self.revoke_token(current, "cascade")
-            # Walk up the chain.
-            current = obj.parent_token
+        # Identify the client owning this token (None-safe).
+        root_client = getattr(getattr(root, "client", None), "client_id", None)
+
+        for obj in await self.list_tokens(root.user_id):
+            obj_client = getattr(getattr(obj, "client", None), "client_id", None)
+            # Revoke same-client tokens; when client is unknown, fall back to
+            # the originally requested token to avoid skipping it.
+            same_family = (root_client is not None and obj_client == root_client) or (
+                obj.refresh_token == refresh_token
+            )
+            if same_family and not obj.revoked:
+                await self.revoke_token(obj.refresh_token, "cascade")
 
     async def list_tokens(self, user_id: int) -> list:
         """Return all non-expired OauthRefreshToken objects for a user.

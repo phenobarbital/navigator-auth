@@ -24,10 +24,9 @@ from collections.abc import Awaitable
 import hmac
 import importlib
 import secrets
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse, urlunparse
 from uuid import uuid4
 
-from requests.models import PreparedRequest
 from aiohttp import web
 from datamodel.exceptions import ValidationError
 from navconfig import config
@@ -47,6 +46,7 @@ from ...conf import (
     OAUTH_REFRESH_TOKEN_TTL,
     OAUTH_REFRESH_ABSOLUTE_TTL,
     OAUTH_REFRESH_ROTATION,
+    OAUTH_SCOPES,
 )
 from navigator_session import get_session
 from ...exceptions import (
@@ -200,6 +200,7 @@ class Oauth2Provider(BaseAuthBackend):
         self.refresh_token_storage = get_refresh_token_storage(storage_type, REDIS_URL)
         self.grant_storage = get_grant_storage(storage_type, REDIS_URL)
         self.access_token_storage = get_access_token_storage(storage_type, REDIS_URL)
+        app["oauth2_access_token_storage"] = self.access_token_storage
 
     async def on_cleanup(self, app: web.Application):
         pass
@@ -223,10 +224,12 @@ class Oauth2Provider(BaseAuthBackend):
         domain_url = f"{PREFERRED_AUTH_SCHEME}://{uri.netloc}"
         return domain_url
 
-    def prepare_url(self, url: str, params: dict = None):
-        req = PreparedRequest()
-        req.prepare_url(url, params)
-        return req.url
+    def prepare_url(self, url: str, params: dict = None) -> str:
+        if not params:
+            return url
+        parsed = urlparse(url)
+        query = urlencode(params)
+        return urlunparse(parsed._replace(query=query))
 
     def redirect(self, uri: str, location: bool = False):
         self.logger.debug(f"Redirect URI: {uri}")
@@ -355,6 +358,16 @@ class Oauth2Provider(BaseAuthBackend):
                 "invalid_scope",
                 f"Scope(s) not allowed: {', '.join(invalid_scopes)}",
             )
+
+        # Validate requested scope against the global OAUTH_SCOPES registry.
+        # When configured, granted scopes must be a subset of the known scopes.
+        if OAUTH_SCOPES:
+            unknown_scopes = [s for s in scopes if s not in OAUTH_SCOPES]
+            if unknown_scopes:
+                return self._error_response(
+                    "invalid_scope",
+                    f"Unknown scope(s): {', '.join(unknown_scopes)}",
+                )
 
         # Check user session.
         session = await self.check_session(request)
@@ -761,11 +774,11 @@ class Oauth2Provider(BaseAuthBackend):
         now_utc = _now_utc()
         expires_in = int(exp_abs - now_utc.timestamp())
 
-        # TASK-027: persist jti record (user_id = 0 for machine-to-machine).
+        # TASK-027: persist jti record (user_id = None for machine-to-machine).
         if self.access_token_storage:
             rec = OauthAccessTokenRecord(
                 jti=jti,
-                user_id=0,
+                user_id=None,
                 client_id=client.client_id,
                 client_pk=client.client_pk,
                 scope=scope,
@@ -924,15 +937,36 @@ class Oauth2Provider(BaseAuthBackend):
 
         scope = payload.get("scope", "")
         scopes = scope.split()
-        claims = {"sub": str(payload.get("user_id", ""))}
+        user_id = payload.get("user_id", "")
+        claims = {"sub": str(user_id)}
+
+        # Look up the user record for profile claims not present in the JWT.
+        # Profile attributes (name, email) are not embedded in the access token,
+        # so we resolve them from the user storage backend.
+        user = None
+        if user_id and ("profile" in scopes or "email" in scopes):
+            try:
+                user = await self._idp.user_from_id(user_id)
+            except Exception as e:  # noqa: BLE001
+                self.logger.warning(f"userinfo: could not load user {user_id}: {e}")
+
+        def _claim(name: str, default: str = "") -> str:
+            # Prefer the JWT payload, then the user record attribute.
+            if payload.get(name) not in (None, ""):
+                return payload.get(name)
+            if user is not None:
+                val = getattr(user, name, None)
+                if val not in (None, ""):
+                    return val
+            return default
 
         # Scope-gated claims.
         if "profile" in scopes:
-            claims["username"] = payload.get("username", "")
-            claims["given_name"] = payload.get("given_name", "")
-            claims["family_name"] = payload.get("family_name", "")
+            claims["username"] = str(_claim("username"))
+            claims["given_name"] = str(_claim("given_name") or _claim("first_name"))
+            claims["family_name"] = str(_claim("family_name") or _claim("last_name"))
         if "email" in scopes:
-            claims["email"] = payload.get("email", "")
+            claims["email"] = str(_claim("email"))
 
         return JSONResponse(claims, status=200)
 
@@ -975,11 +1009,14 @@ class Oauth2Provider(BaseAuthBackend):
                 except Exception:
                     pass
             if hint != "refresh_token":
-                try:
-                    if self.access_token_storage:
-                        await self.access_token_storage.revoke(token)
-                except Exception:
-                    pass
+                if self.access_token_storage:
+                    try:
+                        _, payload_tok = self._idp.decode_token(token)
+                        jti = payload_tok.get("jti") if payload_tok else None
+                        if jti:
+                            await self.access_token_storage.revoke(jti)
+                    except Exception:
+                        pass  # RFC 7009: always return 200
 
         return web.Response(status=200, text="")
 

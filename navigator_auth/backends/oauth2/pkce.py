@@ -9,6 +9,7 @@ Spec: RFC 7636 — https://tools.ietf.org/html/rfc7636
 
 import base64
 import hashlib
+import hmac
 
 
 def _s256(verifier: str) -> str:
@@ -42,8 +43,7 @@ def verify(code_verifier: str, code_challenge: str, method: str = "S256") -> boo
 
     computed = _s256(code_verifier)
     # Constant-time comparison.
-    import hmac as _hmac
-    return _hmac.compare_digest(computed, code_challenge)
+    return hmac.compare_digest(computed, code_challenge)
 
 
 def generate_challenge(verifier: str) -> str:

@@ -286,13 +286,10 @@ class IdentityProvider:
 
         Returns: (jwt_token, refresh_token, exp, scheme) — 4-tuple; signature unchanged.
         """
-        try:
-            del data["exp"]
-            del data["iat"]
-            del data["iss"]
-            del data["aud"]
-        except KeyError:
-            pass
+        # Operate on a local copy to avoid mutating the caller's dict.
+        data = dict(data) if data else {}
+        for reserved in ("exp", "iat", "iss", "aud"):
+            data.pop(reserved, None)
         if not expiration:
             expiration = self.session_timeout
         if not issuer:

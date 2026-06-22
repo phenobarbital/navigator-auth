@@ -228,7 +228,8 @@ class OauthAccessTokenRecord(BaseModel):
     """
 
     jti: UUID = Field(default_factory=uuid4)
-    user_id: int = Field()
+    # None for client_credentials (2LO) tokens with no associated end user.
+    user_id: Optional[int] = Field(default=None)
     client_id: str = Field()   # public client_uid (wire/claim value)
     client_pk: Optional[int] = Field(default=None)  # int FK for DB
     scope: str = Field(default="")

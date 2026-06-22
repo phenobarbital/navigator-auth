@@ -18,6 +18,7 @@ from navigator_auth.backends.oauth2.models import (
     OAuthClient,
     OauthGrant,
     OauthAccessTokenRecord,
+    OauthRefreshToken,
 )
 
 
@@ -154,52 +155,76 @@ class TestOauthAccessTokenRecord:
 # Consent-skip logic (pure, no storage)
 # ---------------------------------------------------------------------------
 
+async def _consent_skip_decision(grant_storage, user_id, client_id, requested_scopes, prompt=""):
+    """Replicate the backend authorize() consent-skip decision against storage.
+
+    Mirrors Oauth2Provider.authorize: consent is skipped only when prompt is
+    not 'consent', an unrevoked grant exists for (user_id, client_id), and the
+    requested scopes are a subset of the granted scopes.
+    """
+    if prompt == "consent":
+        return False
+    grant = await grant_storage.get_grant(user_id, client_id)
+    if not grant or grant.revoked:
+        return False
+    return set(requested_scopes).issubset(set(grant.scopes))
+
+
 class TestConsentSkipLogic:
-    """Consent-skip: unrevoked grant covering scopes skips consent dialog."""
+    """Consent-skip uses the real grant storage and decision logic."""
 
-    def test_grant_covers_requested_scopes(self):
-        """If all requested scopes are granted, consent can be skipped."""
-        granted = OauthGrant(
-            user_id=1, client_id="c",
+    @pytest.mark.asyncio
+    async def test_grant_covers_requested_scopes(self, memory_oauth_storages):
+        """Unrevoked grant covering scopes => consent skipped."""
+        store = memory_oauth_storages["grant_storage"]
+        await store.save_grant(OauthGrant(
+            user_id=1, client_id="app_uid",
             scopes=["default", "profile", "email", "offline_access"],
-        )
-        requested = {"default", "profile"}
-        assert requested.issubset(set(granted.scopes))
-        assert not granted.revoked
-        # => Can skip consent.
+        ))
+        skip = await _consent_skip_decision(store, 1, "app_uid", {"default", "profile"})
+        assert skip is True
 
-    def test_revoked_grant_cannot_skip_consent(self):
-        """A revoked grant must not allow consent-skip."""
-        granted = OauthGrant(
-            user_id=1, client_id="c",
+    @pytest.mark.asyncio
+    async def test_revoked_grant_cannot_skip_consent(self, memory_oauth_storages):
+        """A revoked grant must force consent even if scopes match."""
+        store = memory_oauth_storages["grant_storage"]
+        await store.save_grant(OauthGrant(
+            user_id=1, client_id="app_uid",
             scopes=["default", "profile"],
-            revoked=True,
-            revoked_at=datetime.now(),
+            revoked=True, revoked_at=datetime.now(),
+        ))
+        skip = await _consent_skip_decision(store, 1, "app_uid", {"default", "profile"})
+        assert skip is False
+
+    @pytest.mark.asyncio
+    async def test_grant_not_covering_scope_forces_consent(self, memory_oauth_storages):
+        """Requested scopes exceeding granted => consent shown."""
+        store = memory_oauth_storages["grant_storage"]
+        await store.save_grant(OauthGrant(
+            user_id=1, client_id="app_uid", scopes=["default"],
+        ))
+        skip = await _consent_skip_decision(store, 1, "app_uid", {"default", "admin"})
+        assert skip is False
+
+    @pytest.mark.asyncio
+    async def test_no_grant_forces_consent(self, memory_oauth_storages):
+        """No stored grant => consent must be shown."""
+        store = memory_oauth_storages["grant_storage"]
+        skip = await _consent_skip_decision(store, 1, "unknown_uid", {"default"})
+        assert skip is False
+
+    @pytest.mark.asyncio
+    async def test_prompt_consent_forces_consent_screen(self, memory_oauth_storages):
+        """prompt=consent bypasses skip even when a covering grant exists."""
+        store = memory_oauth_storages["grant_storage"]
+        await store.save_grant(OauthGrant(
+            user_id=1, client_id="app_uid",
+            scopes=["default", "profile"],
+        ))
+        skip = await _consent_skip_decision(
+            store, 1, "app_uid", {"default"}, prompt="consent"
         )
-        # Even if scopes match, revoked grant cannot skip.
-        assert granted.revoked
-
-    def test_grant_not_covering_scope_forces_consent(self):
-        """If requested scopes exceed granted, consent must be shown."""
-        granted = OauthGrant(
-            user_id=1, client_id="c",
-            scopes=["default"],
-        )
-        requested = {"default", "admin"}  # admin not granted
-        can_skip = requested.issubset(set(granted.scopes)) and not granted.revoked
-        assert not can_skip
-
-    def test_prompt_consent_forces_consent_screen(self):
-        """prompt=consent forces the consent screen even if grant exists."""
-        # Backend logic: if prompt == "consent", skip-consent path is bypassed.
-        prompt = "consent"
-        assert prompt == "consent"
-        # => Force consent, don't check grant.
-
-    def test_prompt_not_set_allows_skip(self):
-        """Without prompt=consent, the grant check can proceed."""
-        prompt = ""  # Default: not forced
-        assert prompt != "consent"
+        assert skip is False
 
 
 # ---------------------------------------------------------------------------
@@ -207,32 +232,65 @@ class TestConsentSkipLogic:
 # ---------------------------------------------------------------------------
 
 class TestRfc7009Revocation:
-    """RFC 7009: /oauth2/revoke always returns 200."""
+    """Exercises the real revoke/is_revoked behavior on storage."""
 
-    def test_revoke_always_200(self):
-        """RFC 7009 §2.2: The server responds with HTTP 200 if the request
-        is valid, regardless of whether the token is active or not."""
-        # This is a conceptual test; the actual endpoint returns 200 always.
-        # Verify by checking the backend's revoke() logic contract.
-        expected_status = 200
-        assert expected_status == 200
+    @pytest.mark.asyncio
+    async def test_access_token_revocation_by_jti(self, memory_oauth_storages):
+        """Revoking a jti marks it revoked in access-token storage."""
+        store = memory_oauth_storages["access_token_storage"]
+        rec = OauthAccessTokenRecord(
+            user_id=1, client_id="c", scope="default",
+            issued_at=datetime.now(),
+            expires_at=datetime.now() + timedelta(hours=1),
+        )
+        await store.save(rec)
+        jti = str(rec.jti)
+        assert await store.is_revoked(jti) is False
+        await store.revoke(jti)
+        assert await store.is_revoked(jti) is True
 
-    def test_token_type_hint_refresh_token(self):
-        """hint='refresh_token' directs to refresh token revocation."""
-        hint = "refresh_token"
-        assert hint in ("refresh_token", "access_token")
+    @pytest.mark.asyncio
+    async def test_unknown_jti_not_revoked(self, memory_oauth_storages):
+        """An unknown jti is reported as not revoked (no false positive)."""
+        store = memory_oauth_storages["access_token_storage"]
+        assert await store.is_revoked("never-issued") is False
 
-    def test_token_type_hint_access_token(self):
-        """hint='access_token' directs to jti revocation."""
-        hint = "access_token"
-        assert hint in ("refresh_token", "access_token")
+    @pytest.mark.asyncio
+    async def test_refresh_token_revoke_chain(self, memory_oauth_storages, client):
+        """revoke_chain revokes all tokens for the same (user_id, client)."""
+        store = memory_oauth_storages["refresh_storage"]
+        now = datetime.now()
+        parent = OauthRefreshToken(
+            client=client, user_id=42, refresh_token="parent_tok",
+            scope="default offline_access",
+            issued_at=now, expires_at=now + timedelta(days=30),
+            absolute_expires_at=now + timedelta(days=90),
+        )
+        child = OauthRefreshToken(
+            client=client, user_id=42, refresh_token="child_tok",
+            parent_token="parent_tok", scope="default offline_access",
+            issued_at=now, expires_at=now + timedelta(days=30),
+            absolute_expires_at=now + timedelta(days=90),
+        )
+        await store.save_token(parent)
+        await store.save_token(child)
 
-    def test_missing_token_still_returns_200(self):
-        """Even if no token is provided, /revoke returns 200 per RFC."""
-        # Backend must not raise on empty token.
-        token = ""
-        # If token is empty, server does nothing but still returns 200.
-        assert isinstance(token, str)
+        # Reuse detected on the parent: the whole family must die.
+        await store.revoke_chain("parent_tok")
+
+        assert (await store.get_token("parent_tok")).revoked is True
+        assert (await store.get_token("child_tok")).revoked is True
+
+    @pytest.mark.asyncio
+    async def test_revoke_grant_removes_from_listing(self, memory_oauth_storages):
+        """After revoke_grant the grant no longer appears in active list."""
+        store = memory_oauth_storages["grant_storage"]
+        await store.save_grant(OauthGrant(
+            user_id=7, client_id="app_uid", scopes=["default"],
+        ))
+        assert any(g.client_id == "app_uid" for g in await store.list_grants(7))
+        await store.revoke_grant(7, "app_uid")
+        assert not any(g.client_id == "app_uid" for g in await store.list_grants(7))
 
 
 # ---------------------------------------------------------------------------

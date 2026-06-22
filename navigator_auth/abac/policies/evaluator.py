@@ -356,7 +356,7 @@ class PolicyEvaluator:
             f"{user_id}|{groups_str}|{rtype_val}|{resource_name}|{action}"
             f"|{env_str}|{org_id}|{client_id}|{scopes_str}|{uid_str}"
         )
-        return hashlib.md5(key_data.encode()).hexdigest()
+        return hashlib.md5(key_data.encode(), usedforsecurity=False).hexdigest()
 
     def _check_cache(self, cache_key: str) -> Optional[EvaluationResult]:
         """Check cache for previous evaluation result."""

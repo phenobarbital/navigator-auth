@@ -106,12 +106,14 @@ CREATE INDEX IF NOT EXISTS idx_oauth_grants_user
 -- =====================================================================
 -- oauth_access_tokens — jti tracking (FEAT-093 — TASK-027)
 -- FK client_id references auth.clients(client_id) integer PK.
+-- user_id is NULLABLE: client_credentials (2LO / machine-to-machine) tokens
+-- have no associated end user.
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS auth.oauth_access_tokens (
     id          BIGSERIAL PRIMARY KEY,
     jti         UUID NOT NULL UNIQUE,
-    user_id     INTEGER NOT NULL REFERENCES auth.users(user_id) ON DELETE CASCADE,
+    user_id     INTEGER REFERENCES auth.users(user_id) ON DELETE CASCADE,
     client_id   INTEGER NOT NULL REFERENCES auth.clients(client_id) ON DELETE CASCADE,
     scope       TEXT NOT NULL DEFAULT '',
     issued_at   TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
