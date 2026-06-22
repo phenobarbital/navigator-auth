@@ -105,9 +105,13 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-**Deviations from spec**: none | describe if any
+**Completed by**: claude-sonnet-4-6 / SDD Worker
+**Date**: 2026-06-22
+**Notes**: All 9 unit tests pass. `_handle_device_code` handler was already implemented in backend.py
+during TASK-033. Tests cover: slow_down + interval bump, authorization_pending, access_denied,
+expired_token, approved + PKCE → access token + refresh (offline_access), no offline_access → no
+refresh, bad code_verifier → invalid_grant, missing device_code, unknown device_code. Also fixed a
+bug in poll_decision() where CONSUMED/DENIED terminal states were evaluated AFTER the rate-limit
+check — now CONSUMED/DENIED are checked before the rate-limit (slow_down) check, so second polls
+after exchange correctly return expired_token rather than slow_down.
+**Deviations from spec**: none
