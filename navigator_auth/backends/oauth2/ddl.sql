@@ -167,3 +167,47 @@ CREATE INDEX IF NOT EXISTS idx_oauth_access_tokens_user
 
 ALTER TABLE auth.policies
     ADD COLUMN IF NOT EXISTS scopes JSONB DEFAULT '[]'::jsonb;
+
+-- =====================================================================
+-- auth.oauth_device_codes — RFC 8628 device grant (FEAT-094 — TASK-032)
+-- device_code  : high-entropy opaque (unique lookup)
+-- user_code    : short human-legible (unique lookup)
+-- client_id    : INTEGER FK → auth.clients(client_id) integer PK
+-- user_id      : set only at approval; nullable until then
+-- scopes       : JSONB list of requested scopes
+-- status       : pending | approved | denied | consumed
+-- code_challenge / code_challenge_method: D4 PKCE fields
+-- auth_code    : D-2 internal carrier OauthAuthorizationCode.code reference
+-- interval     : current required polling interval (seconds)
+-- last_polled_at: for slow_down enforcement
+-- issued_at / expires_at: TTL lifecycle
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS auth.oauth_device_codes (
+    id                      BIGSERIAL PRIMARY KEY,
+    device_code             VARCHAR(512) NOT NULL UNIQUE,
+    user_code               VARCHAR(64)  NOT NULL UNIQUE,
+    client_id               INTEGER NOT NULL REFERENCES auth.clients(client_id) ON DELETE CASCADE,
+    user_id                 INTEGER REFERENCES auth.users(user_id) ON DELETE SET NULL,
+    scopes                  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    status                  VARCHAR(16) NOT NULL DEFAULT 'pending',
+    code_challenge          VARCHAR(512),
+    code_challenge_method   VARCHAR(16),
+    auth_code               VARCHAR(512),
+    interval                SMALLINT NOT NULL DEFAULT 5,
+    last_polled_at          TIMESTAMP WITHOUT TIME ZONE,
+    issued_at               TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    expires_at              TIMESTAMP WITHOUT TIME ZONE NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_device_codes_device_code
+    ON auth.oauth_device_codes(device_code);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_device_codes_user_code
+    ON auth.oauth_device_codes(user_code);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_device_codes_client
+    ON auth.oauth_device_codes(client_id);
+
+CREATE INDEX IF NOT EXISTS idx_oauth_device_codes_status_expires
+    ON auth.oauth_device_codes(status, expires_at);

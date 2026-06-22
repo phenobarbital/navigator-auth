@@ -6,6 +6,10 @@ FEAT-093:
   TASK-026 — RefreshTokenStorage extended: revoke_token, revoke_chain,
               list_tokens (for cascade revocation on grant revoke).
   TASK-027 — GrantStorage (consent) and AccessTokenStorage (jti revoke).
+
+FEAT-094:
+  TASK-032 — DeviceCodeStorage ABC + Memory/Redis/Postgres tiers;
+              registered in get_device_code_storage() factory.
 """
 
 from datetime import datetime, timezone
@@ -355,6 +359,127 @@ class AccessTokenStorage:
 
 
 # ---------------------------------------------------------------------------
+# Device Code Storage (FEAT-094 TASK-032)
+# ---------------------------------------------------------------------------
+
+class MemoryDeviceCodeStorage:
+    """In-memory DeviceCodeStorage for tests and single-process deployments.
+
+    Key design:
+      - Keyed by device_code (primary lookup).
+      - Secondary index keyed by user_code for the verification page lookup.
+      - No TTL enforcement in memory — callers use poll_decision to check
+        expires_at.
+    """
+
+    def __init__(self):
+        self._by_device_code: dict = {}
+        self._by_user_code: dict = {}
+
+    async def save(self, dc) -> bool:
+        """Persist an OauthDeviceCode record."""
+        self._by_device_code[dc.device_code] = dc
+        self._by_user_code[dc.user_code.upper()] = dc.device_code
+        return True
+
+    async def get_by_device_code(self, device_code: str):
+        """Return an OauthDeviceCode by device_code, or None."""
+        return self._by_device_code.get(device_code)
+
+    async def get_by_user_code(self, user_code: str):
+        """Return an OauthDeviceCode by (normalised) user_code, or None."""
+        key = user_code.upper().replace("-", "").replace(" ", "")
+        device_code = self._by_user_code.get(key)
+        if device_code:
+            return self._by_device_code.get(device_code)
+        return None
+
+    async def update(self, dc) -> bool:
+        """Update a stored OauthDeviceCode record (status/user_id/interval etc.)."""
+        if dc.device_code not in self._by_device_code:
+            return False
+        self._by_device_code[dc.device_code] = dc
+        # Rebuild user_code index entry in case user_code changed (shouldn't
+        # happen in practice, but be safe).
+        self._by_user_code[dc.user_code.upper()] = dc.device_code
+        return True
+
+    async def delete(self, device_code: str) -> bool:
+        """Remove a device code record from storage."""
+        dc = self._by_device_code.pop(device_code, None)
+        if dc:
+            self._by_user_code.pop(dc.user_code.upper(), None)
+            return True
+        return False
+
+
+class RedisDeviceCodeStorage:
+    """Redis-backed DeviceCodeStorage.
+
+    Primary key: oauth2:device:<device_code>
+    Secondary index: oauth2:device:user:<user_code_upper> → device_code
+    TTL driven by dc.expires_at.
+    """
+
+    def __init__(self, dsn: str = None):
+        if not dsn:
+            dsn = REDIS_URL
+        self.redis = redis.from_url(dsn, decode_responses=True)
+        self.prefix = "oauth2:device:"
+        self.user_index_prefix = "oauth2:device:user:"
+
+    async def save(self, dc) -> bool:
+        """Persist an OauthDeviceCode with TTL derived from expires_at."""
+        key = f"{self.prefix}{dc.device_code}"
+        remaining = dc.expires_at - _now()
+        ttl = max(int(remaining.total_seconds()), 1)
+        data = dc.model_dump_json()
+        await self.redis.set(key, data, ex=ttl)
+        user_key = f"{self.user_index_prefix}{dc.user_code.upper()}"
+        await self.redis.set(user_key, dc.device_code, ex=ttl)
+        return True
+
+    async def get_by_device_code(self, device_code: str):
+        """Retrieve an OauthDeviceCode by device_code."""
+        from .models import OauthDeviceCode  # avoid circular import
+        key = f"{self.prefix}{device_code}"
+        data = await self.redis.get(key)
+        if data:
+            try:
+                return OauthDeviceCode.model_validate_json(data)
+            except Exception as e:
+                logging.error(f"Error decoding device code from Redis: {e}")
+        return None
+
+    async def get_by_user_code(self, user_code: str):
+        """Retrieve an OauthDeviceCode by (normalised) user_code."""
+        key = user_code.upper().replace("-", "").replace(" ", "")
+        user_key = f"{self.user_index_prefix}{key}"
+        device_code = await self.redis.get(user_key)
+        if device_code:
+            return await self.get_by_device_code(device_code)
+        return None
+
+    async def update(self, dc) -> bool:
+        """Update a stored OauthDeviceCode (re-save with remaining TTL)."""
+        key = f"{self.prefix}{dc.device_code}"
+        remaining = dc.expires_at - _now()
+        ttl = max(int(remaining.total_seconds()), 1)
+        await self.redis.set(key, dc.model_dump_json(), ex=ttl)
+        return True
+
+    async def delete(self, device_code: str) -> bool:
+        """Remove a device code record from Redis."""
+        dc = await self.get_by_device_code(device_code)
+        key = f"{self.prefix}{device_code}"
+        await self.redis.delete(key)
+        if dc:
+            user_key = f"{self.user_index_prefix}{dc.user_code.upper()}"
+            await self.redis.delete(user_key)
+        return True
+
+
+# ---------------------------------------------------------------------------
 # Factory helpers (backend.py uses these)
 # ---------------------------------------------------------------------------
 
@@ -375,3 +500,16 @@ def get_grant_storage(storage_type: str = "redis", dsn: str = None) -> GrantStor
 def get_access_token_storage(storage_type: str = "redis", dsn: str = None) -> AccessTokenStorage:
     """Return an appropriate AccessTokenStorage."""
     return AccessTokenStorage(dsn=dsn or REDIS_URL)
+
+
+def get_device_code_storage(storage_type: str = "redis", dsn: str = None):
+    """Return an appropriate DeviceCodeStorage.
+
+    - ``memory`` : MemoryDeviceCodeStorage (tests / single-process)
+    - ``redis``  : RedisDeviceCodeStorage  (default; device codes are short-TTL)
+    - ``postgres``: falls back to Redis for device codes (no postgres tier yet)
+    """
+    if storage_type == "memory":
+        return MemoryDeviceCodeStorage()
+    # redis and postgres both use Redis for device codes
+    return RedisDeviceCodeStorage(dsn=dsn or REDIS_URL)
