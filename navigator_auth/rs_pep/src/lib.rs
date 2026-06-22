@@ -519,7 +519,7 @@ fn filter_resources_batch(
     });
 
     // Build result dict
-    let result_dict = PyDict::new_bound(py);
+    let result_dict = PyDict::new(py);
     let mut allowed_list: Vec<String> = Vec::new();
     let mut denied_list: Vec<String> = Vec::new();
 
@@ -534,7 +534,7 @@ fn filter_resources_batch(
     result_dict.set_item("allowed", allowed_list)?;
     result_dict.set_item("denied", denied_list)?;
 
-    Ok(result_dict.into())
+    Ok(result_dict.into_any().unbind())
 }
 
 /// Evaluate a single resource against policies.
@@ -627,13 +627,13 @@ fn evaluate_single(
     });
 
     // Build result dict
-    let result_dict = PyDict::new_bound(py);
+    let result_dict = PyDict::new(py);
     result_dict.set_item("allowed", result.allowed)?;
     result_dict.set_item("effect", result.effect)?;
     result_dict.set_item("matched_policy", result.matched_policy)?;
     result_dict.set_item("reason", result.reason)?;
 
-    Ok(result_dict.into())
+    Ok(result_dict.into_any().unbind())
 }
 
 /// Navigator Auth PEP module — high-performance batch resource filtering.
