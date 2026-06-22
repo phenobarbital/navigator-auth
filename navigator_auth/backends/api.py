@@ -68,7 +68,12 @@ class APIKeyAuth(BaseAuthBackend):
                 return [None, None]
         except Exception as err:  # pylint: disable=W0703
             self.logger.exception(f"API Key Auth: Error getting payload: {err}")
-            return None
+            # Return the (mech, token) pair shape even on error: callers do
+            # `mech, token = await self.get_payload(request)`, so returning a
+            # bare `None` raises "cannot unpack non-iterable NoneType object",
+            # which surfaces as a misleading 500/"API Auth Error" instead of
+            # cleanly deferring to the next auth backend.
+            return [None, None]
         return [mech, token]
 
     async def reconnect(self):
@@ -76,12 +81,37 @@ class APIKeyAuth(BaseAuthBackend):
             await self.connection.connection()
 
     async def get_token_info(self, request: web.Request, mech: str, token: str) -> dict:
+        """Decode and validate a token; populate OAuth2 bearer claims.
+
+        TASK-029: for bearer (JWT) tokens, copy scopes, client_id, token_type
+        (aud) into the payload so downstream ABAC can gate on them.
+        Also enforces per-request jti revocation via AccessTokenStorage.
+        """
         payload = None
         if mech == "bearer":
             try:
                 _, payload = self._idp.decode_token(token)
             except (FailedAuth, AuthExpired, InvalidAuth):
                 raise
+
+            if payload:
+                # TASK-029: Propagate OAuth2 bearer claims into userinfo.
+                scopes_str = payload.get("scope", "")
+                payload["scopes"] = scopes_str.split() if scopes_str else []
+                # client_id here is the public client_uid string (not the int PK).
+                payload["client_id"] = payload.get("client_id", None)
+                payload["token_type"] = payload.get("aud", "user")
+
+                # TASK-029: Per-request jti revocation check.
+                jti = payload.get("jti")
+                if jti:
+                    access_token_storage = getattr(
+                        request.app.get("auth", None), "_access_token_storage", None
+                    ) or request.app.get("oauth2_access_token_storage", None)
+                    if access_token_storage:
+                        if await access_token_storage.is_revoked(jti):
+                            raise InvalidAuth("Token has been revoked", status=401)
+
         elif mech == "api":
             try:
                 payload = orjson.loads(self.cipher.decode(token))

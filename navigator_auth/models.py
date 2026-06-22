@@ -304,6 +304,8 @@ def expiration_date(days=365):
 
 class Client(Model):
     client_id: int = Column(required=False, primary_key=True, db_default="auto", repr=False)
+    # FEAT-093 TASK-023: opaque public identifier — never expose client_id PK on the wire.
+    client_uid: str = Column(required=False)  # UNIQUE, set by DDL/backfill
     client: str = Column(required=False)
     client_name: str = Column(required=True)
     client_secret: str = Column(required=False, secret=True)

@@ -1,11 +1,20 @@
+"""OAuth2 client storage backends.
+
+FEAT-093 TASK-023:
+  - OAuthClient.client_id is now the PUBLIC opaque uid (str).
+  - OAuthClient.client_pk carries the internal integer surrogate PK.
+  - PostgresClientStorage looks up by client_uid column (DROP the int() cast).
+  - Memory/Redis storages already key by string — they store by client_uid.
+"""
+
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import Optional
 import json
 import logging
+import secrets
 from aiohttp import web
 from .models import OAuthClient
-from navigator_auth.models import Client as ClientModel  # The DB Model
-from navigator_auth.libs.json import json_encoder, json_decoder
+from navigator_auth.models import Client as ClientModel
 
 try:
     import redis.asyncio as redis
@@ -15,31 +24,48 @@ except ImportError:
 
 class ClientStorage(ABC):
     @abstractmethod
-    async def get_client(self, client_id: str, request: Optional[web.Request] = None) -> Optional[OAuthClient]:
+    async def get_client(
+        self, client_id: str, request: Optional[web.Request] = None
+    ) -> Optional[OAuthClient]:
+        """Retrieve a client by its PUBLIC client_uid (str)."""
         pass
 
     @abstractmethod
-    async def save_client(self, client: OAuthClient, request: Optional[web.Request] = None) -> bool:
+    async def save_client(
+        self, client: OAuthClient, request: Optional[web.Request] = None
+    ) -> bool:
         pass
 
 
 class MemoryClientStorage(ClientStorage):
-    def __init__(self):
-        self._clients = {}
+    """In-memory client store, keyed by client_uid (str)."""
 
-    async def get_client(self, client_id: str, request: Optional[web.Request] = None) -> Optional[OAuthClient]:
+    def __init__(self):
+        # Keys are public client_uid strings.
+        self._clients: dict = {}
+
+    async def get_client(
+        self, client_id: str, request: Optional[web.Request] = None
+    ) -> Optional[OAuthClient]:
         return self._clients.get(client_id)
 
-    async def save_client(self, client: OAuthClient, request: Optional[web.Request] = None) -> bool:
+    async def save_client(
+        self, client: OAuthClient, request: Optional[web.Request] = None
+    ) -> bool:
+        # Store by public uid.
         self._clients[client.client_id] = client
         return True
 
 
 class RedisClientStorage(ClientStorage):
+    """Redis-backed client store, keyed by client_uid (str)."""
+
     def __init__(self, dsn: str):
         self.redis = redis.from_url(dsn, decode_responses=True)
 
-    async def get_client(self, client_id: str, request: Optional[web.Request] = None) -> Optional[OAuthClient]:
+    async def get_client(
+        self, client_id: str, request: Optional[web.Request] = None
+    ) -> Optional[OAuthClient]:
         key = f"oauth2:client:{client_id}"
         data = await self.redis.get(key)
         if data:
@@ -51,56 +77,61 @@ class RedisClientStorage(ClientStorage):
                 return None
         return None
 
-    async def save_client(self, client: OAuthClient, request: Optional[web.Request] = None) -> bool:
+    async def save_client(
+        self, client: OAuthClient, request: Optional[web.Request] = None
+    ) -> bool:
         key = f"oauth2:client:{client.client_id}"
-        data = client.model_dump_json()  # Pydantic v2
+        data = client.model_dump_json()
         await self.redis.set(key, data)
         return True
 
 
 class PostgresClientStorage(ClientStorage):
-    """Storage using the Client Model in Postgres (via asyncdb)."""
+    """Storage using the Client Model in Postgres (via asyncdb).
 
-    async def get_client(self, client_id: str, request: Optional[web.Request] = None) -> Optional[OAuthClient]:
+    TASK-023: Looks up by auth.clients.client_uid (NOT the int PK).
+    Maps DB row: client_uid -> OAuthClient.client_id,
+                 client_id  -> OAuthClient.client_pk.
+    """
+
+    async def get_client(
+        self, client_id: str, request: Optional[web.Request] = None
+    ) -> Optional[OAuthClient]:
         db = None
         if request:
             db = request.app.get("authdb")
 
         if not db:
-            # Fallback if no request or db in app (unit tests?)
-            logging.warning("PostgresClientStorage: No DB connection found (request missing associated DB).")
-            # Try without explicit connection (global pool rely?)
-            # return await self._get_client_db(client_id)
+            logging.warning(
+                "PostgresClientStorage: No DB connection found."
+            )
             return None
 
         async with await db.acquire() as conn:
             ClientModel.Meta.connection = conn
             return await self._get_client_db(client_id)
 
-    async def _get_client_db(self, client_id: str):
+    async def _get_client_db(self, client_uid: str) -> Optional[OAuthClient]:
+        """Fetch client by the PUBLIC client_uid column (no int cast)."""
         try:
-            # Note: client_id is int in DB now, but str in OAuthClient.
-            try:
-                cid = int(client_id)
-            except ValueError:
-                return None
-
-            client_db = await ClientModel.get(client_id=cid)
+            # Look up by the opaque public identifier (str column).
+            client_db = await ClientModel.get(client_uid=client_uid)
             if client_db:
                 data = client_db.to_dict()
 
-                # Manual User Mapping if not present or just ID
+                # Map DB columns to OAuthClient fields:
+                #   DB client_id (int PK)  -> client_pk
+                #   DB client_uid (str)    -> client_id
+                db_pk = data.pop("client_id", None)     # integer PK
+                db_uid = data.pop("client_uid", None)   # opaque string
+                data["client_pk"] = db_pk
+                data["client_id"] = db_uid or client_uid
+
+                # Build OauthUser if user_id is present.
                 if "user" not in data:
-                    # check user_id
                     user_val = data.get("user_id")
                     if user_val:
-                        # If it's an integer, we might need to fetch the User or mock OauthUser.
-                        # Since OAuthClient expects OauthUser, lets construct it.
-                        # CAUTION: We don't have full user info if we just have ID.
-                        # But for Client Credentials flow, we mainly need the ID.
                         if isinstance(user_val, int):
-                            # Mocking standard user details to satisfy Pydantic if we can't fetch.
-                            # Ideally we should fetch User.
                             data["user"] = {
                                 "user_id": user_val,
                                 "username": f"user_{user_val}",
@@ -108,7 +139,6 @@ class PostgresClientStorage(ClientStorage):
                                 "family_name": "Unknown",
                             }
                         elif hasattr(user_val, "to_dict"):
-                            # it is a model
                             user_dict = user_val.to_dict()
                             data["user"] = {
                                 "user_id": user_dict.get("user_id"),
@@ -117,21 +147,14 @@ class PostgresClientStorage(ClientStorage):
                                 "family_name": user_dict.get("last_name", ""),
                                 "email": user_dict.get("email"),
                             }
-                    else:
-                        # No user attached?
-                        pass
 
-                # Cleanup nulls for fields that allow defaults in Pydantic
-                keys_to_check = [
-                    "policy_uri",
-                    "client_logo_uri",
-                    "default_scopes",
-                    "redirect_uris",
-                    "allowed_grant_types",
-                ]
-                for k in keys_to_check:
+                # Drop None values for fields that have Pydantic defaults.
+                for k in [
+                    "policy_uri", "client_logo_uri", "default_scopes",
+                    "redirect_uris", "allowed_grant_types",
+                ]:
                     if data.get(k) is None:
-                        del data[k]  # Let Pydantic use defaults
+                        data.pop(k, None)
 
                 return OAuthClient(**data)
         except Exception as e:
@@ -139,7 +162,9 @@ class PostgresClientStorage(ClientStorage):
             return None
         return None
 
-    async def save_client(self, client: OAuthClient, request: Optional[web.Request] = None) -> bool:
+    async def save_client(
+        self, client: OAuthClient, request: Optional[web.Request] = None
+    ) -> bool:
         db = None
         if request:
             db = request.app.get("authdb")
@@ -153,29 +178,43 @@ class PostgresClientStorage(ClientStorage):
 
     async def _save_client_db(self, client: OAuthClient) -> bool:
         try:
-            # Create a dictionary from the pydantic model
             data = client.model_dump()
 
-            # Separate keys that match the model
-            # user -> user_id
-
+            # Separate OauthUser -> user_id FK.
             user = data.pop("user", None)
             if user:
                 if isinstance(user, dict):
                     data["user_id"] = int(user.get("user_id"))
                 else:
-                    data["user_id"] = user.user_id  # Assuming object
+                    data["user_id"] = user.user_id
 
-            # Handle client_id
-            if "client_id" in data:
-                try:
-                    data["client_id"] = int(data["client_id"])
-                except ValueError:
-                    del data["client_id"]  # Let DB assign or fail
+            # Map OAuthClient.client_id (public uid) -> client_uid column.
+            # Map OAuthClient.client_pk (int PK)     -> client_id column (if set).
+            public_uid = data.pop("client_id", None)     # str uid
+            int_pk = data.pop("client_pk", None)         # int PK
 
-            # Check if exists
+            if public_uid:
+                data["client_uid"] = public_uid
+
+            if int_pk:
+                data["client_id"] = int(int_pk)
+
+            # Generate a uid if not provided.
+            if not data.get("client_uid"):
+                data["client_uid"] = secrets.token_urlsafe(18)
+
+            # Check existence by uid if we have one.
             exists = False
-            if "client_id" in data:
+            if data.get("client_uid"):
+                try:
+                    obj = await ClientModel.get(client_uid=data["client_uid"])
+                    if obj:
+                        exists = True
+                except Exception:
+                    pass
+
+            # Fallback: check by int PK.
+            if not exists and data.get("client_id"):
                 try:
                     obj = await ClientModel.get(client_id=data["client_id"])
                     if obj:
@@ -186,9 +225,6 @@ class PostgresClientStorage(ClientStorage):
             if not exists:
                 c = ClientModel(**data)
                 await c.insert()
-            else:
-                # Update?
-                pass
 
             return True
         except Exception as e:

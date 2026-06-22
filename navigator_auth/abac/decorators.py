@@ -139,6 +139,90 @@ async def _check_groups_and_call(
     )
 
 
+def scope_required(
+    *scopes: str,
+    content_type: str = "application/json"
+) -> Callable:
+    """Restrict the handler to requests carrying all the required OAuth2 scopes.
+
+    Works with both function-based handlers and class-based views
+    (``aiohttp.web.View`` subclasses) via ``_apply_decorator``.
+
+    The required scopes are AND-ed: all must be present in ``userinfo["scopes"]``
+    (a list populated by TASK-029 bearer processing).
+
+    Args:
+        *scopes: One or more scope strings that must ALL be present.
+        content_type: Content-Type header for error responses.
+
+    Raises:
+        web.HTTPForbidden (403): with ``reason='insufficient_scope'`` when the
+            token does not carry every required scope.
+        web.HTTPUnauthorized (401): when the request is not authenticated.
+    """
+    scope_set = set(scopes)
+
+    def _func_wrapper(handler):
+        @wraps(handler)
+        async def _wrap(*args, **kwargs) -> web.StreamResponse:
+            request = _get_request(*args)
+            if request is None:
+                raise ValueError(
+                    f"web.Request was not found in arguments. {handler!s}"
+                )
+            return await _check_scopes_and_call(
+                request, handler, args, kwargs, scope_set, content_type
+            )
+        return _wrap
+
+    def _method_wrapper(method):
+        @wraps(method)
+        async def _wrap(self, *args, **kwargs) -> web.StreamResponse:
+            request = self.request
+            return await _check_scopes_and_call(
+                request, method, (self, *args), kwargs, scope_set, content_type
+            )
+        return _wrap
+
+    return lambda handler: _apply_decorator(handler, _func_wrapper, _method_wrapper)
+
+
+async def _check_scopes_and_call(
+    request: web.Request,
+    handler,
+    args: tuple,
+    kwargs: dict,
+    required_scopes: set,
+    content_type: str,
+) -> web.StreamResponse:
+    """Shared logic for scope_required — works for both func and method."""
+    if request.get("authenticated", False) is False:
+        raise web.HTTPUnauthorized(
+            reason="Access Denied",
+            headers={
+                hdrs.CONTENT_TYPE: content_type,
+                hdrs.CONNECTION: "keep-alive",
+            },
+        )
+
+    _, userinfo = await _get_userinfo(request)
+    token_scopes = set()
+    if userinfo is not None:
+        raw = userinfo.get("scopes", [])
+        token_scopes = set(raw) if raw else set()
+
+    if required_scopes.issubset(token_scopes):
+        return await handler(*args, **kwargs)
+
+    raise web.HTTPForbidden(
+        reason="insufficient_scope",
+        headers={
+            hdrs.CONTENT_TYPE: content_type,
+            hdrs.CONNECTION: "keep-alive",
+        },
+    )
+
+
 def requires_permission(
     resource_type: ResourceType,
     action: str,
