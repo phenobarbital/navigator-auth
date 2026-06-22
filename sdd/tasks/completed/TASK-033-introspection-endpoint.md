@@ -106,9 +106,7 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (claude-sonnet-4-6)
+**Date**: 2026-06-22
+**Notes**: All 10 unit tests pass. POST /oauth2/introspect registered + excluded in configure(). Confidential-client auth (client_secret + Basic Auth fallback). Real-time jti + refresh token revocation check. Same-client-only enforcement. RFC 7662 claims returned for active tokens. OAUTH_INTROSPECT_INCLUDE_ABAC_SCOPES added to conf.py. Device config keys also added to conf.py (needed for TASK-034).
+**Deviations from spec**: none
