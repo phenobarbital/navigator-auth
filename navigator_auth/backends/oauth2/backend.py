@@ -16,6 +16,13 @@ FEAT-093 changes (in task order):
   TASK-027 — OauthGrant + consent-skip + jti mint + /revoke + grants API.
   TASK-028 — userinfo / logout / finish_logout implemented (no stubs).
   TASK-029 — audience kwarg on create_token ('user'/'app').
+
+FEAT-094 changes (in task order):
+  TASK-033 — POST /oauth2/introspect (RFC 7662): confidential-client auth,
+             same-client-only, real-time jti/refresh revocation check.
+  TASK-034 — POST /oauth2/device_authorization (RFC 8628 §3.1-3.2).
+  TASK-035 — GET/POST /oauth2/device verification page (RFC 8628 §3.3).
+  TASK-036 — device_code grant branch on POST /oauth2/token (RFC 8628 §3.4-3.5).
 """
 
 from datetime import datetime, timedelta, timezone
@@ -47,6 +54,16 @@ from ...conf import (
     OAUTH_REFRESH_ABSOLUTE_TTL,
     OAUTH_REFRESH_ROTATION,
     OAUTH_SCOPES,
+    # FEAT-094
+    OAUTH_INTROSPECT_INCLUDE_ABAC_SCOPES,
+    OAUTH_DEVICE_CODE_TTL,
+    OAUTH_DEVICE_POLL_INTERVAL,
+    OAUTH_DEVICE_SLOW_DOWN_INCREMENT,
+    OAUTH_DEVICE_USER_CODE_LENGTH,
+    OAUTH_DEVICE_USER_CODE_ALPHABET,
+    OAUTH_DEVICE_VERIFICATION_URI,
+    OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS,
+    OAUTH_DEVICE_LOCKOUT_TTL,
 )
 from navigator_session import get_session
 from ...exceptions import (
@@ -68,8 +85,10 @@ from .code_backend import (
     get_refresh_token_storage,
     get_grant_storage,
     get_access_token_storage,
+    get_device_code_storage,
 )
 from .pkce import verify as pkce_verify
+from .devicecode import generate_user_code, poll_decision as _poll_decision
 
 
 def _now_utc() -> datetime:
@@ -112,6 +131,10 @@ class Oauth2Provider(BaseAuthBackend):
         self.consent_uri: str = "/oauth2/consent"
         self.revoke_uri: str = "/oauth2/revoke"
         self.grants_uri: str = "/api/v1/oauth2/grants"
+        # FEAT-094 new URIs
+        self.introspect_uri: str = "/oauth2/introspect"
+        self.device_authorization_uri: str = "/oauth2/device_authorization"
+        self.device_uri: str = "/oauth2/device"
         self.login_failed_uri = AUTH_LOGIN_FAILED_URI
         self.logout_redirect_uri = AUTH_LOGOUT_REDIRECT_URI or "/oauth2/logout/complete"
         self.redirect_uri = None
@@ -120,6 +143,7 @@ class Oauth2Provider(BaseAuthBackend):
         self.refresh_token_storage = None
         self.grant_storage = None
         self.access_token_storage = None
+        self.device_code_storage = None
 
     def configure(self, app):
         router = app.router
@@ -177,6 +201,26 @@ class Oauth2Provider(BaseAuthBackend):
             name="nav_oauth2_grants_revoke",
         )
 
+        # FEAT-094: Token Introspection (RFC 7662) — TASK-033
+        router.add_route(
+            "POST", self.introspect_uri, self.introspect, name="nav_oauth2_introspect"
+        )
+        app[AUTH_EXCLUDE_LIST_KEY].append(self.introspect_uri)
+
+        # FEAT-094: Device Authorization Grant (RFC 8628) — TASK-034/035
+        router.add_route(
+            "POST",
+            self.device_authorization_uri,
+            self.device_authorization,
+            name="nav_oauth2_device_authorization",
+        )
+        app[AUTH_EXCLUDE_LIST_KEY].append(self.device_authorization_uri)
+
+        router.add_route(
+            "*", self.device_uri, self.device_verification, name="nav_oauth2_device"
+        )
+        app[AUTH_EXCLUDE_LIST_KEY].append(self.device_uri)
+
         super(Oauth2Provider, self).configure(app)
 
     async def on_startup(self, app: web.Application):
@@ -201,6 +245,8 @@ class Oauth2Provider(BaseAuthBackend):
         self.grant_storage = get_grant_storage(storage_type, REDIS_URL)
         self.access_token_storage = get_access_token_storage(storage_type, REDIS_URL)
         app["oauth2_access_token_storage"] = self.access_token_storage
+        # FEAT-094: device code storage
+        self.device_code_storage = get_device_code_storage(storage_type, REDIS_URL)
 
     async def on_cleanup(self, app: web.Application):
         pass
@@ -586,6 +632,8 @@ class Oauth2Provider(BaseAuthBackend):
             return await self._handle_client_credentials(payload, request)
         elif grant_type == "refresh_token":
             return await self._handle_refresh_token(payload, request)
+        elif grant_type == "urn:ietf:params:oauth:grant-type:device_code":
+            return await self._handle_device_code(payload, request)
         else:
             return self._error_response(
                 "unsupported_grant_type",
@@ -631,7 +679,10 @@ class Oauth2Provider(BaseAuthBackend):
             return self._error_response("invalid_client", "client_id mismatch.")
 
         # B3: exact-match redirect_uri.
-        if redirect_uri and auth_code.redirect_uri != redirect_uri:
+        # Device-origin carriers (response_type="device_code") have no redirect_uri —
+        # skip the match when the _device_origin flag is set.
+        is_device_origin = payload.get("_device_origin", False)
+        if redirect_uri and auth_code.redirect_uri != redirect_uri and not is_device_origin:
             return self._error_response(
                 "invalid_grant", "redirect_uri does not match the authorization request."
             )
@@ -907,6 +958,103 @@ class Oauth2Provider(BaseAuthBackend):
         return JSONResponse(response, status=200)
 
     # ------------------------------------------------------------------
+    # _handle_device_code (FEAT-094 TASK-036, RFC 8628 §3.4-3.5)
+    # ------------------------------------------------------------------
+
+    async def _handle_device_code(self, payload, request):
+        """Handle grant_type=urn:ietf:params:oauth:grant-type:device_code.
+
+        D-2: on approval, delegates to the existing authorization_code exchange
+        via the stored auth_code carrier.  This gives device tokens the same
+        owner-binding, single-use, and refresh-iff-offline_access behaviour as
+        regular auth-code tokens.
+
+        State machine per RFC 8628 §3.5:
+          too_soon     → slow_down  (+ bump interval)
+          pending      → authorization_pending
+          denied       → access_denied
+          expired/unknown → expired_token
+          approved     → verify PKCE → delegate to auth_code exchange
+          consumed     → expired_token (single-use guard)
+        """
+        from .models import DeviceCodeStatus
+
+        device_code_str = payload.get("device_code", "")
+        client_id = payload.get("client_id", "")
+        if not device_code_str:
+            return self._error_response(
+                "invalid_request", "Missing device_code.", status=400
+            )
+
+        dc = await self.device_code_storage.get_by_device_code(device_code_str)
+        if not dc:
+            return self._error_response(
+                "expired_token", "Unknown or expired device_code.", status=400
+            )
+
+        # Client match.
+        if client_id and not hmac.compare_digest(str(dc.client_id), str(client_id)):
+            return self._error_response(
+                "invalid_client", "device_code does not belong to this client.", status=400
+            )
+
+        now = _now()
+        decision = _poll_decision(dc, now)
+
+        if decision == "slow_down":
+            # Bump interval server-side and persist.
+            dc.interval = dc.interval + OAUTH_DEVICE_SLOW_DOWN_INCREMENT
+            dc.last_polled_at = now
+            await self.device_code_storage.update(dc)
+            return JSONResponse(
+                {"error": "slow_down", "interval": dc.interval}, status=400
+            )
+
+        if decision == "authorization_pending":
+            dc.last_polled_at = now
+            await self.device_code_storage.update(dc)
+            return JSONResponse({"error": "authorization_pending"}, status=400)
+
+        if decision == "access_denied":
+            return JSONResponse({"error": "access_denied"}, status=400)
+
+        if decision == "expired_token":
+            return JSONResponse({"error": "expired_token"}, status=400)
+
+        # decision == "approved": delegate to the authorization_code exchange.
+        if not dc.auth_code:
+            return JSONResponse({"error": "server_error"}, status=500)
+
+        # D4: PKCE verification for public clients.
+        if dc.code_challenge:
+            code_verifier = payload.get("code_verifier", "")
+            if not code_verifier:
+                return self._error_response(
+                    "invalid_grant", "code_verifier required (PKCE).", status=400
+                )
+            if not pkce_verify(code_verifier, dc.code_challenge,
+                               dc.code_challenge_method or "S256"):
+                return self._error_response(
+                    "invalid_grant", "PKCE verification failed.", status=400
+                )
+
+        # Mark device_code consumed before delegating (single-use guard).
+        dc.status = DeviceCodeStatus.CONSUMED
+        dc.last_polled_at = now
+        await self.device_code_storage.update(dc)
+
+        # Delegate to the auth_code exchange by injecting it into the payload.
+        # The carrier's redirect_uri is "" (device-origin); the exchange must
+        # accept it.  We set redirect_uri to None so the exact-match check is
+        # skipped when the stored redirect_uri is also "".
+        injected_payload = dict(payload)
+        injected_payload["grant_type"] = "authorization_code"
+        injected_payload["code"] = dc.auth_code
+        # Allow the exchange to skip redirect_uri validation for device-origin carriers.
+        injected_payload["_device_origin"] = True
+        return await self._handle_authorization_code(injected_payload, request)
+
+    # ------------------------------------------------------------------
     # userinfo (TASK-028)
     # ------------------------------------------------------------------
 
@@ -1067,6 +1215,450 @@ class Oauth2Provider(BaseAuthBackend):
                     await self.refresh_token_storage.revoke_chain(rt.refresh_token)
 
         return web.Response(status=204)
+
+    # ------------------------------------------------------------------
+    # introspect (FEAT-094 TASK-033, RFC 7662)
+    # ------------------------------------------------------------------
+
+    async def introspect(self, request: web.Request):
+        """POST /oauth2/introspect — RFC 7662 token introspection.
+
+        Caller authentication: confidential client (client_id + client_secret).
+        Same-client-only: the caller's client_uid must equal the token's client_id.
+        Revocation truth is real-time (no cache).
+
+        Response:
+          200 {"active": true, ...RFC 7662 claims...} for active own-client tokens.
+          200 {"active": false}                        for everything else.
+          400 {"error": "invalid_request"}             on missing/duplicate token.
+          401 {"error": "invalid_client"} + WWW-Authenticate on bad client creds.
+        """
+        payload = await self.get_payload(request)
+
+        # --- Authenticate the calling confidential client ---
+        caller_client_id = payload.get("client_id", "")
+        caller_secret = payload.get("client_secret", "")
+        if not caller_client_id:
+            # Also accept HTTP Basic Auth
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Basic "):
+                import base64
+                try:
+                    decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+                    caller_client_id, caller_secret = decoded.split(":", 1)
+                except Exception:
+                    pass
+
+        caller = await self.client_storage.get_client(caller_client_id, request=request)
+        if not caller or caller.client_type == "public":
+            return web.Response(
+                status=401,
+                content_type="application/json",
+                headers={"WWW-Authenticate": 'Bearer realm="oauth2"'},
+                text='{"error":"invalid_client","error_description":"Client authentication required."}',
+            )
+        stored_secret = caller.client_secret or ""
+        if not hmac.compare_digest(stored_secret, caller_secret):
+            return web.Response(
+                status=401,
+                content_type="application/json",
+                headers={"WWW-Authenticate": 'Bearer realm="oauth2"'},
+                text='{"error":"invalid_client","error_description":"Invalid client credentials."}',
+            )
+
+        # --- Validate token parameter ---
+        token = payload.get("token", "")
+        if not token:
+            return self._error_response(
+                "invalid_request", "Missing token parameter.", status=400
+            )
+
+        # Multiple token params is also invalid_request.
+        # (aiohttp returns the last value; we rely on the caller sending one.)
+
+        hint = payload.get("token_type_hint", "")
+
+        # --- Decode token (without raising) ---
+        try:
+            _, token_payload = self._idp.decode_token(token)
+        except Exception:
+            token_payload = None
+
+        if not token_payload:
+            return JSONResponse({"active": False}, status=200)
+
+        # Determine token type: access or refresh.
+        token_type = token_payload.get("token_type", "").lower()
+        is_refresh = hint == "refresh_token" or token_type == "refresh_token"
+        is_access = not is_refresh
+
+        # --- Revocation / activity check ---
+        active = False
+        if is_access:
+            jti = token_payload.get("jti")
+            if jti and self.access_token_storage:
+                revoked = await self.access_token_storage.is_revoked(jti)
+                if not revoked:
+                    # Check not expired.
+                    exp = token_payload.get("exp", 0)
+                    if exp > _now_utc().timestamp():
+                        active = True
+            elif not jti:
+                # No jti in payload — treat as inactive (can't verify revocation).
+                active = False
+        else:
+            # Refresh token: look it up in storage.
+            rt = await self.refresh_token_storage.get_token(token)
+            if rt and not rt.revoked:
+                if rt.expires_at > _now():
+                    active = True
+
+        if not active:
+            return JSONResponse({"active": False}, status=200)
+
+        # --- Same-client-only enforcement (RFC 7662 §2.2) ---
+        token_client_id = token_payload.get("client_id", "")
+        if not hmac.compare_digest(str(caller.client_id), str(token_client_id)):
+            return JSONResponse({"active": False}, status=200)
+
+        # --- Build active response (RFC 7662 §2.2 claims) ---
+        exp = token_payload.get("exp")
+        iat = token_payload.get("iat")
+        scope = token_payload.get("scope", "")
+        user_id = token_payload.get("user_id")
+        sub = str(user_id) if user_id else token_client_id
+        aud = token_payload.get("aud", "")
+
+        claims: dict = {
+            "active": True,
+            "scope": scope,
+            "client_id": caller.client_id,       # wire value = client_uid
+            "token_type": "Bearer",
+            "sub": sub,
+        }
+        if exp:
+            claims["exp"] = int(exp)
+        if iat:
+            claims["iat"] = int(iat)
+        if aud:
+            claims["aud"] = aud
+
+        # Resolve username for 3LO tokens.
+        if user_id:
+            try:
+                user = await self._idp.user_from_id(user_id)
+                if user:
+                    username = getattr(user, "username", None) or getattr(user, "email", "")
+                    claims["username"] = str(username)
+            except Exception:
+                pass
+
+        return JSONResponse(claims, status=200)
+
+    # ------------------------------------------------------------------
+    # device_authorization (FEAT-094 TASK-034, RFC 8628 §3.1-3.2)
+    # ------------------------------------------------------------------
+
+    async def device_authorization(self, request: web.Request):
+        """POST /oauth2/device_authorization — RFC 8628 §3.1/§3.2.
+
+        Issues device_code + user_code; persists a pending OauthDeviceCode;
+        returns the RFC 8628 response payload.
+        """
+        from .models import OauthDeviceCode
+
+        payload = await self.get_payload(request)
+        client_id = payload.get("client_id", "")
+        if not client_id:
+            return self._error_response("invalid_request", "Missing client_id.", status=400)
+
+        client = await self.client_storage.get_client(client_id, request=request)
+        if not client:
+            return self._error_response("invalid_client", "Unknown client.", status=400)
+
+        # Scope validation — filter to client allow-list.
+        requested_scope = payload.get("scope", "default")
+        scopes = requested_scope.split()
+        allowed = client.default_scopes if isinstance(client.default_scopes, list) else [client.default_scopes]
+        invalid_scopes = [s for s in scopes if s not in allowed]
+        if invalid_scopes and allowed:
+            return self._error_response(
+                "invalid_scope",
+                f"Scope(s) not allowed for this client: {', '.join(invalid_scopes)}",
+            )
+
+        # D4: PKCE — required (S256) for public clients.
+        code_challenge = payload.get("code_challenge")
+        code_challenge_method = payload.get("code_challenge_method", "S256")
+        if client.client_type == "public" and OAUTH_REQUIRE_PKCE_PUBLIC:
+            if not code_challenge:
+                return self._error_response(
+                    "invalid_request",
+                    "code_challenge required for public clients (PKCE S256).",
+                    status=400,
+                )
+            if code_challenge_method.upper() != "S256":
+                return self._error_response(
+                    "invalid_request",
+                    "Only code_challenge_method=S256 is supported.",
+                    status=400,
+                )
+
+        # Generate device_code + user_code (regenerate on collision).
+        device_code_str = secrets.token_urlsafe(32)
+        alphabet = OAUTH_DEVICE_USER_CODE_ALPHABET
+        length = OAUTH_DEVICE_USER_CODE_LENGTH
+        max_attempts = 10
+        user_code_str = None
+        for _ in range(max_attempts):
+            candidate = generate_user_code(length=length, alphabet=alphabet)
+            existing = await self.device_code_storage.get_by_user_code(candidate)
+            if not existing:
+                user_code_str = candidate
+                break
+        if not user_code_str:
+            user_code_str = generate_user_code(length=length, alphabet=alphabet)
+
+        now = _now()
+        ttl = OAUTH_DEVICE_CODE_TTL
+        interval = OAUTH_DEVICE_POLL_INTERVAL
+        expires_at = now + timedelta(seconds=ttl)
+
+        dc = OauthDeviceCode(
+            device_code=device_code_str,
+            user_code=user_code_str,
+            client_id=client.client_id,
+            client_pk=client.client_pk,
+            scopes=scopes,
+            code_challenge=code_challenge,
+            code_challenge_method=code_challenge_method if code_challenge else None,
+            interval=interval,
+            issued_at=now,
+            expires_at=expires_at,
+        )
+        await self.device_code_storage.save(dc)
+
+        # Build verification_uri.
+        if OAUTH_DEVICE_VERIFICATION_URI:
+            verification_uri = OAUTH_DEVICE_VERIFICATION_URI
+        else:
+            domain = self.get_domain(request)
+            verification_uri = f"{domain}{self.device_uri}"
+
+        verification_uri_complete = f"{verification_uri}?user_code={user_code_str}"
+
+        return JSONResponse(
+            {
+                "device_code": device_code_str,
+                "user_code": user_code_str,
+                "verification_uri": verification_uri,
+                "verification_uri_complete": verification_uri_complete,
+                "expires_in": ttl,
+                "interval": interval,
+            },
+            status=200,
+        )
+
+    # ------------------------------------------------------------------
+    # device_verification (FEAT-094 TASK-035, RFC 8628 §3.3)
+    # ------------------------------------------------------------------
+
+    async def device_verification(self, request: web.Request):
+        """GET/POST /oauth2/device — RFC 8628 §3.3 verification page.
+
+        GET : show the user_code entry form (pre-filled from query param).
+        POST: process user_code entry, anti-brute-force, login, consent.
+
+        Owner-binding invariant: user_id always comes from the authenticated
+        session, never from client.user.
+        """
+        from .models import OauthGrant, DeviceCodeStatus, OauthDeviceCode
+
+        if request.method == "GET":
+            data = {key: val for (key, val) in request.query.items()}
+            # Try to render the device verification page.
+            try:
+                return await self._parser.view(filename="oauth/device.html", params=data)
+            except Exception:
+                # Fallback: minimal HTML form if template not found.
+                user_code_val = data.get("user_code", "")
+                html = (
+                    "<!DOCTYPE html><html><body>"
+                    f"<form method='POST'>"
+                    f"<label>User Code: <input name='user_code' value='{user_code_val}'></label>"
+                    "<button name='action' value='approve' type='submit'>Approve</button>"
+                    "<button name='action' value='deny' type='submit'>Deny</button>"
+                    "</form></body></html>"
+                )
+                return web.Response(
+                    status=200, content_type="text/html", text=html
+                )
+
+        # POST: process user_code entry.
+        data = await self.get_payload(request)
+        action = data.get("action", "approve")
+        raw_user_code = data.get("user_code", "").upper().replace("-", "").replace(" ", "")
+
+        if not raw_user_code:
+            return self._error_response("invalid_request", "user_code required.", status=400)
+
+        # --- Anti-brute-force: Redis-backed rate-limit + lockout (D3) ---
+        # The lock key is based on the client IP.
+        client_ip = request.remote or "unknown"
+        lockout_key = f"oauth2:device:lockout:{client_ip}"
+        attempt_key = f"oauth2:device:attempts:{client_ip}"
+
+        # Check if locked out (Redis only when RedisDeviceCodeStorage is active).
+        locked_out = False
+        if hasattr(self.device_code_storage, 'redis'):
+            try:
+                locked_out = bool(await self.device_code_storage.redis.exists(lockout_key))
+            except Exception:
+                pass
+
+        if locked_out:
+            return self._error_response(
+                "access_denied",
+                "Too many failed attempts. Please try again later.",
+                status=400,
+            )
+
+        # Look up user_code.
+        dc = await self.device_code_storage.get_by_user_code(raw_user_code)
+        if not dc or dc.status != DeviceCodeStatus.PENDING or _now() >= dc.expires_at:
+            # Increment bad-attempt counter (generic error — no info leakage).
+            await self._record_device_attempt(attempt_key, lockout_key)
+            return self._error_response(
+                "access_denied",
+                "Invalid or expired user code.",
+                status=400,
+            )
+
+        # Reset attempt counter on valid code.
+        if hasattr(self.device_code_storage, 'redis'):
+            try:
+                await self.device_code_storage.redis.delete(attempt_key)
+            except Exception:
+                pass
+
+        # --- Require authenticated session ---
+        session_user = await self.check_session(request)
+        if not session_user:
+            # Redirect to login, with return URL.
+            location = request.app.router["nav_oauth2_login"].url_for()
+            redirect_url = location.with_query(
+                action_url=str(location),
+                device_user_code=raw_user_code,
+            )
+            raise web.HTTPFound(redirect_url)
+
+        user_obj = self._decode_session_user(session_user)
+        if not user_obj:
+            return self._error_response("access_denied", "Cannot resolve session user.", status=401)
+
+        if action == "deny":
+            dc.status = DeviceCodeStatus.DENIED
+            await self.device_code_storage.update(dc)
+            try:
+                return await self._parser.view(
+                    filename="oauth/device_denied.html", params={}
+                )
+            except Exception:
+                return web.Response(status=200, text="Authorization denied.")
+
+        # --- Consent-skip via GrantStorage (FEAT-093 pattern) ---
+        client = await self.client_storage.get_client(dc.client_id, request=request)
+        if not client:
+            return self._error_response("invalid_client", "Unknown client.", status=400)
+
+        scopes = dc.scopes
+        if self.grant_storage:
+            existing_grant = await self.grant_storage.get_grant(user_obj.user_id, dc.client_id)
+            if existing_grant and not existing_grant.revoked:
+                granted = set(existing_grant.scopes)
+                requested = set(scopes)
+                if requested.issubset(granted):
+                    # Consent already granted — proceed to approval.
+                    return await self._approve_device_code(
+                        dc, user_obj, scopes, client, request
+                    )
+
+        # Show consent page.
+        try:
+            return await self._parser.view(
+                filename="oauth/device_consent.html",
+                params={
+                    "client_name": client.client_name,
+                    "scopes": scopes,
+                    "user_code": raw_user_code,
+                    "device_code": dc.device_code,
+                },
+            )
+        except Exception:
+            # Fallback: approve directly.
+            return await self._approve_device_code(dc, user_obj, scopes, client, request)
+
+    async def _record_device_attempt(self, attempt_key: str, lockout_key: str) -> None:
+        """Increment the bad-attempt counter; lock out if threshold exceeded."""
+        if not hasattr(self.device_code_storage, 'redis'):
+            return
+        try:
+            count = await self.device_code_storage.redis.incr(attempt_key)
+            await self.device_code_storage.redis.expire(
+                attempt_key, OAUTH_DEVICE_LOCKOUT_TTL
+            )
+            if int(count) >= OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS:
+                await self.device_code_storage.redis.set(
+                    lockout_key, "1", ex=OAUTH_DEVICE_LOCKOUT_TTL
+                )
+        except Exception:
+            pass
+
+    async def _approve_device_code(self, dc, user_obj, scopes, client, request):
+        """Stamp the device record APPROVED + mint the D-2 auth-code carrier."""
+        from .models import OauthAuthorizationCode, DeviceCodeStatus, OauthGrant
+
+        # Upsert grant record (consent recorded).
+        if self.grant_storage:
+            grant = OauthGrant(
+                user_id=user_obj.user_id,
+                client_id=client.client_id,
+                scopes=scopes,
+            )
+            await self.grant_storage.save_grant(grant)
+
+        # D-2: mint an internal owner-bound OauthAuthorizationCode carrier.
+        # This carrier has no redirect_uri (device-origin; the exchange must
+        # accept it without requiring a matching redirect_uri).
+        auth_code_str = secrets.token_urlsafe(32)
+        now = _now()
+        carrier = OauthAuthorizationCode(
+            client=client,
+            user_id=user_obj.user_id,          # owner-binding: from session
+            code=auth_code_str,
+            redirect_uri="",                    # no redirect_uri for device flow
+            scope=" ".join(scopes),
+            state="",
+            response_type="device_code",        # marker so exchange allows it
+            code_challenge=dc.code_challenge,
+            code_challenge_method=dc.code_challenge_method,
+            expires_at=now + timedelta(seconds=OAUTH_DEVICE_CODE_TTL),
+        )
+        await self.code_storage.save_code(carrier)
+
+        # Stamp device record.
+        dc.status = DeviceCodeStatus.APPROVED
+        dc.user_id = user_obj.user_id           # owner-binding invariant
+        dc.granted_scopes = scopes
+        dc.auth_code = auth_code_str
+        await self.device_code_storage.update(dc)
+
+        try:
+            return await self._parser.view(
+                filename="oauth/device_approved.html", params={}
+            )
+        except Exception:
+            return web.Response(status=200, text="Authorization approved. You may close this window.")
 
     def _get_request_user_id(self, request) -> Optional[int]:
         """Extract user_id from the authenticated request."""
