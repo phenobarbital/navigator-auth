@@ -95,22 +95,25 @@ def poll_decision(dc: "OauthDeviceCode", now: datetime) -> str:
     if now >= dc.expires_at:
         return EXPIRED_TOKEN
 
-    # 2. Polling-rate check (too soon since last poll → slow_down).
+    # 2. Terminal status checks (CONSUMED/DENIED) before rate-limit —
+    #    these states are irreversible; returning slow_down would be misleading.
+    if dc.status == DeviceCodeStatus.CONSUMED:
+        # Already exchanged — treat as expired to avoid revealing state.
+        return EXPIRED_TOKEN
+
+    if dc.status == DeviceCodeStatus.DENIED:
+        return ACCESS_DENIED
+
+    # 3. Polling-rate check (too soon since last poll → slow_down).
+    #    Only applicable to PENDING/APPROVED (non-terminal) states.
     if dc.last_polled_at is not None:
         elapsed = (now - dc.last_polled_at).total_seconds()
         if elapsed < dc.interval:
             return SLOW_DOWN
 
-    # 3. Status-based decisions.
-    if dc.status == DeviceCodeStatus.DENIED:
-        return ACCESS_DENIED
-
+    # 4. Non-terminal status-based decisions.
     if dc.status == DeviceCodeStatus.APPROVED:
         return APPROVED
-
-    if dc.status == DeviceCodeStatus.CONSUMED:
-        # Already exchanged — treat as expired to avoid revealing state.
-        return EXPIRED_TOKEN
 
     # Default: DeviceCodeStatus.PENDING
     return AUTHORIZATION_PENDING
