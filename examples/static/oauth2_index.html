@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>OAuth2 Sample</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 2rem;
+            max-width: 800px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        code {
+            background: #eee;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+        }
+
+        .section {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+
+        button {
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>OAuth2 Sample Server</h1>
+
+    <div class="section">
+        <h2>Authorization Code Flow</h2>
+        <p>1. Start the flow by clicking the button below. You will be redirected to Login, then Consent, then back to
+            the Callback URL with a code.</p>
+        <p><strong>Client ID:</strong> <code>1</code></p>
+        <p><strong>Redirect URI:</strong> <code>http://localhost:5000/static/callback.html</code></p>
+        <a
+            href="/oauth2/authorize?client_id=1&redirect_uri=http://localhost:5000/static/callback.html&response_type=code&state=xyz123&scope=user:read"><button>Authorize</button></a>
+    </div>
+
+    <div class="section">
+        <h2>Client Credentials Flow</h2>
+        <p>Use curl to test:</p>
+        <pre><code>curl -X POST http://localhost:5000/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=1&client_secret=test_client_secret"</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>Setup</h2>
+        <p>Ensure you have created the 'test_client_id' in the backend storage (Memory/Redis/DB).</p>
+    </div>
+</body>
+
+</html>

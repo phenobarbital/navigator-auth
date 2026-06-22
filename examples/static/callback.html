@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>OAuth2 Callback</title>
+</head>
+
+<body>
+    <h1>Callback Received</h1>
+    <p>Code: <code id="code"></code></p>
+    <p>State: <code id="state"></code></p>
+
+    <div id="exchange" style="display:none;">
+        <h3>Exchange Code for Token</h3>
+        <button onclick="exchangeToken()">Get Token</button>
+        <pre id="result"></pre>
+    </div>
+
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+        const state = params.get('state');
+        document.getElementById('code').innerText = code;
+        document.getElementById('state').innerText = state;
+
+        if (code) {
+            document.getElementById('exchange').style.display = 'block';
+        }
+
+        async function exchangeToken() {
+            const formData = new URLSearchParams();
+            formData.append('grant_type', 'authorization_code');
+            formData.append('code', code);
+            formData.append('client_id', '1');
+            formData.append('redirect_uri', 'http://localhost:5000/static/callback.html');
+
+            try {
+                const response = await fetch('/oauth2/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formData
+                });
+                const data = await response.json();
+                document.getElementById('result').innerText = JSON.stringify(data, null, 2);
+            } catch (e) {
+                document.getElementById('result').innerText = 'Error: ' + e;
+            }
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,21 @@
+version: "1.0"
+defaults:
+  effect: deny
+policies:
+  - name: business_hours_access
+    effect: allow
+    description: "Allow all authenticated users access to standard tools during business hours only."
+    resources:
+      - "tool:*"
+      - "kb:*"
+    actions:
+      - "tool:execute"
+      - "tool:list"
+      - "kb:query"
+    subjects:
+      groups:
+        - "*"
+    conditions:
+      environment:
+        is_business_hours: true
+    priority: 20

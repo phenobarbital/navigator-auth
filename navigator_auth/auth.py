@@ -8,6 +8,7 @@ Supporting:
  * authorization exceptions via middlewares
  * Session Support (on top of navigator-session)
 """
+
 import contextlib
 from typing import Union
 from collections.abc import Awaitable, Callable, Iterable
@@ -17,18 +18,19 @@ import orjson
 from orjson import JSONDecodeError
 from aiohttp import hdrs, web
 from aiohttp.web_urldispatcher import SystemRoute, StaticResource
-from navigator_session import SESSION_KEY, SessionHandler, get_session
-from .authorizations import authz_allow_hosts, authz_hosts, authz_useragent
+from navigator_session import SESSION_KEY, SessionHandler, get_session, SESSION_ID
+from .authorizations import authz_allow_hosts, authz_allowed_ips, authz_hosts, authz_useragent
+from .vault.integration import load_vault_for_session, setup_vault_tables, VAULT_SESSION_KEY
 from .backends.idp import IdentityProvider
 from .conf import (
+    AUTH_EXCLUDE_LIST_KEY,
     BASE_DIR,
-    AUTH_CREDENTIALS_REQUIRED,
     AUTH_USER_VIEW,
     AUTHENTICATION_BACKENDS,
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,
+    AZURE_SERVICE_TAGS,
     USER_ATTRIBUTES,
-    AUTH_CLIENT_ID,
     default_dsn,
     REDIS_AUTH_URL,
     logging,
@@ -64,9 +66,7 @@ class AuthHandler:
     app: web.Application = None
     secure_cookies: bool = True
 
-    def __init__(
-        self, app_name: str = "auth", secure_cookies: bool = True, **kwargs
-    ) -> None:
+    def __init__(self, app_name: str = "auth", secure_cookies: bool = True, **kwargs) -> None:
         self.name: str = app_name
         self.backends: dict = {}
         self._session = None
@@ -76,18 +76,14 @@ class AuthHandler:
         else:
             self.auth_scheme = "Bearer"
         ## template parser:
-        self._parser = TemplateParser(
-            directory=BASE_DIR.joinpath('templates')
-        )
+        self._parser = TemplateParser(directory=BASE_DIR.joinpath("templates"))
         ## Identity Provider
         self._idp = IdentityProvider()
         # Get User Model:
         try:
             user_model = self.get_usermodel(AUTH_USER_VIEW)
         except Exception as ex:
-            raise ConfigError(
-                f"Error Getting Auth User Model: {ex}"
-            ) from ex
+            raise ConfigError(f"Error Getting Auth User Model: {ex}") from ex
         args = {
             "scheme": self.auth_scheme,
             "user_model": user_model,
@@ -98,20 +94,16 @@ class AuthHandler:
         }
         # get the authentication backends (all of the list)
         self.backends = self.get_backends(**args)
-        self._middlewares = self.get_authorization_middlewares(
-            AUTHORIZATION_MIDDLEWARES
-        )
-        self._authz_backends: list = self.get_authorization_backends(
-            AUTHORIZATION_BACKENDS
-        )
+        self._middlewares = self.get_authorization_middlewares(AUTHORIZATION_MIDDLEWARES)
+        self._authz_backends: list = self.get_authorization_backends(AUTHORIZATION_BACKENDS)
         # TODO: Session Support with parametrization (other backends):
-        self._session = SessionHandler(
-            storage="redis", use_cookie=True
-        )  # pylint: disable=E1123
+        self._session = SessionHandler(storage="redis", use_cookies=self.secure_cookies)  # pylint: disable=E1123
         ### JSON encoder
         self._json = JSONContent()
         # Logger Backend
-        self.logger = logging.getLogger(name='Nav.Auth')
+        self.logger = logging.getLogger(name="Nav.Auth")
+        # Exclude-provider registry for restart re-hydration (FEAT-241 M2)
+        self._exclude_providers: list[Callable[[], Awaitable[Iterable[str]]]] = []
 
     @property
     def session(self):
@@ -125,12 +117,53 @@ class AuthHandler:
             try:
                 await backend.on_startup(app)
             except Exception as err:
-                logging.exception(
-                    f"Error on Startup Auth Backend {name} init: {err.message}"
+                logging.exception(f"Error on Startup Auth Backend {name} init: {err.message}")
+                raise AuthException(f"Error on Startup Auth Backend {name} init: {err.message}") from err
+        # Create vault tables if they don't exist (non-blocking)
+        if "authdb" in app:
+            await setup_vault_tables(app["authdb"])
+        # Re-hydrate exclude-provider paths after each startup (FEAT-241 M2):
+        for provider in self._exclude_providers:
+            try:
+                paths = await provider()
+                self.register_exclusions(paths)
+            except Exception as exc:
+                self.logger.warning(
+                    "AuthHandler: exclude provider %r failed: %s", provider, exc
                 )
-                raise AuthException(
-                    f"Error on Startup Auth Backend {name} init: {err.message}"
-                ) from err
+        # Auto-fetch Azure Service Tag IP ranges for allowed_ips backend
+        if AZURE_SERVICE_TAGS:
+            await self._load_azure_service_tags()
+
+    async def _load_azure_service_tags(self):
+        """Fetch Azure Service Tag IPs and inject into allowed_ips backend."""
+        ip_backend = None
+        for backend in self._authz_backends:
+            if isinstance(backend, authz_allowed_ips):
+                ip_backend = backend
+                break
+        if ip_backend is None:
+            self.logger.warning(
+                "AZURE_SERVICE_TAGS configured but 'allowed_ips' backend "
+                "is not in AUTHORIZATION_BACKENDS — skipping IP fetch"
+            )
+            return
+        try:
+            from .authorizations.azure_service_tags import (
+                fetch_service_tag_prefixes,
+            )
+            prefixes = await fetch_service_tag_prefixes(AZURE_SERVICE_TAGS)
+            if prefixes:
+                ip_backend.add_networks(prefixes)
+            else:
+                self.logger.warning(
+                    "azure_service_tags: no prefixes returned for "
+                    f"tags {AZURE_SERVICE_TAGS}"
+                )
+        except Exception as exc:
+            self.logger.error(
+                f"Failed to load Azure Service Tags: {exc}"
+            )
 
     async def on_cleanup(self, app):
         """
@@ -141,12 +174,8 @@ class AuthHandler:
                 await backend.on_cleanup(app)
             except Exception as err:
                 print(err)
-                logging.exception(
-                    f"Error on Cleanup Auth Backend {name} init: {err.message}"
-                )
-                raise AuthException(
-                    f"Error on Cleanup Auth Backend {name} init: {err.message}"
-                ) from err
+                logging.exception(f"Error on Cleanup Auth Backend {name} init: {err.message}")
+                raise AuthException(f"Error on Cleanup Auth Backend {name} init: {err.message}") from err
 
     def get_backends(self, **kwargs):
         backends = {}
@@ -160,9 +189,7 @@ class AuthHandler:
                 logging.debug(f"Auth: Loading Backend {bkname}")
                 backends[bkname] = obj(**kwargs)
             except ImportError as ex:
-                raise ConfigError(
-                    f"Error loading Auth Backend {backend}: {ex}"
-                ) from ex
+                raise ConfigError(f"Error loading Auth Backend {backend}: {ex}") from ex
         return backends
 
     def get_usermodel(self, model: str):
@@ -174,9 +201,7 @@ class AuthHandler:
             obj = getattr(module, name)
             return obj
         except ImportError as ex:
-            raise ConfigError(
-                f"Auth: Error loading Auth User Model {model}: {ex}"
-            ) from ex
+            raise ConfigError(f"Auth: Error loading Auth User Model {model}: {ex}") from ex
 
     def get_authorization_backends(self, backends: Iterable) -> tuple:
         b = []
@@ -190,9 +215,13 @@ class AuthHandler:
                 b.append(authz_allow_hosts())
             elif backend == "authz_hosts":
                 b.append(authz_hosts())
+            elif backend == 'allowed_ips':
+                b.append(authz_allowed_ips())
+            elif backend == 'authz_allowed_ips':
+                b.append(authz_allowed_ips())
             elif backend == 'useragent':
                 b.append(authz_useragent())
-            elif backend == 'authz_useragent':
+            elif backend == "authz_useragent":
                 b.append(authz_useragent())
             else:
                 try:
@@ -203,9 +232,7 @@ class AuthHandler:
                     obj = getattr(module, bkname)
                     b.append(obj)
                 except ImportError as ex:
-                    raise ConfigError(
-                        f"Error loading Authz Backend {backend}: {ex}"
-                    ) from ex
+                    raise ConfigError(f"Error loading Authz Backend {backend}: {ex}") from ex
         return b
 
     def get_user_attributes(self, attributes: Iterable) -> tuple:
@@ -219,9 +246,7 @@ class AuthHandler:
                 obj = getattr(module, bkname)
                 b.append(obj)
             except ImportError as ex:
-                raise RuntimeError(
-                    f"Error loading Authz User Attribute {attribute}: {ex}"
-                ) from ex
+                raise RuntimeError(f"Error loading Authz User Attribute {attribute}: {ex}") from ex
         return b
 
     def get_authorization_middlewares(self, backends: Iterable) -> tuple:
@@ -235,9 +260,7 @@ class AuthHandler:
                 obj = getattr(module, bkname)
                 b.append(obj)
             except ImportError as ex:
-                raise RuntimeError(
-                    f"Error loading Authz Middleware {backend}: {ex}"
-                ) from ex
+                raise RuntimeError(f"Error loading Authz Middleware {backend}: {ex}") from ex
         return b
 
     async def api_logout(self, request: web.Request) -> web.Response:
@@ -245,102 +268,120 @@ class AuthHandler:
         API-based Logout.
         """
         try:
-            response = web.json_response(
-                {"message": "Logout successful", "state": 202},
-                status=202
-            )
+            response = web.json_response({"message": "Logout successful", "state": 202}, status=202)
             await self._session.storage.forgot(request, response)
             return response
         except Exception as err:
             print(err)
-            raise web.HTTPUnauthorized(
-                reason=f"Logout Error {err.message}"
-            )
-
-    async def login(self, request: web.Request) -> web.Response:
-        params = {
-            "client_id": AUTH_CLIENT_ID,
-            "destination": "http://navigator-dev.dev.local:5000",
-            "token_service": "/api/v1/oauth2/token",
-            "redirect_uri": "http://navigator-dev.dev.local:5000/auth/login"
-        }
-        return await self._parser.view(
-            filename='auth/login.html',
-            params=params
-        )
-
-    async def logout(self, request: web.Request) -> web.Response:
-        pass
+            raise web.HTTPUnauthorized(reason=f"Logout Error {err.message}")
 
     def get_auth_backend(self, request: web.Request):
-        if (method := request.headers.get("X-Auth-Method", None)):
+        if method := request.headers.get("X-Auth-Method", None):
             try:
                 return self.backends[method]
             except (TypeError, KeyError) as ex:
-                raise self.Unauthorized(
-                    reason=f"Unacceptable Auth Method: {method}"
-                ) from ex
+                raise self.Unauthorized(reason=f"Unacceptable Auth Method: {method}") from ex
         return False
 
     def get_token_backend(self):
-        return self.backends['TrocToken']
+        return self.backends["TrocToken"]
 
     async def _login_token(self, request: web.Request):
         # Using TrocToken or other backend on list with auth
-        if (backend := self.get_token_backend()):
+        if backend := self.get_token_backend():
             try:
                 userdata = await backend.authenticate(request)
                 if not userdata:
-                    raise self.ForbiddenAccess(
-                        reason="User was not authenticated"
-                    )
+                    raise self.ForbiddenAccess(reason="User was not authenticated")
                 return userdata
             except UserNotFound as err:
-                raise self.Unauthorized(
-                    reason="Invalid credentials",
-                    exception=err
-                )
+                raise self.Unauthorized(reason="Invalid credentials", exception=err)
             except Exception as err:
-                raise self.auth_error(
-                    reason=f"Auth Exception: {err}",
-                    exception=err
-                )
+                raise self.auth_error(reason=f"Auth Exception: {err}", exception=err)
 
     async def _backend_auth(self, request: web.Request, backend):
         try:
             userdata = await backend.authenticate(request)
             if not userdata:
-                raise self.ForbiddenAccess(
-                    reason="User was not Authenticated"
-                )
+                raise self.ForbiddenAccess(reason="User was not Authenticated")
             return userdata
         except UserNotFound as err:
-            raise self.Unauthorized(
-                reason="Invalid Credentials",
-                exception=err
-            )
-        except (
-            InvalidAuth,
-            Forbidden,
-            FailedAuth
-        ) as err:
+            raise self.Unauthorized(reason="Invalid Credentials", exception=err)
+        except (InvalidAuth, Forbidden, FailedAuth) as err:
             self.logger.error(str(err))
-            raise self.ForbiddenAccess(
-                reason=f"{err.message}",
-                status=err.status
-            )
+            raise self.ForbiddenAccess(reason=f"{err.message}", status=err.status)
         except AuthException as err:
             logging.exception(err)
-            raise self.ForbiddenAccess(
-                reason=f"{err.message}",
-                exception=err,
-                status=err.status
+            raise self.ForbiddenAccess(reason=f"{err.message}", exception=err, status=err.status)
+        except Exception as err:
+            raise self.auth_error(reason=f"Auth Exception: {err}", exception=err)
+
+    async def api_refresh_token(self, request: web.Request) -> web.Response:
+        """Exchange a refresh_token for a new bearer token."""
+        try:
+            data = await request.json(loads=orjson.loads)
+        except Exception:
+            raise web.HTTPBadRequest(reason="Invalid JSON Payload")
+
+        refresh_token = data.get("refresh_token")
+        if not refresh_token:
+            raise web.HTTPBadRequest(reason="Missing 'refresh_token' parameter")
+
+        redis = request.app.get("redis")
+        if not redis:
+            raise web.HTTPInternalServerError(reason="Redis configuration missing")
+
+        try:
+            user_id = await redis.get(f"auth:refresh_token:{refresh_token}")
+        except Exception as e:
+            raise web.HTTPInternalServerError(reason=f"Redis error: {e}")
+
+        if not user_id:
+            raise self.Unauthorized(reason="Invalid or expired refresh token")
+
+        if isinstance(user_id, bytes):
+            user_id = user_id.decode("utf-8")
+
+        try:
+            uid = int(user_id) if str(user_id).isdigit() else user_id
+            user = await self._idp.user_from_id(uid)
+        except Exception as e:
+            raise self.Unauthorized(reason=f"Invalid user associated with refresh token: {e}")
+
+        try:
+            payload = {"user_id": user.id, "username": user.username, "user": user.id}
+            token, new_refresh_token, exp, scheme = self._idp.create_token(data=payload)
+
+            try:
+                await redis.delete(f"auth:refresh_token:{refresh_token}")
+                await redis.setex(f"auth:refresh_token:{new_refresh_token}", 7776000, str(user.id))
+            except Exception as e:
+                self.logger.error(f"Failed to rotate refresh token in redis: {e}")
+
+            return JSONResponse(
+                {"token": token, "refresh_token": new_refresh_token, "expires_in": exp, "token_type": scheme},
+                status=200,
             )
         except Exception as err:
-            raise self.auth_error(
-                reason=f"Auth Exception: {err}",
-                exception=err
-            )
+            raise self.auth_error(reason=f"Error Generating Refresh Token: {err}", exception=err) from err
+
+    async def api_create_token(self, request: web.Request) -> web.Response:
+        """Create an ephemeral token."""
+        if not request.get("authenticated", False):
+            raise self.Unauthorized(reason="Access Denied")
+        try:
+            # users will use bearer tokens received by authentication backend
+            # to request to IDP provisioning service an bearer (jwt)
+            # token with expiration of 30 minutes (default)
+            user = request.user
+            payload = {"user_id": user.user_id, "username": user.username, "user": user.user_id}
+            if session := request.session if hasattr(request, "session") else None:
+                with contextlib.suppress(AttributeError):
+                    payload[SESSION_ID] = session.id
+            token, _, exp, scheme = self._idp.create_ephemeral_token(data=payload)
+            return JSONResponse({"token": token, "expires_in": exp, "token_type": scheme}, status=200)
+        except Exception as err:
+            raise self.auth_error(reason=f"Error Creating Token: {err}", exception=err) from err
 
     async def api_login(self, request: web.Request) -> web.Response:
         """Login.
@@ -350,9 +391,9 @@ class AuthHandler:
         # first: getting header for an existing backend
         userdata = None
         qs = {key: val for (key, val) in request.query.items()}
-        if (backend := self.get_auth_backend(request)):
+        if backend := self.get_auth_backend(request):
             userdata = await self._backend_auth(request, backend)
-        elif 'auth' in qs:
+        elif "auth" in qs:
             userdata = await self._login_token(request)
         else:
             # second: if no backend declared, will iterate over all backends
@@ -362,23 +403,13 @@ class AuthHandler:
                     userdata = await backend.authenticate(request)
                     if userdata:
                         break
-                except (
-                    AuthException,
-                    UserNotFound,
-                    InvalidAuth,
-                    FailedAuth
-                ):
+                except (AuthException, UserNotFound, InvalidAuth, FailedAuth):
                     continue
                 except Exception as err:
-                    raise self.auth_error(
-                        reason=f"Auth Exception: {err}",
-                        exception=err
-                    )
+                    raise self.auth_error(reason=f"Auth Exception: {err}", exception=err)
         # if not userdata, then raise an not Authorized
         if not userdata:
-            raise self.ForbiddenAccess(
-                reason="Access Denied"
-            )
+            raise self.ForbiddenAccess(reason="Access Denied")
         else:
             if isinstance(userdata, web.HTTPFound):
                 return userdata
@@ -386,13 +417,49 @@ class AuthHandler:
             try:
                 response = JSONResponse(userdata, status=200)
                 await self._session.storage.load_session(
-                    request, userdata, response=response
+                    request,
+                    userdata,
+                    response=response
                 )
             except Exception as err:
                 raise self.Unauthorized(
-                    reason=f"Error Creating User Session: {err.message}",
-                    exception=err
+                    reason=f"Error Creating User Session: {err.message}", exception=err
                 ) from err
+            # Load vault for the authenticated session (non-blocking)
+            try:
+                session = await get_session(request, new=False)
+                user_id = userdata.get("user_id") if isinstance(userdata, dict) else getattr(userdata, "user_id", None)
+                if session and user_id:
+                    db_pool = request.app.get("authdb")
+                    redis = request.app.get("redis")
+
+                    refresh_token = (
+                        userdata.get("refresh_token")
+                        if isinstance(userdata, dict)
+                        else getattr(userdata, "refresh_token", None)
+                    )
+                    if refresh_token and redis:
+                        try:
+                            # 3 months = 90 days = 7776000 seconds
+                            await redis.setex(
+                                f"auth:refresh_token:{refresh_token}", 7776000, str(user_id)
+                            )
+                        except Exception as e:
+                            self.logger.error(
+                                f"Failed to save refresh token to redis: {e}"
+                            )
+
+                    if db_pool:
+                        vault = await load_vault_for_session(
+                            session,
+                            user_id=user_id,
+                            db_pool=db_pool,
+                            redis=redis,
+                        )
+                        if vault:
+                            session[VAULT_SESSION_KEY] = vault
+            except Exception:
+                pass  # Vault failure must not block login
             return response
 
     ### Auth Methods:
@@ -451,12 +518,20 @@ class AuthHandler:
                 session = await self._session.storage.new_session(request, {})
         if isinstance(session, bool):
             # missing User Data:
-            userdata = {}
+            if request.get("authenticated", False):
+                userdata = dict(request.get("userdata", {}))
+                if not userdata and hasattr(request, "user") and request.user:
+                    try:
+                        userdata = request.user.to_dict() if hasattr(request.user, "to_dict") else dict(request.user)
+                    except Exception:
+                        userdata = {}
+            else:
+                userdata = {}
         else:
-            userdata = dict(session)
+            userdata = session.session_data()
         try:
             del userdata["user"]
-        except KeyError:
+        except (KeyError, TypeError):
             pass
         return JSONResponse(userdata, status=200)
 
@@ -470,17 +545,13 @@ class AuthHandler:
         """
         Get the current User ID from Request
         """
-        data = request.get(self.user_property, None)
-        if data:
+        if data := request.get(self.user_property, None):
             return data
         else:
             raise web.HTTPForbidden(reason="Auth: User Data is missing on Request.")
 
     def setup(self, app: web.Application) -> web.Application:
-        if isinstance(app, web.Application):
-            self.app = app  # register the app into the Extension
-        else:
-            self.app = app.get_app()  # Nav Application
+        self.app = app if isinstance(app, web.Application) else app.get_app()
         ## load the Session System
         # configuring Session Object
         self._session.setup(self.app)
@@ -492,7 +563,9 @@ class AuthHandler:
             redis = RedisStorage(driver="redis", dsn=REDIS_AUTH_URL)
             redis.configure(self.app)  # pylint: disable=E1123
         except RuntimeError as ex:
-            raise web.HTTPServerError(reason=f"Error creating Redis connection: {ex}")
+            raise web.HTTPServerError(
+                reason=f"Error creating Redis connection: {ex}"
+            ) from ex
         ## getting Database Connection:
         try:
             pool = PostgresStorage(driver="pg", dsn=default_dsn)
@@ -500,24 +573,28 @@ class AuthHandler:
         except RuntimeError as ex:
             raise web.HTTPServerError(
                 reason=f"Error creating Database connection: {ex}"
-            )
+            ) from ex
         # startup operations over extension backend
         self.app.on_startup.append(self.auth_startup)
         # cleanup operations over Auth backend
         self.app.on_cleanup.append(self.on_cleanup)
         logging.debug(":::: Auth Handler Loaded ::::")
+        # Seed the per-app exclude list from defaults (avoids global mutation)
+        self.app[AUTH_EXCLUDE_LIST_KEY] = list(exclude_list)
         # register the Auth extension into the app
         self.app[self.name] = self
         ## Configure Routes
         router = self.app.router
-        # Login / Logout routes
-        router.add_route("GET", "/auth/login", self.login, name='nav_login')
-        router.add_route("GET", "/auth/logout", self.logout, name='nav_logout')
         # API Login
         router.add_route("GET", "/api/v1/login", self.api_login, name="api_login")
         router.add_route("POST", "/api/v1/login", self.api_login, name="api_login_post")
         router.add_route("GET", "/api/v1/logout", self.api_logout, name="api_logout")
+        # API Create Token
+        router.add_route("POST", "/api/v1/token/create", self.api_create_token, name="api_create_token")
+        # API Refresh Token Exchange
+        router.add_route("POST", "/api/v1/auth/token", self.api_refresh_token, name="api_refresh_token")
         # get the session information for a program (only)
+        # TODO: create a get_session_tenant method
         router.add_route(
             "GET",
             "/api/v1/session/{program}",
@@ -525,9 +602,14 @@ class AuthHandler:
             name="api_session_tenant",
         )
         # get all user information
-        router.add_route(
-            "GET", "/api/v1/user/session", self.get_session, name="api_session"
-        )
+        router.add_route("GET", "/api/v1/user/session", self.get_session, name="api_session")
+
+        # User Session Vault
+        from .handlers.vault import VaultView
+
+        router.add_route("*", "/api/v1/user/vault", VaultView, name="api_user_vault")
+        router.add_route("*", "/api/v1/user/vault/{key}", VaultView, name="api_user_vault_key")
+
         ### get info about auth methods
         router.add_route(
             "GET",
@@ -554,9 +636,7 @@ class AuthHandler:
                     mdl.append(backend.auth_middleware)
             except Exception as err:
                 logging.exception(f"Auth: Error on Backend {name} init: {err!s}")
-                raise ConfigError(
-                    f"Auth: Error on Backend {name} init: {err!s}"
-                ) from err
+                raise ConfigError(f"Auth: Error on Backend {name} init: {err!s}") from err
         # last: add the basic jwt middleware (used by basic auth and others)
         mdl.append(self.auth_middleware)
         # and the security headers on responses.
@@ -578,7 +658,7 @@ class AuthHandler:
             "X-AUTH": message,
         }
         if exception:
-            headers['X-ERROR'] = str(exception)
+            headers["X-ERROR"] = str(exception)
         return headers
 
     def auth_error(
@@ -587,33 +667,24 @@ class AuthHandler:
         exception: Exception = None,
         status: int = 400,
         headers: dict = None,
-        content_type: str = 'application/json',
+        content_type: str = "application/json",
         **kwargs,
     ) -> web.HTTPError:
         if headers:
-            headers = {
-                **self.default_headers(message=str(reason), exception=exception),
-                **headers
-            }
+            headers = {**self.default_headers(message=str(reason), exception=exception), **headers}
         else:
             headers = self.default_headers(message=str(reason), exception=exception)
         # TODO: process the exception object
-        response_obj = {
-            "status": status
-        }
+        response_obj = {"status": status}
         if exception:
             response_obj["error"] = str(exception)
-        args = {
-            "content_type": content_type,
-            "headers": headers,
-            **kwargs
-        }
+        args = {"content_type": content_type, "headers": headers, **kwargs}
         if isinstance(reason, dict):
             response_obj = {**response_obj, **reason}
             # args["content_type"] = "application/json"
             args["body"] = self._json.dumps(response_obj)
         else:
-            response_obj['reason'] = reason
+            response_obj["reason"] = reason
             args["body"] = self._json.dumps(response_obj)
         # defining the error
         if status == 400:  # bad request
@@ -634,31 +705,77 @@ class AuthHandler:
             obj = web.HTTPBadRequest(**args)
         return obj
 
-    def ForbiddenAccess(
-        self,
-        reason: Union[str, dict],
-        status: int = 403,
-        **kwargs
-    ) -> web.HTTPError:
-        return self.auth_error(
-            reason=reason, **kwargs, status=status
-        )
+    def ForbiddenAccess(self, reason: Union[str, dict], status: int = 403, **kwargs) -> web.HTTPError:
+        return self.auth_error(reason=reason, **kwargs, status=status)
 
     def Unauthorized(self, reason: Union[str, dict], **kwargs) -> web.HTTPError:
-        return self.auth_error(
-            reason=reason, **kwargs, status=401
-        )
+        return self.auth_error(reason=reason, **kwargs, status=401)
 
-    def add_exclude_list(self, path: str):
-        exclude_list.append(path)
+    def add_exclude_list(self, path: str) -> None:
+        """Idempotent: append path only if not already present.
+
+        Args:
+            path: URL pattern (fnmatch glob) to add to the per-app exclude list.
+        """
+        lst: list[str] = self.app[AUTH_EXCLUDE_LIST_KEY]
+        if path not in lst:
+            lst.append(path)
+
+    def remove_exclude_list(self, path: str) -> None:
+        """Idempotent: remove path from the per-app exclude list if present.
+
+        Args:
+            path: URL pattern to remove.  No-op if not in the list.
+        """
+        lst: list[str] = self.app[AUTH_EXCLUDE_LIST_KEY]
+        try:
+            lst.remove(path)
+        except ValueError:
+            pass
+
+    def register_exclusions(self, paths: Iterable[str]) -> None:
+        """Bulk idempotent add of multiple paths to the per-app exclude list.
+
+        Args:
+            paths: Iterable of URL patterns (fnmatch globs) to add.
+        """
+        for path in paths:
+            self.add_exclude_list(path)
+
+    def unregister_exclusions(self, paths: Iterable[str]) -> None:
+        """Bulk idempotent remove of multiple paths from the per-app exclude list.
+
+        Args:
+            paths: Iterable of URL patterns to remove.
+        """
+        for path in paths:
+            self.remove_exclude_list(path)
+
+    def add_exclude_provider(
+        self, provider: Callable[[], Awaitable[Iterable[str]]]
+    ) -> None:
+        """Register an async callable that yields auth-exempt paths.
+
+        On each server startup, AuthHandler will call every registered provider
+        and pass the yielded paths to ``register_exclusions()``. This re-hydrates
+        runtime exemptions after a restart.
+
+        Providers are called in registration order.  A failing provider is
+        logged at WARNING and does NOT abort startup — other providers still run.
+
+        Args:
+            provider: Async callable with no arguments returning an iterable of
+                      path strings (fnmatch glob patterns accepted).
+        """
+        self._exclude_providers.append(provider)
 
     async def verify_exceptions(self, request: web.Request) -> bool:
         # avoid authorization backend on OPTION method:
         if request.method == hdrs.METH_OPTIONS:
             return True
 
-        # Check for explicit exclude list matches
-        for pattern in exclude_list:
+        # Check for explicit exclude list matches (per-app, not global)
+        for pattern in request.app.get(AUTH_EXCLUDE_LIST_KEY, ()):
             if fnmatch.fnmatch(request.path, pattern):
                 return True
 
@@ -685,13 +802,13 @@ class AuthHandler:
                 return True
 
         ### Allow Anonymous Access
-        if request.get('allow_anonymous', False) is True:
+        if getattr(request, "allow_anonymous", False) is True:
             return True
 
         ## Already Authenticated
         if request.get("authenticated", False) is True:
             return True
-        return False   # Assuming no authentication match by default
+        return False  # Assuming no authentication match by default
 
     @web.middleware
     async def auth_middleware(
@@ -701,32 +818,35 @@ class AuthHandler:
     ) -> web.StreamResponse:
         """
         Basic Auth Middleware.
-        Description: Basic Authentication for NoAuth, Basic, Token and Django.
+        Description: Basic Authentication for Basic, Token and Django.
         """
         if await self.verify_exceptions(request):
+            # Still attempt authentication if a token is present,
+            # so downstream middlewares (e.g. ABAC) see authenticated=True.
+            if hdrs.AUTHORIZATION in request.headers:
+                try:
+                    token = await self._idp.get_payload(request)
+                    _, payload = self._idp.decode_token(code=token)
+                    if payload:
+                        session = await get_session(request, payload, new=False)
+                        if session:
+                            user = await self.get_session_user(session)
+                            if user:
+                                request.user = user
+                                request["authenticated"] = True
+                except Exception:
+                    pass  # Best-effort: if token is invalid, proceed unauthenticated
             return await handler(request)
-        logging.debug(":: AUTH MIDDLEWARE ::")
+        self.logger.debug(":: AUTH MIDDLEWARE ::")
         try:
             token = await self._idp.get_payload(request)
             _, payload = self._idp.decode_token(code=token)
         except Forbidden as err:
-            logging.error(
-                f"Auth Middleware: Access Denied: {err}"
-            )
-            raise self.Unauthorized(
-                reason=err.message
-            ) from err
+            self.logger.error(f"Auth Middleware: Access Denied: {err}")
+            raise self.Unauthorized(reason=err.message) from err
         except AuthExpired as err:
-            logging.error(
-                f"Auth Middleware: Credentials expired: {err}"
-            )
-            raise self.Unauthorized(
-                reason=err.message, exception=err
-            ) from err
-        except FailedAuth as err:
-            raise self.ForbiddenAccess(
-                reason=err.message, exception=err
-            ) from err
+            self.logger.error(f"Auth Middleware: Credentials expired: {err}")
+            raise self.Unauthorized(reason=err.message, exception=err) from err
         try:
             if payload:
                 ## check if user has a session:
@@ -734,24 +854,109 @@ class AuthHandler:
                 try:
                     session = await get_session(request, payload, new=False)
                 except Exception as err:
-                    logging.error(str(err))
-                if not session and AUTH_CREDENTIALS_REQUIRED is True:
-                    raise self.Unauthorized(
-                        reason="There is no Session or Authentication is missing"
-                    )
-                try:
-                    request.user = await self.get_session_user(session)
-                    request["authenticated"] = True
-                except Exception as ex:  # pylint: disable=W0703
-                    logging.error(f"Missing User Object from Session: {ex}")
+                    self.logger.error(str(err))
+                    session = None
+
+                if not session:
+                    self.logger.warning("Session Missing or Expired, recreating from Token")
+                    try:
+                        session = await get_session(request, payload, new=True)
+
+                        try:
+                            uid = payload[self._idp.username_attribute]
+                        except KeyError:
+                            try:
+                                uid = payload[self._idp.user_attribute]
+                            except KeyError:
+                                try:
+                                    uid = payload[self._idp.userid_attribute]
+                                except KeyError:
+                                    uid = payload.get("email")
+
+                        user = None
+                        if uid:
+                            try:
+                                user = await self._idp.get_user(str(uid))
+                            except Exception as ex:
+                                self.logger.warning(f"Could not fetch user {uid} for recreated session: {ex}")
+
+                        if not user:
+                            raise self.Unauthorized(
+                                reason=f"Unable to resolve user object for '{uid}' from token payload.",
+                            )
+                        try:
+                            await session.save_encoded_data(request, "user", user)
+                            user.is_authenticated = True
+                        except Exception as ex:
+                            self.logger.error(f"Error saving user in new session: {ex}")
+
+                        request.user = user
+                        request["userdata"] = payload
+                        request["authenticated"] = True
+
+                    except web.HTTPException:
+                        raise
+                    except Exception as err:
+                        self.logger.error(f"Error creating fallback session: {err}")
+                        raise self.Unauthorized(
+                            reason="There is no Session or Authentication is missing",
+                        )
+
+                else:
+                    try:
+                        user = await self.get_session_user(session)
+                        if not user:
+                            if uid := (
+                                payload.get(self._idp.username_attribute)
+                                or payload.get(self._idp.userid_attribute)
+                                or payload.get("email")
+                            ):
+                                try:
+                                    user = await self._idp.get_user(str(uid))
+                                    await session.save_encoded_data(
+                                        request,
+                                        "user",
+                                        user
+                                    )
+                                    user.is_authenticated = True
+                                except Exception as ex:
+                                    self.logger.warning(
+                                        f"Could not resolve user '{uid}' from payload: {ex}"
+                                    )
+                        if not user:
+                            raise self.Unauthorized(
+                                reason="Unable to resolve user object from session or token payload.",
+                            )
+                        request.user = user
+                        request["userdata"] = payload
+                        request["authenticated"] = True
+                    except web.HTTPException:
+                        raise
+                    except Exception as ex:  # pylint: disable=W0703
+                        self.logger.error(f"Missing User Object from Session: {ex}")
             elif self.secure_cookies is True:
                 session = await get_session(request, None, new=False)
-                if not session and AUTH_CREDENTIALS_REQUIRED is True:
+                if not session:
                     raise self.Unauthorized(
                         reason="There is no Session or Authentication is missing"
                     )
-                request.user = await self.get_session_user(session)
-                request["authenticated"] = True
+                # verify if a user is in session:
+                try:
+                    user = await self.get_session_user(session)
+                    if user:
+                        request.user = user
+                        request["authenticated"] = True
+                    else:
+                        raise self.Unauthorized(
+                            reason="There is no Session or Authentication is missing",
+                        )
+                except web.HTTPException:
+                    raise
+                except Exception as err:
+                    self.logger.warning(f"Error checking User in Session: {err}")
+                    raise self.Unauthorized(
+                        reason="Error checking User in Session"
+                    ) from err
         except AuthException as err:
             logging.error(
                 f"Auth Middleware: Invalid Signature,\
@@ -760,6 +965,6 @@ class AuthHandler:
             raise self.Unauthorized(
                 reason="Auth Middleware: Invalid Signature, \
                 secret or authentication failed.",
-                exception=err
+                exception=err,
             )
         return await handler(request)

@@ -233,7 +233,7 @@ class UserSession(BaseHandler):
         session = await self.session(request)
         ## get session Data:
         headers = {"x-status": "OK", "x-message": "Session OK"}
-        userdata = dict(session)
+        userdata = session.session_data()
         _id = session[SESSION_KEY]
         data = {"session_id": _id, **userdata}
         if data:

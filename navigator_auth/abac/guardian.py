@@ -1,11 +1,17 @@
-from typing import List
+from typing import List, TYPE_CHECKING
 from collections.abc import Callable
 from aiohttp import web
 from navigator.views import BaseHandler
 from navigator_session import get_session
+from navconfig.logging import logger
+from navigator_auth.conf import AUTH_SESSION_OBJECT
 from .errors import PreconditionFailed, AccessDenied
-from .policies import PolicyEffect
+from .policies import PolicyEffect, Environment
+from .context import EvalContext
 from .decorators import groups_protected
+from .policies.resources import ResourceType
+if TYPE_CHECKING:
+    from .policies.evaluator import FilteredResources
 
 class Guardian:
     """Guardian.
@@ -28,7 +34,7 @@ class Guardian:
         try:
             session = await get_session(request, new=False)
         except RuntimeError as ex:
-            self._logger.error('NAV User Session system is not installed.')
+            logger.error('NAV User Session system is not installed.')
             raise PreconditionFailed(
                 reason="Missing User session for validating Access.",
                 exception=ex
@@ -38,11 +44,60 @@ class Guardian:
         except KeyError:
             user = None
         except AttributeError as ex:
-            self._logger.error(
+            logger.error(
                 f"User is not authenticated: {ex}"
             )
             user = None
+        # Fallback: extract user info from session object when user is None
+        if user is None:
+            try:
+                userinfo = session[AUTH_SESSION_OBJECT]
+                if isinstance(userinfo, dict) and userinfo:
+                    user = userinfo
+                    logger.debug(
+                        "ABAC: user object not in session, "
+                        "using session userinfo as fallback."
+                    )
+            except (KeyError, TypeError):
+                pass
         return (session, user)
+
+    async def has_scope(self, request: web.Request, scopes: list) -> bool:
+        """has_scope.
+
+            Check if the bearer token in the request carries ALL the required scopes.
+
+        FEAT-093 TASK-030: effective scope = granted_scopes ∩ user_ABAC.  This method
+        enforces the scope-ceiling gate (the first half of the intersection).
+
+        Args:
+            request (web.Request): Web request (must be authenticated + bearer).
+            scopes (list): Required scope strings.  ALL must be present (AND).
+
+        Returns:
+            True when all scopes are present.
+
+        Raises:
+            AccessDenied(reason='insufficient_scope'): when any scope is missing.
+        """
+        self.is_authenticated(request=request)
+        try:
+            from navigator_auth.conf import AUTH_SESSION_OBJECT
+            from navigator_session import get_session
+            session = await get_session(request, new=False)
+            userinfo = session.get(AUTH_SESSION_OBJECT, {}) if session else {}
+        except Exception:
+            userinfo = {}
+
+        token_scopes = set(userinfo.get("scopes", []) if userinfo else [])
+        required = set(scopes)
+
+        if required.issubset(token_scopes):
+            return True
+
+        raise AccessDenied(
+            reason="insufficient_scope",
+        )
 
     async def authorize(self, request: web.Request):
         """authorize.
@@ -149,6 +204,68 @@ class Guardian:
             session=session,
             user=user,
             **kwargs
+        )
+
+    async def filter_resources(
+        self,
+        resources: List[str],
+        request: web.Request,
+        resource_type: ResourceType = ResourceType.TOOL,
+        action: str = "tool:execute",
+    ) -> "FilteredResources":
+        """Filter resources by PBAC policies for the authenticated user.
+
+        Follows the same pattern as filter_files(): extracts session,
+        builds EvalContext, delegates to PolicyEvaluator.filter_resources().
+
+        Args:
+            resources: List of resource name strings to filter.
+            request: The current aiohttp web request (must be authenticated).
+            resource_type: The type of resource being filtered (e.g., TOOL, DATASET).
+            action: The action being requested (e.g., "tool:execute").
+
+        Returns:
+            FilteredResources with .allowed and .denied lists.
+
+        Raises:
+            AccessDenied: If the user is not authenticated.
+            PreconditionFailed: If the session system is unavailable.
+        """
+        from .policies.evaluator import PolicyEvaluator, FilteredResources
+
+        self.is_authenticated(request=request)
+        session, user = await self.get_user(request)
+
+        # Extract evaluator from PDP
+        evaluator = getattr(self.pdp, '_evaluator', None)
+        if evaluator is None or not isinstance(evaluator, PolicyEvaluator):
+            # No PolicyEvaluator configured — allow all resources
+            return FilteredResources(allowed=list(resources), denied=[])
+
+        # Extract userinfo from session
+        try:
+            from navigator_auth.conf import AUTH_SESSION_OBJECT
+            userinfo = session[AUTH_SESSION_OBJECT]
+        except (KeyError, TypeError):
+            userinfo = {}
+
+        env = Environment()
+
+        # Build a lightweight EvalContext
+        ctx = EvalContext.__new__(EvalContext)
+        ctx.store = {}
+        ctx.store['request'] = request
+        ctx.store['user'] = user
+        ctx.store['userinfo'] = userinfo if isinstance(userinfo, dict) else {}
+        ctx.store['session'] = session
+        ctx._columns = list(ctx.store.keys())
+
+        return evaluator.filter_resources(
+            ctx=ctx,
+            resource_type=resource_type,
+            resource_names=resources,
+            action=action,
+            env=env,
         )
 
     async def filter(
@@ -296,4 +413,144 @@ class PEP(BaseHandler):
             return self.json_response(
                 response=msg,
                 status=403
+            )
+
+    async def check(self, request: web.Request) -> web.Response:
+        """POST /api/v1/abac/check — PBAC decision endpoint.
+
+        Accepts a JSON body with:
+            - user: str (username or email)
+            - resource: str (e.g. "tool:jira_create")
+            - action: str (e.g. "tool:execute")
+
+        Returns:
+            JSON: {allowed, effect, policy, reason}
+        """
+        try:
+            data = await self.data(request)
+        except Exception as exc:
+            return self.json_response(
+                response={"error": f"Invalid request body: {exc}"},
+                status=400
+            )
+
+        user_id = data.get('user', '')
+        resource = data.get('resource', '')
+        action = data.get('action', '')
+
+        if not resource or not action:
+            return self.json_response(
+                response={"error": "Both 'resource' and 'action' are required."},
+                status=400
+            )
+
+        # Try resource-based evaluation via PolicyEvaluator first
+        try:
+            pdp = request.app.get('abac')
+            if pdp is None:
+                return self.json_response(
+                    response={"error": "ABAC system not configured"},
+                    status=503
+                )
+
+            # Build a lightweight EvalContext for the check
+            userinfo = {
+                'username': user_id,
+                'groups': data.get('groups', []),
+                'roles': data.get('roles', []),
+            }
+
+            # If the request is authenticated, enrich from session
+            if request.get("authenticated", False):
+                try:
+                    session = await get_session(request, new=False)
+                    from navigator_auth.conf import AUTH_SESSION_OBJECT
+                    session_userinfo = session.get(AUTH_SESSION_OBJECT, {})
+                    if session_userinfo:
+                        # Merge — session data wins for groups/roles if not provided
+                        if not userinfo.get('groups'):
+                            userinfo['groups'] = session_userinfo.get('groups', [])
+                        if not userinfo.get('roles'):
+                            userinfo['roles'] = session_userinfo.get('roles', [])
+                        if not userinfo.get('username'):
+                            userinfo['username'] = session_userinfo.get('username', '')
+                except Exception:
+                    pass
+
+            env = Environment()
+
+            # Try resource-type based evaluation (ResourcePolicy via PolicyEvaluator)
+            from navigator_auth.abac.policies.resources import ResourceType
+            from navigator_auth.abac.policies.evaluator import PolicyEvaluator
+
+            # Check if PDP has an evaluator attribute
+            evaluator = getattr(pdp, '_evaluator', None)
+            if evaluator and isinstance(evaluator, PolicyEvaluator):
+                # Parse resource type
+                parts = resource.split(':', 1)
+                if len(parts) == 2:
+                    try:
+                        resource_type = ResourceType(parts[0])
+                        resource_name = parts[1]
+                        ctx = EvalContext.__new__(EvalContext)
+                        ctx.userinfo = userinfo
+                        result = evaluator.check_access(
+                            ctx=ctx,
+                            resource_type=resource_type,
+                            resource_name=resource_name,
+                            action=action,
+                            env=env,
+                        )
+                        return self.json_response(
+                            response={
+                                "allowed": result.allowed,
+                                "effect": result.effect.name,
+                                "policy": result.matched_policy or "",
+                                "reason": result.reason,
+                            },
+                            status=200
+                        )
+                    except (ValueError, KeyError):
+                        pass
+
+            # Fallback: use PDP authorize flow
+            # Create a mock EvalContext from the provided data
+            guardian = self.get_guardian(request)
+            try:
+                policy = await guardian.is_allowed(
+                    request=request,
+                    resource=resource,
+                    action=action
+                )
+                allowed = bool(policy.effect)
+                return self.json_response(
+                    response={
+                        "allowed": allowed,
+                        "effect": PolicyEffect(policy.effect).name if policy.effect else "DENY",
+                        "policy": getattr(policy, 'rule', ''),
+                        "reason": getattr(policy, 'response', ''),
+                    },
+                    status=200
+                )
+            except (AccessDenied, PreconditionFailed) as exc:
+                return self.json_response(
+                    response={
+                        "allowed": False,
+                        "effect": "DENY",
+                        "policy": "",
+                        "reason": str(exc),
+                    },
+                    status=200
+                )
+
+        except Exception as exc:
+            logger.error(f"Error in /check endpoint: {exc}")
+            return self.json_response(
+                response={
+                    "allowed": False,
+                    "effect": "DENY",
+                    "policy": "",
+                    "reason": f"Internal error: {exc}",
+                },
+                status=500
             )

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OAuth2 Consent</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; }
+        .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 100%; max-width: 400px; }
+        h1 { font-size: 1.5rem; margin-bottom: 1rem; color: #333; }
+        p { color: #666; margin-bottom: 1.5rem; }
+        .scope-list { list-style: none; padding: 0; margin-bottom: 1.5rem; }
+        .scope-list li { background: #eef; padding: 0.5rem; margin-bottom: 0.5rem; border-radius: 4px; color: #33a; font-size: 0.9rem; }
+        .actions { display: flex; gap: 1rem; }
+        button { flex: 1; padding: 0.75rem; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .btn-approve { background-color: #1a73e8; color: white; }
+        .btn-deny { background-color: #e0e0e0; color: #333; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Authorize Access</h1>
+        <p>The application <strong>{{ client_name }}</strong> is requesting access to your account.</p>
+        
+        <p><strong>Scopes:</strong></p>
+        <ul class="scope-list">
+            {% for s in scope.split(' ') %}
+            <li>{{ s }}</li>
+            {% endfor %}
+        </ul>
+        
+        <form method="POST">
+            <!-- Hidden fields to pass state back -->
+            <input type="hidden" name="client_id" value="{{ client_id }}">
+            <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
+            <input type="hidden" name="state" value="{{ state }}">
+            <input type="hidden" name="scope" value="{{ scope }}">
+            <input type="hidden" name="response_type" value="{{ response_type }}">
+            
+            <div class="actions">
+                <button type="submit" name="action" value="deny" class="btn-deny">Deny</button>
+                <button type="submit" name="action" value="approve" class="btn-approve">Approve</button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>

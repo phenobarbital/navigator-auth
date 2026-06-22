@@ -2,6 +2,7 @@
 
 Description: Backend Authentication/Authorization using Google AUTH API.
 """
+
 from aiohttp import web
 from aiogoogle import Aiogoogle
 from aiogoogle.auth.utils import create_secret
@@ -49,9 +50,7 @@ class GoogleAuth(ExternalAuth):
             create_secret()
         )  # Shouldn't be a global or a hardcoded variable. should be tied to a session or a user and shouldn't be used more than once
         domain_url = self.get_domain(request)
-        self.redirect_uri = self.redirect_uri.format(
-            domain=domain_url, service=self._service_name
-        )
+        self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
         ## getting Finish Redirect URL
         self.get_finish_redirect_url(request)
         self._credentials["redirect_uri"] = self.redirect_uri
@@ -105,12 +104,8 @@ class GoogleAuth(ExternalAuth):
                 uid = userdata["id"]
                 access_token = user_creds["id_token_jwt"]
                 userdata[self.session_key_property] = uid
-                data = await self.validate_user_info(
-                    request, uid, userdata, access_token
-                )
-                return self.home_redirect(
-                    request, token=data["token"], token_type="Bearer"
-                )
+                data = await self.validate_user_info(request, uid, userdata, access_token)
+                return self.home_redirect(request, token=data["token"], token_type="Bearer")
             except Exception as err:
                 logging.exception(f"Google Auth Error: {err}")
                 return self.redirect(uri=self.login_failed_uri)

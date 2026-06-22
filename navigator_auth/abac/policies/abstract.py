@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from typing import Union, Optional
-import logging
 import uuid
 from enum import Enum
 from datamodel.libs.mapping import ClassDict
@@ -80,6 +79,7 @@ class AbstractPolicy(ABC):
             environment: Optional[Environment] = None,
             priority: int = None,
             enforcing: bool = False,
+            scopes: Optional[list] = None,
             **kwargs
     ):
         self.name = name if name else uuid.uuid1().hex
@@ -91,7 +91,7 @@ class AbstractPolicy(ABC):
         self.conditions: dict = {}
         if isinstance(actions, list):
             self.actions = [ActionKey(r) for r in actions]
-        if type(resource) == str:  # pylint: disable=C0123
+        if type(resource) == str:  # pylint: disable=C0123  # noqa: E721
             self.resources = list(Resource(resource))
         elif isinstance(resource, list):
             self.resources = [Resource(r) for r in resource]
@@ -115,6 +115,9 @@ class AbstractPolicy(ABC):
         self.priority = priority if priority else 0
         ### Objects:
         self.objects = objects
+        # FEAT-093 TASK-030: required scopes (AND-condition, intersected with token scopes).
+        # Empty list means no scope restriction (backward-compatible).
+        self.scopes: list = list(scopes) if scopes else []
         ### any other attributes so far
         self.attributes = kwargs
         ### this policy is enforcing or not

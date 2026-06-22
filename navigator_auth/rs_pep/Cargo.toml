@@ -1,0 +1,17 @@
+[package]
+name = "rs_pep"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance PEP batch filter for navigator-auth PBAC"
+
+[lib]
+name = "rs_pep"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rayon = { workspace = true }
+glob-match = { workspace = true }
+regex = { workspace = true }

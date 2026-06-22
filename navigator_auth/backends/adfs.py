@@ -2,7 +2,9 @@
 
 Description: Backend Authentication/Authorization using Okta Service.
 """
+
 import base64
+from urllib.parse import quote
 from aiohttp import web
 import jwt
 
@@ -27,9 +29,10 @@ from ..conf import (
     ADFS_LOGIN_REDIRECT_URL,
     AZURE_SESSION_TIMEOUT,
     AZURE_AD_SERVER,
-    exclude_list,
+    AUTH_EXCLUDE_LIST_KEY,
     ADFS_MAPPING,
-    REDIS_AUTH_URL
+    REDIS_AUTH_URL,
+    ADFS_SAML_RELAY_RP,
 )
 from .jwksutils import get_public_key
 from .external import ExternalAuth
@@ -63,22 +66,20 @@ class ADFSAuth(ExternalAuth):
             self.username_claim = "upn"
             self.groups_claim = "groups"
             self.claim_mapping = ADFS_CLAIM_MAPPING
-            self.discovery_oid_uri = f"https://login.microsoftonline.com/{self.tenant_id}/.well-known/openid-configuration"
+            self.discovery_oid_uri = (
+                f"https://login.microsoftonline.com/{self.tenant_id}/.well-known/openid-configuration"
+            )
         else:
             self.server = ADFS_SERVER
             self.tenant_id = "adfs"
             self.username_claim = USERNAME_CLAIM
             self.groups_claim = GROUP_CLAIM
             self.claim_mapping = ADFS_CLAIM_MAPPING
-            self.discovery_oid_uri = (
-                f"https://{self.server}/adfs/.well-known/openid-configuration"
-            )
+            self.discovery_oid_uri = f"https://{self.server}/adfs/.well-known/openid-configuration"
             self._discovery_keys_uri = f"https://{self.server}/adfs/discovery/keys"
 
         self.base_uri = f"https:://{self.server}/"
-        self.end_session_endpoint = (
-            f"https://{self.server}/{self.tenant_id}/ls/?wa=wsignout1.0"
-        )
+        self.end_session_endpoint = f"https://{self.server}/{self.tenant_id}/ls/?wa=wsignout1.0"
         self._issuer = f"https://{self.server}/{self.tenant_id}/services/trust"
         self.authorize_uri = f"https://{self.server}/{self.tenant_id}/oauth2/authorize/"
         self._token_uri = f"https://{self.server}/{self.tenant_id}/oauth2/token"
@@ -93,15 +94,13 @@ class ADFSAuth(ExternalAuth):
             callback = ADFS_CALLBACK_REDIRECT_URL
             self.redirect_uri = "{domain}" + callback
             # Excluding Redirect for Authorization
-            exclude_list.append(self.redirect_uri)
+            app[AUTH_EXCLUDE_LIST_KEY].append(self.redirect_uri)
         else:
             callback = f"/auth/{self._service_name}/callback/"
             self.redirect_uri = "{domain}" + callback
-            exclude_list.append(callback)
+            app[AUTH_EXCLUDE_LIST_KEY].append(callback)
         # Login and Redirect Routes:
-        router.add_route(
-            "GET", login, self.authenticate, name=f"{self._service_name}_login"
-        )
+        router.add_route("GET", login, self.authenticate, name=f"{self._service_name}_login")
         # finish login (callback)
         router.add_route(
             "*",
@@ -115,18 +114,12 @@ class ADFSAuth(ExternalAuth):
         """Used to initialize Backend requirements."""
         ## loading redis connection:
         await super(ADFSAuth, self).on_startup(app)
-        self._pool = aioredis.ConnectionPool.from_url(
-            REDIS_AUTH_URL,
-            decode_responses=True,
-            encoding="utf-8"
-        )
+        self._pool = aioredis.ConnectionPool.from_url(REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
 
     async def on_cleanup(self, app: web.Application):
         """Used to cleanup and shutdown any db connection."""
         try:
-            await self._pool.disconnect(
-                inuse_connections=True
-            )
+            await self._pool.disconnect(inuse_connections=True)
         except Exception as e:  # pylint: disable=W0703
             pass
 
@@ -136,9 +129,7 @@ class ADFSAuth(ExternalAuth):
         Description: This function returns the ADFS authorization URL.
         """
         domain_url = self.get_domain(request)
-        self.redirect_uri = self.redirect_uri.format(
-            domain=domain_url, service=self._service_name
-        )
+        self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
         ## getting Finish Redirect URL
         self.get_finish_redirect_url(request)
         qs = self.queryparams(request)
@@ -162,64 +153,41 @@ class ADFSAuth(ExternalAuth):
             # Saving redirect info on Redis:
             flow = {}
             async with aioredis.Redis(connection_pool=self._pool) as redis:
-                flow['internal_redirect'] = redirect
-                await redis.setex(
-                    f"adfs_auth_{self.state}",
-                    600,
-                    json_encoder(flow)
-                )
+                flow["internal_redirect"] = redirect
+                await redis.setex(f"adfs_auth_{self.state}", 600, json_encoder(flow))
             # Step A: redirect
             return self.redirect(login_url)
         except Exception as err:
             self.logger.exception(err)
-            raise AuthException(
-                f"Client doesn't have info for ADFS Authentication: {err}"
-            ) from err
+            raise AuthException(f"Client doesn't have info for ADFS Authentication: {err}") from err
 
     async def auth_callback(self, request: web.Request):
         domain_url = self.get_domain(request)
-        self.redirect_uri = self.redirect_uri.format(
-            domain=domain_url, service=self._service_name
-        )
+        self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
         try:
             auth_response = dict(request.rel_url.query.items())
-            if 'error' in auth_response:
-                self.logger.exception(
-                    f"ADFS: Error getting User information: {auth_response!r}"
-                )
-                raise web.HTTPForbidden(
-                    reason=f"ADFS: Unable to Authenticate: {auth_response!r}"
-                )
+            if "error" in auth_response:
+                self.logger.exception(f"ADFS: Error getting User information: {auth_response!r}")
+                raise web.HTTPForbidden(reason=f"ADFS: Unable to Authenticate: {auth_response!r}")
             authorization_code = auth_response["code"]
             state = None
             try:
                 state = auth_response["state"]
             except (TypeError, KeyError, ValueError):
-                return self.failed_redirect(
-                    request, error="MISSING_AUTH_NONCE",
-                    message="Missing Auth Nonce"
-                )
+                return self.failed_redirect(request, error="MISSING_AUTH_NONCE", message="Missing Auth Nonce")
             flow = {}
-            print('STATE > ', state)
             internal_redirect = None
             # making validation with previous state
             try:
                 async with aioredis.Redis(connection_pool=self._pool) as redis:
                     result = await redis.get(f"adfs_auth_{state}")
                     flow = json_decoder(result)
-                    internal_redirect = flow.pop(
-                        'internal_redirect',
-                        None
-                    )
+                    internal_redirect = flow.pop("internal_redirect", None)
             except Exception:
                 pass
         except Exception as err:
-            raise web.HTTPForbidden(
-                reason=f"ADFS: Invalid Callback response: {err}: {auth_response}"
-            ) from err
-        self.logger.debug(
-            f"Authorization Code: {authorization_code}"
-        )
+            raise web.HTTPForbidden(reason=f"ADFS: Invalid Callback response: {err}: {auth_response}") from err
+        self.logger.debug(f"Authorization Code: {authorization_code}")
         # getting an Access Token
         query_params = {
             "code": authorization_code,
@@ -228,14 +196,10 @@ class ADFSAuth(ExternalAuth):
             "redirect_uri": self.redirect_uri,
             "scope": ADFS_SCOPES,
         }
-        self.logger.debug(
-            f'Token Params: {query_params!r}'
-        )
+        self.logger.debug(f"Token Params: {query_params!r}")
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         try:
-            exchange = await self.post(
-                self._token_uri, data=query_params, headers=headers
-            )
+            exchange = await self.post(self._token_uri, data=query_params, headers=headers)
             if "error" in exchange:
                 error = exchange.get("error")
                 desc = exchange.get("error_description")
@@ -247,13 +211,9 @@ class ADFSAuth(ExternalAuth):
                 access_token = exchange["access_token"]
                 token_type = exchange["token_type"]  # ex: Bearer
                 # id_token = exchange["id_token"]
-                self.logger.debug(
-                    f"Received access token: {access_token}"
-                )
+                self.logger.debug(f"Received access token: {access_token}")
         except Exception as err:
-            raise web.HTTPForbidden(
-                reason=f"Invalid Response from Token Server {err}."
-            )
+            raise web.HTTPForbidden(reason=f"Invalid Response from Token Server {err}.")
         try:
             # decipher the Access Token:
             # getting user information:
@@ -268,9 +228,7 @@ class ADFSAuth(ExternalAuth):
                 "require_iat": False,
                 "require_nbf": False,
             }
-            public_key = get_public_key(
-                access_token, self.tenant_id, self.discovery_oid_uri
-            )
+            public_key = get_public_key(access_token, self.tenant_id, self.discovery_oid_uri)
             # Validate token and extract claims
             data = jwt.decode(
                 access_token,
@@ -282,57 +240,45 @@ class ADFSAuth(ExternalAuth):
                 options=options,
             )
             try:
-                del data['aud']
-                del data['iss']
-                del data['iat']
-                del data['exp']
+                del data["aud"]
+                del data["iss"]
+                del data["iat"]
+                del data["exp"]
             except KeyError:
                 pass
         except Exception as e:
-            raise web.HTTPForbidden(
-                reason=f"Unable to decode JWT token {e}."
-            )
+            raise web.HTTPForbidden(reason=f"Unable to decode JWT token {e}.")
         try:
-            self.logger.debug(
-                f'Received User: {data!r}'
-            )
-            self.logger.debug(
-                f'Backend Mapping: {self.user_mapping}'
-            )
-            userdata, uid = self.build_user_info(
-                userdata=data,
-                token=access_token,
-                mapping=self.user_mapping
-            )
+            self.logger.debug(f"Received User: {data!r}")
+            self.logger.debug(f"Backend Mapping: {self.user_mapping}")
+            userdata, uid = self.build_user_info(userdata=data, token=access_token, mapping=self.user_mapping)
             userdata[self.username_attribute] = userdata[self.userid_attribute]
-            data = await self.validate_user_info(
-                request, uid, userdata, access_token
-            )
+            data = await self.validate_user_info(request, uid, userdata, access_token)
         except Exception as err:
-            self.logger.exception(
-                f"ADFS: Error getting User information: {err}"
-            )
-            raise web.HTTPForbidden(
-                reason=f"ADFS: Error with User Information: {err}"
-            )
+            self.logger.exception(f"ADFS: Error getting User information: {err}")
+            raise web.HTTPForbidden(reason=f"ADFS: Error with User Information: {err}")
         # Redirect User to HOME
         try:
             token = data["token"]
         except (KeyError, TypeError):
             token = None
-        return self.home_redirect(
-            request,
-            token=token,
-            token_type=token_type,
-            uri=internal_redirect
-        )
+        # If ADFS_SAML_RELAY_RP is configured, redirect to ADFS
+        # IdP-initiated SSO to achieve SSO with a SAML SP.
+        # The browser still has the ADFS session cookie from the
+        # OIDC login, so ADFS will issue the SAML assertion
+        # without re-prompting for credentials.
+        if ADFS_SAML_RELAY_RP:
+            idp_sso_url = (
+                f"https://{self.server}/adfs/ls/IdpInitiatedSignOn.aspx" f"?loginToRp={quote(ADFS_SAML_RELAY_RP)}"
+            )
+            self.logger.info(f"SAML Relay: redirecting to IdP-initiated SSO " f"for RP '{ADFS_SAML_RELAY_RP}'")
+            return web.HTTPFound(idp_sso_url)
+        return self.home_redirect(request, token=token, token_type=token_type, uri=internal_redirect)
 
     async def logout(self, request):
         # first: removing the existing session
         # second: redirect to SSO logout
-        self.logger.debug(
-            f"ADFS LOGOUT URI: {self.end_session_endpoint}"
-        )
+        self.logger.debug(f"ADFS LOGOUT URI: {self.end_session_endpoint}")
         return web.HTTPFound(self.end_session_endpoint)
 
     async def finish_logout(self, request):

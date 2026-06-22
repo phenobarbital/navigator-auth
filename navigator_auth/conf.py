@@ -4,6 +4,7 @@ Navigator Auth Configuration.
 # Import Config Class
 import base64
 import orjson
+import contextlib
 from cryptography import fernet
 from navconfig import config, BASE_DIR
 from navconfig.logging import logging
@@ -41,23 +42,23 @@ DBPORT = config.get("DBPORT", fallback=5432)
 default_dsn = f"postgres://{DBUSER}:{DBPWD}@{DBHOST}:{DBPORT}/{DBNAME}"
 
 ### Exclude List:
-excluded_default = [
+AUTH_EXCLUDE_LIST_KEY = "auth_exclude_list"
+
+EXCLUDE_DEFAULTS: list[str] = [
     "/static/",
     "/api/v1/login",
     "/api/v1/logout",
-    "/auth/login",
-    "/auth/logout",
-    "/auth/login/callback"
+    "/api/v1/forgot-password",
+    "/api/v1/reset-password",
 ]
-new_excluded = [
-    e.strip() for e in list(config.get("ROUTES_EXCLUDED", fallback="").split(","))
+_extra_excluded = [
+    e.strip() for e in config.get("ROUTES_EXCLUDED", fallback="").split(",")
 ]
-exclude_list = excluded_default + new_excluded
+# Combined defaults used to seed per-app exclude lists.
+exclude_list = EXCLUDE_DEFAULTS + [e for e in _extra_excluded if e]
 
-# if false, force credentials are not required for using this system.
-AUTH_CREDENTIALS_REQUIRED = config.getboolean(
-    "AUTH_CREDENTIALS_REQUIRED", fallback=True
-)
+# AUTH_CREDENTIALS_REQUIRED has been removed (SOC2).
+# Authentication is always enforced and cannot be disabled via environment.
 
 # Security Headers:
 ENABLE_XFRAME_OPTIONS = config.getboolean('ENABLE_XFRAME_OPTIONS', fallback=True)
@@ -116,7 +117,7 @@ ALLOWED_HOSTS = [
 AUTH_REDIRECT_URI = config.get("AUTH_REDIRECT_URI", fallback="/")
 AUTH_FAILED_REDIRECT_URI = config.get("AUTH_FAILED_REDIRECT_URI", fallback="/login")
 AUTH_LOGIN_FAILED_URI = config.get("AUTH_LOGIN_FAILED_URI", fallback="/login")
-AUTH_LOGOUT_REDIRECT_URI = config.get("AUTH_LOGOUT_REDIRECT_URI", fallback="/logout")
+AUTH_LOGOUT_REDIRECT_URI = config.get("AUTH_LOGOUT_REDIRECT_URI", fallback="/oauth2/logout/complete")
 AUTH_SUCCESSFUL_CALLBACKS = ()
 
 # Enable authentication backends
@@ -127,6 +128,33 @@ AUTHORIZATION_BACKENDS = [
     for e in list(
         config.get("AUTHORIZATION_BACKENDS", fallback="allow_hosts").split(",")
     )
+]
+
+### Allowed IPs (individual IPs or CIDR ranges, comma-separated):
+ALLOWED_IPS = [
+    e.strip()
+    for e in config.get(
+        "ALLOWED_IPS", section="auth", fallback=""
+    ).split(",")
+    if e.strip()
+]
+
+### Trusted proxy IPs (for X-Forwarded-For resolution):
+ALLOWED_IP_TRUSTED_PROXIES = [
+    e.strip()
+    for e in config.get(
+        "ALLOWED_IP_TRUSTED_PROXIES", section="auth", fallback=""
+    ).split(",")
+    if e.strip()
+]
+
+### Azure Service Tags to auto-fetch on startup (e.g. "PowerBI,PowerQueryOnline"):
+AZURE_SERVICE_TAGS = [
+    e.strip()
+    for e in config.get(
+        "AZURE_SERVICE_TAGS", section="auth", fallback=""
+    ).split(",")
+    if e.strip()
 ]
 
 ### Allowed User-Agents:
@@ -327,6 +355,43 @@ ADFS_CLAIM_MAPPING = ad_mapping
 AZURE_AD_SERVER = config.get("AZURE_AD_SERVER", fallback="login.microsoftonline.com")
 AZURE_SESSION_TIMEOUT = config.get("AZURE_SESSION_TIMEOUT", fallback=120)
 
+# ADFS SAML Relay: When set, after OIDC login the user is redirected
+# to ADFS IdP-initiated SSO for this Relying Party (display name as
+# shown in ADFS Management), enabling SSO with a third-party SAML SP
+# without re-authentication. Example: "Network Ninja Production Management"
+ADFS_SAML_RELAY_RP = config.get("ADFS_SAML_RELAY_RP", fallback=None)
+
+
+# SAML
+SAML_PATH = config.get("SAML_PATH")
+SAML_SETTINGS = config.get("SAML_SETTINGS")
+if SAML_SETTINGS:
+    try:
+        SAML_SETTINGS = orjson.loads(SAML_SETTINGS)
+    except orjson.JSONDecodeError:
+        logging.exception(
+            "Auth: Invalid SAML Settings on *SAML_SETTINGS*"
+        )
+
+SAML_MAPPING = {
+    "email": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+    "first_name": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+    "last_name": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+    "username": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
+    "groups": "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups",
+    "object_id": "http://schemas.microsoft.com/identity/claims/objectidentifier",
+    "tenant_id": "http://schemas.microsoft.com/identity/claims/tenantid",
+}
+
+saml_mapping = config.get("SAML_MAPPING")
+if saml_mapping is not None:
+    try:
+        SAML_MAPPING = orjson.loads(saml_mapping)
+    except orjson.JSONDecodeError:
+        logging.exception(
+            "Auth: Invalid SAML Mapping on *SAML_MAPPING*"
+        )
+
 
 # Okta
 OKTA_CLIENT_ID = config.get("OKTA_CLIENT_ID")
@@ -350,30 +415,127 @@ GITHUB_CLIENT_SECRET = config.get("GITHUB_CLIENT_SECRET")
 ## Audit Backend
 # this is the backend for saving Authentication information
 ENABLE_AUDIT_LOG = config.getboolean('ENABLE_AUDIT_LOG', fallback=True)
+# Supported values: "log" (Python logger), "influx", or any asyncdb driver name
+# (e.g. "mongo", "pg", "redis").
 AUDIT_BACKEND = config.get('AUDIT_BACKEND', fallback='influx')
-AUDIT_CREDENTIALS = {
+
+# Driver-specific credentials.
+# For "influx":
+INFLUX_CREDENTIALS = {
     "host": config.get('INFLUX_HOST', fallback='localhost'),
     "port": config.get('INFLUX_PORT', fallback=8086),
     "bucket": config.get('INFLUX_DATABASE', fallback='navigator_audit'),
     "org": config.get('INFLUX_ORG', fallback='navigator'),
-    "token": config.get('INFLUX_TOKEN')
+    "token": config.get('INFLUX_TOKEN'),
 }
+# For any asyncdb driver (mongo, pg, etc.):
+AUDIT_DSN = config.get('AUDIT_DSN', fallback=None)
+AUDIT_TABLE = config.get('AUDIT_TABLE', fallback='audit_log')
 
+# Backwards-compatible alias
+AUDIT_CREDENTIALS = INFLUX_CREDENTIALS
+
+
+## ABAC / PBAC Configuration
+# Business hours for time-based access control
+BUSINESS_HOURS_START = config.get("BUSINESS_HOURS_START", fallback="08:00")
+BUSINESS_HOURS_END = config.get("BUSINESS_HOURS_END", fallback="18:00")
+BUSINESS_DAYS = config.get("BUSINESS_DAYS", fallback="1,2,3,4,5")
+
+# Day segment boundaries (HH:MM-HH:MM)
+DAY_SEGMENT_MORNING = config.get("DAY_SEGMENT_MORNING", fallback="06:00-12:00")
+DAY_SEGMENT_AFTERNOON = config.get("DAY_SEGMENT_AFTERNOON", fallback="12:00-18:00")
+DAY_SEGMENT_EVENING = config.get("DAY_SEGMENT_EVENING", fallback="18:00-22:00")
+
+# YAML policy storage directory
+POLICY_STORAGE_DIR = config.get(
+    "POLICY_STORAGE_DIR",
+    fallback=str(BASE_DIR / "env" / "policies") if hasattr(BASE_DIR, '__truediv__') else None
+)
+
+# Default effect when no policies match a request ("deny" or "allow").
+ABAC_DEFAULT_EFFECT = config.get("ABAC_DEFAULT_EFFECT", fallback="deny")
+
+# ABAC Hot-Reload Interval (seconds). Default: 0 (disabled).
+ABAC_RELOAD_INTERVAL = config.getint("ABAC_RELOAD_INTERVAL", fallback=0)
+
+# ---------------------------------------------------------------------------
+# Per-tenant policy scoping (FEAT-092)
+# ---------------------------------------------------------------------------
+
+# Allow X-Org-Id / X-Client-Id request headers to set the request tenant.
+# SECURITY: enable ONLY when headers are stripped and re-injected by a trusted
+# edge (reverse proxy / API gateway).  Default: False.
+ABAC_TENANT_TRUST_HEADERS = config.getboolean(
+    "ABAC_TENANT_TRUST_HEADERS", fallback=False
+)
+
+# Header names for tenant resolution (overridable per deployment).
+ABAC_TENANT_HEADER_ORG = config.get("ABAC_TENANT_HEADER_ORG", fallback="X-Org-Id")
+ABAC_TENANT_HEADER_CLIENT = config.get("ABAC_TENANT_HEADER_CLIENT", fallback="X-Client-Id")
+
+# (Phase 2) SQL-side prefetch + per-tenant evaluator instances.
+# Default: False (Phase-1 in-engine filtering is the backstop).
+ABAC_TENANT_SQL_FILTERING = config.getboolean(
+    "ABAC_TENANT_SQL_FILTERING", fallback=False
+)
 
 ## Oauth Provider:
 OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS = config.getint(
     "OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS", fallback=4
 )
 
-try:
+# Access token TTL in seconds (default: 1 hour).
+OAUTH_ACCESS_TOKEN_TTL = config.getint("OAUTH_ACCESS_TOKEN_TTL", fallback=3600)
+
+# Authorization code TTL in seconds (default: 10 minutes).
+OAUTH_CODE_TTL = config.getint("OAUTH_CODE_TTL", fallback=600)
+
+# Refresh token sliding TTL in seconds (default: 30 days).
+OAUTH_REFRESH_TOKEN_TTL = config.getint("OAUTH_REFRESH_TOKEN_TTL", fallback=2592000)
+
+# Refresh token absolute maximum lifetime in seconds (default: 90 days).
+OAUTH_REFRESH_ABSOLUTE_TTL = config.getint("OAUTH_REFRESH_ABSOLUTE_TTL", fallback=7776000)
+
+# Enable refresh token rotation on every use (default: True).
+OAUTH_REFRESH_ROTATION = config.getboolean("OAUTH_REFRESH_ROTATION", fallback=True)
+
+# Require PKCE for public clients (default: True per FEAT-093 spec).
+OAUTH_REQUIRE_PKCE_PUBLIC = config.getboolean("OAUTH_REQUIRE_PKCE_PUBLIC", fallback=True)
+
+# Revocation cache TTL in seconds (default: 30 s).
+# Controls how long a jti revocation marker survives independently of the token's remaining TTL.
+OAUTH_REVOCATION_CACHE_TTL = config.getint("OAUTH_REVOCATION_CACHE_TTL", fallback=30)
+
+# ---------------------------------------------------------------------------
+# OAuth2 Scope registry (FEAT-093 TASK-030)
+# ---------------------------------------------------------------------------
+# Comma-separated list of valid scope identifiers (reject unknown at authorize per D5).
+# Override via environment: OAUTH_SCOPES="default,profile,email,offline_access,read,write"
+_oauth_scopes_raw = config.get(
+    "OAUTH_SCOPES",
+    fallback="default,profile,email,offline_access,read,write,admin",
+)
+OAUTH_SCOPES: list[str] = [s.strip() for s in _oauth_scopes_raw.split(",") if s.strip()]
+
+# Action → required scope(s) mapping.
+# Format: "action_name:scope1+scope2,...".  Multiple scopes per action are AND-ed.
+# Override via environment: OAUTH_SCOPE_ACTIONS="tool:execute:default,kb:query:default+read"
+_oauth_scope_actions_raw = config.get("OAUTH_SCOPE_ACTIONS", fallback="")
+OAUTH_SCOPE_ACTIONS: dict[str, list[str]] = {}
+if _oauth_scope_actions_raw.strip():
+    for _entry in _oauth_scope_actions_raw.split(","):
+        _entry = _entry.strip()
+        if ":" in _entry:
+            # Last colon separates action from scope list; earlier colons are part of action.
+            _parts = _entry.rsplit(":", 1)
+            _action_key = _parts[0].strip()
+            _scope_list = [s.strip() for s in _parts[1].split("+") if s.strip()]
+            if _action_key and _scope_list:
+                OAUTH_SCOPE_ACTIONS[_action_key] = _scope_list
+
+
+with contextlib.suppress(ImportError):
     from settings.settings import *  # pylint: disable=W0614,W0401 # noqa
-except ImportError as ex:
-    logging.error(
-        f'There is no "*settings/settings.py" module in project. {ex}'
-    )
-    try:
-        from settings import *  # pylint: disable=W0614,W0401 # noqa
-    except ImportError as ex:
-        logging.error(
-            f'There is no "*settings/__init__.py" module in project. {ex}'
-        )
+with contextlib.suppress(ImportError):
+    from settings import *  # pylint: disable=W0614,W0401 # noqa

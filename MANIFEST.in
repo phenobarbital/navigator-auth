@@ -6,5 +6,7 @@ include Makefile
 graft navigator_auth
 graft docs
 graft tests
+recursive-include navigator_auth/rs_pep *
+recursive-exclude navigator_auth/rs_pep/target *
 global-exclude *.pyc
 prune docs/_build

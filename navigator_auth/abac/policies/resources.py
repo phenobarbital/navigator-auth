@@ -3,10 +3,170 @@ Resource.
 
 Evaluates a Resource Object.
 """
-from typing import List
+from typing import List, Optional, Set, Pattern, Dict, Any
 import logging
 import re
+import fnmatch
+from enum import Enum
+from dataclasses import dataclass, field
 from navigator_auth.libs.parser import is_parseable
+
+
+class ResourceType(Enum):
+    """Types of resources in System."""
+    TOOL = "tool"
+    KB = "kb"
+    VECTOR = "vector"
+    AGENT = "agent"
+    MCP = "mcp"
+    URI = "uri"
+    DATASET = "dataset"
+    WIDGET = "widget"
+    CARD = "card"
+    # ── FEAT-091 (QuerySource pbac-support) ─────────────────────────
+    SLUG = "slug"
+    DATASOURCE = "datasource"
+    DRIVER = "driver"
+    RAW_QUERY = "raw_query"
+
+
+class ActionType(Enum):
+    """Standard actions for AI-Parrot resources."""
+    # Tool actions
+    TOOL_EXECUTE = "tool:execute"
+    TOOL_LIST = "tool:list"
+    TOOL_CONFIGURE = "tool:configure"
+
+    # KB actions
+    KB_QUERY = "kb:query"
+    KB_WRITE = "kb:write"
+    KB_ADMIN = "kb:admin"
+
+    # Vector actions
+    VECTOR_SEARCH = "vector:search"
+    VECTOR_INSERT = "vector:insert"
+    VECTOR_DELETE = "vector:delete"
+
+    # Agent actions
+    AGENT_CHAT = "agent:chat"
+    AGENT_QUERY = "agent:query"
+    AGENT_CONFIGURE = "agent:configure"
+
+    # Dataset actions
+    DATASET_READ = "dataset:read"
+    DATASET_WRITE = "dataset:write"
+    DATASET_DELETE = "dataset:delete"
+
+    # Widget and Card actions
+    WIDGET_VIEW = "widget:view"
+    WIDGET_EDIT = "widget:edit"
+    CARD_VIEW = "card:view"
+    CARD_EDIT = "card:edit"
+
+    # ── FEAT-091 (QuerySource pbac-support) ─────────────────────────
+    SLUG_EXECUTE = "slug:execute"
+    SLUG_LIST = "slug:list"
+    DATASOURCE_USE = "datasource:use"
+    DATASOURCE_LIST = "datasource:list"
+    DRIVER_USE = "driver:use"
+    DRIVER_LIST = "driver:list"
+    RAW_QUERY_EXECUTE = "raw_query:execute"
+
+
+@dataclass(frozen=True, slots=True)
+class ResourcePattern:
+    """
+    Immutable, hashable resource pattern for efficient matching.
+
+    Supports:
+    - Exact match: "tool:jira_create"
+    - Wildcard: "tool:jira_*"
+    - All: "tool:*"
+    """
+    resource_type: ResourceType
+    pattern: str
+    _regex: Pattern = field(default=None, compare=False, hash=False)
+
+    def __post_init__(self):
+        # Convert glob pattern to regex for efficient matching
+        if '*' in self.pattern or '?' in self.pattern:
+            regex_pattern = fnmatch.translate(self.pattern)
+            object.__setattr__(self, '_regex', re.compile(regex_pattern))
+
+    @classmethod
+    def from_string(cls, resource_str: str) -> 'ResourcePattern':
+        """Parse 'type:pattern' string into ResourcePattern."""
+        try:
+            if ':' in resource_str:
+                type_str, pattern = resource_str.split(':', 1)
+                try:
+                    resource_type = ResourceType(type_str)
+                except ValueError:
+                    # Fallback for custom types or if defined as string
+                    resource_type = type_str
+            else:
+                # Default to wildcard type if no colon present
+                resource_type = "*"
+                pattern = resource_str
+            return cls(resource_type=resource_type, pattern=pattern)
+        except (ValueError, KeyError) as e:
+            raise ValueError(f"Invalid resource pattern: {resource_str}") from e
+
+    def matches(self, resource_name: str) -> bool:
+        """Check if resource_name matches this pattern."""
+        if self.pattern == '*':
+            return True
+        if self._regex:
+            return bool(self._regex.match(resource_name))
+        return self.pattern == resource_name
+
+    def __hash__(self):
+        return hash((self.resource_type, self.pattern))
+
+
+@dataclass
+class SubjectSpec:
+    """Specification for policy subjects (who the policy applies to)."""
+    groups: Set[str] = field(default_factory=set)
+    users: Set[str] = field(default_factory=set)
+    roles: Set[str] = field(default_factory=set)
+    exclude_groups: Set[str] = field(default_factory=set)
+    exclude_users: Set[str] = field(default_factory=set)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'SubjectSpec':
+        """Create SubjectSpec from YAML dict."""
+        return cls(
+            groups=set(data.get('groups', [])),
+            users=set(data.get('users', [])),
+            roles=set(data.get('roles', [])),
+            exclude_groups=set(data.get('exclude_groups', [])),
+            exclude_users=set(data.get('exclude_users', []))
+        )
+
+    def matches_user(self, username: str, user_groups: Set[str], user_roles: Set[str] = None) -> bool:
+        """Check if user matches this subject specification."""
+        user_roles = user_roles or set()
+
+        # Check exclusions first (deny takes precedence)
+        if username in self.exclude_users:
+            return False
+        if self.exclude_groups & user_groups:
+            return False
+
+        # Check inclusions
+        # Wildcard group means any authenticated user
+        if '*' in self.groups:
+            return True
+        if username in self.users:
+            return True
+        if self.groups & user_groups:
+            return True
+        if self.roles & user_roles:
+            return True
+
+        # No explicit allow
+        return False
 
 
 class RequestResource:

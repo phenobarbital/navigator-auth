@@ -69,9 +69,7 @@ def _fetch_discovery_meta(tenant_id=None, discovery_url: str = None):
         response.raise_for_status()
     except requests.exceptions.HTTPError as err:
         logging.debug(response.text)
-        raise InvalidToken(
-            f"Error getting issuer discovery meta from {discovery_url}", err
-        ) from err
+        raise InvalidToken(f"Error getting issuer discovery meta from {discovery_url}", err) from err
     return response.json()
 
 

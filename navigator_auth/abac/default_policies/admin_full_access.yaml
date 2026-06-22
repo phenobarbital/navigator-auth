@@ -1,0 +1,33 @@
+version: "1.0"
+defaults:
+  effect: deny
+policies:
+  - name: admin_full_access
+    effect: allow
+    description: "Superuser and admin groups have unrestricted access to all resources at all times."
+    resources:
+      - "tool:*"
+      - "kb:*"
+      - "vector:*"
+      - "agent:*"
+      - "mcp:*"
+      - "uri:*"
+    actions:
+      - "tool:execute"
+      - "tool:list"
+      - "tool:configure"
+      - "kb:query"
+      - "kb:write"
+      - "kb:admin"
+      - "vector:search"
+      - "vector:insert"
+      - "vector:delete"
+      - "agent:chat"
+      - "agent:query"
+      - "agent:configure"
+    subjects:
+      groups:
+        - superuser
+        - admin
+    priority: 100
+    enforcing: true

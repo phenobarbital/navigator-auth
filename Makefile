@@ -1,38 +1,89 @@
+# Navigator-Auth Makefile
+
+.PHONY: venv install develop release format lint test clean distclean lock sync check-deps
+
+# Python version to use
+PYTHON_VERSION := 3.11
+
+# Auto-detect available tools
+HAS_UV := $(shell command -v uv 2> /dev/null)
+
+# Install uv if missing
+install-uv:
+	curl -LsSf https://astral.sh/uv/install.sh | sh
+	@echo "uv installed! You may need to restart your shell or run 'source ~/.bashrc'"
+
+# Create virtual environment
 venv:
-	python3.11 -m venv .venv
-	echo 'run `source .venv/bin/activate` to start develop Navigator-Auth'
+	uv venv --python $(PYTHON_VERSION) .venv
+	@echo 'run `source .venv/bin/activate` to start develop Navigator-Auth'
 
+# Install production dependencies using lock file
 install:
-	pip install -U pip
-	pip install -e .[uvloop]
+	uv sync --frozen --no-dev
+	@echo "Production dependencies installed."
 
+# Generate lock files
+lock:
+ifdef HAS_UV
+	uv lock
+else
+	@echo "Lock files require uv. Install with: make install-uv"
+endif
+
+# Install all dependencies including dev dependencies
 develop:
-	pip install -U pip
-	pip install -e .
-	pip install -Ur docs/requirements-dev.txt
-	flit install --symlink
+	uv sync --frozen --extra uvloop --dev
 
+# Alternative: install without lock file (faster for development)
+develop-fast:
+	uv pip install -e .[uvloop]
+	uv pip install -e .[dev]
+
+# Compile Cython extensions
 compile:
 	python setup.py build_ext --inplace
 
-release:
-	lint test clean
-	flit publish
+# Build and publish release
+release: lint test clean
+	uv build
+	uv publish
 
+# Format code
 format:
-	python -m black navigator_auth
+	uv run black navigator_auth
 
+# Lint code
 lint:
-	python -m pylint --rcfile .pylintrc navigator_auth/*.py
-	python -m black --check navigator_auth
+	uv run pylint --rcfile .pylintrc navigator_auth/*.py
+	uv run black --check navigator_auth
 
+# Run tests
 test:
-	python -m coverage run -m navigator_auth.tests
-	python -m coverage report
-	python -m mypy navigator_auth/*.py
+	uv run coverage run -m pytest tests
+	uv run coverage report
+	uv run mypy navigator_auth/*.py
 
+# Performance tests
 perf:
-	python -m unittest -v navigator_auth.tests.perf
+	uv run python -m unittest -v navigator_auth.tests.perf
 
+# Clean build artifacts
+clean:
+	rm -rf build/
+	rm -rf dist/
+	rm -rf *.egg-info/
+	find . -name "*.pyc" -delete
+	find . -name "*.pyo" -delete
+	find . -name "*.so" -delete
+	find . -type d -name __pycache__ -delete
+	@echo "Clean complete."
+
+# Remove virtual environment
 distclean:
 	rm -rf .venv
+	rm -rf uv.lock
+
+# Show project info
+info:
+	uv tree

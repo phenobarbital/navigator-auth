@@ -31,7 +31,6 @@ async def handle(request):
     name = request.match_info.get('name', "Anonymous")
     try:
         session = await get_session(request)
-        print('WHICH SESSION > ', session)
         if session:
             name = session.session.get('username', str(session.id))
     except Exception:
@@ -136,11 +135,11 @@ for route in list(app.router.routes()):
             if inspect.isclass(route.handler) and issubclass(
                 route.handler, AbstractView
             ):
-                cors.add(route, webview=True)
+                cors.add(route)
             else:
                 cors.add(route)
     except (TypeError, ValueError, RuntimeError) as exc:
-        if 'already has OPTIONS handler' in str(exc):
+        if 'already has OPTIONS handler' in str(exc) or "already has a '*' handler" in str(exc):
             continue
         print(
             f"Error setting up CORS for route {route}: {exc}"
@@ -149,7 +148,6 @@ for route in list(app.router.routes()):
 
 if __name__ == '__main__':
     try:
-        print(TestHandler, type(TestHandler))
         web.run_app(
             app, host='localhost', port=5000, handle_signals=True
         )

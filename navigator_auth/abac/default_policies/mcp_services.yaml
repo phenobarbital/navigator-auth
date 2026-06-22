@@ -1,0 +1,43 @@
+version: "1.0"
+defaults:
+  effect: deny
+policies:
+  - name: mcp_services_devops
+    effect: allow
+    description: "DevOps team can access all MCP services."
+    resources:
+      - "mcp:*"
+    actions:
+      - "tool:execute"
+      - "tool:list"
+      - "tool:configure"
+    subjects:
+      groups:
+        - devops
+        - platform
+    priority: 35
+
+  - name: mcp_services_engineering
+    effect: allow
+    description: "Engineering team can execute and list MCP services but not configure."
+    resources:
+      - "mcp:*"
+    actions:
+      - "tool:execute"
+      - "tool:list"
+    subjects:
+      groups:
+        - engineering
+    priority: 30
+
+  - name: mcp_services_readonly
+    effect: allow
+    description: "All users can list available MCP services."
+    resources:
+      - "mcp:*"
+    actions:
+      - "tool:list"
+    subjects:
+      groups:
+        - "*"
+    priority: 10

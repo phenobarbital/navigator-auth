@@ -100,6 +100,7 @@ class AuthUser(Identity):
 
     first_name: str
     last_name: str
+    display_name: str
     name: str
     email: str
     username: str
