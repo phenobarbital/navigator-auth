@@ -1,6 +1,6 @@
 """Example OAuth2 authorization-server application.
 
-FEAT-093 production-grade 3LO demonstration:
+FEAT-093 + FEAT-094 production-grade demonstration:
 
   - client_id is an opaque string uid (never an integer).
   - PKCE S256 enforced for the public client.
@@ -9,11 +9,14 @@ FEAT-093 production-grade 3LO demonstration:
   - Per-app consent grants (/oauth2/grants).
   - Scope-gated /oauth2/userinfo claims.
   - Scope ↔ ABAC composition via @scope_required.
+  - RFC 8628 Device Authorization Grant (nav_device_client — public, S256 PKCE required).
+  - RFC 7662 Token Introspection (nav_resource_server — confidential).
 
 Run with:
     python examples/oauth2_server.py
 
-Then open http://localhost:5000/login to start the 3LO flow.
+Then open http://localhost:5000/login to start the 3LO flow, or follow the
+Device Grant flow described below.
 """
 
 import os
@@ -110,8 +113,41 @@ if __name__ == '__main__':
                     ],
                 )
 
+                # --- Device client (RFC 8628 — public, S256 PKCE required) ---
+                device_client = OAuthClient(
+                    client_id="nav_device_client",
+                    client_pk=None,
+                    client_name="Navigator Device App",
+                    client_secret=None,        # public: no secret
+                    client_type="public",
+                    redirect_uris=[],           # device grant: no redirect_uri
+                    policy_uri="",
+                    client_logo_uri="",
+                    user=resource_owner,
+                    default_scopes=["default", "profile", "offline_access"],
+                    allowed_grant_types=["urn:ietf:params:oauth:grant-type:device_code"],
+                )
+
+                # --- Resource-server / introspection client (RFC 7662 — confidential) ---
+                resource_server = OAuthClient(
+                    client_id="nav_resource_server",
+                    client_pk=None,
+                    client_name="Navigator Resource Server",
+                    client_secret="rs_introspect_s3cr3t",
+                    client_type="confidential",
+                    redirect_uris=[],
+                    policy_uri="",
+                    client_logo_uri="",
+                    user=resource_owner,
+                    default_scopes=["default"],
+                    allowed_grant_types=["client_credentials"],
+                )
+
                 db = app.get('authdb')
-                for client in (public_client, confidential_client):
+                all_clients = (
+                    public_client, confidential_client, device_client, resource_server
+                )
+                for client in all_clients:
                     if db:
                         async with await db.acquire() as conn:
                             from navigator_auth.models import Client as ClientModel
@@ -135,6 +171,31 @@ if __name__ == '__main__':
                     "&scope=default+profile+email+offline_access"
                     "&state=test_state"
                     "&code_challenge=<S256_hash>&code_challenge_method=S256"
+                )
+                print()
+                print("Device Grant flow (RFC 8628, S256 PKCE required):")
+                print(
+                    "  Step 1 — POST http://localhost:5000/oauth2/device_authorization"
+                    "  body: client_id=nav_device_client"
+                    "&scope=default+offline_access"
+                    "&code_challenge=<S256_hash>&code_challenge_method=S256"
+                )
+                print(
+                    "  Step 2 — User navigates to verification_uri from the response,"
+                    " enters user_code, and approves."
+                )
+                print(
+                    "  Step 3 — POST http://localhost:5000/oauth2/token"
+                    "  body: grant_type=urn:ietf:params:oauth:grant-type:device_code"
+                    "&device_code=<device_code>&client_id=nav_device_client"
+                    "&code_verifier=<verifier>"
+                )
+                print()
+                print("Token Introspection (RFC 7662):")
+                print(
+                    "  POST http://localhost:5000/oauth2/introspect"
+                    "  body: client_id=nav_resource_server"
+                    "&client_secret=rs_introspect_s3cr3t&token=<access_token>"
                 )
         except Exception as e:
             print(f"Error populating clients: {e}")
