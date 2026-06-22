@@ -334,17 +334,29 @@ class PolicyEvaluator:
         env_dict: dict = None,
         org_id: int = 1,
         client_id: int = 1,
+        scope_key: "frozenset[str]" = frozenset(),
+        client_uid: str = None,
     ) -> str:
         """Generate cache key for evaluation.
 
         Tenant (org_id/client_id) is part of the key — two tenants must never
         share a cached decision (security requirement, FEAT-092).
+
+        FEAT-093 TASK-030: ``scope_key`` (frozenset of token scopes) and ``client_uid``
+        (the public OAuth client_uid string) are SEPARATE components from the FEAT-092
+        tenant ``org_id``/``client_id`` integers.  Same user with different token scopes
+        must produce distinct cache keys (regression: §11.4).
         """
         groups_str = ','.join(sorted(user_groups))
         rtype_val = resource_type.value if hasattr(resource_type, 'value') else resource_type
         env_str = json.dumps(env_dict, sort_keys=True) if env_dict else ""
-        key_data = f"{user_id}|{groups_str}|{rtype_val}|{resource_name}|{action}|{env_str}|{org_id}|{client_id}"
-        return hashlib.md5(key_data.encode()).hexdigest()
+        scopes_str = ','.join(sorted(scope_key)) if scope_key else ""
+        uid_str = client_uid or ""
+        key_data = (
+            f"{user_id}|{groups_str}|{rtype_val}|{resource_name}|{action}"
+            f"|{env_str}|{org_id}|{client_id}|{scopes_str}|{uid_str}"
+        )
+        return hashlib.md5(key_data.encode(), usedforsecurity=False).hexdigest()
 
     def _check_cache(self, cache_key: str) -> Optional[EvaluationResult]:
         """Check cache for previous evaluation result."""
@@ -428,11 +440,24 @@ class PolicyEvaluator:
         # Check cache (Hierarchy checks are NOT cached easily if owner_reports_to varies)
         # Tenant is included in the cache key for isolation — two tenants must never
         # share a cached decision (security requirement, FEAT-092).
+        # FEAT-093 TASK-030: extract scope_key and client_uid from userinfo.
+        try:
+            token_scopes = ctx.userinfo.get("scopes", []) if ctx.userinfo else []
+            scope_key = frozenset(token_scopes)
+            # client_uid is the public OAuth client_uid string (str), distinct from
+            # the FEAT-092 tenant client_id (int). Stored in userinfo["client_id"]
+            # by TASK-029 bearer processing.
+            oauth_client_uid = ctx.userinfo.get("client_id", None) if ctx.userinfo else None
+        except (AttributeError, TypeError):
+            scope_key = frozenset()
+            oauth_client_uid = None
+
         cache_key = None
         if not owner_reports_to:
             cache_key = self._make_cache_key(
                 user_id, user_groups, resource_type, resource_name, action,
                 env_dict=env_dict, org_id=org_id, client_id=client_id,
+                scope_key=scope_key, client_uid=oauth_client_uid,
             )
             cached_result = self._check_cache(cache_key)
             if cached_result:

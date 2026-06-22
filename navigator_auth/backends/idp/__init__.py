@@ -269,19 +269,27 @@ class IdentityProvider:
         """
         return self.create_token(data=data, expiration=expiration)
 
-    def create_token(self, data: dict = None, issuer: str = None, expiration: int = None) -> tuple:
+    def create_token(
+        self,
+        data: dict = None,
+        issuer: str = None,
+        expiration: int = None,
+        audience: str = None,
+    ) -> tuple:
         """Creation of JWT tokens based on basic parameters.
-        issuer: for default, urn:Navigator
+
+        issuer:    default urn:Navigator
         expiration: in seconds
-        **kwargs: data to put in payload
+        audience:  optional ``aud`` claim value ('user' for 3LO, 'app' for 2LO).
+                   When omitted the ``aud`` claim is NOT included (backward-compatible).
+                   FEAT-093 TASK-029 — additive kwarg; existing callers unaffected.
+
+        Returns: (jwt_token, refresh_token, exp, scheme) — 4-tuple; signature unchanged.
         """
-        try:
-            del data["exp"]
-            del data["iat"]
-            del data["iss"]
-            del data["aud"]
-        except KeyError:
-            pass
+        # Operate on a local copy to avoid mutating the caller's dict.
+        data = dict(data) if data else {}
+        for reserved in ("exp", "iat", "iss", "aud"):
+            data.pop(reserved, None)
         if not expiration:
             expiration = self.session_timeout
         if not issuer:
@@ -296,6 +304,9 @@ class IdentityProvider:
             "iss": issuer,
             **data,
         }
+        # TASK-029: only include aud when the caller explicitly requests it.
+        if audience is not None:
+            payload["aud"] = audience
         try:
             jwt_token = jwt.encode(payload, SECRET_KEY, AUTH_JWT_ALGORITHM, json_encoder=DefaultEncoder)
         except (TypeError, ValueError) as ex:

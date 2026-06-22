@@ -35,7 +35,7 @@ class pgStorage(DBStorage):
             policy_table = """
             SELECT policy_id, policy_type, name, resource, actions, conditions,
                    effect, groups, context, environment, description, enforcing,
-                   objects, objects_attr, priority, org_id, client_id
+                   objects, objects_attr, priority, org_id, client_id, scopes
             FROM auth.policies
             WHERE enabled = TRUE
               AND org_id IN (1, $1)
@@ -47,7 +47,7 @@ class pgStorage(DBStorage):
             policy_table = """
             SELECT policy_id, policy_type, name, resource, actions, conditions,
                    effect, groups, context, environment, description, enforcing,
-                   objects, objects_attr, priority, org_id, client_id
+                   objects, objects_attr, priority, org_id, client_id, scopes
             FROM auth.policies WHERE enabled = TRUE;"""
             async with self.connection() as conn:
                 result, error = await conn.query(policy_table)
@@ -86,6 +86,8 @@ class ModelPolicy(Model):
     priority: int = Field(required=True, default=1)
     org_id: int = Field(required=True, default=1)
     client_id: int = Field(required=True, default=1)
+    # FEAT-093 TASK-030: required OAuth scopes for this policy (JSONB, default []).
+    scopes: list[str] = Field(required=False, default_factory=list)
     created_at: datetime = Field(required=False, default=now)
     updated_at: datetime = Field(required=False, default=now)
     enabled: bool = Field(required=True, default=True)
