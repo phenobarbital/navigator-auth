@@ -102,9 +102,7 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (claude-sonnet-4-6)
+**Date**: 2026-06-22
+**Notes**: All 8 unit tests pass. POST /oauth2/device_authorization registered + excluded in configure(). Client validation, scope filtering to allow-list, PKCE S256 enforcement for public clients, device code generation (regenerate on collision), DeviceCodeStorage persist, RFC 8628 payload returned. OAUTH_DEVICE_* config keys in conf.py.
+**Deviations from spec**: none

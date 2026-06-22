@@ -94,9 +94,14 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-**Deviations from spec**: none | describe if any
+**Completed by**: claude-sonnet-4-6 / SDD Worker
+**Date**: 2026-06-22
+**Notes**: All 4 integration tests pass. test_full_device_flow covers the full RFC 8628 §3 path
+(device_authorization → device_verification with consent-skip → polling → tokens).
+test_device_user_id_survives verifies owner-binding (session user_id, not client.user).
+test_introspect_reflects_revocation confirms real-time jti revocation via introspection.
+test_device_then_revoke_grant_cascade tests grant revocation → jti inactive path.
+documentation/oauth.md extended with §14 (RFC 7662 introspection) and §15 (RFC 8628
+device grant). examples/oauth2_server.py registers device_client + resource_server clients
+and prints startup curl examples.
+**Deviations from spec**: none

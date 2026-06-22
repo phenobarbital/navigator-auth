@@ -2,9 +2,10 @@
 
 `navigator-auth` provides a production-grade OAuth2 Authorization Server supporting
 Three-Legged (3LO) Authorization Code flow with PKCE, refresh token rotation,
-per-app consent grants, RFC 7009 token revocation, and ABAC scope composition.
+per-app consent grants, RFC 7009 token revocation, ABAC scope composition,
+RFC 7662 Token Introspection, and RFC 8628 Device Authorization Grant.
 
-> **FEAT-093 Note** — This document covers the production model.  See the
+> **FEAT-093 / FEAT-094 Note** — This document covers the production model.  See
 > `examples/oauth2_server.py` for a runnable end-to-end demonstration.
 
 ## 1. Client Model — `client_id` vs `client_pk`
@@ -35,7 +36,7 @@ cache-key logic keeps them distinct so tenant decisions never bleed into OAuth d
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/oauth2/authorize` | GET | Start Authorization Code flow (login + consent). |
-| `/oauth2/token` | POST | Exchange code → tokens; refresh; client_credentials. |
+| `/oauth2/token` | POST | Exchange code → tokens; refresh; client_credentials; device_code poll. |
 | `/oauth2/login` | GET/POST | Login page. |
 | `/oauth2/consent` | GET/POST | User consent page (skip if prior grant exists). |
 | `/oauth2/userinfo` | GET | Scope-gated user profile (RFC 7662-like). |
@@ -44,6 +45,9 @@ cache-key logic keeps them distinct so tenant decisions never bleed into OAuth d
 | `/oauth2/revoke` | POST | RFC 7009 token revocation (always 200). |
 | `/oauth2/grants` | GET | List active per-app consent grants for the user. |
 | `/oauth2/grants/{client_uid}` | DELETE | Revoke all tokens for one client app. |
+| `/oauth2/introspect` | POST | **RFC 7662** token introspection (confidential clients only). |
+| `/oauth2/device_authorization` | POST | **RFC 8628** device authorization request. |
+| `/oauth2/device` | GET/POST | **RFC 8628** user-facing device code verification page. |
 
 ## 3. How to enable OAuth2 in Navigator-Auth
 
@@ -295,3 +299,172 @@ A: The server detects the replay, revokes the entire token chain, and returns
 
 **Q: Does the server support `plain` PKCE?**
 A: No. Only `S256` is accepted. `plain` is rejected with `invalid_request`.
+
+---
+
+## 14. Token Introspection (RFC 7662)
+
+Allows a **confidential client** (resource server) to verify whether a token is
+currently active and retrieve its claims.
+
+> **Security note:** Only the client that was issued the token may introspect it
+> (same-client-only rule).  Public clients cannot call this endpoint.
+
+```http
+POST /oauth2/introspect
+Content-Type: application/x-www-form-urlencoded
+Authorization: (none — credentials in body)
+
+client_id=<your_confidential_client_uid>
+&client_secret=<secret>
+&token=<access_or_refresh_token>
+&token_type_hint=access_token   # optional: access_token | refresh_token
+```
+
+**Active token response:**
+```json
+{
+  "active": true,
+  "client_id": "your_client_uid",
+  "scope": "default read",
+  "exp": 1700000000,
+  "iat": 1699996400,
+  "token_type": "Bearer"
+}
+```
+
+**Inactive token response** (expired, revoked, unknown, or issued to a different client):
+```json
+{"active": false}
+```
+
+Error codes:
+
+| HTTP | `error` | Cause |
+|------|---------|-------|
+| 400 | `invalid_request` | Missing `token` parameter |
+| 401 | `invalid_client` | Bad / missing `client_secret`, or public client |
+
+> **Real-time revocation:** `jti` revocation is checked on every call — no caching.
+
+### Configuration
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `OAUTH_INTROSPECT_INCLUDE_ABAC_SCOPES` | `false` | Include ABAC-derived scopes in response |
+
+---
+
+## 15. Device Authorization Grant (RFC 8628)
+
+For devices with no browser or limited input (smart TVs, CLIs, IoT devices).
+The user authenticates on a secondary device (phone/laptop) using a short code.
+
+### Flow overview
+
+```
+Device                             Authorization Server           User Agent
+  |                                        |                          |
+  |-- POST /oauth2/device_authorization -->|                          |
+  |<- device_code, user_code, uri ---------|                          |
+  |                                        |                          |
+  |                                        |<-- GET /oauth2/device ---|
+  |                                        |<-- POST /oauth2/device --|
+  |                                        |   (user enters user_code)|
+  |                                        |   (grants consent)       |
+  |                                        |                          |
+  |-- POST /oauth2/token (poll) ---------->|                          |
+  |<- access_token, refresh_token ---------|                          |
+```
+
+### Step 1: Request a device code
+
+```http
+POST /oauth2/device_authorization
+Content-Type: application/x-www-form-urlencoded
+
+client_id=<device_client_uid>
+&scope=default%20offline_access
+&code_challenge=<S256_hash_of_verifier>      # required for public clients (D4)
+&code_challenge_method=S256
+```
+
+**Response:**
+```json
+{
+  "device_code": "<opaque_device_code>",
+  "user_code": "BCDF-MNPQ",
+  "verification_uri": "https://auth.example.com/oauth2/device",
+  "verification_uri_complete": "https://auth.example.com/oauth2/device?user_code=BCDFMNPQ",
+  "expires_in": 600,
+  "interval": 5
+}
+```
+
+Display `verification_uri` and `user_code` to the user.
+
+### Step 2: User verifies on a secondary device
+
+The user navigates to `verification_uri`, enters the `user_code` (or scans a QR
+code from `verification_uri_complete`), authenticates, and approves consent.
+
+**Anti-brute-force (D3):** After `OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS` (default 5)
+failed entries from the same IP, the endpoint returns `access_denied` for
+`OAUTH_DEVICE_LOCKOUT_TTL` (default 300 s) regardless of future input.
+
+### Step 3: Poll for tokens
+
+```http
+POST /oauth2/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn:ietf:params:oauth:grant-type:device_code
+&device_code=<device_code_from_step1>
+&client_id=<device_client_uid>
+&code_verifier=<original_pkce_verifier>   # required for public clients
+```
+
+**Success (HTTP 200):**
+```json
+{
+  "access_token": "<jwt>",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "<opaque_string>",   # only if offline_access was granted
+  "scope": "default offline_access"
+}
+```
+
+**Polling errors (HTTP 400):**
+
+| `error` | Meaning | Action |
+|---------|---------|--------|
+| `authorization_pending` | User hasn't approved yet | Wait `interval` seconds and retry |
+| `slow_down` | Polling too fast | Wait `interval + OAUTH_DEVICE_SLOW_DOWN_INCREMENT` s and retry |
+| `access_denied` | User denied the request | Stop polling; inform user |
+| `expired_token` | Device code expired or already used | Start over |
+
+### Owner-binding invariant
+
+The `user_id` in the issued access token is **always** the authenticated user from
+the verification session — never `OAuthClient.user`.  This is the same
+owner-binding guarantee as the 3LO Authorization Code flow (FEAT-093 B-fix).
+
+### PKCE requirement (D4)
+
+Public clients **must** include `code_challenge` (S256 method) at
+`device_authorization` time and `code_verifier` at polling time.  Confidential
+clients may omit PKCE.  `plain` method is rejected with `invalid_request`.
+
+### Device grant configuration
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `OAUTH_DEVICE_CODE_TTL` | `600` s | Device code lifetime. |
+| `OAUTH_DEVICE_POLL_INTERVAL` | `5` s | Initial polling interval. |
+| `OAUTH_DEVICE_SLOW_DOWN_INCREMENT` | `5` s | Interval bump on too-fast polls. |
+| `OAUTH_DEVICE_USER_CODE_LENGTH` | `8` | Length of the human-readable user code. |
+| `OAUTH_DEVICE_USER_CODE_ALPHABET` | `BCDFGHJKLMNPQRSTVWXZ` | Unambiguous alphabet (no vowels, no 0/O/1/I/L). |
+| `OAUTH_DEVICE_VERIFICATION_URI` | `""` | Base verification URI shown to the user. |
+| `OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS` | `5` | Failed entries before IP lockout. |
+| `OAUTH_DEVICE_LOCKOUT_TTL` | `300` s | IP lockout duration. |

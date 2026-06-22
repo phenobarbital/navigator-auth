@@ -535,6 +535,55 @@ if _oauth_scope_actions_raw.strip():
                 OAUTH_SCOPE_ACTIONS[_action_key] = _scope_list
 
 
+# ---------------------------------------------------------------------------
+# OAuth2 Token Introspection (RFC 7662) — FEAT-094 TASK-033
+# ---------------------------------------------------------------------------
+
+# When True, include FEAT-093 effective ABAC scopes in introspection responses.
+# Resolved D5: default False (strict RFC 7662 claims only).
+OAUTH_INTROSPECT_INCLUDE_ABAC_SCOPES = config.getboolean(
+    "OAUTH_INTROSPECT_INCLUDE_ABAC_SCOPES", fallback=False
+)
+
+# ---------------------------------------------------------------------------
+# OAuth2 Device Authorization Grant (RFC 8628) — FEAT-094 TASK-034
+# ---------------------------------------------------------------------------
+
+# Lifetime of a device_code in seconds (RFC 8628 §3.2 default 600 s).
+OAUTH_DEVICE_CODE_TTL = config.getint("OAUTH_DEVICE_CODE_TTL", fallback=600)
+
+# Initial poll interval returned to the device client in seconds.
+OAUTH_DEVICE_POLL_INTERVAL = config.getint("OAUTH_DEVICE_POLL_INTERVAL", fallback=5)
+
+# Seconds added to the interval on a slow_down response (RFC 8628 §3.5).
+OAUTH_DEVICE_SLOW_DOWN_INCREMENT = config.getint(
+    "OAUTH_DEVICE_SLOW_DOWN_INCREMENT", fallback=5
+)
+
+# Length of the user_code (excluding any formatting hyphens).
+OAUTH_DEVICE_USER_CODE_LENGTH = config.getint(
+    "OAUTH_DEVICE_USER_CODE_LENGTH", fallback=8
+)
+
+# Unambiguous alphabet for user_code generation.
+OAUTH_DEVICE_USER_CODE_ALPHABET = config.get(
+    "OAUTH_DEVICE_USER_CODE_ALPHABET", fallback="BCDFGHJKLMNPQRSTVWXZ"
+)
+
+# Verification URI for the device flow.  When empty, derived from request host.
+OAUTH_DEVICE_VERIFICATION_URI = config.get(
+    "OAUTH_DEVICE_VERIFICATION_URI", fallback=""
+)
+
+# Max bad user_code attempts before the client IP is locked out.
+OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS = config.getint(
+    "OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS", fallback=5
+)
+
+# Lockout duration in seconds after too many bad attempts.
+OAUTH_DEVICE_LOCKOUT_TTL = config.getint("OAUTH_DEVICE_LOCKOUT_TTL", fallback=300)
+
+
 with contextlib.suppress(ImportError):
     from settings.settings import *  # pylint: disable=W0614,W0401 # noqa
 with contextlib.suppress(ImportError):
