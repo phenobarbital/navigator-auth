@@ -7,10 +7,14 @@ FEAT-093:
              nested OAuthClient field renamed client_id -> client.
   TASK-026 — parent_token, absolute_expires_at, revoked_reason on OauthRefreshToken.
   TASK-027 — OauthGrant (consent) and OauthAccessTokenRecord (jti tracking).
+
+FEAT-094:
+  TASK-032 — OauthDeviceCode + DeviceCodeStatus for RFC 8628 device grant.
 """
 
 from typing import Optional, Union
 from datetime import datetime, timedelta
+from enum import Enum
 import json
 from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, field_validator
@@ -261,3 +265,59 @@ class OauthToken(BaseModel):
     scope: str = Field()
     expires_at: datetime = Field(default_factory=token_expiration)
     issued_at: datetime = Field(default_factory=datetime.now)
+
+
+# ---------------------------------------------------------------------------
+# Device Code Grant — RFC 8628 (FEAT-094 TASK-032)
+# ---------------------------------------------------------------------------
+
+class DeviceCodeStatus(str, Enum):
+    """Status of an OauthDeviceCode record (RFC 8628)."""
+
+    PENDING = "pending"       # waiting for user to visit verification_uri
+    APPROVED = "approved"     # user has authenticated and granted scopes
+    DENIED = "denied"         # user explicitly denied the request
+    CONSUMED = "consumed"     # single-use guard: token polling succeeded
+
+
+class OauthDeviceCode(BaseModel):
+    """RFC 8628 device code record.
+
+    Lifecycle:
+      1. Created with status=PENDING by POST /oauth2/device_authorization.
+      2. Updated to APPROVED (+ user_id, granted_scopes, auth_code carrier)
+         by the GET/POST /oauth2/device verification page.
+      3. Consumed (status=CONSUMED) by the device_code token polling branch
+         after a successful token exchange.
+
+    Key constraints (FEAT-094 spec §2):
+      - device_code : high-entropy opaque (secrets.token_urlsafe)
+      - user_code   : short human-legible (unambiguous alphabet, configurable length)
+      - client_id   : public client_uid (wire/claim value, string)
+      - client_pk   : internal integer PK (FK target in auth.oauth_device_codes)
+      - user_id     : set ONLY at approval from the authenticated session —
+                      NEVER from client.user (owner-binding invariant)
+      - auth_code   : D-2 internal owner-bound OauthAuthorizationCode carrier ref
+      - code_challenge / code_challenge_method: D4 PKCE — required (S256) for
+                      public clients
+    """
+
+    device_code: str = Field()                          # high-entropy opaque
+    user_code: str = Field()                            # human-legible
+    client_id: str = Field()                            # public client_uid
+    client_pk: Optional[int] = Field(default=None)     # integer FK for DB
+    scopes: list = Field(default_factory=list)          # requested, filtered to allow-list
+    status: DeviceCodeStatus = Field(default=DeviceCodeStatus.PENDING)
+    # D4: PKCE — required (S256) for public clients
+    code_challenge: Optional[str] = Field(default=None)
+    code_challenge_method: Optional[str] = Field(default=None)
+    # Set at approval from the authenticated session (owner-binding invariant).
+    user_id: Optional[int] = Field(default=None)
+    granted_scopes: list = Field(default_factory=list)
+    # D-2: internal owner-bound OauthAuthorizationCode carrier reference.
+    auth_code: Optional[str] = Field(default=None)
+    # Polling state machine
+    interval: int = Field(default=5)                    # current required poll interval (s)
+    last_polled_at: Optional[datetime] = Field(default=None)
+    issued_at: datetime = Field(default_factory=datetime.now)
+    expires_at: datetime = Field()                      # issued_at + OAUTH_DEVICE_CODE_TTL
