@@ -116,9 +116,7 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (claude-sonnet-4-6)
+**Date**: 2026-06-22
+**Notes**: All 24 unit tests pass. OauthDeviceCode + DeviceCodeStatus added to models.py. MemoryDeviceCodeStorage + RedisDeviceCodeStorage + get_device_code_storage() factory added to code_backend.py. Pure helpers generate_user_code and poll_decision created in devicecode.py. auth.oauth_device_codes DDL added to ddl.sql.
+**Deviations from spec**: none

@@ -593,7 +593,7 @@
     "feature_id": "FEAT-094",
     "feature": "oauth2-introspection-device-grant",
     "spec": "sdd/specs/oauth2-introspection-device-grant.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "L",
     "depends_on": [],
@@ -601,7 +601,8 @@
     "parallelism_notes": "Foundational device module. Touches models.py/code_backend.py/devicecode.py/ddl.sql only \u2014 shares NO files with TASK-033 (introspection), so the two can run in separate worktrees concurrently. Device endpoint tasks (034-036) depend on this.",
     "assigned_to": "sdd-worker",
     "started_at": "2026-06-22T13:00:00Z",
-    "file": "sdd/tasks/active/TASK-032-device-storage-model-helpers.md"
+    "completed_at": "2026-06-22T13:30:00Z",
+    "file": "sdd/tasks/completed/TASK-032-device-storage-model-helpers.md"
   },
   {
     "id": "TASK-033",
