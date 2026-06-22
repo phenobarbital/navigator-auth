@@ -3,7 +3,7 @@
 **Feature ID**: FEAT-093
 **Date**: 2026-06-22
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 1.2.0
 
 > **Inputs:** `sdd/proposals/oauth2-3lo-implementation.brainstorm.md` (Recommended Option A)
