@@ -593,14 +593,14 @@
     "feature_id": "FEAT-094",
     "feature": "oauth2-introspection-device-grant",
     "spec": "sdd/specs/oauth2-introspection-device-grant.spec.md",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "L",
     "depends_on": [],
     "parallel": true,
     "parallelism_notes": "Foundational device module. Touches models.py/code_backend.py/devicecode.py/ddl.sql only \u2014 shares NO files with TASK-033 (introspection), so the two can run in separate worktrees concurrently. Device endpoint tasks (034-036) depend on this.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T13:00:00Z",
     "file": "sdd/tasks/active/TASK-032-device-storage-model-helpers.md"
   },
   {
@@ -610,14 +610,14 @@
     "feature_id": "FEAT-094",
     "feature": "oauth2-introspection-device-grant",
     "spec": "sdd/specs/oauth2-introspection-device-grant.spec.md",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "M",
     "depends_on": [],
     "parallel": true,
     "parallelism_notes": "Independent read-only endpoint. Shares no model/storage files with TASK-032, so parallelizable with it. NOTE: shares backend.py/conf.py with TASK-034/035/036 \u2014 must merge before or be rebased against those; schedule first per spec Worktree Strategy.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T13:00:00Z",
     "file": "sdd/tasks/active/TASK-033-introspection-endpoint.md"
   },
   {
@@ -627,7 +627,7 @@
     "feature_id": "FEAT-094",
     "feature": "oauth2-introspection-device-grant",
     "spec": "sdd/specs/oauth2-introspection-device-grant.spec.md",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "M",
     "depends_on": [
@@ -635,8 +635,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Serializes on backend.py/conf.py with TASK-033/035/036 and needs TASK-032 storage/model.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T13:00:00Z",
     "file": "sdd/tasks/active/TASK-034-device-authorization-endpoint.md"
   },
   {
@@ -646,7 +646,7 @@
     "feature_id": "FEAT-094",
     "feature": "oauth2-introspection-device-grant",
     "spec": "sdd/specs/oauth2-introspection-device-grant.spec.md",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -655,8 +655,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Edits backend.py; needs the pending device record from TASK-034 and storage from TASK-032. Owner-binding happens here.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T13:00:00Z",
     "file": "sdd/tasks/active/TASK-035-device-verification-page.md"
   },
   {
@@ -666,7 +666,7 @@
     "feature_id": "FEAT-094",
     "feature": "oauth2-introspection-device-grant",
     "spec": "sdd/specs/oauth2-introspection-device-grant.spec.md",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "M",
     "depends_on": [
@@ -676,8 +676,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "token_request branch in backend.py; reuses auth-code carrier minted by TASK-035 (D-2).",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T13:00:00Z",
     "file": "sdd/tasks/active/TASK-036-device-token-polling.md"
   },
   {
@@ -687,7 +687,7 @@
     "feature_id": "FEAT-094",
     "feature": "oauth2-introspection-device-grant",
     "spec": "sdd/specs/oauth2-introspection-device-grant.spec.md",
-    "status": "pending",
+    "status": "in-progress",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -699,8 +699,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Final integration coverage + docs; depends on all FEAT-094 modules.",
-    "assigned_to": null,
-    "started_at": null,
+    "assigned_to": "sdd-worker",
+    "started_at": "2026-06-22T13:00:00Z",
     "file": "sdd/tasks/active/TASK-037-tests-docs-example.md"
   }
 ]
