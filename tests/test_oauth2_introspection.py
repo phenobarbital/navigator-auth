@@ -29,10 +29,6 @@ from navigator_auth.backends.oauth2.models import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
-
-
 def _confidential_client(client_id: str = "rs_client", secret: str = "s3cr3t") -> OAuthClient:
     return OAuthClient(
         client_id=client_id,

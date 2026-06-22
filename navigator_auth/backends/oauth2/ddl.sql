@@ -190,7 +190,8 @@ CREATE TABLE IF NOT EXISTS auth.oauth_device_codes (
     client_id               INTEGER NOT NULL REFERENCES auth.clients(client_id) ON DELETE CASCADE,
     user_id                 INTEGER REFERENCES auth.users(user_id) ON DELETE SET NULL,
     scopes                  JSONB NOT NULL DEFAULT '[]'::jsonb,
-    status                  VARCHAR(16) NOT NULL DEFAULT 'pending',
+    status                  VARCHAR(16) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'denied', 'consumed')),
     code_challenge          VARCHAR(512),
     code_challenge_method   VARCHAR(16),
     auth_code               VARCHAR(512),

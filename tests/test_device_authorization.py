@@ -22,10 +22,6 @@ from navigator_auth.backends.oauth2.code_backend import MemoryDeviceCodeStorage
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
-
-
 def _public_client(client_id: str = "device_client") -> OAuthClient:
     return OAuthClient(
         client_id=client_id,

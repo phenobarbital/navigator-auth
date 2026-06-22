@@ -28,6 +28,7 @@ FEAT-094 changes (in task order):
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 from collections.abc import Awaitable
+from html import escape
 import hmac
 import importlib
 import secrets
@@ -615,7 +616,7 @@ class Oauth2Provider(BaseAuthBackend):
 
             return response
         else:
-            return self.auth_error(reason=f"Invalid HTTP Login Method: {request.method}", status=400)
+            raise self.auth_error(reason=f"Invalid HTTP Login Method: {request.method}", status=400)
 
     # ------------------------------------------------------------------
     # token_request
@@ -680,7 +681,8 @@ class Oauth2Provider(BaseAuthBackend):
 
         # B3: exact-match redirect_uri.
         # Device-origin carriers (response_type="device_code") have no redirect_uri —
-        # skip the match when the _device_origin flag is set.
+        # skip the match when the _device_origin flag is set (see RFC 8628 §3.4 and
+        # _handle_device_code which injects _device_origin=True into the payload).
         is_device_origin = payload.get("_device_origin", False)
         if redirect_uri and auth_code.redirect_uri != redirect_uri and not is_device_origin:
             return self._error_response(
@@ -1025,6 +1027,10 @@ class Oauth2Provider(BaseAuthBackend):
         if not dc.auth_code:
             return JSONResponse({"error": "server_error"}, status=500)
 
+        # PKCE is verified here (against dc.code_challenge) AND again inside
+        # _handle_authorization_code (against the carrier auth_code.code_challenge,
+        # which is a copy). The double-verify is harmless — both checks use the
+        # same value — but is noted for future refactoring.
         # D4: PKCE verification for public clients.
         if dc.code_challenge:
             code_verifier = payload.get("code_verifier", "")
@@ -1050,7 +1056,8 @@ class Oauth2Provider(BaseAuthBackend):
         injected_payload = dict(payload)
         injected_payload["grant_type"] = "authorization_code"
         injected_payload["code"] = dc.auth_code
-        # Allow the exchange to skip redirect_uri validation for device-origin carriers.
+        # _device_origin=True signals _handle_authorization_code to skip redirect_uri
+        # exact-match validation (device flow has no redirect_uri). See RFC 8628 §3.4.
         injected_payload["_device_origin"] = True
         return await self._handle_authorization_code(injected_payload, request)
 
@@ -1254,7 +1261,7 @@ class Oauth2Provider(BaseAuthBackend):
             return web.Response(
                 status=401,
                 content_type="application/json",
-                headers={"WWW-Authenticate": 'Bearer realm="oauth2"'},
+                headers={"WWW-Authenticate": 'Basic realm="oauth2"'},
                 text='{"error":"invalid_client","error_description":"Client authentication required."}',
             )
         stored_secret = caller.client_secret or ""
@@ -1262,7 +1269,7 @@ class Oauth2Provider(BaseAuthBackend):
             return web.Response(
                 status=401,
                 content_type="application/json",
-                headers={"WWW-Authenticate": 'Bearer realm="oauth2"'},
+                headers={"WWW-Authenticate": 'Basic realm="oauth2"'},
                 text='{"error":"invalid_client","error_description":"Invalid client credentials."}',
             )
 
@@ -1284,18 +1291,21 @@ class Oauth2Provider(BaseAuthBackend):
         except Exception:
             token_payload = None
 
-        if not token_payload:
+        # If no JWT and no refresh hint, nothing to look up.
+        if not token_payload and hint != "refresh_token":
             return JSONResponse({"active": False}, status=200)
 
         # Determine token type: access or refresh.
-        token_type = token_payload.get("token_type", "").lower()
+        # For opaque tokens (token_payload is None), honour the hint.
+        token_type = token_payload.get("token_type", "").lower() if token_payload else ""
         is_refresh = hint == "refresh_token" or token_type == "refresh_token"
         is_access = not is_refresh
 
         # --- Revocation / activity check ---
         active = False
+        rt = None
         if is_access:
-            jti = token_payload.get("jti")
+            jti = token_payload.get("jti") if token_payload else None
             if jti and self.access_token_storage:
                 revoked = await self.access_token_storage.is_revoked(jti)
                 if not revoked:
@@ -1307,7 +1317,7 @@ class Oauth2Provider(BaseAuthBackend):
                 # No jti in payload — treat as inactive (can't verify revocation).
                 active = False
         else:
-            # Refresh token: look it up in storage.
+            # Refresh token: look it up in storage (handles opaque tokens too).
             rt = await self.refresh_token_storage.get_token(token)
             if rt and not rt.revoked:
                 if rt.expires_at > _now():
@@ -1317,17 +1327,24 @@ class Oauth2Provider(BaseAuthBackend):
             return JSONResponse({"active": False}, status=200)
 
         # --- Same-client-only enforcement (RFC 7662 §2.2) ---
-        token_client_id = token_payload.get("client_id", "")
+        # For opaque refresh tokens, derive client_id from the stored record.
+        if token_payload:
+            token_client_id = token_payload.get("client_id", "")
+        elif rt:
+            token_client_id = str(rt.client_id) if hasattr(rt, "client_id") else ""
+        else:
+            token_client_id = ""
         if not hmac.compare_digest(str(caller.client_id), str(token_client_id)):
             return JSONResponse({"active": False}, status=200)
 
         # --- Build active response (RFC 7662 §2.2 claims) ---
-        exp = token_payload.get("exp")
-        iat = token_payload.get("iat")
-        scope = token_payload.get("scope", "")
-        user_id = token_payload.get("user_id")
+        exp = token_payload.get("exp") if token_payload else None
+        iat = token_payload.get("iat") if token_payload else None
+        scope = token_payload.get("scope", "") if token_payload else (getattr(rt, "scope", "") if rt else "")
+        user_id = token_payload.get("user_id") if token_payload else (getattr(rt, "user_id", None) if rt else None)
         sub = str(user_id) if user_id else token_client_id
-        aud = token_payload.get("aud", "")
+        aud = token_payload.get("aud", "") if token_payload else ""
+        jti_claim = token_payload.get("jti") if token_payload else None
 
         claims: dict = {
             "active": True,
@@ -1342,6 +1359,8 @@ class Oauth2Provider(BaseAuthBackend):
             claims["iat"] = int(iat)
         if aud:
             claims["aud"] = aud
+        if jti_claim:
+            claims["jti"] = jti_claim
 
         # Resolve username for 3LO tokens.
         if user_id:
@@ -1481,7 +1500,7 @@ class Oauth2Provider(BaseAuthBackend):
                 return await self._parser.view(filename="oauth/device.html", params=data)
             except Exception:
                 # Fallback: minimal HTML form if template not found.
-                user_code_val = data.get("user_code", "")
+                user_code_val = escape(data.get("user_code", ""), quote=True)
                 html = (
                     "<!DOCTYPE html><html><body>"
                     f"<form method='POST'>"
@@ -1503,8 +1522,12 @@ class Oauth2Provider(BaseAuthBackend):
             return self._error_response("invalid_request", "user_code required.", status=400)
 
         # --- Anti-brute-force: Redis-backed rate-limit + lockout (D3) ---
-        # The lock key is based on the client IP.
-        client_ip = request.remote or "unknown"
+        # Use X-Forwarded-For if available (reverse proxy), else fall back to remote.
+        # NOTE: IP-only lockout is bypassable behind a shared NAT; see issue M-3.
+        client_ip = request.headers.get("X-Forwarded-For", request.remote)
+        if client_ip:
+            client_ip = client_ip.split(",")[0].strip()  # take first (client) IP
+        client_ip = client_ip or "unknown"
         lockout_key = f"oauth2:device:lockout:{client_ip}"
         attempt_key = f"oauth2:device:attempts:{client_ip}"
 

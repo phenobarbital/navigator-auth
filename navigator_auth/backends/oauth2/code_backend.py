@@ -13,15 +13,21 @@ FEAT-094:
 """
 
 from datetime import datetime, timezone
+import asyncio
 import json
 import logging
+
+logger = logging.getLogger(__name__)
 
 from ...conf import REDIS_URL
 
 try:
     import redis.asyncio as redis
 except ImportError:
-    import redis
+    raise ImportError(
+        "redis>=4.2.0 with asyncio support is required. "
+        "Install it with: pip install 'redis[asyncio]>=4.2'"
+    )
 
 
 def _now() -> datetime:
@@ -75,7 +81,7 @@ class AuthorizationCodeStorage:
                 code_data = json.loads(data)
                 return OauthAuthorizationCode(**code_data)
             except Exception as e:
-                logging.error(f"Error decoding auth code from Redis: {e}")
+                logger.error("Error decoding auth code from Redis: %s", e)
                 return None
         return None
 
@@ -156,7 +162,7 @@ class RefreshTokenStorage:
                 token_data = json.loads(data)
                 return OauthRefreshToken(**token_data)
             except Exception as e:
-                logging.error(f"Error decoding refresh token from Redis: {e}")
+                logger.error("Error decoding refresh token from Redis: %s", e)
                 return None
         return None
 
@@ -271,7 +277,7 @@ class GrantStorage:
             try:
                 return OauthGrant(**json.loads(data))
             except Exception as e:
-                logging.error(f"Error decoding grant from Redis: {e}")
+                logger.error("Error decoding grant from Redis: %s", e)
         return None
 
     async def revoke_grant(self, user_id: int, client_id: str) -> bool:
@@ -335,7 +341,7 @@ class AccessTokenStorage:
             try:
                 return OauthAccessTokenRecord(**json.loads(data))
             except Exception as e:
-                logging.error(f"Error decoding access token record from Redis: {e}")
+                logger.error("Error decoding access token record from Redis: %s", e)
         return None
 
     async def revoke(self, jti: str) -> bool:
@@ -375,11 +381,13 @@ class MemoryDeviceCodeStorage:
     def __init__(self):
         self._by_device_code: dict = {}
         self._by_user_code: dict = {}
+        self._lock = asyncio.Lock()
 
     async def save(self, dc) -> bool:
         """Persist an OauthDeviceCode record."""
-        self._by_device_code[dc.device_code] = dc
-        self._by_user_code[dc.user_code.upper()] = dc.device_code
+        async with self._lock:
+            self._by_device_code[dc.device_code] = dc
+            self._by_user_code[dc.user_code.upper()] = dc.device_code
         return True
 
     async def get_by_device_code(self, device_code: str):
@@ -396,21 +404,22 @@ class MemoryDeviceCodeStorage:
 
     async def update(self, dc) -> bool:
         """Update a stored OauthDeviceCode record (status/user_id/interval etc.)."""
-        if dc.device_code not in self._by_device_code:
-            return False
-        self._by_device_code[dc.device_code] = dc
-        # Rebuild user_code index entry in case user_code changed (shouldn't
-        # happen in practice, but be safe).
-        self._by_user_code[dc.user_code.upper()] = dc.device_code
+        async with self._lock:
+            if dc.device_code not in self._by_device_code:
+                return False
+            self._by_device_code[dc.device_code] = dc
+            # Rebuild user_code index entry in case user_code changed (shouldn't
+            # happen in practice, but be safe).
+            self._by_user_code[dc.user_code.upper()] = dc.device_code
         return True
 
     async def delete(self, device_code: str) -> bool:
         """Remove a device code record from storage."""
-        dc = self._by_device_code.pop(device_code, None)
-        if dc:
-            self._by_user_code.pop(dc.user_code.upper(), None)
-            return True
-        return False
+        async with self._lock:
+            dc = self._by_device_code.pop(device_code, None)
+            if dc:
+                self._by_user_code.pop(dc.user_code.upper(), None)
+            return dc is not None
 
 
 class RedisDeviceCodeStorage:
@@ -448,7 +457,7 @@ class RedisDeviceCodeStorage:
             try:
                 return OauthDeviceCode.model_validate_json(data)
             except Exception as e:
-                logging.error(f"Error decoding device code from Redis: {e}")
+                logger.error("Error decoding device code from Redis: %s", e)
         return None
 
     async def get_by_user_code(self, user_code: str):
@@ -463,9 +472,12 @@ class RedisDeviceCodeStorage:
     async def update(self, dc) -> bool:
         """Update a stored OauthDeviceCode (re-save with remaining TTL)."""
         key = f"{self.prefix}{dc.device_code}"
+        user_key = f"{self.user_index_prefix}{dc.user_code.upper()}"
         remaining = dc.expires_at - _now()
         ttl = max(int(remaining.total_seconds()), 1)
         await self.redis.set(key, dc.model_dump_json(), ex=ttl)
+        # Also refresh the secondary user_code index TTL.
+        await self.redis.expire(user_key, ttl)
         return True
 
     async def delete(self, device_code: str) -> bool:
