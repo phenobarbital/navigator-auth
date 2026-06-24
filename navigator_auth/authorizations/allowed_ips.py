@@ -3,6 +3,7 @@ import ipaddress
 import logging
 from aiohttp import web
 from ..conf import ALLOWED_IPS, ALLOWED_IP_TRUSTED_PROXIES
+from ._client_ip import get_client_ip, parse_proxies
 from .abstract import BaseAuthzHandler
 
 
@@ -19,16 +20,9 @@ class authz_allowed_ips(BaseAuthzHandler):
 
     def __init__(self):
         self._networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
-        self._proxies: set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
         for entry in ALLOWED_IPS:
             self._add_network(entry)
-        for entry in ALLOWED_IP_TRUSTED_PROXIES:
-            try:
-                self._proxies.add(ipaddress.ip_address(entry))
-            except ValueError:
-                logging.warning(
-                    f"authz_allowed_ips: ignoring invalid proxy IP: {entry}"
-                )
+        self._proxies = parse_proxies(ALLOWED_IP_TRUSTED_PROXIES)
 
     def _add_network(self, entry: str) -> bool:
         try:
@@ -56,18 +50,7 @@ class authz_allowed_ips(BaseAuthzHandler):
 
     def _get_client_ip(self, request: web.Request) -> str | None:
         """Extract the real client IP, respecting trusted proxies."""
-        remote = request.remote
-        if not remote:
-            return None
-        try:
-            remote_addr = ipaddress.ip_address(remote)
-        except ValueError:
-            return None
-        if self._proxies and remote_addr in self._proxies:
-            forwarded = request.headers.get("X-Forwarded-For", "")
-            if forwarded:
-                return forwarded.split(",")[0].strip()
-        return remote
+        return get_client_ip(request, self._proxies)
 
     async def check_authorization(self, request: web.Request) -> bool:
         if not self._networks:
