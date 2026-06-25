@@ -164,6 +164,29 @@ ALLOWED_UA = [
     if e.strip() != ""
 ]
 
+### User-Agent authorization hardening (geo-fence).
+# When True, authz_useragent requires a matching User-Agent AND that the
+# real client IP geolocates to one of USERAGENT_ALLOWED_COUNTRIES. This is a
+# temporary measure for service clients (e.g. PowerBI) that cannot be pinned
+# to a CIDR range while they migrate to API-key authentication.
+USERAGENT_SECURITY = config.getboolean("USERAGENT_SECURITY", fallback=False)
+
+### ISO-3166 country codes allowed when USERAGENT_SECURITY is on:
+USERAGENT_ALLOWED_COUNTRIES = [
+    e.strip().upper()
+    for e in config.get(
+        "USERAGENT_ALLOWED_COUNTRIES", section="auth", fallback="US,CA"
+    ).split(",")
+    if e.strip()
+]
+
+### Path to the MaxMind GeoLite2-Country database (.mmdb) for geo-fencing:
+GEOIP_DATABASE = config.get(
+    "GEOIP_DATABASE",
+    section="auth",
+    fallback="/etc/navigator/GeoLite2-Country.mmdb",
+)
+
 ## Basic Authorization Middlewares
 AUTHORIZATION_MIDDLEWARES = ()
 
