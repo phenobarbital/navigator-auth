@@ -19,6 +19,12 @@ class TokenStrategy(ABC):
     - When to enforce authentication
     """
 
+    #: Query params this strategy consumes and may strip before the handler.
+    #: Each strategy overrides with only the credential it reads so it never
+    #: removes a param another strategy still needs. Empty (default) -> no
+    #: query sanitization is performed for this strategy.
+    query_params: frozenset = frozenset()
+
     @abstractmethod
     def extract(self, request: web.Request) -> tuple[str | None, str | None]:
         """Extract token and scheme from the request.
@@ -48,6 +54,8 @@ class APIKeyStrategy(TokenStrategy):
     ``authdb`` connection pool stored on the application for a matching row in
     ``public.api_keys``.
     """
+
+    query_params: frozenset = frozenset({"api_key"})
 
     def extract(self, request: web.Request) -> tuple[str | None, str | None]:
         """Extract the API key and return scheme ``"api"``."""
@@ -101,6 +109,8 @@ class PlainTokenStrategy(TokenStrategy):
     handles validation.
     """
 
+    query_params: frozenset = frozenset({"auth"})
+
     def extract(self, request: web.Request) -> tuple[str | None, str | None]:
         """Extract token from ``Authorization`` header, ``auth`` query, or ``X-Token`` header."""
         if "Authorization" in request.headers:
@@ -136,6 +146,8 @@ class TrocTokenStrategy(TokenStrategy):
     Wraps a ``Cipher`` instance (from ``navigator_auth.libs.cipher``) to
     decrypt proprietary Troc tokens.
     """
+
+    query_params: frozenset = frozenset({"auth"})
 
     def __init__(self, cipher: Any) -> None:
         """Initialise the strategy with a cipher instance.
@@ -191,6 +203,8 @@ class JWTStrategy(TokenStrategy):
     query parameter. The ``secret_key`` defaults to ``SECRET_KEY`` from
     ``navigator_auth.conf``.
     """
+
+    query_params: frozenset = frozenset({"auth"})
 
     def __init__(self, secret_key: str | None = None, algorithm: str = "HS256") -> None:
         """Initialise the JWT strategy.

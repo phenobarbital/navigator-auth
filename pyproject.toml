@@ -12,7 +12,7 @@ name = "navigator-auth"
 dynamic = ["version"]
 description = "Navigator Auth is an Authentication/Authorization Toolkit for aiohttp."
 readme = "README.md"
-requires-python = ">=3.9.16"
+requires-python = ">=3.10.1"
 license = "Apache-2.0"
 authors = [
     { name = "Jesus Lara Gimenez", email = "jesuslarag@gmail.com" }
@@ -27,7 +27,6 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Systems Administration",
     "Topic :: System :: Networking",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -48,7 +47,7 @@ dependencies = [
     "okta-jwt-verifier>=0.2.5",
     "python-slugify>=8.0.1",
     "asyncdb>=2.8.0",
-    "navconfig>=1.7.0",
+    "navconfig>=2.2.0",
     "navigator-session>=0.6.5",
     "navigator-api>=0.5.0",
     "pydantic>=2.12.5",
