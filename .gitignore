@@ -145,7 +145,6 @@ navigator_auth/exceptions.c
 uv.lock
 navigator-auth.code-workspace
 templates/.compiled
-
 # Rust build artifacts
 navigator_auth/rs_pep/target/
 
