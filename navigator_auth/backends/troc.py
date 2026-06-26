@@ -24,7 +24,6 @@ from ..conf import (
     AUTH_SUCCESSFUL_CALLBACKS,
     TROCTOKEN_REDIRECT_URI,
 )
-from ..libs.sanitize import sanitize_request
 from .abstract import BaseAuthBackend
 from .basic import BasicUser
 
@@ -39,6 +38,8 @@ class TrocToken(BaseAuthBackend):
     _service_name: str = "troctoken"
     _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
     _callbacks: Optional[list[Callable]] = None
+    # TrocToken delivers its credential via the ``auth`` query param.
+    BACKEND_QUERY_PARAMS: frozenset = frozenset({"auth"})
 
     def __init__(
         self,
@@ -219,7 +220,7 @@ class TrocToken(BaseAuthBackend):
                     usr.id = username
                     usr.set(self.username_attribute, username)
                     self._set_user_request(request, usr)
-                    return await handler(sanitize_request(request))
+                    return await handler(self.sanitize(request))
             except InvalidAuth:
                 _, payload = self._idp.decode_token(code=token)
             if not payload:
@@ -257,4 +258,4 @@ class TrocToken(BaseAuthBackend):
             raise self.ForbiddenAccess(
                 reason=err.message
             ) from err
-        return await handler(sanitize_request(request))
+        return await handler(self.sanitize(request))

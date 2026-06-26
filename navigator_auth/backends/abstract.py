@@ -31,6 +31,7 @@ from ..conf import (
     AUTH_REDIRECT_URI,
 )
 from ..libs.json import json_encoder
+from ..libs.sanitize import sanitize_request
 
 # Authenticated Identity
 from ..identities import Identity, AuthBackend
@@ -55,6 +56,12 @@ class BaseAuthBackend(ABC):
     _external_auth: bool = False
     _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
     _callbacks: Optional[list[Callable]] = None
+    # Auth query params this backend owns and may strip before reaching the
+    # handler. Each backend overrides with only the credential it consumes
+    # (e.g. APIKey -> {"apikey"}, TrocToken -> {"auth"}) so it never removes a
+    # param another backend still needs further down the middleware chain.
+    # Empty (default) -> this backend performs no query sanitization.
+    BACKEND_QUERY_PARAMS: frozenset = frozenset()
     # User Mapping:
     user_mapping: dict = USER_MAPPING
 
@@ -415,6 +422,17 @@ class BaseAuthBackend(ABC):
         setattr(request, self.user_property, user)
         request[self.user_property].is_authenticated = True
         request["authenticated"] = True
+
+    def sanitize(self, request: web.Request) -> web.Request:
+        """Strip only this backend's own auth query params from the request.
+
+        Uses ``BACKEND_QUERY_PARAMS`` so each backend removes solely the
+        credential it consumes. When ``BACKEND_QUERY_PARAMS`` is empty no
+        sanitization is performed and the request is returned unchanged.
+        """
+        if not self.BACKEND_QUERY_PARAMS:
+            return request
+        return sanitize_request(request, self.BACKEND_QUERY_PARAMS)
 
     def uri_redirect(self, request: web.Request, token: str = None, token_type: str = "Bearer", uri: str = None):
         headers = {"x-authenticated": "true"}

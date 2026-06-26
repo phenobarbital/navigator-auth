@@ -62,7 +62,19 @@ class UnifiedAuthMiddleware(base_middleware):
                 request[self.user_property] = user
                 request.user = user
 
-        return await handler(sanitize_request(request))
+        return await handler(self.sanitize(request))
+
+    def sanitize(self, request: web.Request) -> web.Request:
+        """Strip only the active strategy's own auth query params.
+
+        Uses ``strategy.query_params`` so the middleware removes solely the
+        credential it consumes. When that set is empty no sanitization is
+        performed and the request is returned unchanged.
+        """
+        params = self.strategy.query_params
+        if not params:
+            return request
+        return sanitize_request(request, params)
 
     async def middleware(self, app, handler):
         """Backward-compatible factory pattern for legacy registration."""

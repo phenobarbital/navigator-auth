@@ -19,7 +19,6 @@ from ..conf import (
 
 # Authenticated Entity
 from ..identities import AuthUser
-from ..libs.sanitize import sanitize_request
 from .abstract import BaseAuthBackend
 
 
@@ -34,6 +33,8 @@ class APIKeyAuth(BaseAuthBackend):
     _pool = None
     _ident: AuthUser = APIKeyUser
     _description: str = "API Key authentication"
+    # APIKey delivers its credential via the ``apikey`` query param.
+    BACKEND_QUERY_PARAMS: frozenset = frozenset({"apikey"})
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements."""
@@ -271,4 +272,4 @@ class APIKeyAuth(BaseAuthBackend):
                 reason="API Auth Error",
                 exception=err
             ) from err
-        return await handler(sanitize_request(request))
+        return await handler(self.sanitize(request))
