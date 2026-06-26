@@ -109,7 +109,7 @@ AUTH_USER_IDENTITY_MODEL = config.get("AUTH_USER_IDENTITY_MODEL", fallback=None)
 ALLOWED_HOSTS = [
     e.strip()
     for e in list(
-        config.get("ALLOWED_HOSTS", section="auth", fallback="localhost*").split(",")
+        config.get("ALLOWED_HOSTS", fallback="localhost*").split(",")
     )
 ]
 
