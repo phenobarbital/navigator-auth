@@ -9,6 +9,9 @@ from navigator_auth.middlewares.unified import UnifiedAuthMiddleware
 class DummyStrategy(TokenStrategy):
     """Strategy that always extracts token='VALID' and validates to {'user_id': 1}."""
 
+    # Opt into sanitization of the ``apikey`` query param (per-strategy design).
+    query_params = frozenset({"apikey"})
+
     def extract(self, request: web.Request) -> tuple:
         token = request.headers.get("X-Test-Token")
         return (token, "test") if token else (None, None)
