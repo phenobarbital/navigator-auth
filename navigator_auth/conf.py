@@ -158,6 +158,13 @@ AZURE_SERVICE_TAGS = [
     if e.strip()
 ]
 
+# Auto-fetching Azure Service Tags injects broad, externally-sourced IP ranges
+# into the allowed_ips backend (scraped from a Microsoft download page). It is
+# DISABLED by default for security; set AZURE_SERVICE_TAGS_ENABLED=true to opt in.
+AZURE_SERVICE_TAGS_ENABLED = config.getboolean(
+    "AZURE_SERVICE_TAGS_ENABLED", section="auth", fallback=False
+)
+
 ### Allowed User-Agents:
 ALLOWED_UA = [
     e.strip()
