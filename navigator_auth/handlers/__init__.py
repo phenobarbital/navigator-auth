@@ -5,6 +5,8 @@ from .groups import GroupManager, GroupPermissionManager, UserGroupManager
 from .userattrs import UserAccountHandler, UserIdentityHandler
 from .partners import PartnerKeyHandler
 from .recovery import ForgotPasswordHandler, ResetPasswordHandler
+from .config import ConfigHandler
+from .allowed_ips import AllowedIPHandler
 
 ## TODO migration of login/logout handlers:
 def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
@@ -72,4 +74,16 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     router.add_view(
         r"/api/v1/reset-password", ResetPasswordHandler,
         name="api_reset_password"
+    )
+
+    ## Security: Environment/Config debug (superuser only, GET only):
+    router.add_get(
+        "/api/v1/security/config", ConfigHandler,
+        name="api_security_config", allow_head=False
+    )
+
+    ## Security: Add public IPs to allowed_ips backend (superuser only, POST only):
+    router.add_post(
+        "/api/v1/security/allowed_ips", AllowedIPHandler,
+        name="api_security_allowed_ips"
     )
