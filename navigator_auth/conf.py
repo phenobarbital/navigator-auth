@@ -123,11 +123,12 @@ AUTH_SUCCESSFUL_CALLBACKS = ()
 # Enable authentication backends
 AUTHENTICATION_BACKENDS = ()
 
+# No permissive fallback: if AUTHORIZATION_BACKENDS is unset/empty, no authz
+# backend is active (requests must pass authentication, not a host allowlist).
 AUTHORIZATION_BACKENDS = [
     e.strip()
-    for e in list(
-        config.get("AUTHORIZATION_BACKENDS", fallback="allow_hosts").split(",")
-    )
+    for e in config.get("AUTHORIZATION_BACKENDS", fallback="").split(",")
+    if e.strip()
 ]
 
 ### Allowed IPs (individual IPs or CIDR ranges, comma-separated):
@@ -156,6 +157,13 @@ AZURE_SERVICE_TAGS = [
     ).split(",")
     if e.strip()
 ]
+
+# Auto-fetching Azure Service Tags injects broad, externally-sourced IP ranges
+# into the allowed_ips backend (scraped from a Microsoft download page). It is
+# DISABLED by default for security; set AZURE_SERVICE_TAGS_ENABLED=true to opt in.
+AZURE_SERVICE_TAGS_ENABLED = config.getboolean(
+    "AZURE_SERVICE_TAGS_ENABLED", section="auth", fallback=False
+)
 
 ### Allowed User-Agents:
 ALLOWED_UA = [

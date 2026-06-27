@@ -31,7 +31,10 @@ class authz_useragent(BaseAuthzHandler):
         self._proxies = parse_proxies(ALLOWED_IP_TRUSTED_PROXIES)
 
     async def check_authorization(self, request: web.Request) -> bool:
-        ua = request.headers.get("User-Agent", "").lower()
+        ua = request.headers.get("User-Agent", "").strip().lower()
+        # A missing or empty User-Agent is never authorized (fail closed).
+        if not ua:
+            return False
         if not any(key.lower() in ua for key in ALLOWED_UA):
             return False
         if not USERAGENT_SECURITY:
