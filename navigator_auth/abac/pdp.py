@@ -45,7 +45,8 @@ class PDP:
         self,
         storage: AbstractStorage,
         policies: Optional[List[Policy]] = None,
-        yaml_storage: Optional[YAMLStorage] = None
+        yaml_storage: Optional[YAMLStorage] = None,
+        evaluator: Optional[PolicyEvaluator] = None,
     ):
         self._policies: list = []
         if isinstance(policies, list):
@@ -55,7 +56,9 @@ class PDP:
         self.yaml_storage = yaml_storage
         self.logger = logger
         self._auditlog = AuditLog()
-        self._evaluator: PolicyEvaluator = PolicyEvaluator()
+        self._evaluator: PolicyEvaluator = (
+            evaluator if evaluator is not None else PolicyEvaluator()
+        )
         self._reload_task: Optional[asyncio.Task] = None
         # Per-tenant evaluator LRU (ABAC_TENANT_SQL_FILTERING mode).
         # Keyed by (org_id, client_id) tuple; evicts LRU entries when full.
