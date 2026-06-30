@@ -82,11 +82,18 @@ XSS_PROTECTION = config.get('XSS_PROTECTION', fallback='1; mode=block')
 XCONTENT_TYPE_OPTIONS = config.get('XCONTENT_TYPE_OPTIONS', fallback='nosniff')
 
 # Version / Deployment Headers:
+import platform  # noqa: E402
 from .version import __version__ as _PKG_VERSION  # noqa: E402
 
 ENABLE_VERSION_HEADERS = config.getboolean('ENABLE_VERSION_HEADERS', fallback=True)
 APP_VERSION = config.get('APP_VERSION', fallback=_PKG_VERSION)
 GIT_SHA = config.get('GIT_SHA', fallback='unknown')
+
+# Server Info Headers (API_HOST, PYTHON_VERSION, QS_PBAC_ENABLED, ENVIRONMENT):
+ENABLE_SERVER_HEADERS = config.getboolean('ENABLE_SERVER_HEADERS', fallback=True)
+API_HOST = config.get('API_HOST', fallback=DOMAIN_HOST)
+PYTHON_VERSION = platform.python_version()
+QS_PBAC_ENABLED = config.getboolean('QS_PBAC_ENABLED', fallback=False)
 
 # Security: enable/disable the "/api/v1/security/config" debug endpoint (ConfigHandler).
 SECURITY_CONFIG_HANDLER = config.getboolean('SECURITY_CONFIG_HANDLER', fallback=False)
