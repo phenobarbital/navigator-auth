@@ -549,19 +549,6 @@ def create_app() -> web.Application:
     if default_policies_dir.is_dir():
         yaml_storage = YAMLStorage(directory=str(default_policies_dir))
 
-    # --- PDP (Policy Decision Point) ---
-    pdp = PDP(storage=storage, yaml_storage=yaml_storage)
-
-    # Add classic ABAC policies
-    for policy in [
-        public_dashboard,
-        admin_panel,
-        analytics_business_hours,
-        deployment_approval,
-        prod_config_manager,
-    ]:
-        pdp.add_policy(policy)
-
     # --- PolicyEvaluator (high-performance resource-based evaluation) ---
     evaluator = PolicyEvaluator(
         cache_size=1024,
@@ -581,8 +568,22 @@ def create_app() -> web.Application:
         agent_configure_platform,
     ])
 
-    # Attach evaluator to PDP so the /check endpoint can use it
-    pdp._evaluator = evaluator
+    # --- PDP (Policy Decision Point) ---
+    pdp = PDP(
+        storage=storage,
+        yaml_storage=yaml_storage,
+        evaluator=evaluator,
+    )
+
+    # Add classic ABAC policies
+    for policy in [
+        public_dashboard,
+        admin_panel,
+        analytics_business_hours,
+        deployment_approval,
+        prod_config_manager,
+    ]:
+        pdp.add_policy(policy)
 
     # Wire up PDP (registers Guardian, middleware, REST endpoints)
     pdp.setup(app)

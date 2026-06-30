@@ -106,11 +106,20 @@ class TestPDPTenantEvaluatorLRU:
         storage = MagicMock()
         storage.load_policies = AsyncMock(return_value=[])
         storage.close = AsyncMock()
-        pdp = PDP(storage=storage)
         # Pre-populate shared evaluator
         shared = build_evaluator_from_dicts(_make_shared_policy_set())
-        pdp._evaluator = shared
+        pdp = PDP(storage=storage, evaluator=shared)
         return pdp
+
+    def test_constructor_accepts_shared_evaluator(self):
+        """PDP constructor must accept an injected shared evaluator."""
+        from navigator_auth.abac.pdp import PDP
+        storage = MagicMock()
+        evaluator = PolicyEvaluator()
+
+        pdp = PDP(storage=storage, evaluator=evaluator)
+
+        assert pdp.evaluator is evaluator
 
     def test_global_tenant_returns_shared_evaluator(self):
         """(1, 1) must always return the shared evaluator without touching LRU."""

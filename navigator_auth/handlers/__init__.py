@@ -1,4 +1,5 @@
 from aiohttp import web
+from ..conf import SECURITY_CONFIG_HANDLER
 from .permissions import PermissionHandler
 from .users import UserManager, UserSession
 from .groups import GroupManager, GroupPermissionManager, UserGroupManager
@@ -77,10 +78,12 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     )
 
     ## Security: Environment/Config debug (superuser only, GET only):
-    router.add_get(
-        "/api/v1/security/config", ConfigHandler,
-        name="api_security_config", allow_head=False
-    )
+    ## Disabled by default; enable via SECURITY_CONFIG_HANDLER env flag.
+    if SECURITY_CONFIG_HANDLER is True:
+        router.add_get(
+            "/api/v1/security/config", ConfigHandler,
+            name="api_security_config", allow_head=False
+        )
 
     ## Security: Add public IPs to allowed_ips backend (superuser only, POST only):
     router.add_post(
