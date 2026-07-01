@@ -8,6 +8,7 @@ from navigator_auth.conf import (
     AUTH_SESSION_OBJECT,
     ABAC_RELOAD_INTERVAL,
     ABAC_TENANT_SQL_FILTERING,
+    ABAC_DEBUG_AUTHORIZATION,
 )
 from .policies import (
     Policy,
@@ -28,6 +29,32 @@ from .middleware import abac_middleware
 
 # Maximum number of per-tenant evaluator instances kept in the LRU.
 _TENANT_EVALUATOR_LRU_SIZE = 128
+
+
+def _client_info(request: web.Request) -> dict:
+    """Extract the requesting client's identity for authorization debugging.
+
+    Returns the User-Agent plus the IP/host information of whoever issued the
+    authorization request: the direct peer IP (``request.remote``), any
+    proxy-forwarded client IP (``X-Forwarded-For`` / ``X-Real-IP``) and the
+    ``Host`` the request targeted.
+    """
+    if request is None:
+        return {}
+    try:
+        headers = request.headers
+    except AttributeError:
+        headers = {}
+    return {
+        "user_agent": headers.get("User-Agent", "unknown"),
+        "remote_ip": getattr(request, "remote", None),
+        "forwarded_for": headers.get("X-Forwarded-For"),
+        "real_ip": headers.get("X-Real-IP"),
+        "host": headers.get("Host", getattr(request, "host", None)),
+        "method": getattr(request, "method", None),
+        "path": getattr(request, "path_qs", getattr(request, "path", None)),
+        "referer": headers.get("Referer"),
+    }
 
 
 async def find_deny_policy(ctx, policies):
@@ -389,6 +416,7 @@ class PDP:
             actions=[action]
         )
 
+        self._debug_authorization(request, user, action, request.path, result)
         await self.auditlog(response, user)
 
         if not result.allowed:
@@ -400,6 +428,41 @@ class PDP:
                 )
 
         return response
+
+    def _debug_authorization(self, request, user, action, resource, result):
+        """Emit an explicit debug line for an authorization decision.
+
+        Gated by ``ABAC_DEBUG_AUTHORIZATION``.  Logs the decision alongside the
+        requesting client's User-Agent and IP/host information so operators can
+        trace *who* (and from where) requested a given authorization.
+        """
+        if not ABAC_DEBUG_AUTHORIZATION:
+            return
+        info = _client_info(request)
+        username = getattr(user, "username", None)
+        if username is None and isinstance(user, dict):
+            username = user.get("username") or user.get("email")
+        if username is None:
+            username = str(user) if user is not None else "anonymous"
+        decision = "ALLOW" if getattr(result, "allowed", False) else "DENY"
+        self.logger.debug(
+            "ABAC AUTHZ [%s] user=%s action=%s resource=%s "
+            "policy=%s reason=%s | User-Agent=%r remote_ip=%s "
+            "forwarded_for=%s real_ip=%s host=%s method=%s path=%s",
+            decision,
+            username,
+            action,
+            resource,
+            getattr(result, "matched_policy", None) or "default",
+            getattr(result, "reason", None),
+            info.get("user_agent"),
+            info.get("remote_ip"),
+            info.get("forwarded_for"),
+            info.get("real_ip"),
+            info.get("host"),
+            info.get("method"),
+            info.get("path"),
+        )
 
     ## Audit Log
     async def auditlog(self, answer, user):
@@ -532,6 +595,7 @@ class PDP:
             actions=[action]
         )
 
+        self._debug_authorization(request, user, action, f"{rtype}:{rname}", result)
         await self.auditlog(response, user)
         return response
 

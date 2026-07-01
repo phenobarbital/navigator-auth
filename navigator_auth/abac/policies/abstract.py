@@ -156,14 +156,14 @@ class AbstractPolicy(ABC):
                             # If the key is not covered by EvalContext, skip the condition
                             continue
                         ctx_value = getattr(ctx, key)
-                        if any(
-                            item not in ctx_value.items()
-                            for item in value.items()
-                        ):
+                        if isinstance(value, dict) and isinstance(ctx_value, dict):
                             # Check if value is a subset of ctx_value
-                            # if not all(item in ctx_value.items() for item in value.items()):
-                            fit_result = False
-                            break
+                            if any(
+                                item not in ctx_value.items()
+                                for item in value.items()
+                            ):
+                                fit_result = False
+                                break
                         elif isinstance(value, list):
                             if ctx_value not in value:
                                 fit_result = False
