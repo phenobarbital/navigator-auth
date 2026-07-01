@@ -14,8 +14,9 @@ class authz_allowed_ips(BaseAuthzHandler):
     Supports individual IPs and CIDR notation (e.g. 10.0.0.0/8).
     Checks X-Forwarded-For when the direct peer is a trusted proxy.
 
-    Can be extended at runtime via ``add_networks()`` — used by
-    ``auth_startup`` to inject Azure Service Tag ranges dynamically.
+    Can be extended at runtime via ``add_networks()`` — used by the
+    ``authz_powerbi`` subclass to inject PowerBI Azure Service Tag ranges
+    at startup, and by ``AllowedIPHandler`` to add ranges on demand.
     """
 
     def __init__(

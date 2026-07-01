@@ -35,8 +35,6 @@ from .conf import (
     AUTHENTICATION_BACKENDS,
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,
-    AZURE_SERVICE_TAGS,
-    AZURE_SERVICE_TAGS_ENABLED,
     USER_ATTRIBUTES,
     default_dsn,
     REDIS_AUTH_URL,
@@ -139,48 +137,9 @@ class AuthHandler:
                 self.logger.warning(
                     "AuthHandler: exclude provider %r failed: %s", provider, exc
                 )
-        # Auto-fetch Azure Service Tag IP ranges for allowed_ips backend.
-        # Disabled by default (security): only runs when explicitly opted in.
-        if AZURE_SERVICE_TAGS and AZURE_SERVICE_TAGS_ENABLED:
-            await self._load_azure_service_tags()
-        elif AZURE_SERVICE_TAGS and not AZURE_SERVICE_TAGS_ENABLED:
-            self.logger.warning(
-                "AZURE_SERVICE_TAGS is configured but auto-fetch is disabled "
-                "(AZURE_SERVICE_TAGS_ENABLED=false). Skipping IP injection."
-            )
         # Load PowerBI service-tag ranges into the authz_powerbi backend.
         # No-op unless that backend is installed in AUTHORIZATION_BACKENDS.
         await self._load_powerbi_service_tags()
-
-    async def _load_azure_service_tags(self):
-        """Fetch Azure Service Tag IPs and inject into allowed_ips backend."""
-        ip_backend = None
-        for backend in self._authz_backends:
-            if isinstance(backend, authz_allowed_ips):
-                ip_backend = backend
-                break
-        if ip_backend is None:
-            self.logger.warning(
-                "AZURE_SERVICE_TAGS configured but 'allowed_ips' backend "
-                "is not in AUTHORIZATION_BACKENDS — skipping IP fetch"
-            )
-            return
-        try:
-            from .authorizations.azure_service_tags import (
-                fetch_service_tag_prefixes,
-            )
-            prefixes = await fetch_service_tag_prefixes(AZURE_SERVICE_TAGS)
-            if prefixes:
-                ip_backend.add_networks(prefixes)
-            else:
-                self.logger.warning(
-                    "azure_service_tags: no prefixes returned for "
-                    f"tags {AZURE_SERVICE_TAGS}"
-                )
-        except Exception as exc:
-            self.logger.error(
-                f"Failed to load Azure Service Tags: {exc}"
-            )
 
     async def _load_powerbi_service_tags(self):
         """Populate the authz_powerbi backend with live PowerBI IP ranges.

@@ -166,22 +166,6 @@ ALLOWED_IP_TRUSTED_PROXIES = [
     if e.strip()
 ]
 
-### Azure Service Tags to auto-fetch on startup (e.g. "PowerBI,PowerQueryOnline"):
-AZURE_SERVICE_TAGS = [
-    e.strip()
-    for e in config.get(
-        "AZURE_SERVICE_TAGS", section="auth", fallback=""
-    ).split(",")
-    if e.strip()
-]
-
-# Auto-fetching Azure Service Tags injects broad, externally-sourced IP ranges
-# into the allowed_ips backend (scraped from a Microsoft download page). It is
-# DISABLED by default for security; set AZURE_SERVICE_TAGS_ENABLED=true to opt in.
-AZURE_SERVICE_TAGS_ENABLED = config.getboolean(
-    "AZURE_SERVICE_TAGS_ENABLED", section="auth", fallback=False
-)
-
 ### PowerBI IP authorization (authz_powerbi backend).
 # Static PBI CIDRs to seed the backend (fallback when the live Azure
 # Service-Tag fetch is unavailable, e.g. offline startup):
