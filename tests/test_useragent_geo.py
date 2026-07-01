@@ -86,6 +86,62 @@ def test_get_client_ip_no_remote():
     assert get_client_ip(FakeRequest(remote=None), set()) is None
 
 
+def test_get_client_ip_cf_connecting_ip_behind_trusted_proxy():
+    # cloudflared tunnel topology: peer is loopback, no X-Forwarded-For,
+    # Cloudflare's edge header carries the real client.
+    proxies = parse_proxies(["127.0.0.1"])
+    req = FakeRequest(
+        headers={"CF-Connecting-IP": "203.0.113.9"},
+        remote="127.0.0.1",
+    )
+    assert get_client_ip(req, proxies) == "203.0.113.9"
+
+
+def test_get_client_ip_prefers_xff_over_cf():
+    # When both headers are present, the right-to-left XFF walk wins.
+    proxies = parse_proxies(["127.0.0.1"])
+    req = FakeRequest(
+        headers={
+            "X-Forwarded-For": "198.51.100.7",
+            "CF-Connecting-IP": "203.0.113.9",
+        },
+        remote="127.0.0.1",
+    )
+    assert get_client_ip(req, proxies) == "198.51.100.7"
+
+
+def test_get_client_ip_cf_fallback_when_xff_all_trusted():
+    # XFF exhausted (only trusted proxies): CF-Connecting-IP still resolves.
+    proxies = parse_proxies(["127.0.0.1", "10.0.0.5"])
+    req = FakeRequest(
+        headers={
+            "X-Forwarded-For": "10.0.0.5",
+            "CF-Connecting-IP": "203.0.113.9",
+        },
+        remote="127.0.0.1",
+    )
+    assert get_client_ip(req, proxies) == "203.0.113.9"
+
+
+def test_get_client_ip_ignores_cf_from_untrusted_peer():
+    # A direct client sending CF-Connecting-IP must not spoof the whitelist.
+    proxies = parse_proxies(["127.0.0.1"])
+    req = FakeRequest(
+        headers={"CF-Connecting-IP": "20.41.5.87"},
+        remote="8.8.8.8",
+    )
+    assert get_client_ip(req, proxies) == "8.8.8.8"
+
+
+def test_get_client_ip_malformed_cf_falls_back_to_remote():
+    proxies = parse_proxies(["127.0.0.1"])
+    req = FakeRequest(
+        headers={"CF-Connecting-IP": "not-an-ip"},
+        remote="127.0.0.1",
+    )
+    assert get_client_ip(req, proxies) == "127.0.0.1"
+
+
 # --------------------------------------------------------------------------- #
 # authz_useragent — security OFF (legacy behaviour)
 # --------------------------------------------------------------------------- #

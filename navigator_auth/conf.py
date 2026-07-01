@@ -51,6 +51,12 @@ AUTH_EXCLUDE_LIST_KEY = "auth_exclude_list"
 ### and allow access even when there is no user session.
 AUTHZ_BACKEND_KEY = "authz_backend"
 
+### Boolean companion of ``AUTHZ_BACKEND_KEY``: ``request[AUTHORIZED_KEY]`` is
+### True when the request was *authorized* (allowed to pass) without being
+### *authenticated* (no user, no session). Mirrors ``request["authenticated"]``
+### so downstream code can distinguish the two states explicitly.
+AUTHORIZED_KEY = "authorized"
+
 EXCLUDE_DEFAULTS: list[str] = [
     "/static/",
     "/api/v1/login",

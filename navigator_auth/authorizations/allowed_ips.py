@@ -41,7 +41,7 @@ class authz_allowed_ips(BaseAuthzHandler):
             return True
         except ValueError:
             logging.warning(
-                f"authz_allowed_ips: ignoring invalid IP/CIDR: {entry}"
+                f"{type(self).__name__}: ignoring invalid IP/CIDR: {entry}"
             )
             return False
 
@@ -52,7 +52,7 @@ class authz_allowed_ips(BaseAuthzHandler):
             if self._add_network(entry):
                 added += 1
         logging.info(
-            f"authz_allowed_ips: dynamically added {added} network ranges "
+            f"{type(self).__name__}: dynamically added {added} network ranges "
             f"(total: {len(self._networks)})"
         )
         return added
@@ -65,16 +65,31 @@ class authz_allowed_ips(BaseAuthzHandler):
         if not self._networks:
             return False
         client_ip = self._get_client_ip(request)
+        logging.debug(
+            f"{type(self).__name__}: authorization request from "
+            f"client IP {client_ip!r} (peer={request.remote!r}, "
+            f"xff={request.headers.get('X-Forwarded-For')!r}, "
+            f"cf={request.headers.get('CF-Connecting-IP')!r}, "
+            f"{getattr(request, 'method', '?')} {getattr(request, 'path', '?')})"
+        )
         if not client_ip:
             return False
         try:
             addr = ipaddress.ip_address(client_ip)
         except ValueError:
+            logging.debug(
+                f"{type(self).__name__}: invalid client IP {client_ip!r}, denying"
+            )
             return False
         for network in self._networks:
             if addr in network:
                 logging.debug(
-                    f"Authorization based on ALLOWED IP: {client_ip} in {network}"
+                    f"{type(self).__name__}: authorized {client_ip} "
+                    f"(matched network {network})"
                 )
                 return True
+        logging.debug(
+            f"{type(self).__name__}: {client_ip} not in any allowed network "
+            f"({len(self._networks)} ranges checked)"
+        )
         return False

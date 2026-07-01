@@ -31,6 +31,7 @@ from .vault.integration import load_vault_for_session, setup_vault_tables, VAULT
 from .backends.idp import IdentityProvider
 from .conf import (
     AUTH_EXCLUDE_LIST_KEY,
+    AUTHORIZED_KEY,
     AUTHZ_BACKEND_KEY,
     BASE_DIR,
     AUTH_USER_VIEW,
@@ -816,10 +817,12 @@ class AuthHandler:
         ``reason`` is the authorizing backend class name or a short tag.
 
         Downstream, session-based enforcers (e.g. QuerySource PBAC) can read
-        ``request[AUTHZ_BACKEND_KEY]`` to allow a session-less request that was
-        nonetheless authorized here. It is NOT set for authenticated requests —
-        those carry a real user/session and QS enforces on that instead.
+        ``request[AUTHORIZED_KEY]`` / ``request[AUTHZ_BACKEND_KEY]`` to allow a
+        session-less request that was nonetheless authorized here. Neither key
+        is set for authenticated requests — those carry a real user/session
+        (``request["authenticated"]``) and QS enforces on that instead.
         """
+        request[AUTHORIZED_KEY] = True
         request[AUTHZ_BACKEND_KEY] = reason
 
     async def verify_exceptions(self, request: web.Request) -> bool:
