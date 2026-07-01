@@ -22,23 +22,47 @@ def parse_proxies(entries: list[str]) -> set[IPAddress]:
     return proxies
 
 
+def _cf_connecting_ip(request: web.Request) -> str | None:
+    """Return a validated ``CF-Connecting-IP`` header value, or None.
+
+    Cloudflare sets this header to the original visitor IP at its edge.
+    Callers must only trust it when the direct peer is a trusted proxy
+    (e.g. a local ``cloudflared`` tunnel) — otherwise it is
+    client-spoofable, just like ``X-Forwarded-For``.
+    """
+    value = request.headers.get("CF-Connecting-IP", "").strip()
+    if not value:
+        return None
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        logging.warning(f"authz: ignoring malformed CF-Connecting-IP: {value!r}")
+        return None
+    return value
+
+
 def get_client_ip(
     request: web.Request,
     proxies: set[IPAddress] | None = None,
 ) -> str | None:
     """Extract the real client IP, respecting trusted proxies.
 
-    ``X-Forwarded-For`` is only honored when the direct TCP peer
-    (``request.remote``) is a trusted proxy; otherwise the header is
-    attacker-controlled and is ignored in favor of the direct peer.
+    ``X-Forwarded-For`` and ``CF-Connecting-IP`` are only honored when the
+    direct TCP peer (``request.remote``) is a trusted proxy; otherwise the
+    headers are attacker-controlled and are ignored in favor of the direct
+    peer.
 
-    When it is honored, the chain is walked from RIGHT to LEFT (closest
-    proxy → original client) and the first address that is **not** itself a
-    trusted proxy is returned. A well-behaved proxy appends the address it
-    actually observed to the right of the header, so any value a malicious
-    client injects stays to the left and is never trusted. This closes the
-    ``X-Forwarded-For`` spoofing hole where sending
+    When honored, the ``X-Forwarded-For`` chain is walked from RIGHT to LEFT
+    (closest proxy → original client) and the first address that is **not**
+    itself a trusted proxy is returned. A well-behaved proxy appends the
+    address it actually observed to the right of the header, so any value a
+    malicious client injects stays to the left and is never trusted. This
+    closes the ``X-Forwarded-For`` spoofing hole where sending
     ``X-Forwarded-For: <whitelisted-ip>`` would previously bypass the check.
+
+    ``CF-Connecting-IP`` (set by the Cloudflare edge, e.g. behind a
+    ``cloudflared`` tunnel) is used as a fallback when ``X-Forwarded-For``
+    is absent or contains only trusted proxies.
     """
     remote = request.remote
     if not remote:
@@ -47,12 +71,12 @@ def get_client_ip(
         remote_addr = ipaddress.ip_address(remote)
     except ValueError:
         return None
-    # Only trust XFF when the direct peer is a known proxy.
+    # Only trust forwarding headers when the direct peer is a known proxy.
     if not (proxies and remote_addr in proxies):
         return remote
     forwarded = request.headers.get("X-Forwarded-For", "")
     if not forwarded:
-        return remote
+        return _cf_connecting_ip(request) or remote
     # Right-to-left: the first hop that is not a trusted proxy is the client.
     for hop in reversed(forwarded.split(",")):
         hop = hop.strip()
@@ -67,5 +91,6 @@ def get_client_ip(
         if hop_addr in proxies:
             continue
         return hop
-    # Every hop was a trusted proxy: no client information to authorize on.
-    return None
+    # Every hop was a trusted proxy: fall back to Cloudflare's edge header
+    # before giving up on client information entirely.
+    return _cf_connecting_ip(request)

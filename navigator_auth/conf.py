@@ -44,6 +44,19 @@ default_dsn = f"postgres://{DBUSER}:{DBPWD}@{DBHOST}:{DBPORT}/{DBNAME}"
 ### Exclude List:
 AUTH_EXCLUDE_LIST_KEY = "auth_exclude_list"
 
+### Request key set when a request is authorized by a *sessionless* authz
+### backend (authz_allowed_ips, authz_hosts, authz_allow_hosts,
+### authz_useragent). Downstream consumers (e.g. QuerySource PBAC) can read
+### ``request[AUTHZ_BACKEND_KEY]`` to detect IP/host/User-Agent authorization
+### and allow access even when there is no user session.
+AUTHZ_BACKEND_KEY = "authz_backend"
+
+### Boolean companion of ``AUTHZ_BACKEND_KEY``: ``request[AUTHORIZED_KEY]`` is
+### True when the request was *authorized* (allowed to pass) without being
+### *authenticated* (no user, no session). Mirrors ``request["authenticated"]``
+### so downstream code can distinguish the two states explicitly.
+AUTHORIZED_KEY = "authorized"
+
 EXCLUDE_DEFAULTS: list[str] = [
     "/static/",
     "/api/v1/login",
@@ -201,6 +214,13 @@ ALLOWED_UA = [
 # temporary measure for service clients (e.g. PowerBI) that cannot be pinned
 # to a CIDR range while they migrate to API-key authentication.
 USERAGENT_SECURITY = config.getboolean("USERAGENT_SECURITY", fallback=False)
+
+### Explicit authorization debug logging (IP / Host / User-Agent based authz):
+# When True, every IP/host/User-Agent authorization decision made by the
+# authz backends (authz_allowed_ips, authz_hosts, authz_allow_hosts,
+# authz_useragent) is logged explicitly with the requesting client's
+# User-Agent and IP/host information. Default: False.
+AUTHZ_DEBUG = config.getboolean("AUTHZ_DEBUG", fallback=False)
 
 ### ISO-3166 country codes allowed when USERAGENT_SECURITY is on:
 USERAGENT_ALLOWED_COUNTRIES = [
@@ -512,6 +532,14 @@ ABAC_DEFAULT_EFFECT = config.get("ABAC_DEFAULT_EFFECT", fallback="deny")
 
 # ABAC Hot-Reload Interval (seconds). Default: 0 (disabled).
 ABAC_RELOAD_INTERVAL = config.getint("ABAC_RELOAD_INTERVAL", fallback=0)
+
+# Explicit debug logging of every authorization decision, including the
+# requesting client's User-Agent and IP/host information (remote IP,
+# X-Forwarded-For, Host header). Useful for tracing *who* asked for what.
+# Default: False (keep the audit noise down in production).
+ABAC_DEBUG_AUTHORIZATION = config.getboolean(
+    "ABAC_DEBUG_AUTHORIZATION", fallback=False
+)
 
 # ---------------------------------------------------------------------------
 # Per-tenant policy scoping (FEAT-092)

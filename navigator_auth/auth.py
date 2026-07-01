@@ -26,15 +26,19 @@ from .authorizations import (
     authz_powerbi,
     authz_useragent,
 )
+from .authorizations._client_ip import get_client_ip
 from .vault.integration import load_vault_for_session, setup_vault_tables, VAULT_SESSION_KEY
 from .backends.idp import IdentityProvider
 from .conf import (
     AUTH_EXCLUDE_LIST_KEY,
+    AUTHORIZED_KEY,
+    AUTHZ_BACKEND_KEY,
     BASE_DIR,
     AUTH_USER_VIEW,
     AUTHENTICATION_BACKENDS,
     AUTHORIZATION_BACKENDS,
     AUTHORIZATION_MIDDLEWARES,
+    AUTHZ_DEBUG,
     USER_ATTRIBUTES,
     default_dsn,
     REDIS_AUTH_URL,
@@ -774,29 +778,81 @@ class AuthHandler:
         """
         self._exclude_providers.append(provider)
 
+    def _log_authz_grant(self, backend, request: web.Request) -> None:
+        """Explicitly log an IP/Host/User-Agent authorization grant.
+
+        Records *which* authz backend authorized the request together with the
+        requesting client's User-Agent and IP/host information (real client IP,
+        direct peer, X-Forwarded-For and the target Host). Gated by
+        ``AUTHZ_DEBUG`` so it stays silent unless explicitly enabled.
+        """
+        if not AUTHZ_DEBUG:
+            return
+        try:
+            headers = request.headers
+            proxies = getattr(backend, "_proxies", None)
+            client_ip = get_client_ip(request, proxies)
+            self.logger.info(
+                "AUTHZ GRANT [%s] client_ip=%s remote_peer=%s "
+                "forwarded_for=%s host=%s User-Agent=%r method=%s path=%s",
+                type(backend).__name__,
+                client_ip,
+                request.remote,
+                headers.get("X-Forwarded-For"),
+                headers.get("Host", getattr(request, "host", None)),
+                headers.get("User-Agent", "unknown"),
+                request.method,
+                request.path_qs,
+            )
+        except Exception as exc:  # never let logging break authorization
+            self.logger.warning("AUTHZ debug logging failed: %s", exc)
+
+    def _mark_authz(self, request: web.Request, reason: str) -> None:
+        """Stamp the request as *authorized without authentication*.
+
+        This flag is strictly about **authorization**, not authentication: it
+        records that navigator-auth let the request through even though no
+        authentication happened (no user, no session) — e.g. a whitelisted IP,
+        allowed host/User-Agent, an excluded path or anonymous access. The
+        ``reason`` is the authorizing backend class name or a short tag.
+
+        Downstream, session-based enforcers (e.g. QuerySource PBAC) can read
+        ``request[AUTHORIZED_KEY]`` / ``request[AUTHZ_BACKEND_KEY]`` to allow a
+        session-less request that was nonetheless authorized here. Neither key
+        is set for authenticated requests — those carry a real user/session
+        (``request["authenticated"]``) and QS enforces on that instead.
+        """
+        request[AUTHORIZED_KEY] = True
+        request[AUTHZ_BACKEND_KEY] = reason
+
     async def verify_exceptions(self, request: web.Request) -> bool:
         # avoid authorization backend on OPTION method:
         if request.method == hdrs.METH_OPTIONS:
+            self._mark_authz(request, "options")
             return True
 
         # Check for explicit exclude list matches (per-app, not global)
         for pattern in request.app.get(AUTH_EXCLUDE_LIST_KEY, ()):
             if fnmatch.fnmatch(request.path, pattern):
+                self._mark_authz(request, "exclude_list")
                 return True
 
         # Check if it's a static route
         with contextlib.suppress(AttributeError):
             # In case of missing attributes during routing
             if isinstance(request.match_info.route.resource, StaticResource):
+                self._mark_authz(request, "static_resource")
                 return True
 
         # Check if the request is for a static resource
         if request.path.startswith("/static/"):
+            self._mark_authz(request, "static_resource")
             return True
 
         # avoid check system routes
         try:
             if isinstance(request.match_info.route, SystemRoute):  # eg. 404
+                self._mark_authz(request, "system_route")
                 return True
         except Exception:  # pylint: disable=W0703
             pass
@@ -804,13 +860,22 @@ class AuthHandler:
         ### Authorization backends:
         for backend in self._authz_backends:
             if await backend.check_authorization(request):
+                # Stamp the request so downstream, session-based enforcers
+                # (e.g. QuerySource PBAC) can detect that this request was
+                # authorized by a sessionless backend (IP / host / User-Agent)
+                # and allow access even without a user session.
+                self._mark_authz(request, type(backend).__name__)
+                self._log_authz_grant(backend, request)
                 return True
 
         ### Allow Anonymous Access
         if getattr(request, "allow_anonymous", False) is True:
+            self._mark_authz(request, "anonymous")
             return True
 
-        ## Already Authenticated
+        ## Already Authenticated: this request carries real authentication
+        ## (user + session). Do NOT stamp the authz flag here — that flag is
+        ## only for requests authorized *without* authentication.
         if request.get("authenticated", False) is True:
             return True
         return False  # Assuming no authentication match by default
