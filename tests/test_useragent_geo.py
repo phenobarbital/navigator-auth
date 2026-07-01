@@ -31,12 +31,46 @@ def test_parse_proxies_skips_invalid():
 
 
 def test_get_client_ip_uses_xff_behind_trusted_proxy():
+    # ngrok/PBI topology: the trusted edge appends the observed client IP as
+    # the right-most entry. That right-most value is the genuine client.
     proxies = parse_proxies(["127.0.0.1"])
+    req = FakeRequest(
+        headers={"X-Forwarded-For": "20.41.5.87"},
+        remote="127.0.0.1",
+    )
+    assert get_client_ip(req, proxies) == "20.41.5.87"
+
+
+def test_get_client_ip_skips_trusted_proxies_in_chain():
+    # Classic multi-hop: real client, then internal proxy appended to the
+    # right. With the internal proxy trusted, the client is resolved.
+    proxies = parse_proxies(["127.0.0.1", "10.0.0.5"])
     req = FakeRequest(
         headers={"X-Forwarded-For": "181.95.151.21, 10.0.0.5"},
         remote="127.0.0.1",
     )
     assert get_client_ip(req, proxies) == "181.95.151.21"
+
+
+def test_get_client_ip_rejects_spoofed_leftmost_value():
+    # An attacker prepends a whitelisted IP; the trusted edge still appends
+    # the real (attacker) IP on the right. Right-most-wins defeats the spoof.
+    proxies = parse_proxies(["127.0.0.1"])
+    req = FakeRequest(
+        headers={"X-Forwarded-For": "20.41.5.87, 203.0.113.9"},
+        remote="127.0.0.1",
+    )
+    assert get_client_ip(req, proxies) == "203.0.113.9"
+
+
+def test_get_client_ip_all_hops_trusted_returns_none():
+    # Nothing but trusted proxies in the chain: no client to authorize on.
+    proxies = parse_proxies(["127.0.0.1", "10.0.0.5"])
+    req = FakeRequest(
+        headers={"X-Forwarded-For": "10.0.0.5"},
+        remote="127.0.0.1",
+    )
+    assert get_client_ip(req, proxies) is None
 
 
 def test_get_client_ip_ignores_xff_from_untrusted_peer():
