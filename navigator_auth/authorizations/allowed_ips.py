@@ -18,11 +18,19 @@ class authz_allowed_ips(BaseAuthzHandler):
     ``auth_startup`` to inject Azure Service Tag ranges dynamically.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        allowed: list[str] | None = None,
+        proxies: list[str] | None = None,
+    ):
+        # ``allowed``/``proxies`` let subclasses (e.g. authz_powerbi) seed from
+        # their own config instead of the global ALLOWED_IPS list.
         self._networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
-        for entry in ALLOWED_IPS:
+        for entry in (ALLOWED_IPS if allowed is None else allowed):
             self._add_network(entry)
-        self._proxies = parse_proxies(ALLOWED_IP_TRUSTED_PROXIES)
+        self._proxies = parse_proxies(
+            ALLOWED_IP_TRUSTED_PROXIES if proxies is None else proxies
+        )
 
     def _add_network(self, entry: str) -> bool:
         try:

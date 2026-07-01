@@ -182,6 +182,28 @@ AZURE_SERVICE_TAGS_ENABLED = config.getboolean(
     "AZURE_SERVICE_TAGS_ENABLED", section="auth", fallback=False
 )
 
+### PowerBI IP authorization (authz_powerbi backend).
+# Static PBI CIDRs to seed the backend (fallback when the live Azure
+# Service-Tag fetch is unavailable, e.g. offline startup):
+POWERBI_ALLOWED_IPS = [
+    e.strip()
+    for e in config.get(
+        "POWERBI_ALLOWED_IPS", section="auth", fallback=""
+    ).split(",")
+    if e.strip()
+]
+
+# Azure Service Tag names loaded into the authz_powerbi backend at startup.
+# The fetch only runs when the authz_powerbi backend is installed in
+# AUTHORIZATION_BACKENDS (its presence is the opt-in switch):
+POWERBI_SERVICE_TAGS = [
+    e.strip()
+    for e in config.get(
+        "POWERBI_SERVICE_TAGS", section="auth", fallback="PowerBI,PowerQueryOnline"
+    ).split(",")
+    if e.strip()
+]
+
 ### Allowed User-Agents:
 ALLOWED_UA = [
     e.strip()

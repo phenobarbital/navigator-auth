@@ -19,7 +19,13 @@ from orjson import JSONDecodeError
 from aiohttp import hdrs, web
 from aiohttp.web_urldispatcher import SystemRoute, StaticResource
 from navigator_session import SESSION_KEY, SessionHandler, get_session, SESSION_ID
-from .authorizations import authz_allow_hosts, authz_allowed_ips, authz_hosts, authz_useragent
+from .authorizations import (
+    authz_allow_hosts,
+    authz_allowed_ips,
+    authz_hosts,
+    authz_powerbi,
+    authz_useragent,
+)
 from .vault.integration import load_vault_for_session, setup_vault_tables, VAULT_SESSION_KEY
 from .backends.idp import IdentityProvider
 from .conf import (
@@ -142,6 +148,9 @@ class AuthHandler:
                 "AZURE_SERVICE_TAGS is configured but auto-fetch is disabled "
                 "(AZURE_SERVICE_TAGS_ENABLED=false). Skipping IP injection."
             )
+        # Load PowerBI service-tag ranges into the authz_powerbi backend.
+        # No-op unless that backend is installed in AUTHORIZATION_BACKENDS.
+        await self._load_powerbi_service_tags()
 
     async def _load_azure_service_tags(self):
         """Fetch Azure Service Tag IPs and inject into allowed_ips backend."""
@@ -171,6 +180,29 @@ class AuthHandler:
         except Exception as exc:
             self.logger.error(
                 f"Failed to load Azure Service Tags: {exc}"
+            )
+
+    async def _load_powerbi_service_tags(self):
+        """Populate the authz_powerbi backend with live PowerBI IP ranges.
+
+        Runs only when the ``authz_powerbi`` backend is present in
+        AUTHORIZATION_BACKENDS; otherwise it is a no-op. The backend's
+        presence is the opt-in switch for the startup fetch.
+        """
+        pbi_backend = next(
+            (b for b in self._authz_backends if isinstance(b, authz_powerbi)),
+            None,
+        )
+        if pbi_backend is None:
+            return
+        try:
+            added = await pbi_backend.load_service_tags()
+            self.logger.info(
+                "authz_powerbi: loaded %s PowerBI IP range(s) at startup", added
+            )
+        except Exception as exc:
+            self.logger.error(
+                f"authz_powerbi: failed to load PowerBI service tags: {exc}"
             )
 
     async def on_cleanup(self, app):
@@ -227,6 +259,10 @@ class AuthHandler:
                 b.append(authz_allowed_ips())
             elif backend == 'authz_allowed_ips':
                 b.append(authz_allowed_ips())
+            elif backend == 'powerbi':
+                b.append(authz_powerbi())
+            elif backend == 'authz_powerbi':
+                b.append(authz_powerbi())
             elif backend == 'useragent':
                 b.append(authz_useragent())
             elif backend == "authz_useragent":
