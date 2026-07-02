@@ -1,13 +1,17 @@
 """Tests for the PowerBI IP authorization backend (``authz_powerbi``).
 
-The backend extends ``authz_allowed_ips`` but keeps a separate network set
-seeded from ``POWERBI_ALLOWED_IPS`` and populated at startup from the Azure
-Service-Tag download (mocked here so no network access is required).
+The backend is a *sibling* of ``authz_allowed_ips`` — both share the
+:class:`SubnetAuthzHandler` CIDR-matching engine but keep independent network
+sets. ``authz_powerbi`` seeds only from ``POWERBI_ALLOWED_IPS`` and is
+populated at startup from the Azure Service-Tag download (mocked here so no
+network access is required); ``authz_allowed_ips`` seeds only from the
+operator-managed ``ALLOWED_IPS`` list. Neither leaks into the other.
 """
 import pytest
 from navigator_auth.authorizations import powerbi as pbi_mod
-from navigator_auth.authorizations import allowed_ips as aip_mod
+from navigator_auth.authorizations import _subnet as subnet_mod
 from navigator_auth.authorizations import azure_service_tags as ast_mod
+from navigator_auth.authorizations import SubnetAuthzHandler
 from navigator_auth.authorizations.powerbi import authz_powerbi
 from navigator_auth.authorizations.allowed_ips import authz_allowed_ips
 
@@ -16,7 +20,7 @@ from navigator_auth.authorizations.allowed_ips import authz_allowed_ips
 def _trust_localhost_proxy(monkeypatch):
     """Trust 127.0.0.1 as a proxy (the ngrok/reverse-proxy topology) so the
     X-Forwarded-For client IP is honored in these tests."""
-    monkeypatch.setattr(aip_mod, "ALLOWED_IP_TRUSTED_PROXIES", ["127.0.0.1"])
+    monkeypatch.setattr(subnet_mod, "ALLOWED_IP_TRUSTED_PROXIES", ["127.0.0.1"])
 
 
 class FakeRequest:
@@ -35,8 +39,24 @@ def _pbi_request(client_ip: str) -> FakeRequest:
     )
 
 
-def test_is_subclass_of_allowed_ips():
-    assert issubclass(authz_powerbi, authz_allowed_ips)
+def test_shares_engine_but_not_allowed_ips_lineage():
+    # Both backends reuse the CIDR engine, but powerbi is NOT an authz_allowed_ips
+    # so operator-managed IPs (added via AllowedIPHandler) never target it.
+    assert issubclass(authz_powerbi, SubnetAuthzHandler)
+    assert issubclass(authz_allowed_ips, SubnetAuthzHandler)
+    assert not issubclass(authz_powerbi, authz_allowed_ips)
+    assert not isinstance(authz_powerbi(), authz_allowed_ips)
+
+
+def test_network_sets_are_independent(monkeypatch):
+    # A user IP added to authz_allowed_ips must not appear in authz_powerbi.
+    monkeypatch.setattr(pbi_mod, "POWERBI_ALLOWED_IPS", ["20.41.5.0/25"])
+    user_backend = authz_allowed_ips(allowed=[])  # no global seed for this test
+    pbi_backend = authz_powerbi()
+    user_backend.add_networks(["10.9.9.0/24"])  # e.g. AWS keepalive subnet
+    assert any(str(n) == "10.9.9.0/24" for n in user_backend._networks)
+    assert not any(str(n) == "10.9.9.0/24" for n in pbi_backend._networks)
+    assert not any(str(n) == "20.41.5.0/25" for n in user_backend._networks)
 
 
 def test_seeds_from_powerbi_allowed_ips_not_global(monkeypatch):
