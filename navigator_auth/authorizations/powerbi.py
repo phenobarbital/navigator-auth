@@ -1,26 +1,31 @@
 """PowerBI IP authorization backend.
 
-Extends :class:`authz_allowed_ips` to whitelist the Microsoft PowerBI /
-Power Query Online Azure Service Tag ranges. Unlike the generic
-``authz_allowed_ips`` backend (seeded from ``ALLOWED_IPS``), this backend is
-seeded only from ``POWERBI_ALLOWED_IPS`` and is populated at server startup
-with the live PowerBI service-tag prefixes downloaded from Microsoft.
+A subnet-based authorization backend (see :class:`.SubnetAuthzHandler`) that
+whitelists **only** the Microsoft PowerBI / Power Query Online Azure Service
+Tag ranges. It is a *sibling* of ``authz_allowed_ips`` — both share the CIDR
+matching engine but keep independent network sets, so PowerBI ranges never
+leak into the operator-managed ``ALLOWED_IPS`` whitelist and user-added IPs
+never leak into the PowerBI set.
 
-The startup fetch (see ``AuthHandler._load_powerbi_service_tags``) only runs
+The backend is seeded from ``POWERBI_ALLOWED_IPS`` (static fallback) and
+populated at server startup with the live PowerBI service-tag prefixes
+downloaded from Microsoft (``POWERBI_SERVICE_TAGS``).
+
+The startup fetch (see ``AuthHandler._load_subnet_service_tags``) only runs
 when this backend is actually installed in ``AUTHORIZATION_BACKENDS`` — the
 backend's presence is the opt-in switch, so no separate ``*_ENABLED`` flag is
-needed.
+needed. New subnet-based providers can follow the same pattern: subclass
+:class:`.SubnetAuthzHandler` and set ``service_tags``.
 """
-import logging
 from ..conf import POWERBI_ALLOWED_IPS, POWERBI_SERVICE_TAGS
-from .allowed_ips import authz_allowed_ips
+from ._subnet import SubnetAuthzHandler
 
 
-class authz_powerbi(authz_allowed_ips):
+class authz_powerbi(SubnetAuthzHandler):
     """Authorize requests originating from PowerBI Azure Service Tag ranges.
 
     Reuses the (X-Forwarded-For spoofing-safe) client-IP resolution and CIDR
-    matching of :class:`authz_allowed_ips`, but keeps its own network set so
+    matching of :class:`.SubnetAuthzHandler`, but keeps its own network set so
     PowerBI ranges never leak into the general-purpose allowed-IPs whitelist.
     """
 
@@ -31,24 +36,3 @@ class authz_powerbi(authz_allowed_ips):
         # Seed from the PowerBI-specific static list (not ALLOWED_IPS);
         # trusted proxies are shared via ALLOWED_IP_TRUSTED_PROXIES.
         super().__init__(allowed=POWERBI_ALLOWED_IPS)
-
-    async def load_service_tags(self) -> int:
-        """Fetch PowerBI Azure Service-Tag prefixes and add them.
-
-        Returns the number of CIDR ranges successfully added. Safe to call
-        when offline: a failed/empty fetch simply adds nothing and leaves the
-        statically-seeded ``POWERBI_ALLOWED_IPS`` in place.
-        """
-        if not self.service_tags:
-            return 0
-        # Imported lazily so the network dependency is only touched at startup.
-        from .azure_service_tags import fetch_service_tag_prefixes
-
-        prefixes = await fetch_service_tag_prefixes(self.service_tags)
-        if not prefixes:
-            logging.warning(
-                "authz_powerbi: no service-tag prefixes returned for %s",
-                self.service_tags,
-            )
-            return 0
-        return self.add_networks(prefixes)

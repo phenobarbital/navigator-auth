@@ -5,6 +5,7 @@ from ..conf import (
     ALLOWED_IP_TRUSTED_PROXIES,
     USERAGENT_SECURITY,
     USERAGENT_ALLOWED_COUNTRIES,
+    AUTHZ_DEBUG
 )
 from ._client_ip import get_client_ip, parse_proxies
 from ._geoip import lookup_country
@@ -35,19 +36,23 @@ class authz_useragent(BaseAuthzHandler):
         # A missing or empty User-Agent is never authorized (fail closed).
         if not ua:
             return False
-        if not any(key.lower() in ua for key in ALLOWED_UA):
+        if all(key.lower() not in ua for key in ALLOWED_UA):
             return False
         if not USERAGENT_SECURITY:
-            logging.debug("Authorization: allowing Service based on User-Agent")
+            if AUTHZ_DEBUG:
+                logging.debug(
+                    f"Authorization: allowing Service based on User-Agent: {ua}"
+                )
             return True
         # Geo-fence: User-Agent match must come from an allowed country.
         client_ip = get_client_ip(request, self._proxies)
         country = lookup_country(client_ip)
         if country in USERAGENT_ALLOWED_COUNTRIES:
-            logging.info(
-                "Authorization: allowing User-Agent service from "
-                f"{client_ip} ({country})"
-            )
+            if AUTHZ_DEBUG:
+                logging.info(
+                    f"Authorization: allowing User-Agent service from "
+                    f"{client_ip} ({country})"
+                )
             return True
         logging.warning(
             "Authorization: User-Agent matched but denied by geo-fence "

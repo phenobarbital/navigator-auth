@@ -32,12 +32,11 @@ async def _get_download_url(session: aiohttp.ClientSession) -> Optional[str]:
             if resp.status != 200:
                 return None
             html = await resp.text()
-            match = re.search(
+            if match := re.search(
                 r'href="(https://download\.microsoft\.com/download/[^"]*ServiceTags_Public[^"]*\.json)"',
                 html,
-            )
-            if match:
-                return match.group(1)
+            ):
+                return match[1]
     except Exception as exc:
         logging.warning(f"azure_service_tags: failed to scrape download URL: {exc}")
     return None
