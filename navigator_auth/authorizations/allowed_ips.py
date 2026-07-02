@@ -1,22 +1,29 @@
-"""Authorization based on allowed IP addresses and CIDR ranges."""
-import ipaddress
-import logging
-from aiohttp import web
-from ..conf import ALLOWED_IPS, ALLOWED_IP_TRUSTED_PROXIES
-from ._client_ip import get_client_ip, parse_proxies
-from .abstract import BaseAuthzHandler
+"""Authorization based on user-defined allowed IP addresses and CIDR ranges.
+
+``authz_allowed_ips`` holds the subnets *explicitly added by the operator* —
+seeded from the global ``ALLOWED_IPS`` list and extendable at runtime through
+the ``AllowedIPHandler`` endpoint (e.g. an on-prem keepalive or an Amazon AWS
+local subnet). It deliberately does **not** contain any provider/service-tag
+ranges; those live in dedicated sibling backends such as ``authz_powerbi``.
+
+The CIDR-matching engine lives in :class:`.SubnetAuthzHandler`.
+"""
+from ..conf import ALLOWED_IPS
+from ._subnet import SubnetAuthzHandler
 
 
-class authz_allowed_ips(BaseAuthzHandler):
+class authz_allowed_ips(SubnetAuthzHandler):
     """Allowed IPs.
 
     Authorize requests based on the client's source IP address.
     Supports individual IPs and CIDR notation (e.g. 10.0.0.0/8).
     Checks X-Forwarded-For when the direct peer is a trusted proxy.
 
-    Can be extended at runtime via ``add_networks()`` — used by the
-    ``authz_powerbi`` subclass to inject PowerBI Azure Service Tag ranges
-    at startup, and by ``AllowedIPHandler`` to add ranges on demand.
+    Seeded from the global ``ALLOWED_IPS`` whitelist and extendable at runtime
+    via ``add_networks()`` — used by ``AllowedIPHandler`` to add operator
+    ranges on demand. Provider-specific ranges (e.g. PowerBI Azure Service
+    Tags) are handled by separate sibling backends so they never leak into
+    this general-purpose whitelist.
     """
 
     def __init__(
@@ -24,72 +31,8 @@ class authz_allowed_ips(BaseAuthzHandler):
         allowed: list[str] | None = None,
         proxies: list[str] | None = None,
     ):
-        # ``allowed``/``proxies`` let subclasses (e.g. authz_powerbi) seed from
-        # their own config instead of the global ALLOWED_IPS list.
-        self._networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
-        for entry in (ALLOWED_IPS if allowed is None else allowed):
-            self._add_network(entry)
-        self._proxies = parse_proxies(
-            ALLOWED_IP_TRUSTED_PROXIES if proxies is None else proxies
+        # Default to the global operator-managed ALLOWED_IPS list.
+        super().__init__(
+            allowed=ALLOWED_IPS if allowed is None else allowed,
+            proxies=proxies,
         )
-
-    def _add_network(self, entry: str) -> bool:
-        try:
-            self._networks.append(
-                ipaddress.ip_network(entry, strict=False)
-            )
-            return True
-        except ValueError:
-            logging.warning(
-                f"{type(self).__name__}: ignoring invalid IP/CIDR: {entry}"
-            )
-            return False
-
-    def add_networks(self, cidrs: list[str]) -> int:
-        """Add CIDR ranges at runtime. Returns number of successfully added entries."""
-        added = 0
-        for entry in cidrs:
-            if self._add_network(entry):
-                added += 1
-        logging.info(
-            f"{type(self).__name__}: dynamically added {added} network ranges "
-            f"(total: {len(self._networks)})"
-        )
-        return added
-
-    def _get_client_ip(self, request: web.Request) -> str | None:
-        """Extract the real client IP, respecting trusted proxies."""
-        return get_client_ip(request, self._proxies)
-
-    async def check_authorization(self, request: web.Request) -> bool:
-        if not self._networks:
-            return False
-        client_ip = self._get_client_ip(request)
-        logging.debug(
-            f"{type(self).__name__}: authorization request from "
-            f"client IP {client_ip!r} (peer={request.remote!r}, "
-            f"xff={request.headers.get('X-Forwarded-For')!r}, "
-            f"cf={request.headers.get('CF-Connecting-IP')!r}, "
-            f"{getattr(request, 'method', '?')} {getattr(request, 'path', '?')})"
-        )
-        if not client_ip:
-            return False
-        try:
-            addr = ipaddress.ip_address(client_ip)
-        except ValueError:
-            logging.debug(
-                f"{type(self).__name__}: invalid client IP {client_ip!r}, denying"
-            )
-            return False
-        for network in self._networks:
-            if addr in network:
-                logging.debug(
-                    f"{type(self).__name__}: authorized {client_ip} "
-                    f"(matched network {network})"
-                )
-                return True
-        logging.debug(
-            f"{type(self).__name__}: {client_ip} not in any allowed network "
-            f"({len(self._networks)} ranges checked)"
-        )
-        return False

@@ -1,7 +1,7 @@
 """ Authorization based on HOSTS lists."""
 import logging
 from aiohttp import web
-from ..conf import HOSTS
+from ..conf import HOSTS, AUTHZ_DEBUG
 from .abstract import BaseAuthzHandler
 
 
@@ -13,11 +13,17 @@ class authz_hosts(BaseAuthzHandler):
 
     async def check_authorization(self, request: web.Request) -> bool:
         if request.host in HOSTS:
-            logging.debug("Authorized based on HOST Authorization")
+            if AUTHZ_DEBUG:
+                logging.debug(
+                    f"Authorization based on HOST {request.host}"
+                )
             return True
         try:
             if request.headers["origin"] in HOSTS:
-                logging.debug("Authorization based on HOST")
+                if AUTHZ_DEBUG:
+                    logging.debug(
+                        f"Authorization based on HOST {request.headers['origin']}"
+                    )
                 return True
         except KeyError:
             return False

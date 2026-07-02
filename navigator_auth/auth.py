@@ -20,6 +20,7 @@ from aiohttp import hdrs, web
 from aiohttp.web_urldispatcher import SystemRoute, StaticResource
 from navigator_session import SESSION_KEY, SessionHandler, get_session, SESSION_ID
 from .authorizations import (
+    SubnetAuthzHandler,
     authz_allow_hosts,
     authz_allowed_ips,
     authz_hosts,
@@ -141,32 +142,36 @@ class AuthHandler:
                 self.logger.warning(
                     "AuthHandler: exclude provider %r failed: %s", provider, exc
                 )
-        # Load PowerBI service-tag ranges into the authz_powerbi backend.
-        # No-op unless that backend is installed in AUTHORIZATION_BACKENDS.
-        await self._load_powerbi_service_tags()
+        # Load provider service-tag ranges (e.g. PowerBI) into their subnet
+        # backends. No-op unless such a backend is installed in
+        # AUTHORIZATION_BACKENDS.
+        await self._load_subnet_service_tags()
 
-    async def _load_powerbi_service_tags(self):
-        """Populate the authz_powerbi backend with live PowerBI IP ranges.
+    async def _load_subnet_service_tags(self):
+        """Populate subnet backends that declare ``service_tags`` with live ranges.
 
-        Runs only when the ``authz_powerbi`` backend is present in
-        AUTHORIZATION_BACKENDS; otherwise it is a no-op. The backend's
-        presence is the opt-in switch for the startup fetch.
+        Runs for every installed :class:`SubnetAuthzHandler` backend (e.g.
+        ``authz_powerbi``) that declares Azure Service-Tag names; otherwise it
+        is a no-op. A backend's presence in AUTHORIZATION_BACKENDS is the
+        opt-in switch for its startup fetch.
         """
-        pbi_backend = next(
-            (b for b in self._authz_backends if isinstance(b, authz_powerbi)),
-            None,
-        )
-        if pbi_backend is None:
-            return
-        try:
-            added = await pbi_backend.load_service_tags()
-            self.logger.info(
-                "authz_powerbi: loaded %s PowerBI IP range(s) at startup", added
-            )
-        except Exception as exc:
-            self.logger.error(
-                f"authz_powerbi: failed to load PowerBI service tags: {exc}"
-            )
+        for backend in self._authz_backends:
+            if not isinstance(backend, SubnetAuthzHandler):
+                continue
+            if not backend.service_tags:
+                continue
+            name = type(backend).__name__
+            try:
+                added = await backend.load_service_tags()
+                self.logger.info(
+                    "%s: loaded %s service-tag IP range(s) at startup",
+                    name,
+                    added,
+                )
+            except Exception as exc:
+                self.logger.error(
+                    f"{name}: failed to load service tags: {exc}"
+                )
 
     async def on_cleanup(self, app):
         """
