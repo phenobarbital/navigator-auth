@@ -108,6 +108,18 @@ class PDP:
         self._policies.sort(key=lambda policy: policy.priority)
 
     async def _load_policies(self):
+        # Guard: if the evaluator was pre-populated externally (e.g. by
+        # setup_pbac / enable_pbac loading via PolicyLoader), skip the
+        # on-startup storage load to avoid duplicating or corrupting
+        # policies with a second parse that may use a different schema.
+        if self._evaluator._index.all():
+            self.logger.info(
+                "Evaluator already has %d policies loaded externally; "
+                "skipping on-startup storage load to prevent duplicates.",
+                len(self._evaluator._index.all()),
+            )
+            return
+
         # Load policies from DB storage
         try:
             policies = await self.storage.load_policies()

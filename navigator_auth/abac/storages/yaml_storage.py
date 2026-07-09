@@ -110,8 +110,15 @@ class YAMLStorage(AbstractStorage):
         - ``defaults``: default values (e.g. ``effect: deny``)
         - ``policies``: list of policy definitions
 
-        Each policy is converted into a dict compatible with
-        ``PDP._load_policies``.
+        Each policy is converted into a dict whose keys match the
+        ``policy_type`` routing in ``PolicyAdapter``:
+
+        - ``policy_type='resource'`` (default for YAML): uses ``resources``
+          (plural) and structured ``subjects`` dict — consumed by
+          ``PolicyAdapter._adapt_resource()``.
+        - ``policy_type='policy'`` (classic/DB format): uses ``resource``
+          (singular) and flat ``groups``/``subject`` keys — consumed by
+          ``PolicyAdapter._adapt_classic()``.
         """
         with open(path, 'r') as f:
             data = yaml.safe_load(f)
@@ -129,22 +136,38 @@ class YAMLStorage(AbstractStorage):
 
                 subjects = policy_data.get('subjects', {})
                 conditions = policy_data.get('conditions', {})
+                policy_type = policy_data.get('policy_type', 'resource')
 
-                policy_dict = {
-                    'name': policy_data['name'],
-                    'policy_type': policy_data.get('policy_type', 'resource'),
-                    'effect': effect,
-                    'description': policy_data.get('description', ''),
-                    'resource': policy_data.get('resources', []),
-                    'actions': policy_data.get('actions', []),
-                    'groups': subjects.get('groups', []),
-                    'subject': subjects.get('users', []),
-                    'context': conditions.get('context', {}),
-                    'environment': conditions.get('environment', {}),
-                    'conditions': conditions.get('context', {}),
-                    'priority': policy_data.get('priority', 0),
-                    'enforcing': policy_data.get('enforcing', False),
-                }
+                if policy_type == 'resource':
+                    policy_dict = {
+                        'name': policy_data['name'],
+                        'policy_type': 'resource',
+                        'effect': effect,
+                        'description': policy_data.get('description', ''),
+                        'resources': policy_data.get('resources', []),
+                        'actions': policy_data.get('actions', []),
+                        'subjects': subjects,
+                        'conditions': conditions.get('context', {}),
+                        'environment': conditions.get('environment', {}),
+                        'priority': policy_data.get('priority', 0),
+                        'enforcing': policy_data.get('enforcing', False),
+                    }
+                else:
+                    policy_dict = {
+                        'name': policy_data['name'],
+                        'policy_type': policy_type,
+                        'effect': effect,
+                        'description': policy_data.get('description', ''),
+                        'resource': policy_data.get('resources', []),
+                        'actions': policy_data.get('actions', []),
+                        'groups': subjects.get('groups', []),
+                        'subject': subjects.get('users', []),
+                        'context': conditions.get('context', {}),
+                        'environment': conditions.get('environment', {}),
+                        'conditions': conditions.get('context', {}),
+                        'priority': policy_data.get('priority', 0),
+                        'enforcing': policy_data.get('enforcing', False),
+                    }
                 policies.append(policy_dict)
             except Exception as exc:
                 logger.error(
