@@ -489,8 +489,12 @@ GITHUB_CLIENT_SECRET = config.get("GITHUB_CLIENT_SECRET")
 ## Audit Backend
 # this is the backend for saving Authentication information
 ENABLE_AUDIT_LOG = config.getboolean('ENABLE_AUDIT_LOG', fallback=True)
-# Supported values: "log" (Python logger), "influx", or any asyncdb driver name
-# (e.g. "mongo", "pg", "redis").
+# Supported values:
+#   "log"    — Python logger only (no external dependency).
+#   "influx" — InfluxDB (time-series point write).
+#   "mongo"  — MongoDB (document insert).
+#   any asyncdb SQL driver name — "pg", "postgres", "mysql", "mysqlclient",
+#       "mariadb", "mssql", "sqlite", "duckdb", "oracle", ... (requires AUDIT_DSN).
 AUDIT_BACKEND = config.get('AUDIT_BACKEND', fallback='influx')
 
 # Driver-specific credentials.
@@ -502,9 +506,17 @@ INFLUX_CREDENTIALS = {
     "org": config.get('INFLUX_ORG', fallback='navigator'),
     "token": config.get('INFLUX_TOKEN'),
 }
-# For any asyncdb driver (mongo, pg, etc.):
+# For any asyncdb SQL/document driver (mongo, pg, mysql, mssql, oracle, ...):
 AUDIT_DSN = config.get('AUDIT_DSN', fallback=None)
+# Destination table (SQL) or collection (document/Mongo) name.
 AUDIT_TABLE = config.get('AUDIT_TABLE', fallback='audit_log')
+# SQL bind placeholder dialect for drivers not auto-detected in
+# navigator_auth.abac.audit.SQL_PARAMSTYLES. One of:
+#   "numeric" ($1, $2 — asyncpg/Postgres)
+#   "format"  (%s     — MySQL/MariaDB)
+#   "qmark"   (?      — SQLite/MSSQL/DuckDB)
+#   "named"   (:1, :2 — Oracle)
+AUDIT_PARAMSTYLE = config.get('AUDIT_PARAMSTYLE', fallback='format')
 
 # Backwards-compatible alias
 AUDIT_CREDENTIALS = INFLUX_CREDENTIALS
