@@ -11,7 +11,7 @@ base_branch: dev
 **Branch**: `feat-audit-tenant-and-query` (off `dev`)
 **Date**: 2026-07-13
 **Author**: FieldSync team (with Jesús Lara's "reuse nav-auth audit log" direction)
-**Status**: draft
+**Status**: implemented (pending PR to `phenobarbital/navigator-auth` `dev` + Jesús's review)
 
 > **Resume anchor.** This spec exists so the work survives a context compaction.
 > It captures the verified current state of `navigator_auth/abac/audit.py`, the
@@ -78,15 +78,19 @@ nav-auth fully.
 - `async AuditLog.query(*, tenant, user_id=None, username=None, status=None,
   rule=None, since=None, until=None, limit=100, offset=0) -> list[dict]`.
 - **`tenant` is required** and always constrains the read.
-- Backend-aware, mirroring the write dispatch:
+- Backend-aware:
   - `sql`: parameterised `SELECT ... WHERE tenant = ? [AND ...] ORDER BY timestamp DESC
-    LIMIT/OFFSET` — add a pure `build_select(table, filters, paramstyle, ...)` helper
-    (unit-testable like `build_insert`).
-  - `document`: `find({tenant, ...})` with limit/skip.
-  - `timeseries` (influx): tenant-tagged query.
-  - `log`: return `[]` (not queryable) + a warning.
+    LIMIT/OFFSET` — via a pure `build_select(table, conditions, paramstyle, ...)` helper
+    (unit-testable like `build_insert`; conditions are `(column, operator, value)` triples).
+  - `document` / `timeseries` (influx) / `log`: **write-only through this API** — `query()`
+    logs a warning and returns `[]`. **Decision (impl):** structured reads are SQL-only for
+    now; the real consumer (FieldSync) uses Postgres, and shipping untested influx/mongo read
+    queries would violate the "backend-safe, degrade cleanly" requirement from the FEAT-314
+    review (Major 3). Query those stores directly if needed. The **write** path still supports
+    all four families (tenant as column/field/tag/message).
 - Read errors are best-effort (catch driver errors, log, return `[]`) — consistent
   with the write side.
+- `tenant=None` raises `ValueError` (a query can never span tenants).
 
 ### 3.4 Tests
 - Extend the existing pure-helper tests: `build_select` + `build_placeholders` for all
@@ -146,3 +150,4 @@ class AuditLog:
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-07-13 | FieldSync team | Initial spec (resume anchor): tenant scoping + `query()` on `AuditLog`, driven by FieldSync FEAT-314 review. |
+| 0.2 | 2026-07-13 | FieldSync team | **Implemented.** `tenant` on `_build_record`/`log()` across all 4 write families; `build_select()` helper; `AuditLog.query(*, tenant, ...)` SQL-only (other families degrade to `[]`+warning); docs (`documentation/audit-log.md`, `CHANGELOG.md`) + `tenant` DDL/migration + index. 34 unit tests pass (`tests/test_audit_backends.py`, incl. 18 new). Pending PR to Jesús's `dev`. |

@@ -87,10 +87,47 @@ SQL and document backends store a flat record with these columns/fields:
 | `rule`        | string \| null    | Matched policy rule, if any.                 |
 | `username`    | string            | Subject username.                            |
 | `user_id`     | int \| null       | Subject id.                                  |
+| `tenant`      | string \| null    | Owning tenant (see *Tenant scoping* below).  |
 
 The InfluxDB backend stores the same information as a point in the `audit`
-measurement: `status` as a field, and host/region/message/answer/username/user
+measurement: `status` as a field, and host/region/message/answer/username/user/tenant
 as tags.
+
+## Tenant scoping & querying
+
+Audit entries carry an optional **`tenant`** so a multi-tenant deployment can
+attribute — and, crucially, read back — decisions per tenant (mirroring the
+per-tenant policy scoping in `sdd/specs/per-tenant-policy-scoping.spec.md`).
+
+### Writing with a tenant
+
+`AuditLog.log()` accepts a keyword-only `tenant`; it is threaded to every write
+family (SQL column, document field, influx tag, logger message). It is optional,
+so existing PDP callers (`log(answer, status, user)`) are unaffected.
+
+```python
+await audit.log(answer, status, user, tenant="acme")
+```
+
+### Reading back — `AuditLog.query()`
+
+```python
+rows = await audit.query(
+    tenant="acme",                 # REQUIRED — always constrains the read
+    status="DENY",                 # optional equality filters
+    user_id=42, username="alice", rule="rule-1",
+    since=start, until=end,        # optional inclusive timestamp range
+    limit=100, offset=0,           # pagination (newest first)
+)
+```
+
+- **`tenant` is mandatory** and is always the first `WHERE` predicate — a query
+  can never span tenants (passing `tenant=None` raises `ValueError`).
+- Structured `query()` is implemented for **SQL backends only**. For the
+  `influx`, `mongo`/`documentdb` and `log` families it logs a warning and returns
+  `[]` (those stores remain write-only through this API — query them directly).
+- Reads are **best-effort**: driver errors are caught, logged, and surface as `[]`,
+  consistent with the write side.
 
 ## Examples
 
@@ -118,9 +155,24 @@ CREATE TABLE audit_log (
     message     text,
     rule        text,
     username    text,
-    user_id     integer
+    user_id     integer,
+    tenant      text
 );
+
+-- Speeds up the tenant-scoped, newest-first reads issued by AuditLog.query().
+CREATE INDEX idx_audit_log_tenant_ts ON audit_log (tenant, timestamp DESC);
 ```
+
+> **Migration (existing deployments).** The `tenant` column is additive and
+> nullable, so adding it is non-breaking:
+>
+> ```sql
+> ALTER TABLE audit_log ADD COLUMN tenant text;
+> CREATE INDEX idx_audit_log_tenant_ts ON audit_log (tenant, timestamp DESC);
+> ```
+>
+> DDL/migrations are owned by the consuming service — `navigator-auth` does not
+> manage them.
 
 ### MySQL / MariaDB
 
@@ -160,9 +212,13 @@ AUDIT_PARAMSTYLE=qmark           # tell AuditLog which placeholder to emit
 
 - `resolve_paramstyle(backend, default)` — maps a driver name to its dialect.
 - `build_placeholders(paramstyle, count)` — renders the bind placeholders.
-- `build_insert(table, record, paramstyle)` — assembles the `(sql, values)`
+- `build_insert(table, record, paramstyle)` — assembles the `INSERT` `(sql, values)`
   pair.
+- `build_select(table, conditions, paramstyle, *, order_by, descending, limit,
+  offset)` — assembles the `SELECT` `(sql, values)` pair for `query()`; each
+  condition is a `(column, operator, value)` triple with the value bound as a
+  placeholder, `LIMIT`/`OFFSET` inlined as coerced ints.
 
-These three helpers are pure and unit-tested in
+These helpers are pure and unit-tested in
 `tests/test_audit_backends.py` (no live database required). Driver I/O is
 exercised in integration tests.
