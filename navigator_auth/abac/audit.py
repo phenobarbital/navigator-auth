@@ -17,8 +17,19 @@ SQL           any other asyncdb driver (``pg``,           parameterised ``INSERT
 
 SQL drivers differ only in their parameter placeholder dialect. That mapping is
 resolved by :func:`resolve_paramstyle` and the statement is assembled by the
-pure helpers :func:`build_placeholders` / :func:`build_insert`, which are unit
-tested independently of any live database.
+pure helpers :func:`build_placeholders` / :func:`build_insert` / :func:`build_select`,
+which are unit tested independently of any live database.
+
+Tenant scoping
+--------------
+Every record carries an optional ``tenant`` so a multi-tenant deployment can
+attribute — and, crucially, *read back* — audit entries per tenant.
+:meth:`AuditLog.log` accepts a keyword-only ``tenant`` and threads it to every
+write family (SQL column, document field, influx tag, logger message).
+:meth:`AuditLog.query` reads entries back and **always** constrains by tenant to
+prevent cross-tenant leakage. Structured ``query()`` is currently implemented
+for SQL backends only; other families remain write-only and ``query()`` returns
+an empty list with a warning (query the backing store directly).
 """
 from datetime import datetime, timezone
 import socket
@@ -109,8 +120,58 @@ def build_insert(table: str, record: dict, paramstyle: str) -> tuple[str, list]:
     return sql, values
 
 
-def _build_record(answer, status, user, host: str) -> dict:
-    """Build a flat audit record usable by db and influx backends."""
+def build_select(
+    table: str,
+    conditions: list,
+    paramstyle: str,
+    *,
+    order_by: str = None,
+    descending: bool = True,
+    limit: int = None,
+    offset: int = None,
+) -> tuple[str, list]:
+    """Assemble a parameterised ``SELECT`` from equality/range conditions.
+
+    Args:
+        table: Fully-qualified table name.
+        conditions: A list of ``(column, operator, value)`` triples, ANDed
+            together — e.g. ``[("tenant", "=", t), ("timestamp", ">=", since)]``.
+            The operator is a literal SQL comparison (``=``, ``>=``, ``<=``);
+            the value is always bound as a placeholder.
+        paramstyle: Placeholder dialect (see :func:`build_placeholders`).
+        order_by: Optional column to sort by.
+        descending: Sort direction when ``order_by`` is set.
+        limit: Optional ``LIMIT``. Coerced to ``int`` (defence against injection
+            since it is inlined, not bound).
+        offset: Optional ``OFFSET``. Coerced to ``int``.
+
+    Returns:
+        A ``(sql, values)`` tuple; ``values`` preserves condition order.
+    """
+    values = [value for (_col, _op, value) in conditions]
+    placeholders = build_placeholders(paramstyle, len(values))
+    where_parts = [
+        f"{col} {op} {ph}"
+        for (col, op, _value), ph in zip(conditions, placeholders)
+    ]
+    sql = f"SELECT * FROM {table}"
+    if where_parts:
+        sql += " WHERE " + " AND ".join(where_parts)
+    if order_by:
+        sql += f" ORDER BY {order_by} {'DESC' if descending else 'ASC'}"
+    if limit is not None:
+        sql += f" LIMIT {int(limit)}"
+    if offset:
+        sql += f" OFFSET {int(offset)}"
+    return sql, values
+
+
+def _build_record(answer, status, user, host: str, *, tenant: str = None) -> dict:
+    """Build a flat audit record usable by db and influx backends.
+
+    ``tenant`` is optional so existing PDP callers are unaffected; when
+    provided it is persisted as a first-class column/field for per-tenant reads.
+    """
     return {
         "timestamp": datetime.now(timezone.utc),
         "environment": ENVIRONMENT,
@@ -121,6 +182,7 @@ def _build_record(answer, status, user, host: str) -> dict:
         "rule": getattr(answer, "rule", None),
         "username": user.username if hasattr(user, "username") else str(user),
         "user_id": user.id if hasattr(user, "id") else None,
+        "tenant": tenant,
     }
 
 
@@ -212,24 +274,35 @@ class AuditLog:
     # Logging methods
     # ------------------------------------------------------------------
 
-    async def log(self, answer, status, user):
+    async def log(self, answer, status, user, *, tenant: str = None):
+        """Record an access decision.
+
+        Args:
+            answer: The PDP decision object (exposes ``response`` and ``rule``).
+            status: Decision status (e.g. ``"ALLOW"`` / ``"DENY"``).
+            user: The subject; ``username`` and ``id`` are read if present.
+            tenant: Optional tenant identifier persisted with the record so the
+                entry can later be read back per tenant via :meth:`query`.
+                Backwards-compatible: existing callers omit it.
+        """
         if self._family == "log":
-            self._log_to_logger(answer, status, user)
+            self._log_to_logger(answer, status, user, tenant=tenant)
             return
         if self._family == "timeseries":
-            await self._log_to_influx(answer, status, user)
+            await self._log_to_influx(answer, status, user, tenant=tenant)
         elif self._family == "document":
-            await self._log_to_document(answer, status, user)
+            await self._log_to_document(answer, status, user, tenant=tenant)
         else:  # sql
-            await self._log_to_db(answer, status, user)
+            await self._log_to_db(answer, status, user, tenant=tenant)
 
-    def _log_to_logger(self, answer, status, user):
+    def _log_to_logger(self, answer, status, user, *, tenant: str = None):
         username = user.username if hasattr(user, "username") else user
+        scope = f" [tenant={tenant}]" if tenant else ""
         logger.info(
-            f"Access {status} by: {answer.response} to user {username}"
+            f"Access {status} by: {answer.response} to user {username}{scope}"
         )
 
-    async def _log_to_influx(self, answer, status, user):
+    async def _log_to_influx(self, answer, status, user, *, tenant: str = None):
         from asyncdb.exceptions import DriverError
 
         async with await self._driver.connection() as conn:
@@ -247,30 +320,138 @@ class AuditLog:
                         "answer": str(answer),
                         "username": user.username if hasattr(user, "username") else str(user),
                         "user": user.id if hasattr(user, "id") else None,
+                        "tenant": tenant,
                     },
                 }
                 await conn.write(data, bucket=AUDIT_CREDENTIALS["bucket"])
             except (TypeError, AttributeError, ValueError, DriverError) as ex:
                 logger.error(f"InfluxDB: Error saving Audit Log: {ex}")
 
-    async def _log_to_document(self, answer, status, user):
+    async def _log_to_document(self, answer, status, user, *, tenant: str = None):
         """Insert the audit record as a document (e.g. MongoDB)."""
         from asyncdb.exceptions import DriverError
 
-        record = _build_record(answer, status, user, self.host)
+        record = _build_record(answer, status, user, self.host, tenant=tenant)
         async with await self._driver.connection() as conn:
             try:
                 await conn.insert(AUDIT_TABLE, record)
             except (TypeError, AttributeError, ValueError, DriverError) as ex:
                 logger.error(f"{self._backend}: Error saving Audit Log: {ex}")
 
-    async def _log_to_db(self, answer, status, user):
+    async def _log_to_db(self, answer, status, user, *, tenant: str = None):
         from asyncdb.exceptions import DriverError
 
-        record = _build_record(answer, status, user, self.host)
+        record = _build_record(answer, status, user, self.host, tenant=tenant)
         sql, values = build_insert(AUDIT_TABLE, record, self._paramstyle)
         async with await self._driver.connection() as conn:
             try:
                 await conn.execute(sql, *values)
             except (TypeError, AttributeError, ValueError, DriverError) as ex:
                 logger.error(f"{self._backend}: Error saving Audit Log: {ex}")
+
+    # ------------------------------------------------------------------
+    # Read / query API
+    # ------------------------------------------------------------------
+
+    async def query(
+        self,
+        *,
+        tenant: str,
+        user_id=None,
+        username: str = None,
+        status: str = None,
+        rule: str = None,
+        since: datetime = None,
+        until: datetime = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Read audit entries back, **always** constrained to one ``tenant``.
+
+        Structured querying is implemented for SQL backends. For the
+        ``timeseries`` (influx), ``document`` and ``log`` families this returns
+        an empty list and logs a warning — query those stores directly.
+
+        Args:
+            tenant: Required tenant scope. Every returned row belongs to it.
+            user_id / username / status / rule: Optional equality filters.
+            since / until: Optional inclusive ``timestamp`` range bounds.
+            limit / offset: Pagination (``LIMIT``/``OFFSET``).
+
+        Returns:
+            A list of record dicts (newest first), or ``[]`` on any driver error
+            or unsupported backend (best-effort, consistent with the write side).
+        """
+        if tenant is None:
+            raise ValueError("AuditLog.query() requires a 'tenant' scope.")
+        if self._family != "sql":
+            logger.warning(
+                f"AuditLog.query() is only supported for SQL backends; "
+                f"backend '{self._backend}' ({self._family}) is write-only. "
+                f"Query the backing store directly."
+            )
+            return []
+        return await self._query_db(
+            tenant=tenant,
+            user_id=user_id,
+            username=username,
+            status=status,
+            rule=rule,
+            since=since,
+            until=until,
+            limit=limit,
+            offset=offset,
+        )
+
+    @staticmethod
+    def _build_conditions(
+        *, tenant, user_id, username, status, rule, since, until
+    ) -> list:
+        """Assemble the WHERE conditions for :meth:`query` (tenant always first)."""
+        conditions = [("tenant", "=", tenant)]
+        if user_id is not None:
+            conditions.append(("user_id", "=", user_id))
+        if username is not None:
+            conditions.append(("username", "=", username))
+        if status is not None:
+            conditions.append(("status", "=", status))
+        if rule is not None:
+            conditions.append(("rule", "=", rule))
+        if since is not None:
+            conditions.append(("timestamp", ">=", since))
+        if until is not None:
+            conditions.append(("timestamp", "<=", until))
+        return conditions
+
+    async def _query_db(
+        self, *, tenant, user_id, username, status, rule, since, until, limit, offset
+    ) -> list[dict]:
+        from asyncdb.exceptions import DriverError
+
+        conditions = self._build_conditions(
+            tenant=tenant,
+            user_id=user_id,
+            username=username,
+            status=status,
+            rule=rule,
+            since=since,
+            until=until,
+        )
+        sql, values = build_select(
+            AUDIT_TABLE,
+            conditions,
+            self._paramstyle,
+            order_by="timestamp",
+            descending=True,
+            limit=limit,
+            offset=offset,
+        )
+        async with await self._driver.connection() as conn:
+            try:
+                result = await conn.fetch_all(sql, *values)
+            except (TypeError, AttributeError, ValueError, DriverError) as ex:
+                logger.error(f"{self._backend}: Error querying Audit Log: {ex}")
+                return []
+        if not result:
+            return []
+        return [dict(row) for row in result]
