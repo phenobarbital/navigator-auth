@@ -238,6 +238,16 @@ GEOIP_DATABASE = config.get(
     fallback="/etc/navigator/GeoLite2-Country.mmdb",
 )
 
+### Path to the MaxMind GeoLite2-City database (.mmdb) for IP->coordinate lookup.
+### Distinct from GEOIP_DATABASE (Country): only the City database carries
+### latitude/longitude. Used by ``authorizations._geoip.lookup_location`` as a
+### GPS-off fallback (cell/city granularity).
+GEOIP_CITY_DATABASE = config.get(
+    "GEOIP_CITY_DATABASE",
+    section="auth",
+    fallback="/etc/navigator/GeoLite2-City.mmdb",
+)
+
 ## Basic Authorization Middlewares
 AUTHORIZATION_MIDDLEWARES = ()
 
