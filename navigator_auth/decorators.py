@@ -233,6 +233,125 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
     return lambda handler: _apply_decorator(handler, _func_wrapper, _method_wrapper)
 
 
+SUPERUSER_GROUP = "superuser"
+
+
+def _check_superuser(userinfo: dict, user: object = None) -> bool:
+    """Return True if the user has superuser privileges.
+
+    Checks ``userinfo["superuser"]`` first, then falls back to group
+    membership (either ``userinfo["groups"]`` or ``user.groups``).
+    """
+    if userinfo.get("superuser") is True or userinfo.get("is_superuser") is True:
+        return True
+    if "groups" in userinfo:
+        if SUPERUSER_GROUP in userinfo["groups"]:
+            return True
+    if user is not None and hasattr(user, "groups"):
+        for g in user.groups:
+            name = getattr(g, "group", None) or getattr(g, "group_name", None)
+            if name == SUPERUSER_GROUP:
+                return True
+    return False
+
+
+def is_superuser(content_type: str = "application/json") -> Callable:
+    """Restrict the handler to superusers only.
+
+    A user is considered a superuser when ``userinfo["superuser"]`` (or
+    ``is_superuser``) is True **or** the user belongs to the ``superuser``
+    group.
+    """
+
+    def _wrap_function(handler):
+        @wraps(handler)
+        async def _wrapped(*args, **kwargs) -> web.StreamResponse:
+            request = args[-1]
+            if request is None:
+                raise ValueError(f"web.Request was not found in arguments. {handler!s}")
+            if request.method == hdrs.METH_OPTIONS:
+                return await handler(*args, **kwargs)
+            if not request.get("authenticated", False):
+                raise web.HTTPUnauthorized(
+                    reason="Access Denied",
+                    headers={
+                        hdrs.CONTENT_TYPE: content_type,
+                        hdrs.CONNECTION: "keep-alive",
+                    },
+                )
+            session = await get_session(request)
+            userinfo = {}
+            user = None
+            try:
+                userinfo = session[AUTH_SESSION_OBJECT]
+            except KeyError:
+                pass
+            try:
+                user = session.decode("user")
+            except (AttributeError, TypeError, RuntimeError):
+                pass
+            if _check_superuser(userinfo, user):
+                return await handler(*args, **kwargs)
+            raise web.HTTPForbidden(
+                reason="Superuser privileges required",
+                headers={
+                    hdrs.CONTENT_TYPE: content_type,
+                    hdrs.CONNECTION: "keep-alive",
+                },
+            )
+        return _wrapped
+
+    def _wrap_method(method):
+        @wraps(method)
+        async def _wrapped(self, *args, **kwargs) -> web.StreamResponse:
+            request = self.request
+            if request is None:
+                raise ValueError(f"web.Request was not found in arguments. {method!s}")
+            if request.method == hdrs.METH_OPTIONS:
+                return await method(self, *args, **kwargs)
+            if not request.get("authenticated", False):
+                raise web.HTTPUnauthorized(
+                    reason="Access Denied",
+                    headers={
+                        hdrs.CONTENT_TYPE: content_type,
+                        hdrs.CONNECTION: "keep-alive",
+                    },
+                )
+            session = await get_session(request)
+            userinfo = {}
+            user = None
+            try:
+                userinfo = session[AUTH_SESSION_OBJECT]
+            except KeyError:
+                pass
+            try:
+                user = session.decode("user")
+            except (AttributeError, TypeError, RuntimeError):
+                pass
+            if _check_superuser(userinfo, user):
+                return await method(self, *args, **kwargs)
+            raise web.HTTPForbidden(
+                reason="Superuser privileges required",
+                headers={
+                    hdrs.CONTENT_TYPE: content_type,
+                    hdrs.CONNECTION: "keep-alive",
+                },
+            )
+        return _wrapped
+
+    def _wrapper(handler: F):
+        if inspect.isclass(handler) and issubclass(handler, AbstractView):
+            for method_name in hdrs.METH_ALL:
+                method = getattr(handler, method_name.lower(), None)
+                if method is not None and callable(method):
+                    setattr(handler, method_name.lower(), _wrap_method(method))
+            return handler
+        else:
+            return _wrap_function(handler)
+
+    return _wrapper
+
+
 def allowed_groups(groups: list, content_type: str = "application/json") -> Callable:
     """Restrict the Handler only to certain Groups in User information."""
 
