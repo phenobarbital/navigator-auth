@@ -45,6 +45,19 @@ class TemplateParser:
             searchpath=[str(self.path)]
         )
         # initialize the environment
+        #
+        # NOTE: templates are resolved at runtime via the FileSystemLoader
+        # below; the environment is never fed back a precompiled bytecode
+        # bundle (there is no ModuleLoader). A previous implementation called
+        # ``env.compile_templates(target=self.path/".compiled", zip="deflated")``
+        # here, which wrote an ~800 KB zip that nothing ever read. Worse, the
+        # target lived *inside* the loader's search path, so on any subsequent
+        # init the loader listed ``.compiled`` as a template and tried to read
+        # the binary zip as UTF-8 (UnicodeDecodeError); and under a multi-worker
+        # server (e.g. gunicorn -w N) the workers raced writing/reading that one
+        # shared file, tearing it mid-write. Both failures were re-raised
+        # fatally, crash-looping the process. The precompile step is pure dead
+        # work, so it is removed entirely.
         try:
             self.env: Optional[Environment] = Environment(
                 loader=templateLoader, **self.config
