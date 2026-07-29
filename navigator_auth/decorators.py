@@ -244,8 +244,13 @@ def _check_superuser(userinfo: dict, user: object = None) -> bool:
     """
     if userinfo.get("superuser") is True or userinfo.get("is_superuser") is True:
         return True
-    if "groups" in userinfo:
-        if SUPERUSER_GROUP in userinfo["groups"]:
+    groups = userinfo.get("groups")
+    # Membership only on a real collection: `in` on a str is SUBSTRING
+    # matching, so an unguarded test would grant superuser to any value
+    # merely containing the word (e.g. groups="ex_superuser_revoked"),
+    # and raise TypeError on groups=None.
+    if isinstance(groups, (list, tuple, set, frozenset)):
+        if SUPERUSER_GROUP in groups:
             return True
     if user is not None and hasattr(user, "groups"):
         for g in user.groups:
@@ -385,7 +390,10 @@ def allowed_groups(groups: list, content_type: str = "application/json") -> Call
                 try:
                     userinfo = session[AUTH_SESSION_OBJECT]
                 except KeyError:
-                    member = False
+                    # `userinfo` must be bound: the check below dereferences it,
+                    # and an unbound name here turned a missing session object
+                    # into an UnboundLocalError (500) instead of a clean deny.
+                    userinfo = {}
                 if "groups" in userinfo:
                     member = bool(not set(userinfo["groups"]).isdisjoint(groups))
                 else:
