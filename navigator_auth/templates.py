@@ -46,16 +46,8 @@ class TemplateParser:
         )
         # initialize the environment
         try:
-            # TODO: check the bug ,encoding='ANSI'
             self.env: Optional[Environment] = Environment(
                 loader=templateLoader, **self.config
-            )
-            # compiled_path = BytesIO()
-            compiled_path = str(
-                self.path.joinpath(".compiled")
-            )
-            self.env.compile_templates(
-                target=compiled_path, zip="deflated"
             )
         except Exception as err:
             raise RuntimeError(
