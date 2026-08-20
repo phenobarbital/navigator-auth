@@ -106,9 +106,17 @@ def user_session() -> Callable[[F], F]:
                 user = None
             if not user and request.get("user"):
                 user = request.get("user")
+            # Use middleware-attached user if available.
+            if not user and hasattr(request, "user") and request.user is not None:
+                user = request.user
             request["session"] = session
             _attach_vault_to_request(request, session)
-            if hasattr(args[0], "session"):
+            # Attach session and user to the request, as _method_wrapper does;
+            # a middleware-attached user must never be replaced with None.
+            request.session = session
+            if user is not None:
+                request.user = user
+            if args[0] is not request and hasattr(args[0], "session"):
                 args[0].session = session
                 args[0].user = user
             return await handler(*args, session=session, user=user, **kwargs)
