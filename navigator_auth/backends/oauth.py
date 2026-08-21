@@ -19,16 +19,15 @@ class OauthAuth(ExternalAuth):
     _external_auth: bool = True
 
     @abstractmethod
-    async def get_credentials(self, request: web.Request):
-        pass
+    async def get_credentials(self, request: web.Request, redirect_uri: str):
+        """Build the authorize-endpoint query string for the login flow."""
 
     async def authenticate(self, request: web.Request):
         """Authenticate, refresh or return the user credentials."""
         try:
-            domain_url = self.get_domain(request)
-            self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
+            redirect_uri = self.get_redirect_uri(request)
             # Build the URL
-            params = await self.get_credentials(request)
+            params = await self.get_credentials(request, redirect_uri)
             url = self.prepare_url(self.authorize_uri, params)
             # Step A: redirect
             return self.redirect(url)
