@@ -29,6 +29,7 @@ from .authorizations import (
 )
 from .authorizations._client_ip import get_client_ip
 from .vault.integration import load_vault_for_session, setup_vault_tables, VAULT_SESSION_KEY
+from .identity.migrations import setup_identity_columns
 from .backends.idp import IdentityProvider
 from .conf import (
     AUTH_EXCLUDE_LIST_KEY,
@@ -133,6 +134,7 @@ class AuthHandler:
         # Create vault tables if they don't exist (non-blocking)
         if "authdb" in app:
             await setup_vault_tables(app["authdb"])
+            await setup_identity_columns(app["authdb"])
         # Re-hydrate exclude-provider paths after each startup (FEAT-241 M2):
         for provider in self._exclude_providers:
             try:
