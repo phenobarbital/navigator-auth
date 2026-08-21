@@ -77,11 +77,31 @@ class AuthHandler:
     app: web.Application = None
     secure_cookies: bool = True
 
-    def __init__(self, app_name: str = "auth", secure_cookies: bool = True, **kwargs) -> None:
+    def __init__(
+        self,
+        app_name: str = "auth",
+        secure_cookies: bool = True,
+        enable_authdb: bool = True,
+        **kwargs,
+    ) -> None:
+        """AuthHandler.
+
+        Args:
+            app_name: key under which this handler is registered on the app.
+            secure_cookies: enable secure session cookies.
+            enable_authdb: when False, the PostgreSQL ``authdb`` pool is not
+                configured on the application. Useful for deployments (and for
+                the bundled examples) that only use storage-less backends
+                — in-memory / Redis OAuth2 client storage plus a custom
+                IdentityProvider — and therefore have no auth database.
+                Backends that do need ``app["authdb"]`` will fail at request
+                time, exactly as they do today when the pool is missing.
+        """
         self.name: str = app_name
         self.backends: dict = {}
         self._session = None
         self.secure_cookies = secure_cookies
+        self.enable_authdb = enable_authdb
         if "scheme" in kwargs:
             self.auth_scheme = kwargs["scheme"]
         else:
@@ -579,13 +599,18 @@ class AuthHandler:
                 reason=f"Error creating Redis connection: {ex}"
             ) from ex
         ## getting Database Connection:
-        try:
-            pool = PostgresStorage(driver="pg", dsn=default_dsn)
-            pool.configure(self.app)  # pylint: disable=E1123
-        except RuntimeError as ex:
-            raise web.HTTPServerError(
-                reason=f"Error creating Database connection: {ex}"
-            ) from ex
+        if self.enable_authdb:
+            try:
+                pool = PostgresStorage(driver="pg", dsn=default_dsn)
+                pool.configure(self.app)  # pylint: disable=E1123
+            except RuntimeError as ex:
+                raise web.HTTPServerError(
+                    reason=f"Error creating Database connection: {ex}"
+                ) from ex
+        else:
+            logging.warning(
+                "Auth: 'authdb' PostgreSQL pool disabled (enable_authdb=False)."
+            )
         # startup operations over extension backend
         self.app.on_startup.append(self.auth_startup)
         # cleanup operations over Auth backend
@@ -885,6 +910,31 @@ class AuthHandler:
             return True
         return False  # Assuming no authentication match by default
 
+    async def _token_is_revoked(self, payload: dict) -> bool:
+        """Return True when this token's ``jti`` was revoked (RFC 7009).
+
+        OAuth2 access tokens are self-contained JWTs, so revoking one only
+        marks its ``jti`` in the provider's access-token storage. Without this
+        check a revoked token would keep passing ``auth_middleware`` until it
+        expires. Only tokens that actually carry a ``jti`` (i.e. OAuth2 ones)
+        cost a storage lookup.
+        """
+        jti = payload.get("jti") if payload else None
+        if not jti:
+            return False
+        for backend in self.backends.values():
+            storage = getattr(backend, "access_token_storage", None)
+            if storage is None:
+                continue
+            try:
+                if await storage.is_revoked(jti):
+                    return True
+            except Exception as exc:  # pylint: disable=W0703
+                self.logger.warning(
+                    f"Auth Middleware: unable to check revocation of jti={jti}: {exc}"
+                )
+        return False
+
     @web.middleware
     async def auth_middleware(
         self,
@@ -902,7 +952,7 @@ class AuthHandler:
                 try:
                     token = await self._idp.get_payload(request)
                     _, payload = self._idp.decode_token(code=token)
-                    if payload:
+                    if payload and not await self._token_is_revoked(payload):
                         session = await get_session(request, payload, new=False)
                         if session:
                             user = await self.get_session_user(session)
@@ -922,6 +972,14 @@ class AuthHandler:
         except AuthExpired as err:
             self.logger.error(f"Auth Middleware: Credentials expired: {err}")
             raise self.Unauthorized(reason=err.message, exception=err) from err
+        except AuthException as err:
+            # Malformed / unsigned / undecodable token: this is a rejected
+            # credential (401), not a server error (it used to escape here and
+            # surface as a 500).
+            self.logger.error(f"Auth Middleware: Invalid credentials: {err}")
+            raise self.Unauthorized(reason=err.message, exception=err) from err
+        if payload and await self._token_is_revoked(payload):
+            raise self.Unauthorized(reason="Token has been revoked")
         try:
             if payload:
                 ## check if user has a session:
@@ -1010,7 +1068,13 @@ class AuthHandler:
                     except Exception as ex:  # pylint: disable=W0703
                         self.logger.error(f"Missing User Object from Session: {ex}")
             elif self.secure_cookies is True:
-                session = await get_session(request, None, new=False)
+                # No bearer token: fall back to the session cookie. This branch
+                # exists precisely for cookie-based sessions (the browser leg of
+                # the OAuth2 flow, e.g. /oauth2/consent), so the cookie must be
+                # honoured -- get_session() ignores it by default.
+                session = await get_session(
+                    request, None, new=False, ignore_cookie=False
+                )
                 if not session:
                     raise self.Unauthorized(
                         reason="There is no Session or Authentication is missing"

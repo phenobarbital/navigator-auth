@@ -1,4 +1,5 @@
 import time
+from typing import Union
 from datetime import datetime, timedelta, timezone
 import hashlib
 import base64
@@ -314,13 +315,38 @@ class IdentityProvider:
         refresh_token = self.create_refresh_token()
         return jwt_token, refresh_token, exp, self.scheme
 
-    def decode_token(self, code: str, issuer: str = None):
+    def decode_token(
+        self,
+        code: str,
+        issuer: str = None,
+        audience: Union[str, list[str], None] = None,
+    ):
+        """Decode a Navigator JWT.
+
+        Args:
+            code: the raw token (optionally prefixed with ``<tenant>:``).
+            issuer: expected ``iss`` claim. When omitted, the issuer is *not*
+                verified (this used to be passed to PyJWT as an unsupported
+                ``iss=`` kwarg, which PyJWT silently ignored — and warns about
+                since 2.10, fatally under ``-W error``).
+            audience: expected ``aud`` claim. When omitted, the ``aud`` claim
+                is *not* verified.
+
+        Note:
+            ``create_token(audience=...)`` mints tokens carrying an ``aud``
+            claim (FEAT-093 TASK-029 uses ``'user'`` for 3LO access tokens and
+            ``'app'`` for client-credentials tokens). PyJWT rejects any token
+            with an ``aud`` claim when ``decode()`` is called without an
+            ``audience`` argument, which made every OAuth2 access token
+            undecodable by the auth middleware, ``/oauth2/userinfo``,
+            ``/oauth2/revoke`` and ``/oauth2/introspect``. Audience is a
+            token-class marker here, not a resource identifier, so validation
+            is opt-in: callers that care pass ``audience`` explicitly.
+        """
         payload = None
         tenant = None
         if not code:
             return [None, None]
-        if not issuer:
-            issuer = AUTH_TOKEN_ISSUER
         try:
             tenant, jwt_token = code.split(":")
         except (TypeError, ValueError, AttributeError):
@@ -333,7 +359,12 @@ class IdentityProvider:
                 jwt_token,
                 SECRET_KEY,
                 algorithms=[AUTH_JWT_ALGORITHM],
-                iss=issuer,
+                issuer=issuer,
+                audience=audience,
+                options={
+                    "verify_aud": audience is not None,
+                    "verify_iss": issuer is not None,
+                },
                 leeway=30,
             )
             self.logger.debug(f"Decoded Token: {payload!s}")

@@ -150,8 +150,15 @@ AUTH_LOGIN_FAILED_URI = config.get("AUTH_LOGIN_FAILED_URI", fallback="/login")
 AUTH_LOGOUT_REDIRECT_URI = config.get("AUTH_LOGOUT_REDIRECT_URI", fallback="/oauth2/logout/complete")
 AUTH_SUCCESSFUL_CALLBACKS = ()
 
-# Enable authentication backends
-AUTHENTICATION_BACKENDS = ()
+# Enable authentication backends.
+# Comma-separated list of dotted paths, e.g.:
+#   AUTHENTICATION_BACKENDS="navigator_auth.backends.BasicAuth,navigator_auth.backends.oauth2.Oauth2Provider"
+# Defaults to an empty tuple (no backend enabled) to preserve previous behaviour.
+AUTHENTICATION_BACKENDS = tuple(
+    e.strip()
+    for e in config.get("AUTHENTICATION_BACKENDS", fallback="").split(",")
+    if e.strip()
+)
 
 # No permissive fallback: if AUTHORIZATION_BACKENDS is unset/empty, no authz
 # backend is active (requests must pass authentication, not a host allowlist).
