@@ -5,12 +5,13 @@ Tests cover:
 - Non-excluded path still fails authentication
 - Glob pattern matching
 - allow_anonymous bypass
+- allow_anonymous decorates the handler (bare and factory form)
 """
 import fnmatch
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from aiohttp import web
-from navigator_auth.decorators import is_authenticated
+from navigator_auth.decorators import allow_anonymous, is_authenticated
 from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY
 
 
@@ -131,3 +132,59 @@ class TestIsAuthenticatedExcludeList:
         )
         response = await decorated(request)
         assert response.status == 200
+
+
+class TestAllowAnonymous:
+    """@allow_anonymous must return the decorated handler, not a decorator."""
+
+    @pytest.mark.asyncio
+    async def test_bare_form_returns_the_handler(self):
+        """@allow_anonymous (no parentheses) is directly callable by aiohttp."""
+        handler = AsyncMock(return_value=web.Response(status=200))
+        decorated = allow_anonymous(handler)
+        request = _make_request("/api/v1/public", exclude_list=[])
+        response = await decorated(request)
+        assert isinstance(response, web.Response)
+        assert response.status == 200
+        assert request.allow_anonymous is True
+        handler.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_factory_form_returns_the_handler(self):
+        """@allow_anonymous() must work too: it returns the decorator."""
+        handler = AsyncMock(return_value=web.Response(status=200))
+        decorated = allow_anonymous()(handler)
+        request = _make_request("/api/v1/public", exclude_list=[])
+        response = await decorated(request)
+        assert response.status == 200
+        assert request.allow_anonymous is True
+        handler.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_bypasses_is_authenticated(self):
+        """Stacked on is_authenticated, an anonymous request reaches the handler."""
+        handler = AsyncMock(return_value=web.Response(status=200))
+        decorated = allow_anonymous(is_authenticated()(handler))
+        request = _make_request("/api/v1/public", exclude_list=[])
+        request.allow_anonymous = False  # set by the decorator, not beforehand
+        response = await decorated(request)
+        assert response.status == 200
+        handler.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_class_based_view(self):
+        """On a view, every HTTP method is wrapped and the class is returned."""
+        request = _make_request("/api/v1/public", exclude_list=[])
+
+        class PublicView:
+            def __init__(self, request):
+                self.request = request
+
+            async def get(self):
+                return web.Response(status=200)
+
+        decorated = allow_anonymous(PublicView)
+        assert decorated is PublicView
+        response = await decorated(request).get()
+        assert response.status == 200
+        assert request.allow_anonymous is True

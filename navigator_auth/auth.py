@@ -83,6 +83,8 @@ class AuthHandler:
         app_name: str = "auth",
         secure_cookies: bool = True,
         enable_authdb: bool = True,
+        backends: Iterable[str] = None,
+        authz_backends: Iterable[str] = None,
         **kwargs,
     ) -> None:
         """AuthHandler.
@@ -97,12 +99,26 @@ class AuthHandler:
                 IdentityProvider — and therefore have no auth database.
                 Backends that do need ``app["authdb"]`` will fail at request
                 time, exactly as they do today when the pool is missing.
+            backends: explicit list of dotted paths to the authentication
+                backends to enable, overriding ``AUTHENTICATION_BACKENDS``.
+                Use it when the enabled backends are a property of the
+                application itself (the bundled examples do) and must not
+                depend on the ``settings.settings`` module that
+                ``navigator_auth.conf`` imports last.
+            authz_backends: explicit list of *authorization* backends,
+                overriding ``AUTHORIZATION_BACKENDS``. Pass an empty list to
+                require authentication for every request: an inherited
+                ``allow_hosts`` / ``allowed_ips`` backend authorizes requests
+                (skipping authentication entirely) by Host or client IP alone.
         """
         self.name: str = app_name
         self.backends: dict = {}
         self._session = None
         self.secure_cookies = secure_cookies
         self.enable_authdb = enable_authdb
+        self._backend_list: tuple = (
+            tuple(backends) if backends is not None else AUTHENTICATION_BACKENDS
+        )
         if "scheme" in kwargs:
             self.auth_scheme = kwargs["scheme"]
         else:
@@ -127,7 +143,9 @@ class AuthHandler:
         # get the authentication backends (all of the list)
         self.backends = self.get_backends(**args)
         self._middlewares = self.get_authorization_middlewares(AUTHORIZATION_MIDDLEWARES)
-        self._authz_backends: list = self.get_authorization_backends(AUTHORIZATION_BACKENDS)
+        self._authz_backends: list = self.get_authorization_backends(
+            AUTHORIZATION_BACKENDS if authz_backends is None else authz_backends
+        )
         # TODO: Session Support with parametrization (other backends):
         self._session = SessionHandler(storage="redis", use_cookies=self.secure_cookies)  # pylint: disable=E1123
         ### JSON encoder
@@ -209,7 +227,7 @@ class AuthHandler:
 
     def get_backends(self, **kwargs):
         backends = {}
-        for backend in AUTHENTICATION_BACKENDS:
+        for backend in self._backend_list:
             try:
                 parts = backend.split(".")
                 bkname = parts[-1]

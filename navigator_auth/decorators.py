@@ -57,17 +57,29 @@ def _apply_decorator(handler, func_wrapper, method_wrapper):
                 setattr(handler, method_name.lower(), method_wrapper(method))
         return handler
 
-def allow_anonymous(handler: F) -> F:
+def allow_anonymous(handler: F = None) -> F:
     """
     Marks a handler or view as allowing anonymous access, bypassing authentication.
-    This decorator adds the request path to the exclude list so that authentication
-    is not required for this endpoint.
+    The decorated handler flags the request with ``allow_anonymous``, which
+    ``@is_authenticated()`` and ``AuthHandler.verify_exceptions()`` honour, so
+    no authentication is required for this endpoint.
+
+    Usable both bare and called, as the sibling decorators in this module are
+    factories and the parenthesised form is an easy mistake to make::
+
+        @allow_anonymous
+        async def public(request): ...
+
+        @allow_anonymous()
+        async def also_public(request): ...
 
     Args:
-        handler: The handler function or class-based view to decorate.
+        handler: The handler function or class-based view to decorate. When
+            omitted (``@allow_anonymous()``) the decorator itself is returned.
 
     Returns:
-        Callable: The decorated handler that allows anonymous access.
+        Callable: The decorated handler that allows anonymous access, or the
+        decorator when used as a factory.
     """
     def _func_wrapper(handler):
         @wraps(handler)
@@ -87,7 +99,12 @@ def allow_anonymous(handler: F) -> F:
             return await method(self, *args, **kwargs)
         return wrapped_method
 
-    return lambda handler: _apply_decorator(handler, _func_wrapper, _method_wrapper)
+    def _decorate(handler: F) -> F:
+        return _apply_decorator(handler, _func_wrapper, _method_wrapper)
+
+    # bare usage (@allow_anonymous) decorates now; factory usage
+    # (@allow_anonymous()) gets the decorator back to apply itself.
+    return _decorate if handler is None else _decorate(handler)
 
 def user_session() -> Callable[[F], F]:
     """Decorator for attaching a User from session to the request and view instance."""
@@ -187,11 +204,20 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
                 userdata = None
                 for _, backend in auth.backends.items():
                     try:
-                        userdata = await backend.authenticate(request)
-                        if userdata:
-                            break
+                        result = await backend.authenticate(request)
                     except AuthException:
-                        pass
+                        continue
+                    if not result:
+                        continue
+                    if isinstance(result, web.StreamResponse):
+                        # External backends answer an unauthenticated request
+                        # with a redirect to their IdP: that is the start of an
+                        # interactive login, not a credential. Never let it pass
+                        # as "authenticated" (the handler would then run with no
+                        # user at all); try the next backend instead.
+                        continue
+                    userdata = result
+                    break
                 if userdata:
                     return await handler(*args, **kwargs)
                 else:
@@ -221,11 +247,17 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
             userdata = None
             for _, backend in auth.backends.items():
                 try:
-                    userdata = await backend.authenticate(request)
-                    if userdata:
-                        break
+                    result = await backend.authenticate(request)
                 except AuthException:
-                    pass
+                    continue
+                if not result:
+                    continue
+                if isinstance(result, web.StreamResponse):
+                    # a redirect to an external IdP is not a credential:
+                    # see the note in the function-based wrapper above.
+                    continue
+                userdata = result
+                break
             if userdata:
                 return await method(self, *args, **kwargs)
             else:
