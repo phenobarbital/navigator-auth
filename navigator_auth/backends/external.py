@@ -4,6 +4,7 @@ Abstract Model to any Oauth2 or external Auth Support.
 """
 
 import asyncio
+import secrets
 from typing import Any, Optional
 from collections.abc import Callable
 import importlib
@@ -13,12 +14,15 @@ from requests.models import PreparedRequest
 import aiohttp
 from aiohttp import web, hdrs
 from aiohttp.client import ClientTimeout, ClientSession
+import redis.asyncio as aioredis
 from datamodel.exceptions import ValidationError
 from navconfig.logging import logging
 from navigator_session import AUTH_SESSION_OBJECT
 from ..identities import AuthUser
 from ..libs.json import json_decoder
 from ..exceptions import UserNotFound, AuthException
+from ..identity.flow_store import IdentityFlowStore
+from ..identity.types import TokenResponse
 from ..conf import (
     AUTH_LOGIN_FAILED_URI,
     AUTH_REDIRECT_URI,
@@ -29,6 +33,7 @@ from ..conf import (
     AUTH_OAUTH2_REDIRECT_URL,
     AUTH_EXCLUDE_LIST_KEY,
     USER_MAPPING,
+    REDIS_AUTH_URL,
 )
 from .abstract import BaseAuthBackend
 
@@ -102,11 +107,11 @@ class ExternalAuth(BaseAuthBackend):
             name=f"{self._service_name}_alt_login",
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(f"/auth/{self._service_name}/login")
-        # finish login (callback)
+        # finish login (callback); dispatches identity-link flows first
         router.add_route(
             "GET",
             f"/auth/{self._service_name}/callback/",
-            self.auth_callback,
+            self._auth_callback_dispatch,
             name=f"{self._service_name}_complete_login",
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(f"/auth/{self._service_name}/callback/")
@@ -145,9 +150,19 @@ class ExternalAuth(BaseAuthBackend):
         ## Using Startup for detecting and loading functions.
         if self._success_callbacks:
             self.get_successful_callbacks()
+        # Redis pool for per-request OAuth2 flow state (login and
+        # identity-link); backends are singletons, so per-flow data
+        # must live here instead of on the instance.
+        self._pool = aioredis.ConnectionPool.from_url(
+            REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
+        )
+        self._flow_store = IdentityFlowStore(self._pool)
 
     async def on_cleanup(self, app: web.Application):
-        pass
+        try:
+            await self._pool.disconnect(inuse_connections=True)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(err)
 
     def get_successful_callbacks(self) -> list[Callable]:
         fns = []
@@ -192,6 +207,15 @@ class ExternalAuth(BaseAuthBackend):
         domain_url = f"{PREFERRED_AUTH_SCHEME}://{uri.netloc}"
         logging.debug(f"DOMAIN: {domain_url}")
         return domain_url
+
+    def get_redirect_uri(self, request: web.Request) -> str:
+        """Compute this backend's callback URL for the current host.
+
+        Unlike the legacy ``self.redirect_uri`` template mutation, this is
+        a pure function: safe under concurrency and multi-host deployments.
+        """
+        domain_url = self.get_domain(request)
+        return f"{domain_url}/auth/{self._service_name}/callback/"
 
     def get_finish_redirect_url(self, request: web.Request) -> str:
         domain_url = self.get_domain(request)
@@ -288,6 +312,181 @@ class ExternalAuth(BaseAuthBackend):
     @abstractmethod
     async def auth_callback(self, request: web.Request):
         """auth_callback, Finish method for authentication."""
+
+    async def _auth_callback_dispatch(self, request: web.Request):
+        """Route the provider callback to the right flow.
+
+        The identity-link flow shares the provider's registered callback
+        URL with the login flow; a single-use Redis record keyed by the
+        OAuth2 ``state`` distinguishes them.
+        """
+        state = request.rel_url.query.get("state")
+        if state:
+            flow = await self._flow_store.consume_link(state)
+            if flow:
+                return await self.finish_identity_link(request, flow)
+        return await self.auth_callback(request)
+
+    # ------------------------------------------------------------------
+    # Identity-link flow: a logged-in user authorizes this backend's
+    # provider once more, purely to capture a credential (bearer +
+    # refresh token) that is stored ciphered in auth.user_identities.
+    # ------------------------------------------------------------------
+
+    def identity_scopes(self) -> list:
+        """Scopes requested when linking an identity. Per-backend."""
+        return []
+
+    def identity_authorize_params(self) -> dict:
+        """Extra authorize-endpoint params for the identity flow
+        (e.g. Google's access_type=offline&prompt=consent)."""
+        return {}
+
+    def get_identity_client(self) -> tuple:
+        """(client_id, client_secret) used by the generic identity flow."""
+        raise AuthException(
+            f"{self._service_name}: identity flow is not supported"
+        )
+
+    def get_identity_userid(self, userinfo: dict) -> Optional[str]:
+        """Stable external account id from the provider's userinfo."""
+        for key in (self.userid_attribute, "sub", "id"):
+            value = userinfo.get(key)
+            if value is not None:
+                return str(value)
+        return None
+
+    async def authorize_identity(
+        self, request: web.Request, user_id: Any, finish_redirect: str
+    ):
+        """Start the identity-link authorization flow (302 to provider)."""
+        from ..conf import IDENTITY_LINK_TTL
+
+        state = secrets.token_urlsafe(32)
+        redirect_uri = self.get_redirect_uri(request)
+        client_id, _ = self.get_identity_client()
+        scopes = self.identity_scopes()
+        payload = {
+            "user_id": user_id,
+            "provider": self._service_name,
+            "flow": "identity_link",
+            "finish_redirect": finish_redirect,
+            "redirect_uri": redirect_uri,
+            "extra": {},
+        }
+        await self._flow_store.start_link(state, payload, ttl=IDENTITY_LINK_TTL)
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "scope": " ".join(scopes),
+            "state": state,
+            "response_type": "code",
+            **self.identity_authorize_params(),
+        }
+        return self.redirect(self.prepare_url(self.authorize_uri, params))
+
+    async def exchange_code_for_tokens(
+        self, request: web.Request, flow: dict
+    ) -> "TokenResponse":
+        """Generic authorization_code exchange for the identity flow."""
+        code = request.rel_url.query.get("code")
+        if not code:
+            raise AuthException(
+                f"{self._service_name}: no authorization code in callback"
+            )
+        client_id, client_secret = self.get_identity_client()
+        payload = await self.token_request(
+            self._token_uri,
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": flow["redirect_uri"],
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+        )
+        return TokenResponse.from_oauth_response(
+            payload, scopes=self.identity_scopes()
+        )
+
+    async def refresh_identity_tokens(
+        self, refresh_token: str
+    ) -> "TokenResponse":
+        """Generic refresh_token grant; providers may rotate the token."""
+        client_id, client_secret = self.get_identity_client()
+        payload = await self.token_request(
+            self._token_uri,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+        )
+        token = TokenResponse.from_oauth_response(payload)
+        if not token.refresh_token:
+            # provider did not rotate: keep using the current one
+            token.refresh_token = refresh_token
+        return token
+
+    async def get_identity_userinfo(self, token: "TokenResponse") -> dict:
+        """Provider userinfo for the linked account (best-effort)."""
+        try:
+            data = await self.get(
+                self.userinfo_uri,
+                token=token.access_token,
+                token_type=token.token_type or "Bearer",
+            )
+            return data or {}
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(
+                f"{self._service_name}: cannot fetch identity userinfo: {err}"
+            )
+            return {}
+
+    async def finish_identity_link(self, request: web.Request, flow: dict):
+        """Provider callback for an identity-link flow: exchange the code,
+        cipher and store the credential, cache it in the Session Vault."""
+        from ..identity.store import IdentityStore, cache_credential
+
+        if error := request.rel_url.query.get("error"):
+            desc = request.rel_url.query.get("error_description", "")
+            return self.failed_redirect(
+                request, error="IDENTITY_LINK_DENIED", message=f"{error}: {desc}"
+            )
+        try:
+            token = await self.exchange_code_for_tokens(request, flow)
+            userinfo = await self.get_identity_userinfo(token)
+            if not token.provider_user_id:
+                token.provider_user_id = self.get_identity_userid(userinfo)
+            store = IdentityStore(request.app["authdb"])
+            await store.save_linked_identity(
+                flow["user_id"], self._service_name, token, userinfo
+            )
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.exception(
+                f"{self._service_name}: identity link failed: {err}"
+            )
+            return self.failed_redirect(
+                request,
+                error="IDENTITY_LINK_FAILED",
+                message=f"Identity link failed: {err}",
+            )
+        # best-effort: cache the decrypted credential in the session vault
+        try:
+            from navigator_session import get_session
+
+            session = await get_session(request, new=False)
+            if session:
+                await cache_credential(
+                    session, self._service_name, token.credential()
+                )
+        except Exception:  # pylint: disable=W0703
+            pass
+        redirect_to = flow.get("finish_redirect") or "/"
+        if not bool(urlparse(redirect_to).netloc):
+            redirect_to = f"{self.get_domain(request)}{redirect_to}"
+        return web.HTTPFound(redirect_to)
 
     @abstractmethod
     async def logout(self, request: web.Request):
@@ -459,6 +658,52 @@ class ExternalAuth(BaseAuthBackend):
                     except ValueError:
                         response = resp
                     raise AuthException(f"{response}")
+
+    async def token_request(
+        self,
+        url: str,
+        data: dict,
+        headers: Optional[dict] = None,
+        auth: Optional[aiohttp.BasicAuth] = None,
+    ) -> dict:
+        """POST to an OAuth2 token endpoint and return the parsed response.
+
+        Sends a form-encoded body with ``Accept: application/json`` (GitHub
+        replies form-encoded without it) and normalizes a form-encoded reply
+        into a flat dict. Raises AuthException with the provider's error
+        payload on HTTP errors or an ``error`` key in the body.
+        """
+        _headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        if headers:
+            _headers.update(headers)
+        timeout = ClientTimeout(total=120)
+        async with ClientSession(trust_env=True) as client:
+            async with client.post(
+                url,
+                data=data,
+                headers=_headers,
+                auth=auth,
+                timeout=timeout,
+            ) as response:
+                raw = await response.read()
+                try:
+                    payload = json_decoder(raw)
+                except (ValueError, AuthException):
+                    parsed = parse_qs(raw.decode("utf-8"))
+                    payload = {
+                        k: v[0] if len(v) == 1 else v
+                        for k, v in parsed.items()
+                    }
+                if not isinstance(payload, dict):
+                    payload = {"response": payload}
+                if response.status >= 400 or "error" in payload:
+                    raise AuthException(
+                        f"{self._service_name}: Token request failed: {payload}"
+                    )
+                return payload
 
     async def create_external_user(self, userdata: dict) -> Callable:
         """create_external_user.

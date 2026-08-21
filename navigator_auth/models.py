@@ -91,6 +91,19 @@ class UserIdentity(Model):
     auth_provider: str = Column(required=False)
     auth_data: Optional[dict] = Column(required=False, repr=False)
     attributes: Optional[dict] = Column(required=False, repr=False)
+    # Identity Vault: linked external credential (tokens ciphered with the
+    # Session Vault master keys — never exposed through the API).
+    provider_user_id: str = Column(required=False, repr=False)
+    scopes: Optional[list] = Column(
+        required=False, default_factory=list, repr=False
+    )
+    access_token: bytes = Column(required=False, repr=False)
+    refresh_token: bytes = Column(required=False, repr=False)
+    token_type: str = Column(required=False, repr=False)
+    expires_at: datetime = Column(required=False, repr=False)
+    refreshed_at: datetime = Column(required=False, repr=False)
+    enabled: bool = Column(required=False, default=True)
+    key_version: int = Column(required=False, repr=False)
     created_at: datetime = Column(
         required=False, default=datetime.now, repr=False
     )

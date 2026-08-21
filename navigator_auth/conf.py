@@ -489,6 +489,7 @@ OKTA_CLIENT_ID = config.get("OKTA_CLIENT_ID")
 OKTA_CLIENT_SECRET = config.get("OKTA_CLIENT_SECRET")
 OKTA_DOMAIN = config.get("OKTA_DOMAIN")
 OKTA_APP_NAME = config.get("OKTA_APP_NAME")
+OKTA_AUDIENCE = config.get("OKTA_AUDIENCE", fallback="api://default")
 
 # GOOGLE
 GOOGLE_CLIENT_ID = config.get("GOOGLE_CLIENT_ID")
@@ -502,6 +503,60 @@ GOOGLE_API_SCOPES = [
 ## Github Support:
 GITHUB_CLIENT_ID = config.get("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = config.get("GITHUB_CLIENT_SECRET")
+GITHUB_SCOPES = [
+    s.strip()
+    for s in config.get("GITHUB_SCOPES", fallback="user:email").split(",")
+]
+
+## Odoo Support (OCA oauth_provider module):
+# Endpoint paths are configurable because OCA deployments vary.
+ODOO_DOMAIN = config.get("ODOO_DOMAIN")
+ODOO_CLIENT_ID = config.get("ODOO_CLIENT_ID")
+ODOO_CLIENT_SECRET = config.get("ODOO_CLIENT_SECRET")
+ODOO_AUTHORIZE_PATH = config.get("ODOO_AUTHORIZE_PATH", fallback="/oauth2/auth")
+ODOO_TOKEN_PATH = config.get("ODOO_TOKEN_PATH", fallback="/oauth2/token")
+ODOO_USERINFO_PATH = config.get(
+    "ODOO_USERINFO_PATH", fallback="/oauth2/userinfo"
+)
+ODOO_SCOPES = [
+    s.strip()
+    for s in config.get("ODOO_SCOPES", fallback="profile,email").split(",")
+]
+
+## Identity Vault (linked external credentials)
+IDENTITY_LINK_TTL = config.getint("IDENTITY_LINK_TTL", fallback=600)
+IDENTITY_CACHE_TTL = config.getint("IDENTITY_CACHE_TTL", fallback=3600)
+IDENTITY_REFRESH_LEEWAY = config.getint("IDENTITY_REFRESH_LEEWAY", fallback=120)
+# Scopes requested when linking an identity (offline/refresh access included
+# where the provider needs it explicitly):
+AZURE_IDENTITY_SCOPES = [
+    s.strip()
+    for s in config.get("AZURE_IDENTITY_SCOPES", fallback="User.Read").split(",")
+]
+GOOGLE_IDENTITY_SCOPES = [
+    s.strip()
+    for s in config.get(
+        "GOOGLE_IDENTITY_SCOPES", fallback="openid,email,profile"
+    ).split(",")
+]
+GITHUB_IDENTITY_SCOPES = [
+    s.strip()
+    for s in config.get(
+        "GITHUB_IDENTITY_SCOPES", fallback="read:user,user:email"
+    ).split(",")
+]
+OKTA_IDENTITY_SCOPES = [
+    s.strip()
+    for s in config.get(
+        "OKTA_IDENTITY_SCOPES", fallback="openid,email,profile,offline_access"
+    ).split(",")
+]
+ODOO_IDENTITY_SCOPES = [
+    s.strip()
+    for s in config.get(
+        "ODOO_IDENTITY_SCOPES", fallback=",".join(ODOO_SCOPES)
+    ).split(",")
+]
 
 ## Audit Backend
 # this is the backend for saving Authentication information

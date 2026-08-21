@@ -12,8 +12,23 @@ from ..conf import (
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_API_SCOPES,
+    GOOGLE_IDENTITY_SCOPES,
 )
 from .external import ExternalAuth
+
+GOOGLE_LOGIN_FLOW = "google_auth_{state}"
+
+# OIDC userinfo claim mapping (Google returns `sub`, not `id`):
+GOOGLE_MAPPING = {
+    "id": "sub",
+    "email": "email",
+    "username": "email",
+    "first_name": "given_name",
+    "last_name": "family_name",
+    "display_name": "name",
+    "given_name": "given_name",
+    "family_name": "family_name",
+}
 
 
 class GoogleAuth(ExternalAuth):
@@ -25,17 +40,42 @@ class GoogleAuth(ExternalAuth):
     user_attribute: str = "user"
     username_attribute: str = "email"
     pwd_atrribute: str = "password"
+    userid_attribute: str = "id"
     _service_name: str = "google"
     _description: str = "Google Apps Authentication"
 
+    def __init__(
+        self,
+        user_attribute: str = None,
+        userid_attribute: str = None,
+        password_attribute: str = None,
+        **kwargs,
+    ):
+        super().__init__(
+            user_attribute, userid_attribute, password_attribute, **kwargs
+        )
+        self.user_mapping = GOOGLE_MAPPING
+
     def configure(self, app):
         super(GoogleAuth, self).configure(app)
-        # TODO: build the callback URL and append to routes
+        # base client credentials; redirect_uri is computed per request.
         self._credentials = {
             "client_id": GOOGLE_CLIENT_ID,
             "client_secret": GOOGLE_CLIENT_SECRET,
             "scopes": GOOGLE_API_SCOPES,
-            "redirect_uri": self.redirect_uri,
+        }
+        # raw OAuth2 endpoints, used by the identity-link flow
+        # (the login flow goes through aiogoogle's OIDC client):
+        self.authorize_uri = "https://accounts.google.com/o/oauth2/v2/auth"
+        self._token_uri = "https://oauth2.googleapis.com/token"
+        self.userinfo_uri = "https://openidconnect.googleapis.com/v1/userinfo"
+
+    def get_google_credentials(self, redirect_uri: str, scopes: list = None) -> dict:
+        """Per-request client credentials dict for aiogoogle."""
+        return {
+            **self._credentials,
+            "scopes": scopes or GOOGLE_API_SCOPES,
+            "redirect_uri": redirect_uri,
         }
 
     async def get_payload(self, request):
@@ -43,23 +83,25 @@ class GoogleAuth(ExternalAuth):
 
     async def authenticate(self, request: web.Request):
         """Authenticate, refresh or return the user credentials."""
-        self._state = (
-            create_secret()
-        )  # Shouldn't be a global or a hardcoded variable. should be tied to a session or a user and shouldn't be used more than once
-        self._nonce = (
-            create_secret()
-        )  # Shouldn't be a global or a hardcoded variable. should be tied to a session or a user and shouldn't be used more than once
-        domain_url = self.get_domain(request)
-        self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
+        # per-request state and nonce, stored server-side: backends are
+        # process-wide singletons, so per-login data cannot live on `self`.
+        state = create_secret()
+        nonce = create_secret()
+        redirect_uri = self.get_redirect_uri(request)
         ## getting Finish Redirect URL
         self.get_finish_redirect_url(request)
-        self._credentials["redirect_uri"] = self.redirect_uri
-        self.google = Aiogoogle(client_creds=self._credentials)
-        if self.google.openid_connect.is_ready(self._credentials):
-            uri = self.google.openid_connect.authorization_url(
-                client_creds=self._credentials,
-                state=self._state,
-                nonce=self._nonce,
+        credentials = self.get_google_credentials(redirect_uri)
+        await self._flow_store.set(
+            GOOGLE_LOGIN_FLOW.format(state=state),
+            {"nonce": nonce, "redirect_uri": redirect_uri},
+            ttl=600,
+        )
+        google = Aiogoogle(client_creds=credentials)
+        if google.openid_connect.is_ready(credentials):
+            uri = google.openid_connect.authorization_url(
+                client_creds=credentials,
+                state=state,
+                nonce=nonce,
                 access_type="offline",
                 include_granted_scopes=True,
                 # login_hint=user,
@@ -71,39 +113,41 @@ class GoogleAuth(ExternalAuth):
             raise AuthException("Client doesn't have info for Authentication")
 
     async def auth_callback(self, request: web.Request):
-        try:
-            if request.query.get("error"):
-                error = {
-                    "error": request.query.get("error"),
-                    "error_description": request.query.get("error_description"),
-                }
-                # logging.exception(f"Google Login Error: {err}, {err.state}")
-                response = {"message": "Google Login Error", **error}
-                return web.json_response(response, status=403)
-        except Exception as err:
-            logging.exception(f"Google Login Error: {err}, {err.state}")
-            response = {"message": f"Google Login Error: {err}, {err.state}"}
-            return web.json_response(response, status=501)
+        if error := request.query.get("error"):
+            response = {
+                "message": "Google Login Error",
+                "error": error,
+                "error_description": request.query.get("error_description"),
+            }
+            return web.json_response(response, status=403)
         if code := request.query.get("code"):
             state = request.query.get("state")
-            if state != self._state:
+            flow = None
+            if state:
+                flow = await self._flow_store.getdel(
+                    GOOGLE_LOGIN_FLOW.format(state=state)
+                )
+            if not flow:
                 response = {
                     "message": "Something wrong with Authentication State",
                     "error": "Authenticate Error",
                 }
                 return web.json_response(response, status=403)
-            user_creds = await self.google.openid_connect.build_user_creds(
+            credentials = self.get_google_credentials(flow["redirect_uri"])
+            google = Aiogoogle(client_creds=credentials)
+            user_creds = await google.openid_connect.build_user_creds(
                 grant=code,
-                client_creds=self._credentials,
-                nonce=self._nonce,
-                verify=False,
+                client_creds=credentials,
+                nonce=flow["nonce"],
+                verify=True,
             )
-            # print(user_creds)
-            userdata = await self.google.openid_connect.get_user_info(user_creds)
+            userdata = await google.openid_connect.get_user_info(user_creds)
             try:
-                uid = userdata["id"]
                 access_token = user_creds["id_token_jwt"]
-                userdata[self.session_key_property] = uid
+                # GOOGLE_MAPPING maps the OIDC `sub` claim onto `id`:
+                userdata, uid = self.build_user_info(
+                    userdata, access_token, mapping=self.user_mapping
+                )
                 data = await self.validate_user_info(request, uid, userdata, access_token)
                 return self.home_redirect(request, token=data["token"], token_type="Bearer")
             except Exception as err:
@@ -115,6 +159,25 @@ class GoogleAuth(ExternalAuth):
                 "error": "Authenticate Error",
             }
             return web.json_response(response, status=403)
+
+    ### Identity-link flow
+    def identity_scopes(self) -> list:
+        return GOOGLE_IDENTITY_SCOPES
+
+    def identity_authorize_params(self) -> dict:
+        # Google only re-issues a refresh token on explicit consent:
+        return {
+            "access_type": "offline",
+            "prompt": "consent",
+            "include_granted_scopes": "true",
+        }
+
+    def get_identity_client(self) -> tuple:
+        return (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+
+    def get_identity_userid(self, userinfo: dict):
+        value = userinfo.get("sub", userinfo.get("id"))
+        return str(value) if value is not None else None
 
     async def logout(self, request):
         pass

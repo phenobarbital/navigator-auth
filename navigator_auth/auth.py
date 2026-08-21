@@ -29,6 +29,7 @@ from .authorizations import (
 )
 from .authorizations._client_ip import get_client_ip
 from .vault.integration import load_vault_for_session, setup_vault_tables, VAULT_SESSION_KEY
+from .identity.migrations import setup_identity_columns
 from .backends.idp import IdentityProvider
 from .conf import (
     AUTH_EXCLUDE_LIST_KEY,
@@ -153,6 +154,7 @@ class AuthHandler:
         # Create vault tables if they don't exist (non-blocking)
         if "authdb" in app:
             await setup_vault_tables(app["authdb"])
+            await setup_identity_columns(app["authdb"])
         # Re-hydrate exclude-provider paths after each startup (FEAT-241 M2):
         for provider in self._exclude_providers:
             try:
@@ -317,6 +319,25 @@ class AuthHandler:
 
     def get_token_backend(self):
         return self.backends["TrocToken"]
+
+    def get_external_backend(self, service: str):
+        """Resolve an enabled external (OAuth2/OpenID) backend by its
+        service slug (e.g. 'azure', 'google', 'github', 'okta', 'odoo')."""
+        for backend in self.backends.values():
+            if (
+                getattr(backend, "_external_auth", False)
+                and getattr(backend, "_service_name", None) == service
+            ):
+                return backend
+        return None
+
+    def external_backends(self) -> list:
+        """All enabled external backends (for the identities UI)."""
+        return [
+            backend
+            for backend in self.backends.values()
+            if getattr(backend, "_external_auth", False)
+        ]
 
     async def _login_token(self, request: web.Request):
         # Using TrocToken or other backend on list with auth

@@ -31,7 +31,6 @@ from ..conf import (
     AZURE_AD_SERVER,
     AUTH_EXCLUDE_LIST_KEY,
     ADFS_MAPPING,
-    REDIS_AUTH_URL,
     ADFS_SAML_RELAY_RP,
 )
 from .jwksutils import get_public_key
@@ -112,16 +111,8 @@ class ADFSAuth(ExternalAuth):
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements."""
-        ## loading redis connection:
+        ## redis connection pool is created by ExternalAuth.on_startup
         await super(ADFSAuth, self).on_startup(app)
-        self._pool = aioredis.ConnectionPool.from_url(REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
-
-    async def on_cleanup(self, app: web.Application):
-        """Used to cleanup and shutdown any db connection."""
-        try:
-            await self._pool.disconnect(inuse_connections=True)
-        except Exception as e:  # pylint: disable=W0703
-            pass
 
     async def authenticate(self, request: web.Request):
         """Authenticate, refresh or return the user credentials.

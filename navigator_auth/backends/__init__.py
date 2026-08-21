@@ -13,6 +13,7 @@ from .okta import OktaAuth
 from .adfs import ADFSAuth
 from .azure import AzureAuth
 from .github import GithubAuth
+from .odoo import OdooAuth
 from .oauth2 import Oauth2Provider
 from .saml import SAMLAuth
 
@@ -29,6 +30,7 @@ __all__ = (
     "ADFSAuth",
     "AzureAuth",
     "GithubAuth",
+    "OdooAuth",
     "Oauth2Provider",
     "SAMLAuth",
 )

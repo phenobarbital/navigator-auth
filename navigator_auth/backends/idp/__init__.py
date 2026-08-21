@@ -78,6 +78,46 @@ class IdentityProvider:
         except ImportError as ex:
             raise ConfigError(f"Auth: Error loading Auth User Model {model}: {ex}") from ex
 
+    async def get_user_identity_credential(
+        self, user_id, provider: str, *, auto_refresh: bool = True
+    ) -> dict:
+        """Serve a user's linked-identity credential to in-process consumers.
+
+        Decrypts the stored credential for (user, provider) from
+        auth.user_identities; when it is expired/expiring and a refresh
+        token is stored, refreshes it against the provider first.
+
+        Raises UserNotFound when no identity is linked; ConfigError when
+        the identity cipher is not configured.
+        """
+        from ...identity.crypto import IdentityCipher
+        from ...identity.store import IdentityStore
+        from ...conf import IDENTITY_REFRESH_LEEWAY
+
+        db = self.app["authdb"]
+        store = IdentityStore(db, cipher=IdentityCipher())
+        identity = await store.get_by_provider(user_id, provider)
+        if not identity:
+            raise UserNotFound(
+                f"No linked identity for user {user_id} on {provider}"
+            )
+        token = store.decrypt_credential(identity)
+        if auto_refresh and token.is_expiring(leeway=IDENTITY_REFRESH_LEEWAY):
+            if not token.refresh_token:
+                raise ConfigError(
+                    f"{provider}: credential expired and no refresh token "
+                    "stored; the identity must be re-linked."
+                )
+            auth = self.app.get("auth")
+            backend = auth.get_external_backend(provider) if auth else None
+            if backend is None:
+                raise ConfigError(
+                    f"{provider}: backend not enabled; cannot refresh."
+                )
+            token = await backend.refresh_identity_tokens(token.refresh_token)
+            await store.update_tokens(identity, token)
+        return token.credential()
+
     async def user_from_id(self, uid: int) -> Identity:
         """Getting User Object."""
         user = None

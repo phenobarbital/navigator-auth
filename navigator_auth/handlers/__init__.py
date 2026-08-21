@@ -4,6 +4,12 @@ from .permissions import PermissionHandler
 from .users import UserManager, UserSession
 from .groups import GroupManager, GroupPermissionManager, UserGroupManager
 from .userattrs import UserAccountHandler, UserIdentityHandler
+from .user_identities import (
+    UserIdentitiesHandler,
+    IdentityCredentialHandler,
+    IdentityLinkHandler,
+    IdentitiesManageView,
+)
 from .partners import PartnerKeyHandler
 from .recovery import ForgotPasswordHandler, ResetPasswordHandler
 from .config import ConfigHandler
@@ -55,6 +61,31 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     router.add_view(
         r"/api/v1/user_identity{meta:\:?.*}", UserIdentityHandler,
         name="api_auth_useridentity"
+    )
+    ### Identity Vault (linked external credentials):
+    # literal segments must be registered before the {identity_id} route.
+    router.add_view(
+        "/api/v1/user/identities/manage", IdentitiesManageView,
+        name="api_user_identities_manage"
+    )
+    router.add_view(
+        r"/api/v1/user/identities/link/{provider:[a-z0-9_]+}",
+        IdentityLinkHandler,
+        name="api_user_identities_link"
+    )
+    router.add_view(
+        r"/api/v1/user/identities/{provider:[a-z0-9_]+}/credential",
+        IdentityCredentialHandler,
+        name="api_user_identity_credential"
+    )
+    router.add_view(
+        r"/api/v1/user/identities/{identity_id:[0-9a-fA-F-]{36}}",
+        UserIdentitiesHandler,
+        name="api_user_identities_id"
+    )
+    router.add_view(
+        "/api/v1/user/identities", UserIdentitiesHandler,
+        name="api_user_identities"
     )
     ### User Session Methods:
     usr = UserSession()

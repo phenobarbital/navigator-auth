@@ -2,7 +2,7 @@ import logging
 from aiohttp import web
 from aiohttp_cors import CorsViewMixin
 from navigator_session import get_session
-from navigator_auth.vault import VAULT_SESSION_KEY, load_vault_for_session
+from navigator_auth.vault import VAULT_SESSION_KEY, get_session_vault
 from navigator_auth.responses import JSONResponse
 from navigator_auth.decorators import user_session
 from navigator_auth.libs.json import json_encoder
@@ -12,9 +12,11 @@ logger = logging.getLogger("navigator.vault")
 
 def _json_error(status: int, message: str):
     """Raise an HTTP exception with a JSON body."""
-    raise web.HTTPException(
+    exc_class = type(
+        "JSONHTTPError", (web.HTTPException,), {"status_code": status}
+    )
+    raise exc_class(
         text=json_encoder({"error": message}),
-        status=status,
         content_type="application/json",
     )
 
@@ -28,30 +30,22 @@ class VaultView(web.View, CorsViewMixin):
 
     async def _get_vault(self, session):
         """Helper to get the vault from session, or load it on demand."""
-        vault = session.get(VAULT_SESSION_KEY)
-        if vault is not None:
-            return vault
-
         # Extract user_id from the user object set by @user_session decorator
         user = getattr(self, "user", None)
         if isinstance(user, dict):
             user_id = user.get("user_id")
         else:
             user_id = getattr(user, "user_id", None)
-        if not user_id:
+        if not user_id and session.get(VAULT_SESSION_KEY) is None:
             _json_error(401, "User ID not found for vault access.")
-
-        db_pool = self.request.app.get("authdb")
-        redis = self.request.app.get("redis")
-        if not db_pool:
+        if not self.request.app.get("authdb") and session.get(VAULT_SESSION_KEY) is None:
             _json_error(500, "Database pool not configured.")
 
         try:
-            vault = await load_vault_for_session(
-                session, user_id=user_id, db_pool=db_pool, redis=redis
+            vault = await get_session_vault(
+                self.request, session, user_id=user_id
             )
             if vault:
-                session[VAULT_SESSION_KEY] = vault
                 return vault
         except Exception:
             logger.exception(
