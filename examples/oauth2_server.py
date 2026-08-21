@@ -12,6 +12,10 @@ FEAT-093 + FEAT-094 production-grade demonstration:
   - RFC 8628 Device Authorization Grant (nav_device_client — public, S256 PKCE required).
   - RFC 7662 Token Introspection (nav_resource_server — confidential).
 
+For a *runnable* browser walk-through of the 3LO flow (PKCE, consent, token
+exchange and a protected endpoint) see ``examples/oauth2_3lo_server.py``; this
+file focuses on the client registrations and the raw endpoint contracts.
+
 Run with:
     python examples/oauth2_server.py
 
@@ -22,9 +26,13 @@ Device Grant flow described below.
 import os
 
 # Set Environment Variables BEFORE importing navigator_auth or navconfig
-os.environ["NAV_AUTHENTICATION_BACKENDS"] = "navigator_auth.backends.oauth2.Oauth2Provider"
-os.environ["NAV_OAUTH2_CLIENT_STORAGE"] = "memory"
-os.environ["NAV_API_HOST"] = "localhost"
+# navconfig reads these names verbatim -- the old "NAV_" prefix was never
+# looked up, so the app started with zero authentication backends.
+os.environ.setdefault(
+    "AUTHENTICATION_BACKENDS", "navigator_auth.backends.oauth2.Oauth2Provider"
+)
+os.environ.setdefault("OAUTH2_CLIENT_STORAGE", "memory")
+os.environ.setdefault("API_HOST", "localhost")
 
 import logging
 from aiohttp import web

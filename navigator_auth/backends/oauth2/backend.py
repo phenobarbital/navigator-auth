@@ -66,7 +66,15 @@ from ...conf import (
     OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS,
     OAUTH_DEVICE_LOCKOUT_TTL,
 )
-from navigator_session import get_session
+from navigator_session import (
+    get_session,
+    SESSION_ID,
+)
+from navigator_session.conf import (
+    SESSION_OBJECT,
+    SESSION_REQUEST_KEY,
+    SESSION_STORAGE,
+)
 from ...exceptions import (
     FailedAuth,
     UserNotFound,
@@ -346,6 +354,110 @@ class Oauth2Provider(BaseAuthBackend):
             self.logger.warning(f"Could not decode session user: {e}")
         return None
 
+    # ------------------------------------------------------------------
+    # Session binding
+    # ------------------------------------------------------------------
+    #
+    # navigator-auth resolves the current user from a *server-side session*:
+    # ``AuthHandler.auth_middleware`` decodes the bearer JWT and then loads the
+    # session it points at, and ``@user_session()`` reads the user out of that
+    # session. An OAuth2 access token therefore has to be bound to a session,
+    # exactly like the token BasicAuth mints in ``remember()``; otherwise every
+    # request carrying a perfectly valid 3LO token is rejected because no
+    # session can be resolved from its claims.
+
+    def _session_storage(self, request: web.Request):
+        """Return the configured session storage (or None when unavailable)."""
+        storage = request.get(SESSION_STORAGE)
+        if storage is not None:
+            return storage
+        try:
+            return request.app["auth"].session.storage
+        except (KeyError, AttributeError, TypeError):
+            return None
+
+    async def _create_user_session(
+        self,
+        request: web.Request,
+        user: Any,
+        response: web.StreamResponse = None,
+    ):
+        """Create (or refresh) the server-side session for a resource owner.
+
+        The session is keyed by the user's identity, so the interactive login
+        and any token minted for that same user share one session — the same
+        one-session-per-user model the other backends use.
+
+        Args:
+            request: the current request.
+            user: the authenticated user object.
+            response: when given, the session cookie is written on it (needed
+                for the browser leg: ``/oauth2/login`` -> ``/oauth2/authorize``).
+
+        Returns:
+            The ``SessionData`` object, or None when no storage is configured.
+        """
+        storage = self._session_storage(request)
+        if storage is None:
+            self.logger.error("Oauth2: no session storage configured.")
+            return None
+        try:
+            identity = user[self.username_attribute]
+        except (KeyError, TypeError):
+            identity = getattr(user, self.username_attribute, None)
+        if not identity:
+            self.logger.error("Oauth2: cannot resolve the user identity for a session.")
+            return None
+        identity = str(identity)
+        try:
+            user.is_authenticated = True
+        except (AttributeError, TypeError):
+            pass
+        # Resolve the session purely from the identity: a stale session id left
+        # on the request (e.g. a cookie from another user) must not be reused.
+        for key in (SESSION_ID, SESSION_OBJECT, SESSION_REQUEST_KEY):
+            request.pop(key, None)
+        request[self.session_key_property] = identity
+        session_data = {
+            self.session_key_property: identity,
+            "user": jsonpickle.encode(user),
+        }
+        try:
+            session = await storage.new_session(request, session_data, response=response)
+        except TypeError:
+            # storages whose new_session() has no ``response`` argument.
+            session = await storage.new_session(request, session_data)
+        if not session:
+            self.logger.error("Oauth2: unable to create the User session.")
+            return None
+        return session
+
+    async def _token_session_claims(self, request: web.Request, user_id: int) -> dict:
+        """Bind a freshly issued access token to a session.
+
+        Returns the extra JWT claims (``id``, ``session_id``, ``username``)
+        that let ``auth_middleware`` resolve the session — and therefore the
+        user — from the bearer token alone. Returns an empty dict when the
+        resource owner cannot be resolved, leaving the token usable for
+        introspection-based resource servers.
+        """
+        try:
+            user = await self._idp.user_from_id(user_id)
+        except Exception as exc:  # pylint: disable=W0703
+            self.logger.warning(
+                f"Oauth2: cannot bind a session to the token for user_id={user_id}: {exc}"
+            )
+            return {}
+        session = await self._create_user_session(request, user)
+        if not session:
+            return {}
+        identity = str(user[self.username_attribute])
+        return {
+            self.session_key_property: identity,
+            self.session_id_property: session.session_id,
+            self.username_attribute: identity,
+        }
+
     async def validate_client(self, client_id, redirect_uri=None, request=None):
         """Fetch client by public uid; optionally validate redirect_uri (exact match)."""
         client = await self.client_storage.get_client(client_id, request=request)
@@ -585,34 +697,49 @@ class Oauth2Provider(BaseAuthBackend):
             except Exception as exc:
                 raise web.HTTPBadRequest(reason=f"Auth: Exception {exc}")
 
-            redirect_uri = data.get("redirect_uri")
-            client_id = data.get("client_id")
-            state = data.get("state")
-            scope = data.get("scope")
-
             location = request.app.router["nav_oauth2_authorize"].url_for()
             payload = {
-                "client_id": client_id,
-                "redirect_uri": redirect_uri,
-                "state": state,
-                "scope": scope,
-                "response_type": "code",
+                "client_id": data.get("client_id"),
+                "redirect_uri": data.get("redirect_uri"),
+                "response_type": data.get("response_type", "code") or "code",
             }
+            # Carry the rest of the authorization request across the login hop.
+            # PKCE in particular MUST survive it: dropping code_challenge here
+            # makes every public-client exchange fail later with
+            # "PKCE required for public clients".
+            for key in (
+                "state",
+                "scope",
+                "code_challenge",
+                "code_challenge_method",
+                "nonce",
+                "prompt",
+            ):
+                value = data.get(key)
+                if value:
+                    payload[key] = value
+            payload = {k: v for k, v in payload.items() if v is not None}
             url = location.with_query(**payload)
             response = web.HTTPFound(url)
 
+            # Establish the browser session for the resource owner: the
+            # session cookie is written on this redirect, and /oauth2/authorize
+            # reads it back on the next hop (see check_session).
             try:
-                auth_handler = request.app.get("auth")
-                if auth_handler:
-                    encoded_user = jsonpickle.encode(user)
-                    session_data = {"user": encoded_user}
-                    session = await auth_handler.session.storage.load_session(
-                        request, session_data, response=response, new=True
+                session = await self._create_user_session(
+                    request, user, response=response
+                )
+                if not session:
+                    raise web.HTTPBadRequest(
+                        reason="Auth: unable to create the User session."
                     )
-                    if session:
-                        session["user"] = encoded_user
-            except Exception as e:
+            except web.HTTPException:
+                raise
+            except Exception as e:  # pylint: disable=W0703
                 self.logger.error(f"Error creating session: {e}")
+                raise web.HTTPBadRequest(
+                    reason=f"Auth: unable to create the User session: {e}"
+                ) from e
 
             return response
         else:
@@ -733,6 +860,9 @@ class Oauth2Provider(BaseAuthBackend):
             "client_id": client.client_id,   # public uid in JWT claim
             "scope": scope,
             "jti": jti,
+            # Bind the token to a session so the auth middleware,
+            # @is_authenticated() and @user_session() can resolve the user.
+            **await self._token_session_claims(request, user_id),
         }
 
         # TASK-029: audience = 'user' for 3LO tokens.
@@ -905,6 +1035,8 @@ class Oauth2Provider(BaseAuthBackend):
             "client_id": client.client_id,
             "scope": scope,
             "jti": jti,
+            # Same session binding as the authorization_code grant.
+            **await self._token_session_claims(request, user_id),
         }
 
         # TASK-029: audience = 'user'.
@@ -1684,17 +1816,92 @@ class Oauth2Provider(BaseAuthBackend):
             return web.Response(status=200, text="Authorization approved. You may close this window.")
 
     def _get_request_user_id(self, request) -> Optional[int]:
-        """Extract user_id from the authenticated request."""
-        try:
-            userinfo = request.get("userinfo", {})
-            if isinstance(userinfo, dict):
-                uid = userinfo.get("user_id")
+        """Extract user_id from the authenticated request.
+
+        The auth middleware publishes the decoded token claims under
+        ``request["userdata"]`` (``"userinfo"`` is the ABAC context key, which
+        nothing sets on the request — reading only that made every call to the
+        grants API return 401). The authenticated user object is used as a
+        fallback for cookie-session requests, whose claims are not on the
+        request at all.
+        """
+        for source in (request.get("userdata"), request.get("userinfo")):
+            if isinstance(source, dict):
+                uid = source.get("user_id")
                 if uid:
+                    try:
+                        return int(uid)
+                    except (TypeError, ValueError):
+                        pass
+        user = request.get(self.user_property) or getattr(request, "user", None)
+        for attr in (self.userid_attribute, "user_id", "id"):
+            uid = getattr(user, attr, None) if user is not None else None
+            if uid:
+                try:
                     return int(uid)
-        except Exception:
-            pass
+                except (TypeError, ValueError):
+                    continue
         return None
 
+    # ------------------------------------------------------------------
+    # Resource-Server side: validating an issued access token
+    # ------------------------------------------------------------------
+
+    async def authenticate(self, request: web.Request):
+        """Validate the ``Authorization: Bearer <access_token>`` credential.
+
+        This is the Resource-Server half of the provider and the hook
+        ``@is_authenticated()`` calls when a request has not already been
+        authenticated by ``AuthHandler.auth_middleware``. On success the
+        user, the session and the token claims are attached to the request.
+
+        Returns:
+            The decoded token claims.
+
+        Raises:
+            InvalidAuth: no token, invalid/expired token, revoked ``jti``, or
+                a token that resolves to no session/user.
+        """
+        token = await self._idp.get_payload(request)
+        if not token:
+            raise InvalidAuth("Oauth2: Missing Bearer access token.", status=401)
+        _, payload = self._idp.decode_token(code=token)
+        if not payload:
+            raise InvalidAuth("Oauth2: Invalid access token.", status=401)
+
+        # Real-time revocation check (RFC 7009 marks the jti, not the JWT).
+        jti = payload.get("jti")
+        if jti and self.access_token_storage:
+            try:
+                if await self.access_token_storage.is_revoked(jti):
+                    raise InvalidAuth(
+                        "Oauth2: access token has been revoked.", status=401
+                    )
+            except InvalidAuth:
+                raise
+            except Exception as exc:  # pylint: disable=W0703
+                self.logger.warning(f"Oauth2: cannot check jti revocation: {exc}")
+
+        try:
+            session = await get_session(request, payload, new=False)
+        except Exception as exc:  # pylint: disable=W0703
+            self.logger.error(f"Oauth2: error loading the token session: {exc}")
+            session = None
+        if not session:
+            raise InvalidAuth(
+                "Oauth2: the access token is not bound to a valid session.",
+                status=401,
+            )
+        user = await self.get_session_user(session)
+        if not user:
+            raise InvalidAuth(
+                "Oauth2: cannot resolve the user of this access token.", status=401
+            )
+        request["userdata"] = payload
+        request["authenticated"] = True
+        self._set_user_request(request, user)
+        return payload
+
     async def check_credentials(self, request):
-        """Authentication and create a session."""
-        return True
+        """Check the credentials carried by the request (bearer access token)."""
+        return await self.authenticate(request)

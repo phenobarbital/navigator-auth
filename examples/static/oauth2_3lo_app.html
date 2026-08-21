@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>navigator-auth · OAuth2 3LO example</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg: #f4f6fb;
+            --card: #ffffff;
+            --ink: #1f2430;
+            --muted: #6b7280;
+            --line: #e3e7ef;
+            --accent: #1a73e8;
+            --ok: #157347;
+            --err: #b02a37;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #14161c;
+                --card: #1d212b;
+                --ink: #e8eaf0;
+                --muted: #9aa2b1;
+                --line: #2c3140;
+            }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 2rem 1rem 4rem;
+            background: var(--bg);
+            color: var(--ink);
+            font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+
+        main { max-width: 820px; margin: 0 auto; }
+
+        h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+
+        .lede { color: var(--muted); margin: 0 0 2rem; }
+
+        section {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 1.25rem;
+        }
+
+        h2 {
+            font-size: .8rem;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            color: var(--muted);
+            margin: 0 0 .75rem;
+        }
+
+        button {
+            font: inherit;
+            font-weight: 600;
+            padding: .55rem 1.1rem;
+            border: 0;
+            border-radius: 6px;
+            background: var(--accent);
+            color: #fff;
+            cursor: pointer;
+        }
+
+        button.secondary { background: #6b7280; }
+        button:disabled { opacity: .45; cursor: not-allowed; }
+
+        .row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+
+        pre {
+            background: rgba(127, 127, 127, .12);
+            border-radius: 6px;
+            padding: .8rem 1rem;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: .6rem 0 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; margin: 0; }
+        dt { color: var(--muted); }
+        dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-all; }
+
+        .status { font-weight: 600; }
+        .status.ok { color: var(--ok); }
+        .status.err { color: var(--err); }
+
+        ol { margin: 0; padding-left: 1.2rem; color: var(--muted); }
+        ol strong { color: var(--ink); }
+        code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+</head>
+
+<body>
+    <main>
+        <h1>navigator-auth · OAuth2 3LO</h1>
+        <p class="lede">
+            Authorization Code + PKCE against this same aiohttp server, then one
+            call to <code>GET /api/v1/me</code> — an endpoint protected with
+            <code>@is_authenticated()</code> and <code>@user_session()</code>.
+        </p>
+
+        <section>
+            <h2>The flow</h2>
+            <ol>
+                <li><strong>PKCE</strong> — the page generates a <code>code_verifier</code> and its S256 <code>code_challenge</code>.</li>
+                <li><strong>Authorize</strong> — the browser goes to <code>/oauth2/authorize</code>, logs in and approves the consent screen.</li>
+                <li><strong>Callback</strong> — navigator-auth redirects back here with <code>?code=…&amp;state=…</code>.</li>
+                <li><strong>Token</strong> — the page exchanges the code at <code>/oauth2/token</code> with the <code>code_verifier</code>.</li>
+                <li><strong>Resource</strong> — it calls <code>/api/v1/me</code> with <code>Authorization: Bearer …</code>.</li>
+            </ol>
+        </section>
+
+        <section>
+            <h2>1 · Login</h2>
+            <div class="row">
+                <button id="start">Start OAuth2 login</button>
+                <button id="reset" class="secondary">Reset</button>
+                <span id="login-status" class="status"></span>
+            </div>
+            <p id="creds" class="lede" style="margin:.9rem 0 0"></p>
+        </section>
+
+        <section>
+            <h2>2 · Token</h2>
+            <dl id="token-view"><dt>state</dt><dd id="tk-state">no token yet</dd></dl>
+            <pre id="token-raw" hidden></pre>
+        </section>
+
+        <section>
+            <h2>3 · Protected resource — <code>GET /api/v1/me</code></h2>
+            <div class="row">
+                <button id="call-me" disabled>Call /api/v1/me</button>
+                <button id="call-me-anon" class="secondary">Call it without credentials (expect 401)</button>
+                <button id="call-userinfo" class="secondary" disabled>Call /oauth2/userinfo</button>
+                <button id="refresh" class="secondary" disabled>Refresh token</button>
+                <span id="api-status" class="status"></span>
+            </div>
+            <pre id="api-out">—</pre>
+        </section>
+
+        <section>
+            <h2>4 · Consent grants — <code>/api/v1/oauth2/grants</code></h2>
+            <p class="lede" style="margin:0 0 .8rem">
+                navigator-auth remembers the consent you gave, so a second login
+                skips the approval screen. Revoke the grant to see it again.
+            </p>
+            <div class="row">
+                <button id="list-grants" class="secondary" disabled>List my grants</button>
+                <button id="revoke-grant" class="secondary" disabled>Revoke this app's grant</button>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const STORE = 'nav_oauth2_example';
+        let cfg = null;
+
+        // ---------- small helpers -------------------------------------------------
+        const $ = (id) => document.getElementById(id);
+
+        function b64url(bytes) {
+            return btoa(String.fromCharCode(...new Uint8Array(bytes)))
+                .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        function randomString(size = 32) {
+            return b64url(crypto.getRandomValues(new Uint8Array(size)));
+        }
+
+        async function s256(verifier) {
+            const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+            return b64url(digest);
+        }
+
+        const load = () => { try { return JSON.parse(sessionStorage.getItem(STORE)) || {}; } catch { return {}; } };
+        const save = (patch) => sessionStorage.setItem(STORE, JSON.stringify({ ...load(), ...patch }));
+        const clear = () => sessionStorage.removeItem(STORE);
+
+        function setStatus(el, text, ok) {
+            el.textContent = text;
+            el.className = 'status' + (ok === true ? ' ok' : ok === false ? ' err' : '');
+        }
+
+        function show(obj) {
+            $('api-out').textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+        }
+
+        // ---------- flow ----------------------------------------------------------
+        async function startLogin() {
+            const verifier = randomString(32);
+            const state = randomString(12);
+            save({ verifier, state });
+            const params = new URLSearchParams({
+                response_type: 'code',
+                client_id: cfg.client_id,
+                redirect_uri: cfg.redirect_uri,
+                scope: cfg.scope,
+                state,
+                code_challenge: await s256(verifier),
+                code_challenge_method: 'S256',
+            });
+            window.location.href = `${cfg.authorization_endpoint}?${params}`;
+        }
+
+        async function exchangeCode(code, state) {
+            const saved = load();
+            if (!saved.state || saved.state !== state) {
+                throw new Error('state mismatch — possible CSRF, aborting the exchange');
+            }
+            const body = new URLSearchParams({
+                grant_type: 'authorization_code',
+                code,
+                client_id: cfg.client_id,
+                redirect_uri: cfg.redirect_uri,
+                code_verifier: saved.verifier,   // PKCE proof
+            });
+            const res = await fetch(cfg.token_endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body,
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(`${data.error || res.status}: ${data.error_description || ''}`);
+            }
+            save({ token: data });
+            return data;
+        }
+
+        async function refreshToken() {
+            const { token } = load();
+            const body = new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: token.refresh_token,
+                client_id: cfg.client_id,
+            });
+            const res = await fetch(cfg.token_endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body,
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error_description || data.error || res.status);
+            save({ token: data });
+            renderToken(data);
+            setStatus($('api-status'), 'token refreshed (rotated)', true);
+            show(data);
+        }
+
+        async function callApi(url, withToken) {
+            const headers = {};
+            if (withToken) {
+                const { token } = load();
+                headers.Authorization = `${token.token_type} ${token.access_token}`;
+            }
+            // credentials:'omit' -> the browser session cookie left over from the
+            // consent screen is NOT sent, so "without the token" really means
+            // unauthenticated and returns 401 instead of falling back to it.
+            const res = await fetch(url, { headers, credentials: 'omit' });
+            const text = await res.text();
+            let parsed;
+            try { parsed = JSON.parse(text); } catch { parsed = text; }
+            setStatus($('api-status'), `${res.status} ${res.statusText}`, res.ok);
+            show(parsed);
+        }
+
+        // ---------- rendering -----------------------------------------------------
+        function renderToken(token) {
+            const view = $('token-view');
+            if (!token) {
+                view.innerHTML = '<dt>state</dt><dd id="tk-state">no token yet</dd>';
+                $('token-raw').hidden = true;
+                return;
+            }
+            const claims = JSON.parse(atob(token.access_token.split('.')[1]
+                .replace(/-/g, '+').replace(/_/g, '/')));
+            const rows = {
+                token_type: token.token_type,
+                expires_in: `${token.expires_in}s`,
+                scope: token.scope,
+                refresh_token: token.refresh_token ? `${token.refresh_token.slice(0, 12)}…` : '(none)',
+                'claims.user_id': claims.user_id,
+                'claims.client_id': claims.client_id,
+                'claims.aud': claims.aud,
+                'claims.jti': claims.jti,
+                'claims.session_id': claims.session_id,
+            };
+            view.innerHTML = Object.entries(rows)
+                .map(([k, v]) => `<dt>${k}</dt><dd>${v ?? '—'}</dd>`).join('');
+            const raw = $('token-raw');
+            raw.hidden = false;
+            raw.textContent = `access_token = ${token.access_token}`;
+            for (const id of ['call-me', 'call-userinfo', 'list-grants', 'revoke-grant']) {
+                $(id).disabled = false;
+            }
+            $('refresh').disabled = !token.refresh_token;
+        }
+
+        // ---------- boot ----------------------------------------------------------
+        (async function init() {
+            cfg = await (await fetch('/client-config')).json();
+            $('creds').textContent =
+                'Demo credentials: ' + cfg.demo_users.map(u => `${u.username} / ${u.password}`).join(' · ');
+
+            $('start').onclick = () => startLogin().catch(e => setStatus($('login-status'), e.message, false));
+            $('reset').onclick = () => { clear(); window.location.href = '/'; };
+            $('call-me').onclick = () => callApi(cfg.protected_endpoint, true);
+            $('call-me-anon').onclick = () => callApi(cfg.protected_endpoint, false);
+            $('call-userinfo').onclick = () => callApi(cfg.userinfo_endpoint, true);
+            $('refresh').onclick = () => refreshToken().catch(e => setStatus($('api-status'), e.message, false));
+            $('list-grants').onclick = () => callApi('/api/v1/oauth2/grants', true);
+            $('revoke-grant').onclick = async () => {
+                const { token } = load();
+                const res = await fetch(`/api/v1/oauth2/grants/${cfg.client_id}`, {
+                    method: 'DELETE',
+                    headers: { Authorization: `${token.token_type} ${token.access_token}` },
+                    credentials: 'omit',
+                });
+                setStatus($('api-status'), `${res.status} ${res.statusText}`, res.ok);
+                show(await res.text() || '(grant revoked — the next login asks for consent again)');
+            };
+
+            const qs = new URLSearchParams(window.location.search);
+            if (qs.get('error')) {
+                setStatus($('login-status'), `authorization denied: ${qs.get('error')}`, false);
+                history.replaceState({}, '', '/');
+                return;
+            }
+            if (qs.get('code')) {
+                setStatus($('login-status'), 'exchanging the authorization code…');
+                try {
+                    const token = await exchangeCode(qs.get('code'), qs.get('state'));
+                    history.replaceState({}, '', '/');
+                    setStatus($('login-status'), 'logged in — access token issued', true);
+                    renderToken(token);
+                } catch (err) {
+                    history.replaceState({}, '', '/');
+                    setStatus($('login-status'), err.message, false);
+                }
+                return;
+            }
+            const { token } = load();
+            if (token) {
+                setStatus($('login-status'), 'token restored from sessionStorage', true);
+                renderToken(token);
+            }
+        })();
+    </script>
+</body>
+
+</html>

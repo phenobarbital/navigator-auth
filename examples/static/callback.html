@@ -31,7 +31,7 @@
             const formData = new URLSearchParams();
             formData.append('grant_type', 'authorization_code');
             formData.append('code', code);
-            formData.append('client_id', '1');
+            formData.append('client_id', 'nav_public_client');
             formData.append('redirect_uri', 'http://localhost:5000/static/callback.html');
 
             try {

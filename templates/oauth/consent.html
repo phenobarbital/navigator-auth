@@ -34,7 +34,13 @@
             <input type="hidden" name="state" value="{{ state }}">
             <input type="hidden" name="scope" value="{{ scope }}">
             <input type="hidden" name="response_type" value="{{ response_type }}">
-            
+            <!-- PKCE: the challenge captured at /oauth2/authorize has to reach
+                 _issue_code(), otherwise the code is minted without it and the
+                 token exchange rejects the public client. -->
+            <input type="hidden" name="code_challenge" value="{{ code_challenge }}">
+            <input type="hidden" name="code_challenge_method" value="{{ code_challenge_method }}">
+            <input type="hidden" name="nonce" value="{{ nonce }}">
+
             <div class="actions">
                 <button type="submit" name="action" value="deny" class="btn-deny">Deny</button>
                 <button type="submit" name="action" value="approve" class="btn-approve">Approve</button>
