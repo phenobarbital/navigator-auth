@@ -13,6 +13,7 @@ from ..conf import (
     GITHUB_CLIENT_ID,
     GITHUB_CLIENT_SECRET,
     GITHUB_SCOPES,
+    GITHUB_IDENTITY_SCOPES,
 )
 from .oauth import OauthAuth
 
@@ -136,6 +137,21 @@ class GithubAuth(OauthAuth):
         except Exception as err:
             logging.exception(err)
             return self.redirect(uri=self.login_failed_uri)
+
+    ### Identity-link flow
+    def identity_scopes(self) -> list:
+        return GITHUB_IDENTITY_SCOPES
+
+    def identity_authorize_params(self) -> dict:
+        return {"allow_signup": "false"}
+
+    def get_identity_client(self) -> tuple:
+        return (GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET)
+
+    def get_identity_userid(self, userinfo: dict):
+        # numeric account id is stable even across username changes
+        value = userinfo.get("id", userinfo.get("login"))
+        return str(value) if value is not None else None
 
     async def logout(self, request):
         pass

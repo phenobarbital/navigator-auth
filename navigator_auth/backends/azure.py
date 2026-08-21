@@ -4,6 +4,7 @@ Description: Backend Authentication/Authorization using Microsoft authentication
 """
 
 import base64
+from typing import Optional
 import orjson
 from aiohttp import web
 import msal
@@ -12,6 +13,7 @@ from msal.authority import AuthorityBuilder, AZURE_PUBLIC
 from navconfig.logging import logging
 from navigator_session import get_session
 from ..exceptions import AuthException, UserNotFound
+from ..identity.types import TokenResponse
 from ..conf import (
     AZURE_ADFS_CLIENT_ID,
     AZURE_ADFS_CLIENT_SECRET,
@@ -92,29 +94,14 @@ class AzureAuth(ExternalAuth):
         ## redis connection pool is created by ExternalAuth.on_startup
         await super(AzureAuth, self).on_startup(app)
 
-    async def get_cache(self, request: web.Request, state: str):
-        cache = msal.SerializableTokenCache()
-        result = None
-        async with aioredis.Redis(connection_pool=self._pool) as redis:
-            result = await redis.get(f"azure_cache_{state}")
-        if result:
-            cache.deserialize(result)
-        return cache
-
-    async def save_cache(self, request: web.Request, state: str, cache: msal.SerializableTokenCache):
-        if cache.has_state_changed:
-            result = cache.serialize()
-            async with aioredis.Redis(connection_pool=self._pool) as redis:
-                await redis.setex(f"azure_cache_{state}", AZURE_SESSION_TIMEOUT, result)
-
-    def get_msal_app(self):
+    def get_msal_app(self, token_cache: msal.SerializableTokenCache = None):
         authority = self._issuer if self._issuer else self.authority
         return msal.ConfidentialClientApplication(
             AZURE_ADFS_CLIENT_ID,
             authority=authority,
             client_credential=AZURE_ADFS_CLIENT_SECRET,
             validate_authority=True,
-            # token_cache=cache
+            token_cache=token_cache,
         )
 
     def get_msal_client(self):
@@ -278,6 +265,100 @@ class AzureAuth(ExternalAuth):
         except Exception as err:
             logging.exception(err)
             return self.failed_redirect(request, error="ERROR_UNKNOWN", message=f"Error: {err}")
+
+    ### Identity-link flow (MSAL-based)
+    def identity_scopes(self) -> list:
+        from ..conf import AZURE_IDENTITY_SCOPES
+
+        # MSAL adds openid/profile/offline_access reserved scopes itself
+        return AZURE_IDENTITY_SCOPES
+
+    def get_identity_userid(self, userinfo: dict):
+        value = userinfo.get("id", userinfo.get("userPrincipalName"))
+        return str(value) if value is not None else None
+
+    @staticmethod
+    def _refresh_token_from_cache(
+        cache: msal.SerializableTokenCache,
+    ) -> Optional[str]:
+        """MSAL never returns the refresh token in the result dict;
+        it must be read from the token cache."""
+        try:
+            tokens = cache.find(msal.TokenCache.CredentialType.REFRESH_TOKEN)
+            for entry in tokens:
+                secret = entry.get("secret")
+                if secret:
+                    return secret
+        except Exception:  # pylint: disable=W0703
+            pass
+        return None
+
+    @staticmethod
+    def _token_from_msal_result(
+        result: dict, cache: msal.SerializableTokenCache
+    ) -> TokenResponse:
+        if "error" in result or "access_token" not in result:
+            error = result.get("error", "unknown_error")
+            desc = result.get("error_description", "")
+            raise AuthException(f"azure: {error}: {desc}")
+        scope = result.get("scope")
+        scopes = scope.split() if isinstance(scope, str) else list(scope or [])
+        return TokenResponse(
+            access_token=result["access_token"],
+            token_type=result.get("token_type", "Bearer"),
+            refresh_token=AzureAuth._refresh_token_from_cache(cache),
+            expires_in=result.get("expires_in"),
+            scopes=scopes,
+            raw={k: v for k, v in result.items() if k != "refresh_token"},
+        )
+
+    async def authorize_identity(
+        self, request: web.Request, user_id, finish_redirect: str
+    ):
+        from ..conf import IDENTITY_LINK_TTL
+
+        redirect_uri = self.get_redirect_uri(request)
+        app = self.get_msal_app()
+        flow = app.initiate_auth_code_flow(
+            scopes=self.identity_scopes(),
+            redirect_uri=redirect_uri,
+        )
+        # MSAL generates its own state: use it as the link-flow key.
+        payload = {
+            "user_id": user_id,
+            "provider": self._service_name,
+            "flow": "identity_link",
+            "finish_redirect": finish_redirect,
+            "redirect_uri": redirect_uri,
+            "extra": {"msal_flow": flow},
+        }
+        await self._flow_store.start_link(
+            flow["state"], payload, ttl=IDENTITY_LINK_TTL
+        )
+        return self.redirect(flow["auth_uri"])
+
+    async def exchange_code_for_tokens(
+        self, request: web.Request, flow: dict
+    ) -> TokenResponse:
+        auth_response = dict(request.rel_url.query.items())
+        cache = msal.SerializableTokenCache()
+        app = self.get_msal_app(token_cache=cache)
+        result = app.acquire_token_by_auth_code_flow(
+            auth_code_flow=flow["extra"]["msal_flow"],
+            auth_response=auth_response,
+        )
+        return self._token_from_msal_result(result, cache)
+
+    async def refresh_identity_tokens(self, refresh_token: str) -> TokenResponse:
+        cache = msal.SerializableTokenCache()
+        app = self.get_msal_app(token_cache=cache)
+        result = app.acquire_token_by_refresh_token(
+            refresh_token, scopes=self.identity_scopes()
+        )
+        token = self._token_from_msal_result(result, cache)
+        if not token.refresh_token:
+            token.refresh_token = refresh_token
+        return token
 
     async def logout(self, request):
         pass

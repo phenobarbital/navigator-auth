@@ -12,6 +12,7 @@ from ..conf import (
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GOOGLE_API_SCOPES,
+    GOOGLE_IDENTITY_SCOPES,
 )
 from .external import ExternalAuth
 
@@ -63,6 +64,11 @@ class GoogleAuth(ExternalAuth):
             "client_secret": GOOGLE_CLIENT_SECRET,
             "scopes": GOOGLE_API_SCOPES,
         }
+        # raw OAuth2 endpoints, used by the identity-link flow
+        # (the login flow goes through aiogoogle's OIDC client):
+        self.authorize_uri = "https://accounts.google.com/o/oauth2/v2/auth"
+        self._token_uri = "https://oauth2.googleapis.com/token"
+        self.userinfo_uri = "https://openidconnect.googleapis.com/v1/userinfo"
 
     def get_google_credentials(self, redirect_uri: str, scopes: list = None) -> dict:
         """Per-request client credentials dict for aiogoogle."""
@@ -153,6 +159,25 @@ class GoogleAuth(ExternalAuth):
                 "error": "Authenticate Error",
             }
             return web.json_response(response, status=403)
+
+    ### Identity-link flow
+    def identity_scopes(self) -> list:
+        return GOOGLE_IDENTITY_SCOPES
+
+    def identity_authorize_params(self) -> dict:
+        # Google only re-issues a refresh token on explicit consent:
+        return {
+            "access_type": "offline",
+            "prompt": "consent",
+            "include_granted_scopes": "true",
+        }
+
+    def get_identity_client(self) -> tuple:
+        return (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
+
+    def get_identity_userid(self, userinfo: dict):
+        value = userinfo.get("sub", userinfo.get("id"))
+        return str(value) if value is not None else None
 
     async def logout(self, request):
         pass

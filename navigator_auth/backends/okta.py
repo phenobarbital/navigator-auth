@@ -13,6 +13,7 @@ from ..conf import (
     OKTA_CLIENT_SECRET,
     OKTA_DOMAIN,
     OKTA_AUDIENCE,
+    OKTA_IDENTITY_SCOPES,
     # OKTA_APP_NAME
 )
 
@@ -143,6 +144,57 @@ class OktaAuth(OauthAuth):
         except Exception as err:
             logging.exception(f"Okta Auth Error: {err}")
             return self.redirect(uri=self.login_failed_uri)
+
+    ### Identity-link flow
+    def identity_scopes(self) -> list:
+        # offline_access is required for Okta to issue a refresh token
+        return OKTA_IDENTITY_SCOPES
+
+    def get_identity_client(self) -> tuple:
+        return (OKTA_CLIENT_ID, OKTA_CLIENT_SECRET)
+
+    def _basic_auth_header(self) -> dict:
+        basic = base64.b64encode(
+            f"{OKTA_CLIENT_ID}:{OKTA_CLIENT_SECRET}".encode()
+        ).decode()
+        return {"Authorization": f"Basic {basic}"}
+
+    async def exchange_code_for_tokens(self, request, flow):
+        from ..identity.types import TokenResponse
+        from ..exceptions import AuthException
+
+        code = request.rel_url.query.get("code")
+        if not code:
+            raise AuthException("okta: no authorization code in callback")
+        payload = await self.token_request(
+            self._token_uri,
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": flow["redirect_uri"],
+            },
+            headers=self._basic_auth_header(),
+        )
+        return TokenResponse.from_oauth_response(
+            payload, scopes=self.identity_scopes()
+        )
+
+    async def refresh_identity_tokens(self, refresh_token: str):
+        from ..identity.types import TokenResponse
+
+        payload = await self.token_request(
+            self._token_uri,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "scope": " ".join(self.identity_scopes()),
+            },
+            headers=self._basic_auth_header(),
+        )
+        token = TokenResponse.from_oauth_response(payload)
+        if not token.refresh_token:
+            token.refresh_token = refresh_token
+        return token
 
     async def logout(self, request):
         pass
