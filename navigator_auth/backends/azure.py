@@ -18,7 +18,6 @@ from ..conf import (
     AZURE_ADFS_DOMAIN,
     AZURE_ADFS_TENANT_ID,
     AZURE_SESSION_TIMEOUT,
-    REDIS_AUTH_URL,
     AZURE_MAPPING,
 )
 from ..libs.json import json_encoder, json_decoder
@@ -90,16 +89,8 @@ class AzureAuth(ExternalAuth):
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements."""
-        ## loading redis connection:
+        ## redis connection pool is created by ExternalAuth.on_startup
         await super(AzureAuth, self).on_startup(app)
-        self._pool = aioredis.ConnectionPool.from_url(REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
-
-    async def on_cleanup(self, app: web.Application):
-        """Used to cleanup and shutdown any db connection."""
-        try:
-            await self._pool.disconnect(inuse_connections=True)
-        except Exception as e:  # pylint: disable=W0703
-            logging.warning(e)
 
     async def get_cache(self, request: web.Request, state: str):
         cache = msal.SerializableTokenCache()

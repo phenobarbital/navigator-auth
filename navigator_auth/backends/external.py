@@ -13,12 +13,14 @@ from requests.models import PreparedRequest
 import aiohttp
 from aiohttp import web, hdrs
 from aiohttp.client import ClientTimeout, ClientSession
+import redis.asyncio as aioredis
 from datamodel.exceptions import ValidationError
 from navconfig.logging import logging
 from navigator_session import AUTH_SESSION_OBJECT
 from ..identities import AuthUser
 from ..libs.json import json_decoder
 from ..exceptions import UserNotFound, AuthException
+from ..identity.flow_store import IdentityFlowStore
 from ..conf import (
     AUTH_LOGIN_FAILED_URI,
     AUTH_REDIRECT_URI,
@@ -29,6 +31,7 @@ from ..conf import (
     AUTH_OAUTH2_REDIRECT_URL,
     AUTH_EXCLUDE_LIST_KEY,
     USER_MAPPING,
+    REDIS_AUTH_URL,
 )
 from .abstract import BaseAuthBackend
 
@@ -102,11 +105,11 @@ class ExternalAuth(BaseAuthBackend):
             name=f"{self._service_name}_alt_login",
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(f"/auth/{self._service_name}/login")
-        # finish login (callback)
+        # finish login (callback); dispatches identity-link flows first
         router.add_route(
             "GET",
             f"/auth/{self._service_name}/callback/",
-            self.auth_callback,
+            self._auth_callback_dispatch,
             name=f"{self._service_name}_complete_login",
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(f"/auth/{self._service_name}/callback/")
@@ -145,9 +148,19 @@ class ExternalAuth(BaseAuthBackend):
         ## Using Startup for detecting and loading functions.
         if self._success_callbacks:
             self.get_successful_callbacks()
+        # Redis pool for per-request OAuth2 flow state (login and
+        # identity-link); backends are singletons, so per-flow data
+        # must live here instead of on the instance.
+        self._pool = aioredis.ConnectionPool.from_url(
+            REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
+        )
+        self._flow_store = IdentityFlowStore(self._pool)
 
     async def on_cleanup(self, app: web.Application):
-        pass
+        try:
+            await self._pool.disconnect(inuse_connections=True)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(err)
 
     def get_successful_callbacks(self) -> list[Callable]:
         fns = []
@@ -192,6 +205,15 @@ class ExternalAuth(BaseAuthBackend):
         domain_url = f"{PREFERRED_AUTH_SCHEME}://{uri.netloc}"
         logging.debug(f"DOMAIN: {domain_url}")
         return domain_url
+
+    def get_redirect_uri(self, request: web.Request) -> str:
+        """Compute this backend's callback URL for the current host.
+
+        Unlike the legacy ``self.redirect_uri`` template mutation, this is
+        a pure function: safe under concurrency and multi-host deployments.
+        """
+        domain_url = self.get_domain(request)
+        return f"{domain_url}/auth/{self._service_name}/callback/"
 
     def get_finish_redirect_url(self, request: web.Request) -> str:
         domain_url = self.get_domain(request)
@@ -288,6 +310,28 @@ class ExternalAuth(BaseAuthBackend):
     @abstractmethod
     async def auth_callback(self, request: web.Request):
         """auth_callback, Finish method for authentication."""
+
+    async def _auth_callback_dispatch(self, request: web.Request):
+        """Route the provider callback to the right flow.
+
+        The identity-link flow shares the provider's registered callback
+        URL with the login flow; a single-use Redis record keyed by the
+        OAuth2 ``state`` distinguishes them.
+        """
+        state = request.rel_url.query.get("state")
+        if state:
+            flow = await self._flow_store.consume_link(state)
+            if flow:
+                return await self.finish_identity_link(request, flow)
+        return await self.auth_callback(request)
+
+    async def finish_identity_link(self, request: web.Request, flow: dict):
+        """Finish an identity-link flow (implemented with the identity API).
+
+        Overridden/extended in the identity-link feature; the base class
+        keeps login-only backends working if a stale link state appears.
+        """
+        return await self.auth_callback(request)
 
     @abstractmethod
     async def logout(self, request: web.Request):
@@ -459,6 +503,52 @@ class ExternalAuth(BaseAuthBackend):
                     except ValueError:
                         response = resp
                     raise AuthException(f"{response}")
+
+    async def token_request(
+        self,
+        url: str,
+        data: dict,
+        headers: Optional[dict] = None,
+        auth: Optional[aiohttp.BasicAuth] = None,
+    ) -> dict:
+        """POST to an OAuth2 token endpoint and return the parsed response.
+
+        Sends a form-encoded body with ``Accept: application/json`` (GitHub
+        replies form-encoded without it) and normalizes a form-encoded reply
+        into a flat dict. Raises AuthException with the provider's error
+        payload on HTTP errors or an ``error`` key in the body.
+        """
+        _headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        if headers:
+            _headers.update(headers)
+        timeout = ClientTimeout(total=120)
+        async with ClientSession(trust_env=True) as client:
+            async with client.post(
+                url,
+                data=data,
+                headers=_headers,
+                auth=auth,
+                timeout=timeout,
+            ) as response:
+                raw = await response.read()
+                try:
+                    payload = json_decoder(raw)
+                except (ValueError, AuthException):
+                    parsed = parse_qs(raw.decode("utf-8"))
+                    payload = {
+                        k: v[0] if len(v) == 1 else v
+                        for k, v in parsed.items()
+                    }
+                if not isinstance(payload, dict):
+                    payload = {"response": payload}
+                if response.status >= 400 or "error" in payload:
+                    raise AuthException(
+                        f"{self._service_name}: Token request failed: {payload}"
+                    )
+                return payload
 
     async def create_external_user(self, userdata: dict) -> Callable:
         """create_external_user.
