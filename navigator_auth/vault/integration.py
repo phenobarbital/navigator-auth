@@ -85,6 +85,37 @@ async def setup_vault_tables(db_pool: Any) -> None:
         logger.error("Failed to create vault tables: %s", err)
 
 
+async def get_session_vault(
+    request: Any, session: Any, user_id: Any
+) -> Optional[SessionVault]:
+    """Get the session's vault, loading it on demand.
+
+    Returns the vault stored in the session when present; otherwise
+    tries to load it from ``request.app`` resources and caches it in
+    the session. Returns None when the vault cannot be loaded — vault
+    availability must never break the calling endpoint.
+    """
+    try:
+        vault = session.get(VAULT_SESSION_KEY)
+        if vault is not None:
+            return vault
+    except Exception:  # pylint: disable=W0703
+        return None
+    db_pool = request.app.get("authdb")
+    redis = request.app.get("redis")
+    if not db_pool or not user_id:
+        return None
+    vault = await load_vault_for_session(
+        session, user_id=user_id, db_pool=db_pool, redis=redis
+    )
+    if vault is not None:
+        try:
+            session[VAULT_SESSION_KEY] = vault
+        except Exception:  # pylint: disable=W0703
+            pass
+    return vault
+
+
 def _attach_vault_to_request(request: Any, session: Any) -> None:
     """Attach vault instance from session to the request object.
 

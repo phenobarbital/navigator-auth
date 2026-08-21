@@ -300,6 +300,25 @@ class AuthHandler:
     def get_token_backend(self):
         return self.backends["TrocToken"]
 
+    def get_external_backend(self, service: str):
+        """Resolve an enabled external (OAuth2/OpenID) backend by its
+        service slug (e.g. 'azure', 'google', 'github', 'okta', 'odoo')."""
+        for backend in self.backends.values():
+            if (
+                getattr(backend, "_external_auth", False)
+                and getattr(backend, "_service_name", None) == service
+            ):
+                return backend
+        return None
+
+    def external_backends(self) -> list:
+        """All enabled external backends (for the identities UI)."""
+        return [
+            backend
+            for backend in self.backends.values()
+            if getattr(backend, "_external_auth", False)
+        ]
+
     async def _login_token(self, request: web.Request):
         # Using TrocToken or other backend on list with auth
         if backend := self.get_token_backend():
