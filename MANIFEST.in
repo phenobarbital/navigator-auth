@@ -3,6 +3,8 @@ include LICENSE
 include CHANGES.rst
 include README.md
 include Makefile
+include Cargo.toml
+include Cargo.lock
 graft navigator_auth
 graft docs
 graft tests
