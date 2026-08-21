@@ -432,7 +432,7 @@ fn filter_resources_batch(
     user_context: &Bound<'_, PyDict>,
     environment: &Bound<'_, PyDict>,
     default_effect: &str,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     // Parse policies
     let policies: Vec<PolicyDef> = serde_json::from_str(policies_json)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid policies JSON: {e}")))?;
@@ -497,7 +497,7 @@ fn filter_resources_batch(
     let regex_cache = build_regex_cache(&policies);
 
     // Parallel batch evaluation using rayon
-    let results: Vec<(String, bool)> = py.allow_threads(|| {
+    let results: Vec<(String, bool)> = py.detach(|| {
         resources
             .par_iter()
             .map(|resource| {
@@ -552,7 +552,7 @@ fn evaluate_single(
     environment: &Bound<'_, PyDict>,
     owner_reports_to: Option<String>,
     default_effect: &str,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     // Parse policies
     let policies: Vec<PolicyDef> = serde_json::from_str(policies_json)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Invalid policies JSON: {e}")))?;
@@ -611,7 +611,7 @@ fn evaluate_single(
     let regex_cache = build_regex_cache(&policies);
 
     // Single evaluation (no rayon needed)
-    let result = py.allow_threads(|| {
+    let result = py.detach(|| {
         evaluate_resource(
             &policies,
             resource,
