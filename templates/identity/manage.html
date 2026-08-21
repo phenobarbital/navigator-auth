@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Identities Vault</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: sans-serif; background-color: #f0f2f5; margin: 0; padding: 2rem; color: #333; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+        .subtitle { color: #666; margin-bottom: 2rem; }
+        h2 { font-size: 1.15rem; margin: 2rem 0 1rem; }
+        .providers { display: flex; flex-wrap: wrap; gap: 1rem; }
+        .provider-card { background: white; padding: 1rem 1.25rem; border-radius: 8px;
+                         box-shadow: 0 2px 4px rgba(0,0,0,0.08); min-width: 180px; }
+        .provider-card .name { font-weight: bold; text-transform: capitalize; margin-bottom: 0.25rem; }
+        .provider-card .desc { color: #777; font-size: 0.8rem; margin-bottom: 0.75rem; }
+        .identity-table { width: 100%; border-collapse: collapse; background: white;
+                          border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
+        .identity-table th, .identity-table td { text-align: left; padding: 0.7rem 0.9rem;
+                          border-bottom: 1px solid #eee; font-size: 0.9rem; vertical-align: top; }
+        .identity-table th { background: #fafbfc; color: #555; font-size: 0.8rem;
+                          text-transform: uppercase; letter-spacing: 0.04em; }
+        .provider-name { font-weight: bold; text-transform: capitalize; }
+        .account { color: #666; font-size: 0.8rem; }
+        .scopes { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+        .scope { background: #eef; color: #33a; border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.75rem; }
+        .badge { display: inline-block; border-radius: 10px; padding: 0.15rem 0.6rem; font-size: 0.75rem; font-weight: bold; }
+        .badge-ok { background: #e6f4ea; color: #137333; }
+        .badge-expired { background: #fce8e6; color: #c5221f; }
+        .badge-norefresh { background: #fef7e0; color: #b06000; }
+        button { padding: 0.45rem 0.9rem; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.8rem; }
+        .btn-link { background-color: #1a73e8; color: white; }
+        .btn-refresh { background-color: #e8f0fe; color: #1a73e8; margin-right: 0.4rem; }
+        .btn-delete { background-color: #fce8e6; color: #c5221f; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .empty { background: white; border-radius: 8px; padding: 2rem; text-align: center; color: #888;
+                 box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
+        #message { margin: 1rem 0; padding: 0.75rem 1rem; border-radius: 6px; display: none; font-size: 0.9rem; }
+        #message.ok { display: block; background: #e6f4ea; color: #137333; }
+        #message.error { display: block; background: #fce8e6; color: #c5221f; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Identities Vault</h1>
+        <p class="subtitle">Link external accounts and manage the stored credentials
+           other systems can use on your behalf. Tokens are stored encrypted; they are
+           never displayed here.</p>
+
+        <div id="message"></div>
+
+        <h2>Link a new identity</h2>
+        <div class="providers">
+            {% for provider in providers %}
+            <div class="provider-card">
+                <div class="name">{{ provider.service }}</div>
+                <div class="desc">{{ provider.description }}</div>
+                <button class="btn-link"
+                        onclick="linkIdentity('{{ provider.service }}')">Link</button>
+            </div>
+            {% else %}
+            <div class="empty">No external providers are enabled.</div>
+            {% endfor %}
+        </div>
+
+        <h2>Linked identities</h2>
+        {% if identities %}
+        <table class="identity-table">
+            <thead>
+                <tr>
+                    <th>Provider</th>
+                    <th>Account</th>
+                    <th>Scopes</th>
+                    <th>Status</th>
+                    <th>Last refresh</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for identity in identities %}
+                <tr id="row-{{ identity.identity_id }}">
+                    <td>
+                        <span class="provider-name">{{ identity.auth_provider }}</span>
+                        <div class="account">{{ identity.profile.email
+                            or identity.profile.login
+                            or identity.profile.name
+                            or identity.provider_user_id }}</div>
+                    </td>
+                    <td class="account">{{ identity.provider_user_id }}</td>
+                    <td>
+                        <div class="scopes">
+                            {% for scope in identity.scopes %}
+                            <span class="scope">{{ scope }}</span>
+                            {% endfor %}
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge {{ 'badge-expired' if identity.expired else 'badge-ok' }}"
+                              data-expires="{{ identity.expires_at or '' }}">
+                            {{ 'expired' if identity.expired else 'active' }}
+                        </span>
+                        {% if not identity.has_refresh_token %}
+                        <span class="badge badge-norefresh" title="Provider did not issue a refresh token; re-link to renew.">no refresh</span>
+                        {% endif %}
+                    </td>
+                    <td class="account">{{ identity.refreshed_at or '—' }}</td>
+                    <td>
+                        <button class="btn-refresh"
+                                {% if not identity.has_refresh_token %}disabled{% endif %}
+                                onclick="refreshIdentity('{{ identity.identity_id }}')">Refresh</button>
+                        <button class="btn-delete"
+                                onclick="deleteIdentity('{{ identity.identity_id }}', '{{ identity.auth_provider }}')">Delete</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty">No identities linked yet. Use the provider cards above to link one.</div>
+        {% endif %}
+    </div>
+
+    <script>
+        const API = '/api/v1/user/identities';
+
+        function showMessage(text, kind) {
+            const el = document.getElementById('message');
+            el.textContent = text;
+            el.className = kind;
+        }
+
+        function linkIdentity(provider) {
+            const here = window.location.pathname;
+            window.location.href = API + '/link/' + provider +
+                '?redirect_uri=' + encodeURIComponent(here);
+        }
+
+        async function refreshIdentity(identityId) {
+            try {
+                const response = await fetch(API + '/' + identityId, {
+                    method: 'PUT',
+                    credentials: 'same-origin',
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || response.statusText);
+                }
+                showMessage('Credential refreshed.', 'ok');
+                setTimeout(() => window.location.reload(), 600);
+            } catch (err) {
+                showMessage('Refresh failed: ' + err.message, 'error');
+            }
+        }
+
+        async function deleteIdentity(identityId, provider) {
+            if (!confirm('Remove the linked ' + provider + ' identity?')) {
+                return;
+            }
+            try {
+                const response = await fetch(API + '/' + identityId, {
+                    method: 'DELETE',
+                    credentials: 'same-origin',
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || response.statusText);
+                }
+                showMessage('Identity removed.', 'ok');
+                setTimeout(() => window.location.reload(), 600);
+            } catch (err) {
+                showMessage('Delete failed: ' + err.message, 'error');
+            }
+        }
+
+        // mark expired badges client-side from the ISO timestamp:
+        document.querySelectorAll('.badge[data-expires]').forEach((badge) => {
+            const iso = badge.dataset.expires;
+            if (iso && new Date(iso) < new Date()) {
+                badge.classList.remove('badge-ok');
+                badge.classList.add('badge-expired');
+                badge.textContent = 'expired';
+            }
+        });
+    </script>
+</body>
+</html>

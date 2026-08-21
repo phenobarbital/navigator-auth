@@ -192,7 +192,14 @@ class IdentityStore:
 
     def masked(self, identity: UserIdentity) -> dict:
         """API-safe representation: never includes token material."""
+        expires_at = identity.expires_at
+        expired = False
+        if expires_at is not None:
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            expired = expires_at <= datetime.now(timezone.utc)
         return {
+            "expired": expired,
             "identity_id": str(identity.identity_id),
             "auth_provider": identity.auth_provider,
             "provider_user_id": identity.provider_user_id,
