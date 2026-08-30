@@ -245,3 +245,40 @@ UPDATE auth.clients SET registration_source = 'static' WHERE registration_source
 -- and age; the introspection/authorize paths look clients up by client_uid.
 CREATE INDEX IF NOT EXISTS idx_clients_registration_source
     ON auth.clients(registration_source);
+
+-- =====================================================================
+-- FEAT-095 TASK-042 — auth.client_access (per-client access gate, D3/D7)
+-- Decides whether a given user may obtain a token for a given client.
+-- Consulted at /oauth2/authorize and at device verification, BEFORE consent.
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS auth.client_access (
+    access_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     INTEGER NOT NULL REFERENCES auth.users(user_id) ON DELETE CASCADE,
+    -- Internal integer FK (three-meanings-of-client_id discipline).
+    client_id   INTEGER REFERENCES auth.clients(client_id) ON DELETE CASCADE,
+    -- Denormalized public wire identifier: what the gate actually checks.
+    client_uid  VARCHAR(255) NOT NULL,
+    -- active | pending | revoked
+    status      VARCHAR(16) NOT NULL DEFAULT 'active',
+    granted_by  INTEGER REFERENCES auth.users(user_id) ON DELETE SET NULL,
+    granted_at  TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    revoked_at  TIMESTAMP WITHOUT TIME ZONE
+);
+
+-- One row per (user, client): the approval queue must never accumulate
+-- duplicate 'pending' rows for repeated denied attempts (D7).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_client_access_user_client
+    ON auth.client_access(user_id, client_id);
+
+-- client_id is NULL for clients that live outside Postgres, so the wire
+-- identifier carries the same uniqueness guarantee on its own.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_client_access_user_client_uid
+    ON auth.client_access(user_id, client_uid);
+
+-- Gate check (by uid) and the management API's per-client listing.
+CREATE INDEX IF NOT EXISTS idx_client_access_client_uid
+    ON auth.client_access(client_uid);
+
+CREATE INDEX IF NOT EXISTS idx_client_access_client_status
+    ON auth.client_access(client_uid, status);

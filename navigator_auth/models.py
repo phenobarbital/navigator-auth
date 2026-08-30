@@ -355,3 +355,46 @@ class Client(Model):
         strict = True
         connection = None
         frozen = False
+
+
+class ClientAccess(Model):
+    """Per-(user, client) access grant for the OAuth2 access gate.
+
+    FEAT-095 TASK-042 (decisions D3 + D7).
+
+    Registering a client confers nothing; this table is what decides whether a
+    given user may obtain a token for a given client.  It is consulted at
+    ``/oauth2/authorize`` and at device verification, **before** consent — a
+    user without an ``active`` row never reaches the consent screen and never
+    receives a code.
+
+    ``status``:
+      - ``active``  — may authorize.
+      - ``pending`` — tried and was denied; awaiting admin approval (D7).
+      - ``revoked`` — access withdrawn; deactivation cascades revocation of
+        the grant, the refresh-token chain and live jtis for that pair.
+
+    Both client identifiers are carried, per the three-meanings-of-client_id
+    discipline: ``client_id`` is the internal integer FK, ``client_uid`` the
+    denormalized public wire identifier the gate actually checks.
+    """
+
+    access_id: UUID = Column(
+        required=False, primary_key=True, db_default="auto", repr=False
+    )
+    user_id: User = Column(required=True, fk="user_id|username", api="users")
+    # Internal integer FK; absent for memory/redis-tier clients.
+    client_id: int = Column(required=False)
+    # Denormalized public identifier — the value presented on the wire.
+    client_uid: str = Column(required=True)
+    status: str = Column(required=True, default="active")
+    granted_by: int = Column(required=False)
+    granted_at: datetime = Column(required=False, default=datetime.now)
+    revoked_at: datetime = Column(required=False)
+
+    class Meta:
+        name = "client_access"
+        schema = AUTH_DB_SCHEMA
+        strict = True
+        connection = None
+        frozen = False

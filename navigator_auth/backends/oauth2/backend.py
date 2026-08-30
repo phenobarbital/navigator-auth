@@ -31,6 +31,7 @@ from collections.abc import Awaitable
 from html import escape
 import hmac
 import importlib
+import json
 import secrets
 from urllib.parse import urlencode, urlparse, urlunparse
 from uuid import uuid4
@@ -81,6 +82,9 @@ from ...conf import (
     OAUTH_UPSTREAM_IDP_BACKENDS,
     OAUTH_UPSTREAM_FLOW_TTL,
     REDIS_AUTH_URL,
+    # FEAT-095 TASK-042
+    OAUTH_ACCESS_GATE_ENABLED,
+    OAUTH_ACCESS_GATE_QUEUE,
 )
 from navigator_session import (
     get_session,
@@ -126,6 +130,7 @@ from ..external import (
     OAUTH2_RESUME_COOKIE,
 )
 from ...identity.flow_store import IdentityFlowStore
+from .client_access import get_client_access_storage
 from .dcr import (
     DCRError,
     build_registration_response,
@@ -275,6 +280,8 @@ class Oauth2Provider(BaseAuthBackend):
         self.grant_storage = None
         self.access_token_storage = None
         self.device_code_storage = None
+        # FEAT-095 TASK-042: per-client access gate storage.
+        self.client_access_storage = None
         # FEAT-095 TASK-039: in-process cache of the built discovery documents,
         # keyed by issuer (a deployment can legitimately serve several hosts).
         self._metadata_cache: dict = {}
@@ -403,6 +410,11 @@ class Oauth2Provider(BaseAuthBackend):
         app["oauth2_access_token_storage"] = self.access_token_storage
         # FEAT-094: device code storage
         self.device_code_storage = get_device_code_storage(storage_type, REDIS_URL)
+        # FEAT-095 TASK-042: per-client access gate storage.
+        self.client_access_storage = get_client_access_storage(
+            storage_type, REDIS_URL
+        )
+        app["oauth2_client_access_storage"] = self.client_access_storage
 
     async def on_cleanup(self, app: web.Application):
         pass
@@ -693,6 +705,185 @@ class Oauth2Provider(BaseAuthBackend):
         """
         issuer = self.issuer_url(request)
         return self._metadata_response(self._build_metadata_documents(issuer)["prm"])
+
+    # ------------------------------------------------------------------
+    # Per-client access gate (FEAT-095 TASK-042, decisions D3 + D7)
+    # ------------------------------------------------------------------
+
+    def _gate_applies(self, client) -> bool:
+        """Is the access gate enforced for this client?
+
+        Enforced when the global switch is on **or** the client carries its
+        own ``enforce_access_gate`` flag (DCR clients are born gated).  With
+        both off the FEAT-093 behaviour is untouched — the gate is opt-in.
+        """
+        if OAUTH_ACCESS_GATE_ENABLED:
+            return True
+        return bool(getattr(client, "enforce_access_gate", False))
+
+    async def _enforce_access_gate(
+        self,
+        request: web.Request,
+        client,
+        user_id: int,
+        redirect_uri: str,
+        state: str,
+    ):
+        """Return an ``access_denied`` response, or None to let the flow run.
+
+        Called after authentication and **before** consent, from both
+        ``/oauth2/authorize`` and device verification — the device grant would
+        otherwise be a way around the gate entirely (spec §6 risk).
+        """
+        if not self._gate_applies(client):
+            return None
+        if not self.client_access_storage:
+            self.logger.error(
+                "OAuth2 gate: enforced but no ClientAccessStorage is configured; "
+                "denying access."
+            )
+            return self._access_denied(request, redirect_uri, state)
+
+        client_uid = client.client_id
+        try:
+            allowed = await self.client_access_storage.check(
+                user_id, client_uid, request=request
+            )
+        except Exception as e:
+            # Fail closed: an unavailable gate must never grant access.
+            self.logger.error(f"OAuth2 gate: check failed, denying: {e}")
+            return self._access_denied(request, redirect_uri, state)
+
+        if allowed:
+            return None
+
+        # D7: record the denied attempt so an admin can approve it later.
+        # Inert unless a gate is actually enforced, which it is here.
+        if OAUTH_ACCESS_GATE_QUEUE:
+            try:
+                await self.client_access_storage.request_access(
+                    user_id,
+                    client_uid,
+                    client_pk=getattr(client, "client_pk", None),
+                    request=request,
+                )
+            except Exception as e:  # pylint: disable=W0703
+                self.logger.warning(f"OAuth2 gate: could not queue request: {e}")
+
+        self.logger.warning(
+            f"OAuth2 gate: user {user_id} is not activated for client "
+            f"{client_uid}; access_denied."
+        )
+        return self._access_denied(request, redirect_uri, state)
+
+    def _access_denied(self, request: web.Request, redirect_uri: str, state: str):
+        """Standard OAuth ``access_denied`` outcome.
+
+        Redirects to the client's registered callback with the original
+        ``state`` (RFC 6749 §4.1.2.1) so the client can correlate the failure.
+        Falls back to a rendered error when there is no usable redirect_uri —
+        never emit a redirect we have not validated.
+        """
+        if not redirect_uri:
+            return self._error_response(
+                "access_denied",
+                "You are not authorized to use this application. "
+                "An administrator must approve your access.",
+                status=403,
+            )
+        params = {
+            "error": "access_denied",
+            "error_description": (
+                "You are not authorized to use this application. "
+                "An administrator must approve your access."
+            ),
+        }
+        if state:
+            params["state"] = state
+        return web.HTTPFound(self.prepare_url(redirect_uri, params))
+
+    async def cascade_access_revocation(
+        self, user_id: int, client_uid: str, request: web.Request = None
+    ) -> dict:
+        """Revoke everything a (user, client) pair currently holds.
+
+        Deactivation must take effect within one access-token TTL (the
+        FEAT-093 acceptance model), so this uses only existing primitives:
+        the consent grant, the refresh-token chain, and the live ``jti``
+        records.  Access tokens already minted stay syntactically valid until
+        they expire, but introspection and the jti check report them revoked.
+        """
+        result = {"grants": 0, "refresh_chains": 0, "access_tokens": 0}
+
+        # 1. Consent grant.
+        if self.grant_storage:
+            try:
+                if await self.grant_storage.revoke_grant(user_id, client_uid):
+                    result["grants"] = 1
+            except Exception as e:  # pylint: disable=W0703
+                self.logger.warning(f"Gate cascade: grant revoke failed: {e}")
+
+        # 2. Refresh-token families.
+        if self.refresh_token_storage:
+            try:
+                tokens = await self.refresh_token_storage.list_tokens(user_id)
+                for rt in tokens:
+                    rt_client = getattr(getattr(rt, "client", None), "client_id", None)
+                    if rt_client == client_uid and not rt.revoked:
+                        await self.refresh_token_storage.revoke_chain(
+                            rt.refresh_token
+                        )
+                        result["refresh_chains"] += 1
+            except Exception as e:  # pylint: disable=W0703
+                self.logger.warning(f"Gate cascade: refresh revoke failed: {e}")
+
+        # 3. Live access-token jtis for this pair.
+        result["access_tokens"] = await self._revoke_client_jtis(
+            user_id, client_uid
+        )
+
+        self.logger.info(
+            f"OAuth2 gate: revoked access for user {user_id} on {client_uid}: "
+            f"{result}"
+        )
+        return result
+
+    async def _revoke_client_jtis(self, user_id: int, client_uid: str) -> int:
+        """Revoke every live jti belonging to (user, client).
+
+        ``AccessTokenStorage`` is keyed by jti with no (user, client) index,
+        so the live set is swept over its own Redis handle.  This runs only on
+        an administrative deactivation, never on the request path.
+        """
+        storage = self.access_token_storage
+        redis_conn = getattr(storage, "redis", None)
+        if storage is None or redis_conn is None:
+            return 0
+        revoked = 0
+        try:
+            pattern = f"{storage.prefix}*"
+            async for key in redis_conn.scan_iter(match=pattern):
+                # Skip the revocation markers, which share the prefix.
+                if key.startswith(storage.revoked_prefix):
+                    continue
+                raw = await redis_conn.get(key)
+                if not raw:
+                    continue
+                try:
+                    record = json.loads(raw)
+                except Exception:
+                    continue
+                if record.get("client_id") != client_uid:
+                    continue
+                if record.get("user_id") != user_id:
+                    continue
+                if record.get("revoked"):
+                    continue
+                await storage.revoke(record["jti"])
+                revoked += 1
+        except Exception as e:  # pylint: disable=W0703
+            self.logger.warning(f"Gate cascade: jti revoke failed: {e}")
+        return revoked
 
     # ------------------------------------------------------------------
     # Upstream IdP proxy login (FEAT-095 TASK-041, decision D2)
@@ -1049,6 +1240,21 @@ class Oauth2Provider(BaseAuthBackend):
             payload = {"action_url": str(location), **data}
             url = location.with_query(**payload)
             self.redirect(url, location=True)
+
+        # FEAT-095 TASK-042: ACCESS GATE — after login, BEFORE consent.
+        # A non-activated user must never see the consent screen and never
+        # receive a code.
+        gate_user = self._decode_session_user(session)
+        if gate_user is not None:
+            denied = await self._enforce_access_gate(
+                request,
+                client,
+                gate_user.user_id,
+                redirect_uri,
+                data.get("state", ""),
+            )
+            if denied is not None:
+                return denied
 
         # TASK-027: Consent-skip — if unrevoked grant exists for these scopes.
         prompt = data.get("prompt", "")
@@ -2251,6 +2457,16 @@ class Oauth2Provider(BaseAuthBackend):
         client = await self.client_storage.get_client(dc.client_id, request=request)
         if not client:
             return self._error_response("invalid_client", "Unknown client.", status=400)
+
+        # FEAT-095 TASK-042: ACCESS GATE — device-flow parity is a security
+        # requirement: without this check the device grant is a way around
+        # the gate entirely (spec §6 risk).  There is no redirect_uri in the
+        # device flow, so denial renders instead of redirecting.
+        gate_denied = await self._enforce_access_gate(
+            request, client, user_obj.user_id, redirect_uri=None, state=""
+        )
+        if gate_denied is not None:
+            return gate_denied
 
         scopes = dc.scopes
         if self.grant_storage:
