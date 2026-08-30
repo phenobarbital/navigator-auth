@@ -855,7 +855,7 @@
     "feature_id": "FEAT-095",
     "feature": "oauth2-for-mcp-agents",
     "spec": "sdd/specs/oauth2-for-mcp-agents.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -870,7 +870,7 @@
     "parallelism_notes": "Final integration coverage + docs; depends on all FEAT-095 modules; closes ai-parrot S1.",
     "assigned_to": null,
     "started_at": "2026-08-30T22:17:43Z",
-    "completed_at": null,
-    "file": "sdd/tasks/active/TASK-045-tests-docs-example.md"
+    "completed_at": "2026-08-30T23:55:11Z",
+    "file": "sdd/tasks/completed/TASK-045-tests-docs-example.md"
   }
 ]
