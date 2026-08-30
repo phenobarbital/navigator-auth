@@ -67,6 +67,9 @@ from ...conf import (
     OAUTH_DEVICE_LOCKOUT_TTL,
     # FEAT-095 TASK-038
     AUTH_ISSUER_URL,
+    # FEAT-095 TASK-039
+    OAUTH_DCR_POLICY,
+    OAUTH_JWT_KEYS,
 )
 from navigator_session import (
     get_session,
@@ -100,6 +103,13 @@ from .code_backend import (
 )
 from .pkce import verify as pkce_verify
 from .devicecode import generate_user_code, poll_decision as _poll_decision
+from .metadata import (
+    WELL_KNOWN_AS_PATH,
+    WELL_KNOWN_PRM_PATH,
+    DEFAULT_GRANT_TYPES_SUPPORTED,
+    build_as_metadata,
+    build_protected_resource_metadata,
+)
 
 
 def _now_utc() -> datetime:
@@ -225,6 +235,9 @@ class Oauth2Provider(BaseAuthBackend):
         self.introspect_uri: str = "/oauth2/introspect"
         self.device_authorization_uri: str = "/oauth2/device_authorization"
         self.device_uri: str = "/oauth2/device"
+        # FEAT-095 TASK-039: discovery documents (RFC 8414 / RFC 9728).
+        self.as_metadata_uri: str = WELL_KNOWN_AS_PATH
+        self.prm_metadata_uri: str = WELL_KNOWN_PRM_PATH
         self.login_failed_uri = AUTH_LOGIN_FAILED_URI
         self.logout_redirect_uri = AUTH_LOGOUT_REDIRECT_URI or "/oauth2/logout/complete"
         self.redirect_uri = None
@@ -234,6 +247,9 @@ class Oauth2Provider(BaseAuthBackend):
         self.grant_storage = None
         self.access_token_storage = None
         self.device_code_storage = None
+        # FEAT-095 TASK-039: in-process cache of the built discovery documents,
+        # keyed by issuer (a deployment can legitimately serve several hosts).
+        self._metadata_cache: dict = {}
 
     def configure(self, app):
         router = app.router
@@ -310,6 +326,21 @@ class Oauth2Provider(BaseAuthBackend):
             "*", self.device_uri, self.device_verification, name="nav_oauth2_device"
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(self.device_uri)
+
+        # FEAT-095 TASK-039: discovery documents (RFC 8414 + RFC 9728).
+        # RFC 8414 §3 requires the AS metadata at the ORIGIN ROOT; the aliases
+        # under the AS path exist for deployments mounted behind a prefix.
+        for path, handler, name in (
+            (self.as_metadata_uri, self.as_metadata, "nav_oauth2_as_metadata"),
+            (self.prm_metadata_uri, self.protected_resource_metadata,
+             "nav_oauth2_prm_metadata"),
+            (f"/oauth2{self.as_metadata_uri}", self.as_metadata,
+             "nav_oauth2_as_metadata_alias"),
+            (f"/oauth2{self.prm_metadata_uri}", self.protected_resource_metadata,
+             "nav_oauth2_prm_metadata_alias"),
+        ):
+            router.add_route("GET", path, handler, name=name)
+            app[AUTH_EXCLUDE_LIST_KEY].append(path)
 
         super(Oauth2Provider, self).configure(app)
 
@@ -558,6 +589,75 @@ class Oauth2Provider(BaseAuthBackend):
             if redirect_uri not in client.redirect_uris:
                 return None
         return client
+
+    # ------------------------------------------------------------------
+    # Discovery documents (FEAT-095 TASK-039, RFC 8414 + RFC 9728)
+    # ------------------------------------------------------------------
+
+    def _dcr_enabled(self) -> bool:
+        """True when Dynamic Client Registration is offered by this deployment."""
+        return str(OAUTH_DCR_POLICY).lower() != "disabled"
+
+    def _jwks_enabled(self) -> bool:
+        """True when a signing-key registry is configured.
+
+        Read from configuration only: the ``jwks_uri`` must never be advertised
+        without keys behind it, and this must not create a code dependency on
+        the (independently shippable) JWKS module.
+        """
+        return bool(OAUTH_JWT_KEYS)
+
+    def _build_metadata_documents(self, issuer: str) -> dict:
+        """Build (and memoise) both discovery documents for one issuer."""
+        cached = self._metadata_cache.get(issuer)
+        if cached is not None:
+            return cached
+        documents = {
+            "as": build_as_metadata(
+                issuer,
+                dcr_enabled=self._dcr_enabled(),
+                jwks=self._jwks_enabled(),
+                grant_types=DEFAULT_GRANT_TYPES_SUPPORTED,
+                scopes=OAUTH_SCOPES,
+            ),
+            "prm": build_protected_resource_metadata(
+                resource=issuer,
+                auth_servers=[issuer],
+                scopes=OAUTH_SCOPES,
+            ),
+        }
+        self._metadata_cache[issuer] = documents
+        return documents
+
+    def _metadata_response(self, document: dict) -> web.Response:
+        """Serve a discovery document (public, cacheable, JSON)."""
+        return JSONResponse(
+            document,
+            status=200,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+
+    async def as_metadata(self, request: web.Request):
+        """GET /.well-known/oauth-authorization-server — RFC 8414 §3.
+
+        Unauthenticated (the path is in the exclude list) and served from an
+        in-process cache, so it stays far inside Claude's 10 s discovery budget.
+        """
+        issuer = self.issuer_url(request)
+        return self._metadata_response(self._build_metadata_documents(issuer)["as"])
+
+    async def protected_resource_metadata(self, request: web.Request):
+        """GET /.well-known/oauth-protected-resource — RFC 9728.
+
+        Describes *this* deployment as a protected resource.  External resource
+        servers (ai-parrot MCP mounts, spec D6) serve their own document using
+        :func:`~.metadata.build_protected_resource_metadata` directly.
+        """
+        issuer = self.issuer_url(request)
+        return self._metadata_response(self._build_metadata_documents(issuer)["prm"])
 
     # ------------------------------------------------------------------
     # authorize
