@@ -268,6 +268,8 @@ class Oauth2Provider(BaseAuthBackend):
         self.prm_metadata_uri: str = WELL_KNOWN_PRM_PATH
         # FEAT-095 TASK-040: Dynamic Client Registration (RFC 7591).
         self.register_uri: str = "/oauth2/register"
+        # FEAT-095 TASK-043: JWK Set (asymmetric verification keys).
+        self.jwks_uri: str = "/oauth2/jwks"
         # FEAT-095 TASK-041: flow store for parked authorize requests
         # (built lazily — see the flow_store property).
         self._flow_store = None
@@ -383,6 +385,11 @@ class Oauth2Provider(BaseAuthBackend):
             "POST", self.register_uri, self.register, name="nav_oauth2_register"
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(self.register_uri)
+
+        # FEAT-095 TASK-043: JWK Set — public verification keys, unauthenticated
+        # (a resource server must be able to fetch it before it holds a token).
+        router.add_route("GET", self.jwks_uri, self.jwks, name="nav_oauth2_jwks")
+        app[AUTH_EXCLUDE_LIST_KEY].append(self.jwks_uri)
 
         super(Oauth2Provider, self).configure(app)
 
@@ -705,6 +712,35 @@ class Oauth2Provider(BaseAuthBackend):
         """
         issuer = self.issuer_url(request)
         return self._metadata_response(self._build_metadata_documents(issuer)["prm"])
+
+    # ------------------------------------------------------------------
+    # JWK Set (FEAT-095 TASK-043, decision D4)
+    # ------------------------------------------------------------------
+
+    async def jwks(self, request: web.Request):
+        """GET /oauth2/jwks — the public JWK Set (RFC 7517).
+
+        Lets a third-party resource server validate tokens **offline**,
+        without an introspection round-trip.  Serves public parameters only:
+        the registry has no code path that can serialise private material.
+
+        When no keys are configured this returns an empty set rather than a
+        404 — the discovery document only advertises ``jwks_uri`` when keys
+        are loaded, so an empty set is the correct answer for a direct hit.
+        """
+        try:
+            document = self._idp.key_registry.jwk_set()
+        except Exception as e:  # pylint: disable=W0703
+            self.logger.error(f"OAuth2: cannot build the JWK Set: {e}")
+            document = {"keys": []}
+        return JSONResponse(
+            document,
+            status=200,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
 
     # ------------------------------------------------------------------
     # Per-client access gate (FEAT-095 TASK-042, decisions D3 + D7)
