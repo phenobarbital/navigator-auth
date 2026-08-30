@@ -38,5 +38,20 @@
         <input type="submit" value="Submit">
     </form>
   </div>
+  {% if upstream_providers %}
+  <div>
+    <hr />
+    <div><span>Or sign in with:</span></div>
+    <br />
+    {% for provider in upstream_providers %}
+    <div>
+      <a href="{{ action_url }}?provider={{ provider }}&amp;response_type={{ response_type }}&amp;client_id={{ client_id }}&amp;redirect_uri={{ redirect_uri }}&amp;scope={{ scope }}&amp;state={{ state }}&amp;code_challenge={{ code_challenge }}&amp;code_challenge_method={{ code_challenge_method }}&amp;nonce={{ nonce }}&amp;prompt={{ prompt }}&amp;resource={{ resource }}">
+        Continue with {{ provider|capitalize }}
+      </a>
+      <br /><br />
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 </body>
 </html>

@@ -39,6 +39,7 @@ from aiohttp import web
 from datamodel.exceptions import ValidationError
 from navconfig import config
 import jsonpickle
+import redis.asyncio as aioredis
 
 from ...identities import AuthUser
 from ...conf import (
@@ -76,6 +77,10 @@ from ...conf import (
     OAUTH_DCR_GATE_NEW_CLIENTS,
     OAUTH_DCR_RATE_LIMIT,
     OAUTH_DCR_UNUSED_TTL,
+    # FEAT-095 TASK-041
+    OAUTH_UPSTREAM_IDP_BACKENDS,
+    OAUTH_UPSTREAM_FLOW_TTL,
+    REDIS_AUTH_URL,
 )
 from navigator_session import (
     get_session,
@@ -116,6 +121,11 @@ from .metadata import (
     build_as_metadata,
     build_protected_resource_metadata,
 )
+from ..external import (
+    OAUTH2_PENDING_FLOW_KEY,
+    OAUTH2_RESUME_COOKIE,
+)
+from ...identity.flow_store import IdentityFlowStore
 from .dcr import (
     DCRError,
     build_registration_response,
@@ -253,6 +263,9 @@ class Oauth2Provider(BaseAuthBackend):
         self.prm_metadata_uri: str = WELL_KNOWN_PRM_PATH
         # FEAT-095 TASK-040: Dynamic Client Registration (RFC 7591).
         self.register_uri: str = "/oauth2/register"
+        # FEAT-095 TASK-041: flow store for parked authorize requests
+        # (built lazily — see the flow_store property).
+        self._flow_store = None
         self.login_failed_uri = AUTH_LOGIN_FAILED_URI
         self.logout_redirect_uri = AUTH_LOGOUT_REDIRECT_URI or "/oauth2/logout/complete"
         self.redirect_uri = None
@@ -682,6 +695,129 @@ class Oauth2Provider(BaseAuthBackend):
         return self._metadata_response(self._build_metadata_documents(issuer)["prm"])
 
     # ------------------------------------------------------------------
+    # Upstream IdP proxy login (FEAT-095 TASK-041, decision D2)
+    # ------------------------------------------------------------------
+
+    #: Authorize-request members that MUST survive the upstream hop.
+    #: Losing ``state`` breaks CSRF protection; losing ``code_challenge``
+    #: breaks PKCE and the later token exchange fails outright.
+    PENDING_AUTHORIZE_FIELDS = (
+        "client_id",
+        "redirect_uri",
+        "response_type",
+        "scope",
+        "state",
+        "code_challenge",
+        "code_challenge_method",
+        "nonce",
+        "prompt",
+        "resource",
+    )
+
+    def _upstream_providers(self) -> list:
+        """Upstream IdP service names offered at the AS login page."""
+        return list(OAUTH_UPSTREAM_IDP_BACKENDS or [])
+
+    @property
+    def flow_store(self):
+        """Lazy :class:`IdentityFlowStore` for parked authorize requests.
+
+        ``Oauth2Provider`` extends ``BaseAuthBackend``, not ``ExternalAuth``,
+        so it does not inherit the latter's store; it builds its own over the
+        same Redis URL.  Flow state must never live on ``self`` — backends are
+        process-wide singletons.
+        """
+        if self._flow_store is None:
+            pool = aioredis.ConnectionPool.from_url(
+                REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
+            )
+            self._flow_store = IdentityFlowStore(pool)
+        return self._flow_store
+
+    async def _start_upstream_login(
+        self, request: web.Request, provider: str, data: dict
+    ):
+        """Park the pending authorize request and detour to an upstream IdP."""
+        if provider not in self._upstream_providers():
+            return self._error_response(
+                "invalid_request",
+                f"Unknown or disabled login provider '{provider}'.",
+                status=400,
+            )
+
+        pending = {
+            key: data[key]
+            for key in self.PENDING_AUTHORIZE_FIELDS
+            if data.get(key) is not None
+        }
+        if not pending.get("client_id"):
+            return self._error_response(
+                "invalid_request",
+                "Cannot start provider login without a pending authorize request.",
+                status=400,
+            )
+
+        flow_id = secrets.token_urlsafe(32)
+        try:
+            await self.flow_store.set(
+                OAUTH2_PENDING_FLOW_KEY.format(flow_id=flow_id),
+                pending,
+                ttl=OAUTH_UPSTREAM_FLOW_TTL,
+            )
+        except Exception as e:
+            self.logger.error(f"OAuth2: cannot park the authorize request: {e}")
+            return self._error_response(
+                "server_error",
+                "Unable to start provider login; please retry.",
+                status=500,
+            )
+
+        response = web.HTTPFound(f"/auth/{provider}/login")
+        # Only the opaque handle rides in the browser.
+        response.set_cookie(
+            OAUTH2_RESUME_COOKIE,
+            flow_id,
+            max_age=OAUTH_UPSTREAM_FLOW_TTL,
+            httponly=True,
+            samesite="Lax",
+            secure=(PREFERRED_AUTH_SCHEME == "https"),
+            path="/",
+        )
+        self.logger.notice(
+            f"OAuth2: parked authorize flow {flow_id}, delegating to '{provider}'"
+        )
+        return response
+
+    async def _resume_pending_authorize(self, data: dict) -> Optional[dict]:
+        """Restore an authorize request parked before the upstream hop.
+
+        Single-use (``getdel``): a replayed ``flow`` id must not resurrect the
+        request.  Returns None when the flow is missing or expired, so the
+        caller can restart cleanly instead of emitting a broken redirect.
+        """
+        flow_id = data.get("flow")
+        if not flow_id:
+            return None
+        try:
+            pending = await self.flow_store.getdel(
+                OAUTH2_PENDING_FLOW_KEY.format(flow_id=flow_id)
+            )
+        except Exception as e:
+            self.logger.error(f"OAuth2: cannot read parked authorize flow: {e}")
+            return None
+        if not pending:
+            self.logger.warning(
+                f"OAuth2: authorize flow {flow_id} is missing or expired."
+            )
+            return None
+        # Anything explicitly present on the resume URL wins over the
+        # parked copy, but the parked copy is the source of truth for the
+        # security-critical members (state, PKCE challenge).
+        restored = {**data, **pending}
+        restored.pop("flow", None)
+        return restored
+
+    # ------------------------------------------------------------------
     # Dynamic Client Registration (FEAT-095 TASK-040, RFC 7591)
     # ------------------------------------------------------------------
 
@@ -841,6 +977,22 @@ class Oauth2Provider(BaseAuthBackend):
         B4: validates response_type == "code".
         """
         data = await self.get_payload(request)
+
+        # FEAT-095 TASK-041: resume a request parked before an upstream-IdP
+        # hop.  Single-use; an expired flow restarts cleanly as
+        # invalid_request rather than redirecting somewhere half-formed.
+        if data.get("flow"):
+            restored = await self._resume_pending_authorize(data)
+            if restored is None:
+                return self._error_response(
+                    "invalid_request",
+                    (
+                        "Your sign-in session expired before the authorization "
+                        "request could be completed. Please start again."
+                    ),
+                    status=400,
+                )
+            data = restored
 
         # B4: validate response_type
         response_type = data.get("response_type", "code")
@@ -1044,9 +1196,21 @@ class Oauth2Provider(BaseAuthBackend):
             raise self.auth_error(reason=f"Invalid HTTP Form Data: {request.method}", status=400)
 
     async def auth_login(self, request: web.Request):
-        """Login page for OAuth2 resource owner authentication."""
+        """Login page for OAuth2 resource owner authentication.
+
+        FEAT-095 TASK-041 (D2): when ``OAUTH_UPSTREAM_IDP_BACKENDS`` is
+        configured the page also offers the upstream providers, and a
+        ``provider=`` selection hands the browser to that backend's normal
+        login route.  With the setting empty this method behaves exactly as
+        it did before the feature.
+        """
         if request.method == "GET":
             data = {key: val for (key, val) in request.query.items()}
+            # Provider selected: park the authorize request and detour.
+            provider = data.pop("provider", None)
+            if provider:
+                return await self._start_upstream_login(request, provider, data)
+            data["upstream_providers"] = self._upstream_providers()
             return await self._parser.view(filename="oauth/login.html", params=data)
         elif request.method == "POST":
             username, password, data = await self.get_login_form(request)
