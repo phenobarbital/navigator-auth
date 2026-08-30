@@ -21,6 +21,12 @@ from ..conf import (
 from ..identities import AuthUser
 from .abstract import BaseAuthBackend
 
+#: FEAT-095 TASK-044 — request key marking a bearer (resource-server) request.
+#: The auth middleware reads it to decide whether a 401 should carry the
+#: RFC 9728 ``WWW-Authenticate: Bearer resource_metadata=...`` challenge, so
+#: session/cookie 401s are not given a bearer challenge they cannot act on.
+BEARER_CHALLENGE_KEY: str = "_oauth2_bearer_challenge"
+
 
 class APIKeyUser(AuthUser):
     token: str
@@ -93,6 +99,14 @@ class APIKeyAuth(BaseAuthBackend):
         """
         payload = None
         if mech == "bearer":
+            # FEAT-095 TASK-044: mark this as a bearer request so any 401 the
+            # middleware raises from here on carries the resource_metadata
+            # challenge — including the revoked-jti rejection below.  The
+            # marker leaks nothing about *why* a token failed.
+            try:
+                request[BEARER_CHALLENGE_KEY] = True
+            except TypeError:  # pragma: no cover — non-mapping request stub
+                pass
             try:
                 _, payload = self._idp.decode_token(token)
             except (FailedAuth, AuthExpired, InvalidAuth):

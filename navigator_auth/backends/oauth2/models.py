@@ -15,6 +15,7 @@ FEAT-095:
   TASK-040 — ClientRegistrationRequest/Response (RFC 7591 DCR) and the
              token_endpoint_auth_method / registration_source /
              enforce_access_gate members on OAuthClient.
+  TASK-044 — resource (RFC 8707) on OauthAuthorizationCode.
 """
 
 from typing import Optional, Union
@@ -226,6 +227,11 @@ class OauthAuthorizationCode(BaseModel):
     expires_at: datetime = Field(default_factory=code_expiration)
     code_challenge: Optional[str] = Field(default=None)
     code_challenge_method: Optional[str] = Field(default=None)
+    # FEAT-095 TASK-044 (RFC 8707): the canonical resource this code was
+    # requested for.  Carried through the code so the token exchange can
+    # reflect it into `aud`; audience *enforcement* is the resource server's
+    # job (D5), navigator-auth only validates and propagates.
+    resource: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.now)
     # Single-use enforcement (B5).
     used: bool = Field(default=False)

@@ -29,11 +29,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 from collections.abc import Awaitable
 from html import escape
+import base64
 import hmac
 import importlib
 import json
 import secrets
-from urllib.parse import urlencode, urlparse, urlunparse
+from urllib.parse import urlencode, unquote_plus, urlparse, urlunparse
 from uuid import uuid4
 
 from aiohttp import web
@@ -138,6 +139,24 @@ from .dcr import (
     to_oauth_client,
     validate_registration,
 )
+
+
+def validate_resource_uri(resource: str) -> bool:
+    """RFC 8707 §2: a resource indicator is an absolute URI with no fragment.
+
+    Minimal support per D5 — navigator-auth validates the value and reflects
+    it into ``aud``; enforcing that a token is used only at its audience is
+    the resource server's responsibility.
+    """
+    if not resource or not isinstance(resource, str):
+        return False
+    try:
+        parsed = urlparse(resource)
+    except (ValueError, AttributeError):
+        return False
+    if not parsed.scheme or not parsed.netloc:
+        return False
+    return not parsed.fragment
 
 
 def _now_utc() -> datetime:
@@ -714,6 +733,51 @@ class Oauth2Provider(BaseAuthBackend):
         return self._metadata_response(self._build_metadata_documents(issuer)["prm"])
 
     # ------------------------------------------------------------------
+    # OAuth 2.1 / Claude conformance (FEAT-095 TASK-044, decision D5)
+    # ------------------------------------------------------------------
+
+    def _merge_basic_auth(self, request: web.Request, payload: dict) -> dict:
+        """Fold ``client_secret_basic`` credentials into the payload.
+
+        RFC 6749 §2.3.1 makes HTTP Basic the mandatory-to-implement client
+        authentication method, and TASK-039's metadata advertises both it and
+        ``client_secret_post``; advertising a method we do not accept is how
+        clients end up failing with no useful error.
+
+        Credentials already present in the body win, so this cannot override
+        an explicit ``client_id``/``client_secret``.
+        """
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Basic "):
+            return payload
+        try:
+            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            client_id, client_secret = decoded.split(":", 1)
+        except Exception:  # pylint: disable=W0703
+            # A malformed header is simply not credentials; the downstream
+            # client check will reject the request on its own terms.
+            return payload
+        merged = dict(payload)
+        # RFC 6749 §2.3.1 requires form-urlencoding of the two components.
+        if not merged.get("client_id"):
+            merged["client_id"] = unquote_plus(client_id)
+        if not merged.get("client_secret"):
+            merged["client_secret"] = unquote_plus(client_secret)
+        return merged
+
+    def _resource_audience(self, marker: str, resource: Optional[str]):
+        """Build the ``aud`` claim for a token.
+
+        Keeps the FEAT-093 ``'user'``/``'app'`` token-class marker and appends
+        the RFC 8707 canonical resource when one was requested, producing a
+        list-valued audience.  With no resource the claim stays the plain
+        string it has always been — existing tokens are unchanged.
+        """
+        if not resource:
+            return marker
+        return [marker, resource]
+
+    # ------------------------------------------------------------------
     # JWK Set (FEAT-095 TASK-043, decision D4)
     # ------------------------------------------------------------------
 
@@ -1229,6 +1293,15 @@ class Oauth2Provider(BaseAuthBackend):
                 f"response_type '{response_type}' is not supported; use 'code'.",
             )
 
+        # FEAT-095 TASK-044 (RFC 8707): validate the resource indicator.
+        resource = data.get("resource")
+        if resource and not validate_resource_uri(resource):
+            return self._error_response(
+                "invalid_target",
+                "The 'resource' parameter must be an absolute URI "
+                "without a fragment.",
+            )
+
         client_id = data.get("client_id")
         if not client_id:
             raise web.HTTPBadRequest(reason="Missing client_id")
@@ -1310,6 +1383,7 @@ class Oauth2Provider(BaseAuthBackend):
                             requested_scope, data.get("state", ""),
                             data.get("code_challenge"),
                             data.get("code_challenge_method"),
+                            resource=resource,
                         )
 
         # Show Consent page.
@@ -1332,6 +1406,7 @@ class Oauth2Provider(BaseAuthBackend):
         state: str,
         code_challenge: Optional[str] = None,
         code_challenge_method: Optional[str] = None,
+        resource: Optional[str] = None,
     ):
         """Issue an authorization code and redirect to the client."""
         from .models import OauthAuthorizationCode
@@ -1347,6 +1422,8 @@ class Oauth2Provider(BaseAuthBackend):
             response_type="code",
             code_challenge=code_challenge,
             code_challenge_method=code_challenge_method,
+            # RFC 8707: carried through the code to the token exchange.
+            resource=resource,
         )
         await self.code_storage.save_code(code_obj)
         payload = {"code": auth_code, "state": state}
@@ -1371,6 +1448,15 @@ class Oauth2Provider(BaseAuthBackend):
                 state = data.get("state", "")
                 code_challenge = data.get("code_challenge")
                 code_challenge_method = data.get("code_challenge_method")
+                # FEAT-095 TASK-044 (RFC 8707): the resource indicator must
+                # survive the consent hop, exactly like the PKCE challenge.
+                resource = data.get("resource")
+                if resource and not validate_resource_uri(resource):
+                    return self._error_response(
+                        "invalid_target",
+                        "The 'resource' parameter must be an absolute URI "
+                        "without a fragment.",
+                    )
 
                 # Resolve authenticated user from session — NEVER from client.user.
                 session_user = await self.check_session(request)
@@ -1399,7 +1485,8 @@ class Oauth2Provider(BaseAuthBackend):
 
                 return await self._issue_code(
                     request, client, user_obj, redirect_uri, scope, state,
-                    code_challenge, code_challenge_method
+                    code_challenge, code_challenge_method,
+                    resource=resource,
                 )
 
             else:
@@ -1518,8 +1605,32 @@ class Oauth2Provider(BaseAuthBackend):
     # ------------------------------------------------------------------
 
     async def token_request(self, request):
-        """Token endpoint (authorization_code / client_credentials / refresh_token)."""
+        """Token endpoint (authorization_code / client_credentials / refresh_token).
+
+        FEAT-095 TASK-044: OAuth 2.1 requires the token request to be
+        ``application/x-www-form-urlencoded`` (RFC 6749 §4.1.3).  Claude's
+        client sends form; JSON-only servers are what make Claude fail, so we
+        invert that — accept form, refuse JSON with **415**.
+        """
+        if request.method == "POST":
+            content_type = (request.content_type or "").lower()
+            if content_type and content_type != "application/x-www-form-urlencoded":
+                return JSONResponse(
+                    {
+                        "error": "invalid_request",
+                        "error_description": (
+                            "The token endpoint requires "
+                            "application/x-www-form-urlencoded; "
+                            f"got '{content_type}'."
+                        ),
+                    },
+                    status=415,
+                    headers={"Accept": "application/x-www-form-urlencoded"},
+                )
+
         payload = await self.get_payload(request)
+        # RFC 6749 §2.3.1 / RFC 8414: client_secret_basic as well as _post.
+        payload = self._merge_basic_auth(request, payload)
         grant_type = payload.get("grant_type")
 
         if grant_type == "authorization_code":
@@ -1633,11 +1744,34 @@ class Oauth2Provider(BaseAuthBackend):
             **await self._token_session_claims(request, user_id),
         }
 
-        # TASK-029: audience = 'user' for 3LO tokens.
+        # FEAT-095 TASK-044 (RFC 8707): a `resource` on the token request must
+        # match the one the code was issued for; otherwise fall back to the
+        # code's own value.  Downgrading silently would let a client swap the
+        # audience after consent.
+        requested_resource = payload.get("resource")
+        if requested_resource:
+            if not validate_resource_uri(requested_resource):
+                return self._error_response(
+                    "invalid_target",
+                    "The 'resource' parameter must be an absolute URI "
+                    "without a fragment.",
+                )
+            code_resource = getattr(auth_code, "resource", None)
+            if code_resource and requested_resource != code_resource:
+                return self._error_response(
+                    "invalid_target",
+                    "The 'resource' does not match the authorization request.",
+                )
+            resource = requested_resource
+        else:
+            resource = getattr(auth_code, "resource", None)
+
+        # TASK-029: audience = 'user' for 3LO tokens; TASK-044 appends the
+        # canonical resource when one was requested (list-valued aud).
         access_token, _, exp_abs, scheme = self._idp.create_token(
             token_data,
             expiration=OAUTH_ACCESS_TOKEN_TTL,
-            audience="user",
+            audience=self._resource_audience("user", resource),
         )
 
         # B1: expires_in is seconds (not an absolute timestamp).
@@ -1715,11 +1849,22 @@ class Oauth2Provider(BaseAuthBackend):
             "jti": jti,
         }
 
-        # TASK-029: audience = 'app' for 2LO tokens.
+        # FEAT-095 TASK-044 (RFC 8707): client_credentials may also target a
+        # resource; there is no code to carry it, so it comes off the request.
+        cc_resource = payload.get("resource")
+        if cc_resource and not validate_resource_uri(cc_resource):
+            return self._error_response(
+                "invalid_target",
+                "The 'resource' parameter must be an absolute URI "
+                "without a fragment.",
+            )
+
+        # TASK-029: audience = 'app' for 2LO tokens; TASK-044 appends the
+        # canonical resource when one was requested (list-valued aud).
         access_token, _, exp_abs, scheme = self._idp.create_token(
             token_data,
             expiration=OAUTH_ACCESS_TOKEN_TTL,
-            audience="app",
+            audience=self._resource_audience("app", cc_resource),
         )
 
         now_utc = _now_utc()
@@ -2053,6 +2198,9 @@ class Oauth2Provider(BaseAuthBackend):
         Always returns 200 regardless of token validity.
         """
         payload = await self.get_payload(request)
+        # FEAT-095 TASK-044: accept client_secret_basic here too (RFC 8414
+        # advertises it for the revocation endpoint).
+        payload = self._merge_basic_auth(request, payload)
         token = payload.get("token", "")
         hint = payload.get("token_type_hint", "")
 
@@ -2143,18 +2291,11 @@ class Oauth2Provider(BaseAuthBackend):
         payload = await self.get_payload(request)
 
         # --- Authenticate the calling confidential client ---
+        # FEAT-095 TASK-044: client_secret_basic and _post, via the shared
+        # helper (which also form-urldecodes per RFC 6749 §2.3.1).
+        payload = self._merge_basic_auth(request, payload)
         caller_client_id = payload.get("client_id", "")
         caller_secret = payload.get("client_secret", "")
-        if not caller_client_id:
-            # Also accept HTTP Basic Auth
-            auth_header = request.headers.get("Authorization", "")
-            if auth_header.startswith("Basic "):
-                import base64
-                try:
-                    decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
-                    caller_client_id, caller_secret = decoded.split(":", 1)
-                except Exception:
-                    pass
 
         caller = await self.client_storage.get_client(caller_client_id, request=request)
         if not caller or caller.client_type == "public":
