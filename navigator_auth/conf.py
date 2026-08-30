@@ -749,6 +749,107 @@ OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS = config.getint(
 # Lockout duration in seconds after too many bad attempts.
 OAUTH_DEVICE_LOCKOUT_TTL = config.getint("OAUTH_DEVICE_LOCKOUT_TTL", fallback=300)
 
+# ---------------------------------------------------------------------------
+# OAuth 2.1 for MCP Agents (FEAT-095) — issuer, DCR, upstream IdP, gate, JWKS
+# ---------------------------------------------------------------------------
+
+# Canonical https issuer identifier for RFC 8414 / RFC 9728 discovery.
+# When empty, the issuer is derived per-request from the request scheme/host
+# (honouring X-Forwarded-Proto / Host so it is reverse-proxy safe).
+# NOTE: this is a NEW setting; AUTH_TOKEN_ISSUER (urn:Navigator) keeps its
+# current semantics for the non-OAuth2 JWT ``iss`` claim.
+AUTH_ISSUER_URL = config.get("AUTH_ISSUER_URL", fallback="")
+
+# --- Dynamic Client Registration (RFC 7591) — D1: open by default ----------
+
+# open | allowlist | disabled
+OAUTH_DCR_POLICY = config.get("OAUTH_DCR_POLICY", fallback="open")
+
+# Glob patterns accepted as redirect_uris when OAUTH_DCR_POLICY == "allowlist".
+# Claude's MCP connector callbacks ship as defaults.
+_oauth_dcr_allowlist_raw = config.get(
+    "OAUTH_DCR_REDIRECT_ALLOWLIST",
+    fallback=(
+        "https://claude.ai/api/mcp/auth_callback,"
+        "https://claude.com/api/mcp/auth_callback"
+    ),
+)
+OAUTH_DCR_REDIRECT_ALLOWLIST: list[str] = [
+    s.strip() for s in _oauth_dcr_allowlist_raw.split(",") if s.strip()
+]
+
+# Scopes granted to DCR clients that request none.
+_oauth_dcr_default_scopes_raw = config.get("OAUTH_DCR_DEFAULT_SCOPES", fallback="")
+OAUTH_DCR_DEFAULT_SCOPES: list[str] = [
+    s.strip() for s in _oauth_dcr_default_scopes_raw.split(",") if s.strip()
+]
+
+# DCR-registered clients are born with enforce_access_gate = True.
+OAUTH_DCR_GATE_NEW_CLIENTS = config.getboolean(
+    "OAUTH_DCR_GATE_NEW_CLIENTS", fallback=True
+)
+
+# Per-source-IP registration rate limit, "<count>/<window>" where window is
+# one of second | minute | hour | day.
+OAUTH_DCR_RATE_LIMIT = config.get("OAUTH_DCR_RATE_LIMIT", fallback="10/hour")
+
+# Reap DCR clients that never completed a token exchange (seconds; 30 days).
+OAUTH_DCR_UNUSED_TTL = config.getint("OAUTH_DCR_UNUSED_TTL", fallback=2592000)
+
+# --- Upstream IdP proxy login (D2) -----------------------------------------
+
+# ExternalAuth service names offered at the AS login page (e.g. "google,azure").
+# Empty (default) keeps the current local-password-only behaviour.
+_oauth_upstream_idp_raw = config.get("OAUTH_UPSTREAM_IDP_BACKENDS", fallback="")
+OAUTH_UPSTREAM_IDP_BACKENDS: list[str] = [
+    s.strip() for s in _oauth_upstream_idp_raw.split(",") if s.strip()
+]
+
+# TTL of the parked pending-authorize flow record (seconds).
+OAUTH_UPSTREAM_FLOW_TTL = config.getint("OAUTH_UPSTREAM_FLOW_TTL", fallback=600)
+
+# --- Per-client access gate (D3 / D7) --------------------------------------
+
+# Enforce the access gate for ALL clients (global kill-switch, default off).
+OAUTH_ACCESS_GATE_ENABLED = config.getboolean(
+    "OAUTH_ACCESS_GATE_ENABLED", fallback=False
+)
+
+# Record a status='pending' approval-queue row on a denied gated attempt.
+# Inert unless a gate is actually enforced for that client.
+OAUTH_ACCESS_GATE_QUEUE = config.getboolean(
+    "OAUTH_ACCESS_GATE_QUEUE", fallback=True
+)
+
+# --- Asymmetric signing + JWKS (D4) ----------------------------------------
+
+# HS256 (default) | RS256 | ES256.
+OAUTH_JWT_SIGNING_ALG = config.get("OAUTH_JWT_SIGNING_ALG", fallback="HS256")
+
+# Signing key registry.  JSON list of objects:
+#   [{"kid": "...", "algorithm": "RS256",
+#     "private_key_file": "/path/key.pem", "public_key_file": "/path/pub.pem",
+#     "active": true}]
+# Inline PEM is also accepted via "private_key" / "public_key".
+# Exactly one entry may carry "active": true (the signer); the rest verify only.
+_oauth_jwt_keys_raw = config.get("OAUTH_JWT_KEYS", fallback="")
+OAUTH_JWT_KEYS: list = []
+if _oauth_jwt_keys_raw:
+    if isinstance(_oauth_jwt_keys_raw, (list, tuple)):
+        OAUTH_JWT_KEYS = list(_oauth_jwt_keys_raw)
+    else:
+        try:
+            _parsed_jwt_keys = orjson.loads(_oauth_jwt_keys_raw)
+            if isinstance(_parsed_jwt_keys, list):
+                OAUTH_JWT_KEYS = _parsed_jwt_keys
+            elif isinstance(_parsed_jwt_keys, dict):
+                OAUTH_JWT_KEYS = [_parsed_jwt_keys]
+        except Exception:  # pylint: disable=W0703
+            logging.warning(
+                "OAUTH_JWT_KEYS is not valid JSON; asymmetric signing disabled."
+            )
+            OAUTH_JWT_KEYS = []
+
 
 with contextlib.suppress(ImportError):
     from settings.settings import *  # pylint: disable=W0614,W0401 # noqa

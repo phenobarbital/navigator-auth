@@ -65,6 +65,8 @@ from ...conf import (
     OAUTH_DEVICE_VERIFICATION_URI,
     OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS,
     OAUTH_DEVICE_LOCKOUT_TTL,
+    # FEAT-095 TASK-038
+    AUTH_ISSUER_URL,
 )
 from navigator_session import (
     get_session,
@@ -106,6 +108,85 @@ def _now_utc() -> datetime:
 
 def _now() -> datetime:
     return datetime.now()
+
+
+# ---------------------------------------------------------------------------
+# FEAT-095 TASK-038 — canonical issuer identity
+# ---------------------------------------------------------------------------
+
+#: Hosts for which a plain-http issuer is tolerated (local development).
+LOCALHOST_NAMES: frozenset = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+
+
+def _is_localhost(host: str) -> bool:
+    """True when ``host`` (optionally ``host:port``) is a loopback name."""
+    if not host:
+        return False
+    hostname = host.split(",")[0].strip()
+    if hostname.startswith("["):          # IPv6 literal, e.g. [::1]:8080
+        hostname = hostname.split("]")[0] + "]"
+    else:
+        hostname = hostname.split(":")[0]
+    return hostname.lower() in LOCALHOST_NAMES
+
+
+def issuer_url(request: Optional[web.Request] = None) -> str:
+    """Return the canonical OAuth2 issuer identifier for this deployment.
+
+    RFC 8414 §2 requires the issuer to be an ``https`` URL without query or
+    fragment, and RFC 8414 §3 requires the metadata document to be served at
+    ``{issuer}/.well-known/oauth-authorization-server``.  ``AUTH_TOKEN_ISSUER``
+    (``urn:Navigator``) is a URN and cannot serve that role, hence the separate
+    ``AUTH_ISSUER_URL`` setting.
+
+    Resolution order:
+      1. ``AUTH_ISSUER_URL`` when configured — returned verbatim (minus any
+         trailing slash).
+      2. Derived from the request: ``X-Forwarded-Proto`` (first value) is
+         honoured for the scheme and ``X-Forwarded-Host`` / ``Host`` for the
+         authority, so the value is correct behind a reverse proxy.
+
+    https is enforced: a derived ``http`` issuer is upgraded to ``https``
+    unless the host is a loopback address (local development).
+
+    Args:
+        request: the current request; may be ``None`` when a static
+            ``AUTH_ISSUER_URL`` is configured.
+
+    Returns:
+        The issuer URL with no trailing slash.
+
+    Raises:
+        RuntimeError: when the issuer cannot be resolved (no setting and no
+            request).
+    """
+    if AUTH_ISSUER_URL:
+        return AUTH_ISSUER_URL.rstrip("/")
+    if request is None:
+        raise RuntimeError(
+            "Oauth2: cannot derive the issuer URL — set AUTH_ISSUER_URL."
+        )
+    headers = request.headers
+    forwarded_proto = headers.get("X-Forwarded-Proto", "")
+    scheme = forwarded_proto.split(",")[0].strip().lower() if forwarded_proto else ""
+    if not scheme:
+        scheme = (getattr(request, "scheme", "") or "https").lower()
+    host = (
+        headers.get("X-Forwarded-Host", "")
+        or headers.get("Host", "")
+        or getattr(getattr(request, "url", None), "netloc", "")
+        or ""
+    )
+    host = host.split(",")[0].strip()
+    if not host:
+        raise RuntimeError(
+            "Oauth2: cannot derive the issuer URL — no Host header; "
+            "set AUTH_ISSUER_URL."
+        )
+    # https enforcement: http is only tolerated for loopback development.
+    if scheme != "https" and not _is_localhost(host):
+        scheme = "https"
+    return f"{scheme}://{host}".rstrip("/")
 
 
 class Oauth2Provider(BaseAuthBackend):
@@ -273,6 +354,15 @@ class Oauth2Provider(BaseAuthBackend):
                     f"Auth Callback: Error getting Callback Function: {fn}, {e!s}"
                 ) from e
         self._callbacks = fns
+
+    def issuer_url(self, request: web.Request = None) -> str:
+        """Canonical issuer for this AS (FEAT-095 TASK-038).
+
+        Thin delegation to the module-level :func:`issuer_url` helper so every
+        FEAT-095 surface (discovery, DCR, JWKS, challenges) shares one
+        definition of "who this authorization server is".
+        """
+        return issuer_url(request)
 
     def get_domain(self, request: web.Request) -> str:
         uri = urlparse(str(request.url))
