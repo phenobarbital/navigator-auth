@@ -1,0 +1,121 @@
+# TASK-042: Per-client access gate + approval queue
+
+**Feature**: FEAT-095 oauth2-for-mcp-agents
+**Spec**: `sdd/specs/oauth2-for-mcp-agents.spec.md` (Module 5, decisions D3 + D7)
+**Status**: pending
+**Priority**: high
+**Estimated effort**: L (4-8h)
+**Depends-on**: TASK-041
+**Assigned-to**: unassigned
+
+---
+
+## Context
+
+Nothing in the login path gates who may receive tokens — `AUTH_MISSING_ACCOUNT="create"`
+auto-provisions any Google login. For MCP exposure, token issuance must require explicit
+per-user activation per client (D3), with an approval queue so admins can see and approve
+who tried (D7, ships in v1).
+
+---
+
+## Scope
+
+- Create `navigator_auth/backends/oauth2/client_access.py`: `ClientAccessStorage` ABC +
+  memory/redis/postgres tiers, registered in the FEAT-093 storage factory
+  (`get_token_storages`). Interface per spec §2: `check`, `grant`, `revoke`,
+  `list_for_client` (+ `list_pending`, `approve`, `reject` for the queue).
+- `ClientAccess` model (`models.py`) + `auth.client_access` DDL (unique
+  `(user_id, client_id)`, indexed `client_uid`; `status`: `active|revoked|pending`).
+- Gate check in `authorize` (after login, **before consent**) and in FEAT-094 device
+  verification (`/oauth2/device`): enforced when `OAUTH_ACCESS_GATE_ENABLED` (global) or
+  the client's `enforce_access_gate` flag; failure ⇒ standard `access_denied` error
+  redirect (with `state`) — never reaches consent, never gets a code.
+- **Approval queue (D7)**: denied gated attempt upserts one `status='pending'` row per
+  (user, client) when `OAUTH_ACCESS_GATE_QUEUE=True` (default).
+- Deactivation cascade: revoke `OauthGrant`s + `revoke_chain` on refresh tokens + revoke
+  live `jti`s for that (user, client); effect ≤ access-token TTL.
+- Management API `handlers/client_access.py`:
+  `GET/POST/DELETE /api/v1/oauth2/clients/{client_uid}/access` (admin/superuser only,
+  behind auth middleware + ABAC); list includes pending rows; approve (`pending→active`)
+  and reject.
+- Unit tests per spec §4 (five `test_gate_*` rows).
+
+**NOT in scope**: any UI beyond the JSON API; shadow/dry-run PBAC mode (explicit non-goal).
+
+---
+
+## Files to Create / Modify
+
+| File | Action | Description |
+|---|---|---|
+| `navigator_auth/backends/oauth2/client_access.py` | CREATE | Storage ABC + 3 tiers |
+| `navigator_auth/models.py` | MODIFY | `ClientAccess` model |
+| `navigator_auth/backends/oauth2/ddl.sql` | MODIFY | `auth.client_access` table |
+| `navigator_auth/backends/oauth2/backend.py` | MODIFY | Gate check in `authorize` + device verification |
+| `navigator_auth/handlers/client_access.py` | CREATE | Management API |
+| `navigator_auth/handlers/__init__.py` | MODIFY | Mount routes |
+| `navigator_auth/conf.py` | MODIFY | (keys exist from TASK-038 — wire only) |
+| `tests/test_oauth2_access_gate.py` | CREATE | Gate matrix + cascade + queue |
+
+---
+
+## Implementation Notes
+
+### Key Constraints
+- **Device-flow parity is a security requirement**: the gate must cover
+  `/oauth2/device` verification or it is bypassable via the device grant (spec §6 risk).
+- Cascade uses only FEAT-093/094 primitives (`GrantStorage`, `RefreshTokenStorage.
+  revoke_chain`, `AccessTokenStorage`); no new revocation machinery.
+- Table carries both int FK (`client_id`) and denormalized `client_uid` (three-meanings
+  discipline).
+- `access_denied` must include the original `state` and use the standard OAuth error
+  redirect (FEAT-093 `auth_error` helper).
+
+### References in Codebase
+- `navigator_auth/backends/oauth2/client_backend.py` — storage ABC + trio template.
+- `navigator_auth/backends/oauth2/backend.py:476` `authorize`, FEAT-094 device
+  verification — insertion points.
+- `navigator_auth/handlers/user_identities.py` — handler + mounting pattern.
+
+---
+
+## Acceptance Criteria
+
+- [ ] Non-activated user on a gated client ⇒ `access_denied` (with `state`), no code, no
+      token; pending row recorded
+- [ ] Gate off globally + client flag off ⇒ FEAT-093 behavior unchanged
+- [ ] Approve ⇒ next authorize succeeds; reject ⇒ still denied; no duplicate pending rows
+- [ ] Deactivate ⇒ grants + refresh chain + jtis revoked; refresh ⇒ `invalid_grant`;
+      introspect ⇒ inactive; new authorize ⇒ `access_denied`
+- [ ] Gate enforced at FEAT-094 device verification too
+- [ ] Tests pass: `pytest tests/test_oauth2_access_gate.py -v`
+
+---
+
+## Test Specification
+
+```python
+# tests/test_oauth2_access_gate.py — per spec §4:
+# test_gate_blocks_before_consent, test_gate_disabled_by_default,
+# test_gate_revoke_cascade, test_gate_device_flow, test_gate_pending_queue
+# + integration test_gate_lifecycle (activate → works → deactivate → revoked everywhere)
+```
+
+---
+
+## Agent Instructions
+
+1. **Read the spec**; 2. **Check dependencies** (TASK-041 completed);
+3. **Update index** → in-progress; 4. **Implement**; 5. **Verify**;
+6. **Move to completed/**; 7. **Update index** → done; 8. **Fill Completion Note**.
+
+---
+
+## Completion Note
+
+**Completed by**:
+**Date**:
+**Notes**:
+
+**Deviations from spec**: none
