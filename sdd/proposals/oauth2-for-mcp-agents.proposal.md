@@ -2,7 +2,8 @@
 
 **Date**: 2026-08-30
 **Author**: Jesus Lara
-**Status**: discussion
+**Status**: accepted
+**Spec**: sdd/specs/oauth2-for-mcp-agents.spec.md
 **Feature ID (reserved)**: FEAT-095
 **Depends on**: FEAT-093 (`oauth2-3lo-implementation`, landed), FEAT-094 (`oauth2-introspection-device-grant`, landed)
 **Driven by**: ai-parrot `sdd/proposals/sdd-brainstorm_agent-methods-as-mcp-tools.md` — spike gate **S1** ("Does a minimal AS connect from claude.ai without 'Disconnected'?") blocks that feature's proposal stage.
