@@ -814,7 +814,7 @@
     "feature_id": "FEAT-095",
     "feature": "oauth2-for-mcp-agents",
     "spec": "sdd/specs/oauth2-for-mcp-agents.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "priority": "medium",
     "effort": "M",
     "depends_on": [
@@ -824,8 +824,8 @@
     "parallelism_notes": "Only backends/idp/ + one route; no file overlap with 039-042/044 \u2014 safe in a parallel worktree (spec Worktree Strategy).",
     "assigned_to": null,
     "started_at": "2026-08-30T22:17:43Z",
-    "completed_at": null,
-    "file": "sdd/tasks/active/TASK-043-jwks-asymmetric-signing.md"
+    "completed_at": "2026-08-30T23:41:45Z",
+    "file": "sdd/tasks/completed/TASK-043-jwks-asymmetric-signing.md"
   },
   {
     "id": "TASK-044",
