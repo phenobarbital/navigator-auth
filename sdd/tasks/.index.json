@@ -774,7 +774,7 @@
     "feature_id": "FEAT-095",
     "feature": "oauth2-for-mcp-agents",
     "spec": "sdd/specs/oauth2-for-mcp-agents.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -784,8 +784,8 @@
     "parallelism_notes": "Edits backend.py authorize/auth_login; ordered before the gate (042) which inserts into this flow.",
     "assigned_to": null,
     "started_at": "2026-08-30T22:17:43Z",
-    "completed_at": null,
-    "file": "sdd/tasks/active/TASK-041-upstream-idp-proxy.md"
+    "completed_at": "2026-08-30T23:31:37Z",
+    "file": "sdd/tasks/completed/TASK-041-upstream-idp-proxy.md"
   },
   {
     "id": "TASK-042",
