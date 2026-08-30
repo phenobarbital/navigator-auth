@@ -326,9 +326,19 @@ class Client(Model):
     redirect_uris: list = Column(required=False, default_factory=list)
     policy_uri: str = Column(required=False)
     client_logo_uri: str = Column(required=False)
-    user_id: User = Column(required=True, fk="user_id|username")
+    # FEAT-095 TASK-040: optional — a client self-registered through RFC 7591
+    # Dynamic Client Registration has no owning user (registration is anonymous
+    # by design, D1); the access gate is what controls who may use it.
+    user_id: User = Column(required=False, fk="user_id|username")
     default_scopes: list = Column(required=False, default_factory=list)
     allowed_grant_types: list = Column(required=False, default_factory=list)
+    # FEAT-095 TASK-040: RFC 7591 registration metadata.
+    # "none" designates a public client (no secret; PKCE mandatory).
+    token_endpoint_auth_method: str = Column(required=False)
+    # 'static' (operator-provisioned) | 'dcr' (self-registered) — auditability.
+    registration_source: str = Column(required=False, default='static')
+    # Per-client access gate (TASK-042); DCR clients are born gated.
+    enforce_access_gate: bool = Column(required=False, default=False)
     created_at: datetime = Column(required=False, default=datetime.now)
     updated_at: datetime = Column(required=False, default=datetime.now)
     is_active: bool = Column(required=True, default=True)

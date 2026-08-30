@@ -212,3 +212,36 @@ CREATE INDEX IF NOT EXISTS idx_oauth_device_codes_client
 
 CREATE INDEX IF NOT EXISTS idx_oauth_device_codes_status_expires
     ON auth.oauth_device_codes(status, expires_at);
+
+-- =====================================================================
+-- FEAT-095 TASK-040 — Dynamic Client Registration (RFC 7591)
+-- Registration metadata + the per-client access-gate flag on auth.clients.
+-- =====================================================================
+
+-- How the client authenticates at /oauth2/token.
+-- 'none' designates a PUBLIC client: no client_secret, PKCE mandatory.
+ALTER TABLE auth.clients
+    ADD COLUMN IF NOT EXISTS token_endpoint_auth_method VARCHAR(64);
+
+-- Provenance: 'static' (operator-provisioned) | 'dcr' (self-registered).
+-- Open registration (D1) makes provenance the audit handle for abuse review.
+ALTER TABLE auth.clients
+    ADD COLUMN IF NOT EXISTS registration_source VARCHAR(32) NOT NULL DEFAULT 'static';
+
+-- Per-client access gate (TASK-042). DCR clients are born gated
+-- (OAUTH_DCR_GATE_NEW_CLIENTS), so registering grants nobody access.
+ALTER TABLE auth.clients
+    ADD COLUMN IF NOT EXISTS enforce_access_gate BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- DCR clients are anonymous: registration carries no owning user, so the
+-- owner FK must be nullable.  (client_credentials clients still set it.)
+ALTER TABLE auth.clients
+    ALTER COLUMN user_id DROP NOT NULL;
+
+-- Existing rows predate DCR and were provisioned out of band.
+UPDATE auth.clients SET registration_source = 'static' WHERE registration_source IS NULL;
+
+-- The reaper (OAUTH_DCR_UNUSED_TTL) sweeps unused DCR clients by provenance
+-- and age; the introspection/authorize paths look clients up by client_uid.
+CREATE INDEX IF NOT EXISTS idx_clients_registration_source
+    ON auth.clients(registration_source);

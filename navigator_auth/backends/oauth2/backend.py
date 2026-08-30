@@ -70,6 +70,12 @@ from ...conf import (
     # FEAT-095 TASK-039
     OAUTH_DCR_POLICY,
     OAUTH_JWT_KEYS,
+    # FEAT-095 TASK-040
+    OAUTH_DCR_REDIRECT_ALLOWLIST,
+    OAUTH_DCR_DEFAULT_SCOPES,
+    OAUTH_DCR_GATE_NEW_CLIENTS,
+    OAUTH_DCR_RATE_LIMIT,
+    OAUTH_DCR_UNUSED_TTL,
 )
 from navigator_session import (
     get_session,
@@ -109,6 +115,13 @@ from .metadata import (
     DEFAULT_GRANT_TYPES_SUPPORTED,
     build_as_metadata,
     build_protected_resource_metadata,
+)
+from .dcr import (
+    DCRError,
+    build_registration_response,
+    parse_rate_limit,
+    to_oauth_client,
+    validate_registration,
 )
 
 
@@ -238,6 +251,8 @@ class Oauth2Provider(BaseAuthBackend):
         # FEAT-095 TASK-039: discovery documents (RFC 8414 / RFC 9728).
         self.as_metadata_uri: str = WELL_KNOWN_AS_PATH
         self.prm_metadata_uri: str = WELL_KNOWN_PRM_PATH
+        # FEAT-095 TASK-040: Dynamic Client Registration (RFC 7591).
+        self.register_uri: str = "/oauth2/register"
         self.login_failed_uri = AUTH_LOGIN_FAILED_URI
         self.logout_redirect_uri = AUTH_LOGOUT_REDIRECT_URI or "/oauth2/logout/complete"
         self.redirect_uri = None
@@ -341,6 +356,13 @@ class Oauth2Provider(BaseAuthBackend):
         ):
             router.add_route("GET", path, handler, name=name)
             app[AUTH_EXCLUDE_LIST_KEY].append(path)
+
+        # FEAT-095 TASK-040: Dynamic Client Registration (RFC 7591).
+        # Anonymous by design (D1) — the endpoint must bypass auth entirely.
+        router.add_route(
+            "POST", self.register_uri, self.register, name="nav_oauth2_register"
+        )
+        app[AUTH_EXCLUDE_LIST_KEY].append(self.register_uri)
 
         super(Oauth2Provider, self).configure(app)
 
@@ -658,6 +680,156 @@ class Oauth2Provider(BaseAuthBackend):
         """
         issuer = self.issuer_url(request)
         return self._metadata_response(self._build_metadata_documents(issuer)["prm"])
+
+    # ------------------------------------------------------------------
+    # Dynamic Client Registration (FEAT-095 TASK-040, RFC 7591)
+    # ------------------------------------------------------------------
+
+    def _client_source_ip(self, request: web.Request) -> str:
+        """Best-effort source identity for rate limiting.
+
+        Mirrors the FEAT-094 device-lockout approach, including its caveat:
+        IP-based limits are bypassable behind a shared NAT or a rotating proxy
+        pool.  This is a speed bump against casual abuse, not authentication.
+        """
+        client_ip = request.headers.get("X-Forwarded-For", request.remote)
+        if client_ip:
+            client_ip = client_ip.split(",")[0].strip()
+        return client_ip or "unknown"
+
+    async def _check_dcr_rate_limit(self, request: web.Request) -> bool:
+        """Consume one registration token for this source IP.
+
+        Uses a fixed-window counter in Redis (shared across workers) taken from
+        ``self.code_storage``, the one Redis handle that is always present
+        regardless of the configured client-storage tier.
+
+        Returns:
+            True when the request may proceed.  Fails **open** when Redis is
+            unreachable — a broken cache must not make the AS unregisterable.
+        """
+        count, window = parse_rate_limit(OAUTH_DCR_RATE_LIMIT)
+        if count <= 0:
+            return True
+        redis_conn = getattr(self.code_storage, "redis", None)
+        if redis_conn is None:
+            return True
+        key = f"oauth2:dcr:ratelimit:{self._client_source_ip(request)}"
+        try:
+            used = await redis_conn.incr(key)
+            if int(used) == 1:
+                await redis_conn.expire(key, window)
+            return int(used) <= count
+        except Exception as e:
+            self.logger.warning(f"OAuth2 DCR: rate-limit check unavailable: {e}")
+            return True
+
+    async def register(self, request: web.Request):
+        """POST /oauth2/register — RFC 7591 Dynamic Client Registration.
+
+        Open by default (D1): registration is anonymous and confers no
+        privileges.  A registered client still cannot reach anything until a
+        user authenticates and passes the access gate (TASK-042), and DCR
+        clients are born gated via ``OAUTH_DCR_GATE_NEW_CLIENTS``.
+        """
+        if str(OAUTH_DCR_POLICY).strip().lower() == "disabled":
+            return self._error_response(
+                "registration_not_supported",
+                "Dynamic client registration is disabled on this server.",
+                status=400,
+            )
+
+        if not await self._check_dcr_rate_limit(request):
+            _, window = parse_rate_limit(OAUTH_DCR_RATE_LIMIT)
+            return JSONResponse(
+                {
+                    "error": "too_many_requests",
+                    "error_description": (
+                        "Too many client registrations from this source. "
+                        "Please retry later."
+                    ),
+                },
+                status=429,
+                headers={"Retry-After": str(window)},
+            )
+
+        # RFC 7591 §3.1: the registration request is a JSON document.
+        try:
+            body = await request.json()
+        except Exception:
+            return self._error_response(
+                "invalid_client_metadata",
+                "The registration request body must be valid JSON.",
+                status=400,
+            )
+
+        try:
+            reg = validate_registration(
+                body, OAUTH_DCR_POLICY, OAUTH_DCR_REDIRECT_ALLOWLIST
+            )
+        except DCRError as exc:
+            return self._error_response(exc.error, exc.description, status=exc.status)
+
+        client = to_oauth_client(
+            reg,
+            default_scopes=OAUTH_DCR_DEFAULT_SCOPES,
+            gate_new_clients=OAUTH_DCR_GATE_NEW_CLIENTS,
+        )
+
+        saved = await self.client_storage.save_client(client, request)
+        if not saved:
+            self.logger.error(
+                f"OAuth2 DCR: failed to persist client {client.client_id}"
+            )
+            return self._error_response(
+                "server_error",
+                "The client could not be registered; please retry.",
+                status=500,
+            )
+
+        # Never log the generated secret.
+        self.logger.info(
+            f"OAuth2 DCR: registered {client.client_type} client "
+            f"{client.client_id} ({client.client_name}) "
+            f"gated={client.enforce_access_gate}"
+        )
+
+        response = build_registration_response(reg, client)
+        # exclude_none drops client_secret for public clients (RFC 7591 §3.2.1).
+        return JSONResponse(response.model_dump(exclude_none=True), status=201)
+
+    async def reap_unused_dcr_clients(self, request: web.Request = None) -> int:
+        """Sweep DCR clients that never completed a token exchange.
+
+        Anti-abuse counterpart to open registration (``OAUTH_DCR_UNUSED_TTL``).
+        Exposed as a method so deployments can drive it from a scheduler or a
+        maintenance command; it is deliberately not run on the request path.
+
+        The Postgres tier (the default) answers "was this client ever used?"
+        authoritatively in SQL and ignores the predicate below.  The memory and
+        Redis tiers have no index from client to issued tokens, so the
+        predicate fails **safe** — unknown means "assume used", and nothing is
+        deleted.  Those tiers are ephemeral anyway; a process restart is their
+        reaper.
+        """
+        async def _is_used(client_uid: str) -> bool:
+            storage = self.access_token_storage
+            lister = getattr(storage, "list_by_client", None)
+            if lister is None:
+                # Cannot prove the client is unused ⇒ never delete it.
+                return True
+            try:
+                return bool(await lister(client_uid))
+            except Exception:
+                return True
+
+        try:
+            return await self.client_storage.reap_unused_dcr_clients(
+                OAUTH_DCR_UNUSED_TTL, is_used=_is_used, request=request
+            )
+        except Exception as e:
+            self.logger.error(f"OAuth2 DCR: reaper failed: {e}")
+            return 0
 
     # ------------------------------------------------------------------
     # authorize
