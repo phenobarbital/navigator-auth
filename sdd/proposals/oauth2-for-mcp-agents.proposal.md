@@ -192,6 +192,11 @@ composition. No OIDC `id_token` issuance, no DPoP/mTLS, no token exchange.
 
 ## Open Questions
 
+> **All resolved 2026-08-31** — see spec §7 (D5–D7): RFC 8707 enforcement lives on the
+> resource-server side (ai-parrot `ExternalOAuthValidator` audience check); ai-parrot
+> serves its own PRM per MCP mount (cross-repo follow-up spec once this lands); activation
+> ships **both** the admin API and the approval queue in v1.
+
 1. **RFC 8707 resource indicators** — the 2025-06 MCP authorization spec
    expects clients to send `resource=`; Claude sends it. Accept-and-echo
    (minimal) or full audience-restricted tokens?

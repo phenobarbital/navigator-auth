@@ -3,7 +3,7 @@
 **Feature ID**: FEAT-095
 **Date**: 2026-08-30
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 1.4.0
 
 > **Inputs:** `sdd/proposals/oauth2-for-mcp-agents.proposal.md` (decisions D1–D4 resolved
@@ -83,7 +83,7 @@ agent tools, and third-party resource servers wanting offline token validation.
   device grant) — consumed as-is.
 - Full RFC 8707 multi-resource audience restriction — **minimal support only**: accept and
   validate the `resource` parameter, reflect the canonical resource into the token `aud`
-  claim when provided (see OQ1 for anything beyond).
+  claim when provided; audience *enforcement* is the resource server's job (D5).
 - A PBAC shadow/dry-run mode. **Note for ai-parrot D11:** `enforcing: false` on policies
   means "non-short-circuiting ordinary policy" (`abac/policies/abstract.py:81`), *not*
   audit-only; a real shadow mode would be separate work on `abac/pdp.py`/`audit.py`.
@@ -309,8 +309,10 @@ class ClientAccessStorage(ABC):
   `OauthGrant`s, `revoke_chain` on refresh tokens, revoke live `jti`s for that
   (user, client); effective ≤ access-token TTL (FEAT-093 acceptance model). Management
   API `GET/POST/DELETE /api/v1/oauth2/clients/{client_uid}/access` (admin/superuser only,
-  behind existing auth middleware + ABAC). Optional `status=pending` rows recorded on
-  denied attempts when `OAUTH_ACCESS_GATE_QUEUE=True` (OQ3) so admins see who requested.
+  behind existing auth middleware + ABAC). **Approval queue (D7, ships in v1):** a denied
+  attempt on a gated client upserts a `status='pending'` row (one per (user, client)) when
+  `OAUTH_ACCESS_GATE_QUEUE=True` (default); the management API lists pending requests and
+  approves (`pending → active`) or rejects them.
 - **Depends on**: Modules 1, 4 (ordering inside `authorize`); FEAT-093/094 storages.
 
 ### Module 6: Asymmetric signing + JWKS (D4)
@@ -376,6 +378,7 @@ class ClientAccessStorage(ABC):
 | `test_gate_disabled_by_default` | M5 | gate off globally + client flag off ⇒ FEAT-093 behavior unchanged |
 | `test_gate_revoke_cascade` | M5 | deactivate ⇒ grants revoked, refresh chain revoked, `jti`s revoked; next `tools`-style call 401 |
 | `test_gate_device_flow` | M5 | gate also enforced at FEAT-094 device verification |
+| `test_gate_pending_queue` | M5 | denied gated attempt upserts one `pending` row (no duplicates); approve ⇒ `active` ⇒ next authorize succeeds; reject ⇒ still denied (D7) |
 | `test_jwks_document` | M6 | public keys only, `kid`/`use: sig`; no private material ever serialized |
 | `test_rs256_sign_verify_kid` | M6 | RS256 token carries `kid`; decode selects key by `kid`; rotation: old key verifies, only active signs |
 | `test_hs256_default_unchanged` | M6 | unconfigured ⇒ HS256 tokens identical to pre-feature output |
@@ -436,9 +439,10 @@ def rsa_keypair(tmp_path):
       survives the hop and resumes into consent; upstream tokens are vaulted; with the
       setting empty, behavior is byte-identical to FEAT-093.
 - [ ] A non-activated user on a gated client receives `access_denied` (with `state`) and
-      never a code or token; activating via the management API unblocks; deactivating
-      cascades revocation with effect ≤ access-token TTL. Gate defaults off globally;
-      DCR-registered clients are born gated (`OAUTH_DCR_GATE_NEW_CLIENTS=True`).
+      never a code or token; the denied attempt records a `pending` approval-queue row
+      (D7); activating via the management API (direct grant or pending-approval) unblocks;
+      deactivating cascades revocation with effect ≤ access-token TTL. Gate defaults off
+      globally; DCR-registered clients are born gated (`OAUTH_DCR_GATE_NEW_CLIENTS=True`).
 - [ ] With RS256/ES256 configured: tokens carry `kid`, `/oauth2/jwks` serves the public set,
       metadata advertises `jwks_uri`, old keys verify during rotation, and a third party can
       validate offline. Unconfigured: HS256 output unchanged.
@@ -507,7 +511,7 @@ def rsa_keypair(tmp_path):
 | `OAUTH_UPSTREAM_IDP_BACKENDS` | `[]` | ExternalAuth service names offered at AS login (D2) |
 | `OAUTH_UPSTREAM_FLOW_TTL` | `600` | Pending-authorize flow-store TTL (s) |
 | `OAUTH_ACCESS_GATE_ENABLED` | `False` | Enforce the gate for **all** clients (D3) |
-| `OAUTH_ACCESS_GATE_QUEUE` | `False` | Record `pending` rows on denied attempts (OQ3) |
+| `OAUTH_ACCESS_GATE_QUEUE` | `True` | Record `pending` rows on denied gated attempts for admin approval (D7; inert unless a gate is enforced) |
 | `OAUTH_JWT_SIGNING_ALG` | `HS256` | `HS256` / `RS256` / `ES256` (D4) |
 | `OAUTH_JWT_KEYS` | `[]` | Key registry: `{kid, algorithm, private_key_file/public_key_file, active}` |
 
@@ -518,19 +522,33 @@ def rsa_keypair(tmp_path):
 
 ---
 
-## 7. Open Questions
+## 7. Resolved Decisions
 
-- [ ] **OQ1 — RFC 8707 beyond minimal.** M7 accepts + reflects `resource` into `aud`.
-      Should resource servers *enforce* audience match (reject tokens minted for another
-      resource)? Defer to ai-parrot integration testing. — *Owner: Jesus Lara*
-- [ ] **OQ2 — PRM ownership for ai-parrot mounts.** navigator-auth ships
-      `build_protected_resource_metadata`; confirm ai-parrot serves its own
-      `/.well-known/oauth-protected-resource` per MCP mount and consumes the builder.
-      — *Owner: Jesus Lara (ai-parrot side)*
-- [ ] **OQ3 — Activation UX.** Admin API only, or approval queue
-      (`OAUTH_ACCESS_GATE_QUEUE` records `pending` rows an admin can approve)? Queue is
-      spec'd as optional/off; decide before M5 lands whether it ships in v1.
-      — *Owner: Jesus Lara*
+> D1–D4 were resolved at proposal stage (2026-08-30); D5–D7 resolved with Jesus Lara on
+> 2026-08-31. None block implementation.
+
+- **D5 — RFC 8707 enforcement lives on the resource-server side.** navigator-auth keeps
+  the minimal M7 support (validate `resource`, reflect into `aud`); audience **enforcement**
+  is done by the resource server — ai-parrot's `ExternalOAuthValidator` already validates
+  `aud` against its `resource_server_url` (`oauth_server.py:263`), so no further
+  navigator-auth work. Configure each MCP mount's validator with its canonical resource
+  URI. (was OQ1)
+- **D6 — ai-parrot serves its own PRM.** Each ai-parrot MCP mount serves its own
+  `/.well-known/oauth-protected-resource` (consuming this spec's
+  `build_protected_resource_metadata` builder), pointing at this AS. A **follow-up spec in
+  the ai-parrot repo** covers that half and must be written once this spec lands (tracked
+  as a cross-repo follow-up in §8/M8 docs and in ai-parrot's "Agent Methods as MCP Tools"
+  feature). (was OQ2)
+- **D7 — Activation UX: both, in v1.** The admin management API **and** the approval queue
+  ship together: a denied `/authorize` attempt on a gated client records a
+  `status='pending'` row (upsert; no duplicates per (user, client)), and the management
+  API approves (`pending → active`) or rejects. `OAUTH_ACCESS_GATE_QUEUE` defaults **True**
+  (rows are only written when the gate is actually enforced for that client, so the default
+  is inert for un-gated deployments). (was OQ3)
+
+### Open Questions
+
+- *(none — all resolved above)*
 
 ---
 
@@ -555,3 +573,4 @@ def rsa_keypair(tmp_path):
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-08-30 | Jesus Lara | Initial draft from `oauth2-for-mcp-agents.proposal.md`; D1–D4 folded in (open DCR, auth_login delegation, per-client gate table, JWKS in scope); OQ1–OQ3 carried |
+| 0.2 | 2026-08-31 | Jesus Lara | Resolved D5–D7 (RFC 8707 enforcement on RS side via ExternalOAuthValidator; ai-parrot serves own PRM + cross-repo follow-up spec; approval queue ships in v1, `OAUTH_ACCESS_GATE_QUEUE=True`); folded queue into M5/tests/AC; status → approved |
