@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-095 oauth2-for-mcp-agents
 **Spec**: `sdd/specs/oauth2-for-mcp-agents.spec.md` (Module 1)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -100,8 +100,8 @@ async def test_issuer_https_enforced(...)       # http non-localhost ⇒ rejecte
 
 *(Agent fills this in when done)*
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Opus 5)
+**Date**: 2026-08-30
+**Notes**: AUTH_ISSUER_URL + full FEAT-095 config block added to conf.py; pure issuer_url(request) helper (module-level in oauth2/backend.py) plus Oauth2Provider.issuer_url() delegation. Honours AUTH_ISSUER_URL verbatim, else derives scheme://host from X-Forwarded-Proto / X-Forwarded-Host / Host; https enforced with a loopback exemption. 23 tests in tests/test_oauth2_issuer.py pass; FEAT-093/094 suites unchanged (3 pre-existing env failures in test_oauth2_3lo_session_binding.py caused by a 6-byte SECRET_KEY in the local .env + PyJWT 2.13 InsecureKeyLengthWarning, unrelated to this task).
 
 **Deviations from spec**: none
