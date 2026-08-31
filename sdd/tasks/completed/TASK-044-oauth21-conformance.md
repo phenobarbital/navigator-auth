@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-095 oauth2-for-mcp-agents
 **Spec**: `sdd/specs/oauth2-for-mcp-agents.spec.md` (Module 7, decision D5)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-039, TASK-040
@@ -101,8 +101,8 @@ validates and reflects.
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Opus 5)
+**Date**: 2026-08-31
+**Notes**: **415 guard**: `token_request` refuses any POST whose Content-Type is present and is not `application/x-www-form-urlencoded`, returning 415 with an `Accept` header. Comparison is lower-cased, and an *absent* Content-Type is tolerated so the FEAT-093/094 token tests keep passing unmodified (explicitly covered by two tests). **client_secret_basic**: one `_merge_basic_auth` helper now serves `/oauth2/token`, `/oauth2/introspect` and `/oauth2/revoke`; it form-urldecodes both components per RFC 6749 §2.3.1 (the previous inline introspect implementation did not), preserves colons in secrets, lets body credentials win over the header, and treats a malformed header as "no credentials" rather than raising. The existing `hmac.compare_digest` checks downstream are untouched. **RFC 8707**: `validate_resource_uri` (absolute URI, no fragment) gates the parameter at authorize, at consent, at the authorization_code exchange and at client_credentials; bad values ⇒ `invalid_target`. `resource` is persisted on `OauthAuthorizationCode` and threaded through `_issue_code` from both the consent-skip and the consent-POST paths. At the token exchange a `resource` on the request must match the one the code was issued for — silently downgrading would let a client swap the audience after consent. `_resource_audience` appends the canonical resource to the FEAT-093 `'user'`/`'app'` marker, giving a list-valued `aud`; with no resource the claim stays the plain string it has always been. Enforcement stays on the resource server per D5. **Challenges**: `api.py` marks bearer requests with `BEARER_CHALLENGE_KEY`, and `auth_middleware` now wraps its body and decorates any escaping `HTTPUnauthorized` with `WWW-Authenticate: Bearer resource_metadata="{issuer}/.well-known/oauth-protected-resource"`. Doing it once at the boundary covers every 401 path — including the revoked-`jti` rejection — instead of patching 18 call sites. The marker means session/cookie 401s do not get a bearer challenge they cannot act on; `bearer_challenge` never raises (a discovery convenience must not turn a 401 into a 500) and leaks nothing about why the token failed. 39 new tests; 377 pass across the non-DB OAuth2 suites.
 
-**Deviations from spec**: none
+**Deviations from spec**: one file beyond the task's table — `templates/oauth/consent.html` gained a hidden `resource` field. Without it the resource indicator is silently dropped at the consent hop and never reaches `_issue_code`, so the acceptance criterion "resource validated + reflected into aud" would fail for the interactive flow. This is exactly the bug the template's existing PKCE comment documents for `code_challenge`. A test asserts the field is present.

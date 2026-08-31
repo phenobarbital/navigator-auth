@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-095 oauth2-for-mcp-agents
 **Spec**: `sdd/specs/oauth2-for-mcp-agents.spec.md` (Module 3, decision D1)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-039
@@ -121,8 +121,8 @@ already emits `registration_endpoint`), `client_secret_basic` at token (TASK-044
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Opus 5)
+**Date**: 2026-08-31
+**Notes**: Pure `oauth2/dcr.py` (`validate_registration`, `to_oauth_client`, plus `build_registration_response`, `parse_rate_limit`, `generate_client_uid/secret` and a `DCRError` carrying the RFC 7591 §3.2.2 body). `ClientRegistrationRequest`/`ClientRegistrationResponse` added to `oauth2/models.py` with `extra="ignore"` (RFC 7591 §2 allows unknown metadata; Claude sends extras). `POST /oauth2/register` on `Oauth2Provider`, in the exclude list, returning 201 with `exclude_none=True` so `client_secret` is absent for public clients. Policy knob honoured: `open` (default) / `allowlist` (fnmatch globs, Claude callbacks default, fails closed when no patterns configured) / `disabled` ⇒ `registration_not_supported`. Validation rejects missing/empty `redirect_uris`, non-absolute URIs, fragments, wildcards and non-https (loopback exempt), unsupported grant/response types and auth methods — all as `invalid_client_metadata`. Public (`token_endpoint_auth_method=none`) ⇒ no secret ever minted; confidential ⇒ `secrets.token_urlsafe(32)`. Rate limiting is a fixed-window Redis counter per source IP off `self.code_storage.redis` (the one always-present handle, independent of the client-storage tier), 429 + `Retry-After`, and **fails open** so a broken cache cannot make the AS unregisterable. Unused-DCR reaper added as `ClientStorage.reap_unused_dcr_clients` across all three tiers: Postgres answers "never exchanged a token" authoritatively in SQL (`NOT EXISTS` against `oauth_access_tokens` / `oauth_grants`); memory/redis take an `is_used` predicate that fails **safe** (unknown ⇒ never delete). It is exposed as a method for a scheduler, deliberately not run on the request path. 52 new tests; 253 pass across the non-DB OAuth2 suites.
 
-**Deviations from spec**: none
+**Deviations from spec**: one required enabling change, `navigator_auth/models.py` `Client.user_id` `required=True` → `required=False` (plus `ALTER COLUMN user_id DROP NOT NULL` in `ddl.sql`). DCR registration is anonymous by design (D1), so a self-registered client has no owning user; without this the model raised `ValueError: Missing Required Field *user_id*` and DCR could not work at all on the default Postgres tier. The DDL column was already nullable — only the model-level constraint blocked it. Operator-provisioned and client_credentials clients still set `user_id` exactly as before. Two additions beyond the literal file table, both inside files already in scope: `enforce_access_gate`/`registration_source`/`token_endpoint_auth_method` were added to the `OAuthClient` Pydantic model (needed to carry the new columns through all three storage tiers), and the reaper lives on `ClientStorage` rather than in a new module.

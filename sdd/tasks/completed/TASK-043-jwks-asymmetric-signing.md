@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-095 oauth2-for-mcp-agents
 **Spec**: `sdd/specs/oauth2-for-mcp-agents.spec.md` (Module 6, decision D4)
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-038
@@ -103,8 +103,8 @@ TASK-039..042 (spec Worktree Strategy).
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Opus 5)
+**Date**: 2026-08-31
+**Notes**: `backends/idp/keys.py` provides `SigningKey` (Pydantic, private material in `SecretStr`), `SigningKeyRegistry`, `build_jwk_set` and `load_registry`. Keys load from PEM file paths or inline PEM; malformed or unreadable entries are skipped with a warning rather than raising, so a bad key definition cannot stop the service from starting. Exactly one key is the active signer; inactive keys stay in the registry as verification-only material, which is what makes rotation non-disruptive. PEM→JWK conversion supports RSA (`kty: RSA`, n/e) and NIST EC curves (`kty: EC`, crv/x/y), covering RS*/ES*, and emits `use: "sig"` + `kid` + `alg`. **HS256 remains byte-identical when unconfigured**: `signing_key()` returns None unless `OAUTH_JWT_SIGNING_ALG` names an asymmetric algorithm *and* a usable active key is loaded, so the original `jwt.encode(payload, SECRET_KEY, AUTH_JWT_ALGORITHM, ...)` call is reached unchanged — gated by `test_hs256_default_unchanged` (asserts no `kid` header, `alg=HS256`, decodes with SECRET_KEY) and by a test asserting keys loaded with `OAUTH_JWT_SIGNING_ALG=HS256` still sign symmetrically. `decode_token` dispatches on the token's own `kid` header via `_verification_key`, falling back to SECRET_KEY/HS256 for tokens with no `kid` or an unrecognised one — `test_mixed_token_migration_window` proves HS256 tokens minted before a rotation still decode after switching to RS256. `create_token` keeps its 4-tuple signature (explicitly tested). `GET /oauth2/jwks` added to `configure()` and the exclude list, serving public parameters only and returning an empty set (not 404) when unconfigured, since TASK-039 only advertises `jwks_uri` when keys are loaded. Two dedicated no-leak tests assert no RSA private parameters (d/p/q/dp/dq/qi), no "PRIVATE KEY" string and no raw PEM appear in the JWK Set or the endpoint body, plus one asserting `SecretStr` keeps the key out of `repr`/`str`. `test_asymmetric_e2e` validates a real token using only the JWK Set via `jwt.algorithms.RSAAlgorithm.from_jwk` — no shared secret, no introspection. 30 new tests; 338 pass across the non-DB OAuth2 suites.
 
-**Deviations from spec**: none
+**Deviations from spec**: none. `pyproject.toml` was NOT touched — `cryptography>=41.0` is already a direct dependency (line 57; resolved version 46.0.7), as the task required verifying. One note: the six `TestIdentityProviderSigning` tests carry `@pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning")`. The HS256 path signs with the deployment's `SECRET_KEY`, and this checkout's local `.env` holds a 6-byte value; PyJWT warns and the project's `filterwarnings = error` turns that into a failure. It is a property of the local environment's secret, not of the code — the same cause as the 3 pre-existing failures in `test_oauth2_3lo_session_binding.py` that predate this feature.

@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-095 oauth2-for-mcp-agents
 **Spec**: `sdd/specs/oauth2-for-mcp-agents.spec.md` (Module 8)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-039, TASK-040, TASK-041, TASK-042, TASK-043, TASK-044
@@ -102,8 +102,8 @@ as deviations); ai-parrot-side changes.
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Opus 5)
+**Date**: 2026-08-31
+**Notes**: **S1 is closed.** `tests/test_oauth2_mcp_conformance.py` (15 tests) drives the real provider methods against in-memory storages — no Redis, no Postgres, no network, no aiohttp server. `test_claude_replay_dcr` runs discovery → DCR (Claude's exact body: `client_name="Claude"`, `token_endpoint_auth_method=none`, the `claude.ai` callback) → gate activation → authorize with PKCE S256 → the user approves consent → form-urlencoded token → introspection, asserting the issued JWT's `user_id`/`client_id`/`jti`; `test_claude_replay_static_client` repeats it against a pre-registered static client. Each leg is wrapped in a `_Timer` asserting Claude's ≤10 s budget (≤30 s for refresh), plus a whole-handshake budget test. Also covered: refresh rotation retiring the old token, the 415-on-JSON refusal, PKCE rejection on a wrong verifier, single-use codes, the gate denying before any code exists while queueing the attempt, `test_gate_lifecycle` (denied → queued → approved → full flow → deactivate → cascade → `invalid_grant` on refresh → denied again, with jti revocation actually verified through a small fake Redis so the sweep really runs), `test_upstream_google_end_to_end` (provider button → parked flow → mocked callback → resume hook → every authorize parameter asserted intact across the hop → vaulted upstream token → consent → owner-bound token), and `test_asymmetric_e2e` (RS256 ⇒ metadata advertises `jwks_uri`, JWKS serves public-only, third party validates offline from the JWK Set alone). `examples/oauth2_mcp_server.py` wires the whole feature — open DCR, gate with approval queue, optional Google/Azure upstream IdPs, a demo IdP needing no database, and a small resource server at `/mcp/tools` that serves its own RFC 9728 document and emits the `WWW-Authenticate` challenge; verified to build with all 23 OAuth2/MCP routes mounted. `documentation/oauth.md` gained a full FEAT-095 section (issuer, discovery, DCR with request/response samples, upstream proxy, gate + management API, JWKS, conformance); `documentation/mcp-connector.md` is new and covers what URL to give Claude, reverse-proxy `.well-known` rewrites, a failure-mode table, gate administration with curl recipes, the RS256 key generation + publish/promote/retire rotation runbook, resource indicators, and the D6 cross-repo follow-up. Full regression: **435 passed** across all OAuth2 suites.
 
-**Deviations from spec**: none
+**Deviations from spec**: none. No production code was changed — the task's file table was followed exactly (2 files created, 1 modified, plus the new test file), and no test failure forced a source fix. Two notes: (1) the suite carries a module-level `filterwarnings` ignore for `jwt.warnings.InsecureKeyLengthWarning`, because access tokens are HS256-signed with this checkout's 6-byte `.env` `SECRET_KEY` and the project's `filterwarnings = error` would otherwise fail every token leg — the same environmental cause as the 3 pre-existing failures in `test_oauth2_3lo_session_binding.py`. (2) Those 3 failures remain the only red tests in the repository and predate FEAT-095; `pytest tests/ -k oauth` is otherwise fully green.
