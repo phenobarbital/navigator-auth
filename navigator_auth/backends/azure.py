@@ -176,15 +176,19 @@ class AzureAuth(ExternalAuth):
             redirect = None
             if "redirect_uri" in qs:
                 redirect = qs.pop("redirect_uri")
-            domain_url = self.get_domain(request)
-            self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
-            self.logger.notice(f"Redirect URL: {self.redirect_uri}")
+            # FEAT-095 TASK-041: never mutate self.redirect_uri — backends are
+            # process-wide singletons, so the old in-place .format() baked the
+            # first caller's domain into every later login (and raced once the
+            # AS started driving this flow concurrently).  get_redirect_uri()
+            # is a pure per-request computation.
+            redirect_uri = self.get_redirect_uri(request)
+            self.logger.notice(f"Redirect URL: {redirect_uri}")
             SCOPE = ["https://graph.microsoft.com/.default"]
             app = self.get_msal_app()
             try:
                 flow = app.initiate_auth_code_flow(
                     scopes=SCOPE,
-                    redirect_uri=self.redirect_uri,
+                    redirect_uri=redirect_uri,
                     domain_hint=AZURE_ADFS_DOMAIN,
                     max_age=int(AZURE_SESSION_TIMEOUT),
                 )

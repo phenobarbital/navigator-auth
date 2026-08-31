@@ -14,6 +14,7 @@ from .partners import PartnerKeyHandler
 from .recovery import ForgotPasswordHandler, ResetPasswordHandler
 from .config import ConfigHandler
 from .allowed_ips import AllowedIPHandler
+from .client_access import ClientAccessHandler
 
 ## TODO migration of login/logout handlers:
 def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
@@ -115,6 +116,12 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
             "/api/v1/security/config", ConfigHandler,
             name="api_security_config", allow_head=False
         )
+
+    ## OAuth2 per-client access gate (FEAT-095 TASK-042, superuser only):
+    router.add_view(
+        r"/api/v1/oauth2/clients/{client_uid}/access", ClientAccessHandler,
+        name="api_oauth2_client_access"
+    )
 
     ## Security: Add public IPs to allowed_ips backend (superuser only, POST only):
     router.add_post(

@@ -5,9 +5,17 @@ FEAT-093 TASK-023:
   - OAuthClient.client_pk carries the internal integer surrogate PK.
   - PostgresClientStorage looks up by client_uid column (DROP the int() cast).
   - Memory/Redis storages already key by string — they store by client_uid.
+
+FEAT-095 TASK-040 (Dynamic Client Registration):
+  - The RFC 7591 metadata (token_endpoint_auth_method, registration_source,
+    enforce_access_gate) round-trips through all three tiers.
+  - ``reap_unused_dcr_clients`` sweeps self-registered clients that never
+    completed a token exchange (OAUTH_DCR_UNUSED_TTL) — the anti-abuse
+    counterpart to open registration (D1).
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
 from typing import Optional
 import json
 import logging
@@ -36,6 +44,34 @@ class ClientStorage(ABC):
     ) -> bool:
         pass
 
+    async def reap_unused_dcr_clients(
+        self,
+        ttl: int,
+        *,
+        is_used=None,
+        request: Optional[web.Request] = None,
+    ) -> int:
+        """Delete self-registered clients that never exchanged a token.
+
+        Open registration (D1) means anyone can mint a ``client_id``; this is
+        the sweep that keeps abandoned and abusive registrations from
+        accumulating.  Only ``registration_source == 'dcr'`` rows are ever
+        touched — operator-provisioned clients are never reaped.
+
+        Args:
+            ttl: age in seconds beyond which an unused DCR client is stale
+                (``OAUTH_DCR_UNUSED_TTL``).
+            is_used: optional ``async (client_uid) -> bool`` predicate telling
+                the sweep whether a client ever completed a token exchange.
+                Tiers with no visibility into token storage rely on it; the
+                Postgres tier answers the question in SQL and ignores it.
+            request: carries the DB connection for the Postgres tier.
+
+        Returns:
+            The number of clients removed.
+        """
+        return 0
+
 
 class MemoryClientStorage(ClientStorage):
     """In-memory client store, keyed by client_uid (str)."""
@@ -55,6 +91,27 @@ class MemoryClientStorage(ClientStorage):
         # Store by public uid.
         self._clients[client.client_id] = client
         return True
+
+    async def reap_unused_dcr_clients(
+        self,
+        ttl: int,
+        *,
+        is_used=None,
+        request: Optional[web.Request] = None,
+    ) -> int:
+        cutoff = datetime.now() - timedelta(seconds=int(ttl))
+        stale = []
+        for uid, client in self._clients.items():
+            if getattr(client, "registration_source", "static") != "dcr":
+                continue
+            if client.created_at and client.created_at >= cutoff:
+                continue
+            if is_used is not None and await is_used(uid):
+                continue
+            stale.append(uid)
+        for uid in stale:
+            self._clients.pop(uid, None)
+        return len(stale)
 
 
 class RedisClientStorage(ClientStorage):
@@ -84,6 +141,36 @@ class RedisClientStorage(ClientStorage):
         data = client.model_dump_json()
         await self.redis.set(key, data)
         return True
+
+    async def reap_unused_dcr_clients(
+        self,
+        ttl: int,
+        *,
+        is_used=None,
+        request: Optional[web.Request] = None,
+    ) -> int:
+        cutoff = datetime.now() - timedelta(seconds=int(ttl))
+        removed = 0
+        try:
+            async for key in self.redis.scan_iter(match="oauth2:client:*"):
+                raw = await self.redis.get(key)
+                if not raw:
+                    continue
+                try:
+                    client = OAuthClient(**json.loads(raw))
+                except Exception:
+                    continue
+                if getattr(client, "registration_source", "static") != "dcr":
+                    continue
+                if client.created_at and client.created_at >= cutoff:
+                    continue
+                if is_used is not None and await is_used(client.client_id):
+                    continue
+                await self.redis.delete(key)
+                removed += 1
+        except Exception as e:
+            logging.error(f"Error reaping unused DCR clients from Redis: {e}")
+        return removed
 
 
 class PostgresClientStorage(ClientStorage):
@@ -149,9 +236,13 @@ class PostgresClientStorage(ClientStorage):
                             }
 
                 # Drop None values for fields that have Pydantic defaults.
+                # FEAT-095 TASK-040: registration_source / enforce_access_gate
+                # are NULL on rows written before the DDL migration ran; let
+                # the model defaults ('static' / False) apply.
                 for k in [
                     "policy_uri", "client_logo_uri", "default_scopes",
                     "redirect_uris", "allowed_grant_types",
+                    "registration_source", "enforce_access_gate",
                 ]:
                     if data.get(k) is None:
                         data.pop(k, None)
@@ -230,3 +321,52 @@ class PostgresClientStorage(ClientStorage):
         except Exception as e:
             logging.error(f"Error saving Client to DB: {e}")
             return False
+
+    async def reap_unused_dcr_clients(
+        self,
+        ttl: int,
+        *,
+        is_used=None,
+        request: Optional[web.Request] = None,
+    ) -> int:
+        """Sweep stale DCR clients in one statement.
+
+        "Never completed a token exchange" is answered authoritatively here:
+        a client that ever received a token has a row in
+        ``auth.oauth_access_tokens``; one that was ever consented to has a row
+        in ``auth.oauth_grants``.  Neither ⇒ the registration was never used.
+        """
+        db = None
+        if request:
+            db = request.app.get("authdb")
+        if not db:
+            logging.warning("PostgresClientStorage: No DB connection for DCR reaper.")
+            return 0
+
+        sql = """
+        DELETE FROM auth.clients c
+        WHERE c.registration_source = 'dcr'
+          AND c.created_at < (NOW() - ($1 || ' seconds')::interval)
+          AND NOT EXISTS (
+              SELECT 1 FROM auth.oauth_access_tokens t
+              WHERE t.client_id = c.client_id
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM auth.oauth_grants g
+              WHERE g.client_id = c.client_uid
+          )
+        """
+        try:
+            async with await db.acquire() as conn:
+                result, error = await conn.execute(sql, str(int(ttl)))
+                if error:
+                    logging.error(f"DCR reaper failed: {error}")
+                    return 0
+                # asyncpg returns a command tag such as "DELETE 3".
+                try:
+                    return int(str(result).split()[-1])
+                except (ValueError, IndexError):
+                    return 0
+        except Exception as e:
+            logging.error(f"Error reaping unused DCR clients: {e}")
+            return 0

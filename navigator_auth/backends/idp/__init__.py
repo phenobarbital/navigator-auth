@@ -27,6 +27,8 @@ from ...conf import (
     AUTH_CODE_EXPIRATION,
     AUTH_JWT_ALGORITHM,
     SECRET_KEY,
+    OAUTH_JWT_SIGNING_ALG,
+    OAUTH_JWT_KEYS,
     AUTH_DEFAULT_SCHEME,
 )
 from ...exceptions import UserNotFound, ConfigError, InvalidAuth, FailedAuth, AuthExpired, AuthException
@@ -310,6 +312,69 @@ class IdentityProvider:
         """
         return self.create_token(data=data, expiration=expiration)
 
+    # ------------------------------------------------------------------
+    # Signing keys (FEAT-095 TASK-043, decision D4)
+    # ------------------------------------------------------------------
+
+    @property
+    def key_registry(self):
+        """Lazily-loaded signing-key registry.
+
+        Empty unless ``OAUTH_JWT_KEYS`` is configured, in which case every
+        signing/verification decision below stays on the legacy HS256 path.
+        """
+        registry = getattr(self.__class__, "_key_registry", None)
+        if registry is None:
+            from .keys import load_registry
+
+            registry = load_registry(OAUTH_JWT_KEYS)
+            self.__class__._key_registry = registry
+            if registry:
+                self.logger.notice(
+                    f"Loaded {len(registry)} JWT signing key(s); "
+                    f"algorithm: {OAUTH_JWT_SIGNING_ALG}"
+                )
+        return registry
+
+    def signing_key(self):
+        """The active asymmetric signer, or None to keep the HS256 path.
+
+        Returns None unless ``OAUTH_JWT_SIGNING_ALG`` selects an asymmetric
+        algorithm *and* a usable active key is loaded — the default config
+        must never change token output.
+        """
+        from .keys import ASYMMETRIC_ALGORITHMS
+
+        if OAUTH_JWT_SIGNING_ALG not in ASYMMETRIC_ALGORITHMS:
+            return None
+        return self.key_registry.signing_key()
+
+    def _verification_key(self, jwt_token: str) -> tuple:
+        """Pick the verification key for a token: ``(key, algorithms)``.
+
+        Selection is driven by the token's own ``kid`` header, so tokens
+        signed before a rotation keep verifying against the retired key.
+        Anything without a known ``kid`` falls back to ``SECRET_KEY``/HS256,
+        which is what makes a mixed-token migration window work.
+        """
+        registry = self.key_registry
+        if not registry:
+            return SECRET_KEY, [AUTH_JWT_ALGORITHM]
+        try:
+            kid = jwt.get_unverified_header(jwt_token).get("kid")
+        except Exception:  # pylint: disable=W0703
+            kid = None
+        if not kid:
+            return SECRET_KEY, [AUTH_JWT_ALGORITHM]
+        key = registry.get(kid)
+        if key is None or not key.public_key:
+            self.logger.warning(
+                f"Token references unknown signing key '{kid}'; "
+                "falling back to the symmetric key."
+            )
+            return SECRET_KEY, [AUTH_JWT_ALGORITHM]
+        return key.public_key, [key.algorithm]
+
     def create_token(
         self,
         data: dict = None,
@@ -348,8 +413,21 @@ class IdentityProvider:
         # TASK-029: only include aud when the caller explicitly requests it.
         if audience is not None:
             payload["aud"] = audience
+        # FEAT-095 TASK-043 (D4): asymmetric signing when configured.
+        # With no key registry this is skipped entirely and the HS256 call
+        # below is byte-identical to pre-feature behaviour.
+        signing_key = self.signing_key()
         try:
-            jwt_token = jwt.encode(payload, SECRET_KEY, AUTH_JWT_ALGORITHM, json_encoder=DefaultEncoder)
+            if signing_key is not None:
+                jwt_token = jwt.encode(
+                    payload,
+                    signing_key.private_pem(),
+                    algorithm=signing_key.algorithm,
+                    headers={"kid": signing_key.kid},
+                    json_encoder=DefaultEncoder,
+                )
+            else:
+                jwt_token = jwt.encode(payload, SECRET_KEY, AUTH_JWT_ALGORITHM, json_encoder=DefaultEncoder)
         except (TypeError, ValueError) as ex:
             raise AuthException(f"Cannot Create Session Token: {ex!s}") from ex
         refresh_token = self.create_refresh_token()
@@ -394,11 +472,15 @@ class IdentityProvider:
             jwt_token = code
         if not jwt_token:
             return [None, None]
+        # FEAT-095 TASK-043: dispatch on the `kid` header when the token was
+        # signed asymmetrically; otherwise fall back to the SECRET_KEY HS256
+        # path.  Both must work at once during an HS256→RS256 migration.
+        verify_key, verify_algorithms = self._verification_key(jwt_token)
         try:
             payload = jwt.decode(
                 jwt_token,
-                SECRET_KEY,
-                algorithms=[AUTH_JWT_ALGORITHM],
+                verify_key,
+                algorithms=verify_algorithms,
                 issuer=issuer,
                 audience=audience,
                 options={

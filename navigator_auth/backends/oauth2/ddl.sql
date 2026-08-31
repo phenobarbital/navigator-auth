@@ -212,3 +212,73 @@ CREATE INDEX IF NOT EXISTS idx_oauth_device_codes_client
 
 CREATE INDEX IF NOT EXISTS idx_oauth_device_codes_status_expires
     ON auth.oauth_device_codes(status, expires_at);
+
+-- =====================================================================
+-- FEAT-095 TASK-040 — Dynamic Client Registration (RFC 7591)
+-- Registration metadata + the per-client access-gate flag on auth.clients.
+-- =====================================================================
+
+-- How the client authenticates at /oauth2/token.
+-- 'none' designates a PUBLIC client: no client_secret, PKCE mandatory.
+ALTER TABLE auth.clients
+    ADD COLUMN IF NOT EXISTS token_endpoint_auth_method VARCHAR(64);
+
+-- Provenance: 'static' (operator-provisioned) | 'dcr' (self-registered).
+-- Open registration (D1) makes provenance the audit handle for abuse review.
+ALTER TABLE auth.clients
+    ADD COLUMN IF NOT EXISTS registration_source VARCHAR(32) NOT NULL DEFAULT 'static';
+
+-- Per-client access gate (TASK-042). DCR clients are born gated
+-- (OAUTH_DCR_GATE_NEW_CLIENTS), so registering grants nobody access.
+ALTER TABLE auth.clients
+    ADD COLUMN IF NOT EXISTS enforce_access_gate BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- DCR clients are anonymous: registration carries no owning user, so the
+-- owner FK must be nullable.  (client_credentials clients still set it.)
+ALTER TABLE auth.clients
+    ALTER COLUMN user_id DROP NOT NULL;
+
+-- Existing rows predate DCR and were provisioned out of band.
+UPDATE auth.clients SET registration_source = 'static' WHERE registration_source IS NULL;
+
+-- The reaper (OAUTH_DCR_UNUSED_TTL) sweeps unused DCR clients by provenance
+-- and age; the introspection/authorize paths look clients up by client_uid.
+CREATE INDEX IF NOT EXISTS idx_clients_registration_source
+    ON auth.clients(registration_source);
+
+-- =====================================================================
+-- FEAT-095 TASK-042 — auth.client_access (per-client access gate, D3/D7)
+-- Decides whether a given user may obtain a token for a given client.
+-- Consulted at /oauth2/authorize and at device verification, BEFORE consent.
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS auth.client_access (
+    access_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     INTEGER NOT NULL REFERENCES auth.users(user_id) ON DELETE CASCADE,
+    -- Internal integer FK (three-meanings-of-client_id discipline).
+    client_id   INTEGER REFERENCES auth.clients(client_id) ON DELETE CASCADE,
+    -- Denormalized public wire identifier: what the gate actually checks.
+    client_uid  VARCHAR(255) NOT NULL,
+    -- active | pending | revoked
+    status      VARCHAR(16) NOT NULL DEFAULT 'active',
+    granted_by  INTEGER REFERENCES auth.users(user_id) ON DELETE SET NULL,
+    granted_at  TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+    revoked_at  TIMESTAMP WITHOUT TIME ZONE
+);
+
+-- One row per (user, client): the approval queue must never accumulate
+-- duplicate 'pending' rows for repeated denied attempts (D7).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_client_access_user_client
+    ON auth.client_access(user_id, client_id);
+
+-- client_id is NULL for clients that live outside Postgres, so the wire
+-- identifier carries the same uniqueness guarantee on its own.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_client_access_user_client_uid
+    ON auth.client_access(user_id, client_uid);
+
+-- Gate check (by uid) and the management API's per-client listing.
+CREATE INDEX IF NOT EXISTS idx_client_access_client_uid
+    ON auth.client_access(client_uid);
+
+CREATE INDEX IF NOT EXISTS idx_client_access_client_status
+    ON auth.client_access(client_uid, status);
