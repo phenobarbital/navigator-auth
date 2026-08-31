@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-095 oauth2-for-mcp-agents
 **Spec**: `sdd/specs/oauth2-for-mcp-agents.spec.md` (Module 2)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-038
@@ -105,8 +105,8 @@ async def test_wellknown_routes(...)     # 200, unauthenticated, JSON content-ty
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Opus 5)
+**Date**: 2026-08-31
+**Notes**: Pure builders in `oauth2/metadata.py` (`build_as_metadata`, `build_protected_resource_metadata`) with no aiohttp/framework imports — the PRM builder is importable standalone for ai-parrot MCP mounts (D6), asserted by a dedicated test. Module also exports `WELL_KNOWN_AS_PATH`, `WELL_KNOWN_PRM_PATH`, `DEFAULT_ENDPOINT_PATHS` and `DEFAULT_GRANT_TYPES_SUPPORTED`. Conditional fields behave per config: `registration_endpoint` iff `OAUTH_DCR_POLICY != "disabled"`, `jwks_uri` iff `OAUTH_JWT_KEYS` is non-empty (config read only — no code dependency on TASK-043), `scopes_supported` omitted when `OAUTH_SCOPES` is empty. Four GET routes registered in `configure()` — the two RFC-mandated origin-root paths plus `/oauth2/...` aliases for prefix-mounted deployments — all appended to `AUTH_EXCLUDE_LIST_KEY`. Documents memoised per issuer in `_metadata_cache` (a deployment may serve several hosts), served with `Cache-Control: public, max-age=3600` and permissive CORS. Issuer comes from TASK-038's `issuer_url(request)`. 27 tests pass.
 
-**Deviations from spec**: none
+**Deviations from spec**: none. Two additions beyond the literal field list, both non-breaking and RFC 8414-conformant: `userinfo_endpoint` (the route already exists from FEAT-093) and the `*_endpoint_auth_methods_supported` members for revocation/introspection.

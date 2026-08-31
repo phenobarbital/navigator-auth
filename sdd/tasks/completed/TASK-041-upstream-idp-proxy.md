@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-095 oauth2-for-mcp-agents
 **Spec**: `sdd/specs/oauth2-for-mcp-agents.spec.md` (Module 4, decision D2)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-038
@@ -115,8 +115,8 @@ exchange logic.
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Opus 5)
+**Date**: 2026-08-31
+**Notes**: `auth_login` GET now renders `upstream_providers` and handles `provider=` by parking the pending authorize request and redirecting to `/auth/{provider}/login`. `PENDING_AUTHORIZE_FIELDS` covers client_id, redirect_uri, response_type, scope, state, code_challenge(+method), nonce, prompt and resource; a test asserts every one survives the hop. Parked under `oauth2_pending_{flow_id}` in `IdentityFlowStore` with `OAUTH_UPSTREAM_FLOW_TTL`. `Oauth2Provider` extends `BaseAuthBackend`, not `ExternalAuth`, so it builds its own flow store lazily via a `flow_store` property over `REDIS_AUTH_URL` — never on `self`. `authorize` resumes via single-use `getdel`; parked values deliberately override anything on the resume URL, so a tampered resume cannot swap `state`, `code_challenge` or `redirect_uri` (covered by `test_parked_values_win_over_url`). Missing/expired flow ⇒ 400 `invalid_request`, explicitly asserted not to be a redirect. `ExternalAuth._auth_callback_dispatch` reads the marker *before* `auth_callback` (backends consume their own state record inside it), then rewrites `Location` in place — the response object is edited rather than rebuilt so the session cookie and any backend headers survive. Identity-link dispatch still wins; a failed provider login (non-3xx) is passed through untouched instead of becoming a consent redirect. `_vault_upstream_token` ciphers the upstream credential into `auth.user_identities` through the same `IdentityStore.save_linked_identity` path the identity-link flow uses, best-effort so a vault failure cannot break login. `azure.py` no longer mutates the singleton `self.redirect_uri` — it uses `get_redirect_uri(request)`; the old code was doubly broken (it destroyed the `{domain}` template on first use, pinning every later login to the first caller's host). 23 new tests; 276 pass across the non-DB OAuth2 suites.
 
-**Deviations from spec**: none
+**Deviations from spec**: one mechanism change. The task specified carrying `{"oauth2_flow": flow_id}` "through the backend's own state-keyed flow record", but each backend generates its own `state` *inside* `authenticate()` and writes its own record (`google_auth_{state}`, `azure_auth_{state}`, okta/odoo/github variants) with no injection point — the AS cannot know that state in advance, and implementing it that way would require editing six backend files that are not in this task's scope. Instead the opaque flow id travels in a short-lived HttpOnly/SameSite=Lax cookie (`nav_oauth2_flow`) set on the redirect into the provider and read back at the callback; the authorize request itself never leaves the server, staying in `IdentityFlowStore` exactly as specified. `_pending_oauth2_flow` still prefers `request['oauth2_flow']` when present, so the specified per-backend mechanism works if a backend later supplies it. Also note: the normal login path never persisted upstream tokens (only the identity-link path did), so `_vault_upstream_token` is new code rather than a reuse of an existing hook.

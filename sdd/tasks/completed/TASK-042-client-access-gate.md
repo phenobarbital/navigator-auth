@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-095 oauth2-for-mcp-agents
 **Spec**: `sdd/specs/oauth2-for-mcp-agents.spec.md` (Module 5, decisions D3 + D7)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-041
@@ -114,8 +114,8 @@ who tried (D7, ships in v1).
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Claude Opus 5)
+**Date**: 2026-08-31
+**Notes**: `oauth2/client_access.py` ships `ClientAccessStorage` (ABC) + memory/redis/postgres tiers and `get_client_access_storage`, wired into `on_startup` alongside the FEAT-093 storages and published as `app["oauth2_client_access_storage"]`. Records are the asyncdb `ClientAccess` model (`auth.client_access`), so all three tiers speak the table's shape; `check` returns True only for `status='active'`, so every other state fails closed. `_enforce_access_gate` runs in `authorize` immediately after the session check and **before** both the consent-skip and the consent hand-off (asserted by a source-order test), and again in `device_verification` right after the client lookup — device parity is a security requirement, not a nicety. Enforced when `OAUTH_ACCESS_GATE_ENABLED` **or** the client's `enforce_access_gate` flag; with both off the gate is completely inert (no check, no queue row). Denial returns the standard `access_denied` redirect carrying the original `state`, and falls back to a rendered 403 when there is no validated `redirect_uri` (the device flow) — never a bare unvalidated redirect. The gate fails closed if storage is missing or throws. D7 queue: a denied attempt upserts exactly one `pending` row per (user, client); repeated attempts do not duplicate, and `request_access` never downgrades an `active` row nor reopens a `revoked` one. `cascade_access_revocation` uses only existing primitives — `GrantStorage.revoke_grant`, `RefreshTokenStorage.revoke_chain` filtered to the client's live tokens, and jti revocation — and tolerates partial failures. Management API `ClientAccessHandler` at `GET/POST/DELETE /api/v1/oauth2/clients/{client_uid}/access`, superuser-only, mounted in `handlers/__init__.py`; POST takes `action: grant|approve|reject`, DELETE revokes and cascades. 32 new tests; 308 pass across the non-DB OAuth2 suites.
 
-**Deviations from spec**: none
+**Deviations from spec**: none functionally. Two implementation notes. (1) `AccessTokenStorage` has no (user, client) index — it is keyed by jti only — so `_revoke_client_jtis` sweeps live records over that storage's own Redis handle, skipping the `revoked:` markers that share its prefix. This adds no new revocation machinery (it calls the existing `AccessTokenStorage.revoke`) and runs only on an administrative deactivation, never on the request path. (2) The DDL carries the spec'd `UNIQUE (user_id, client_id)` **and** an additional `UNIQUE (user_id, client_uid)`; `client_id` is nullable because clients held in the memory/redis tiers have no integer PK, so the uid pair is what actually guarantees "no duplicate pending rows". `conf.py` needed no edit — TASK-038 already added `OAUTH_ACCESS_GATE_ENABLED` / `OAUTH_ACCESS_GATE_QUEUE`; this task only wires them.
