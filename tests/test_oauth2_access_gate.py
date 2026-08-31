@@ -664,3 +664,170 @@ class TestGateLifecycle:
         ) is not None
         # And the revoked row was not silently re-queued as pending.
         assert (await storage.get(USER_ID, CLIENT_UID)).status == STATUS_REVOKED
+
+
+# ---------------------------------------------------------------------------
+# Gate enforcement on the refresh grant
+# ---------------------------------------------------------------------------
+
+class TestRefreshGrantIsGated:
+    """Regression: refresh tokens outlived a gate policy change.
+
+    `cascade_access_revocation` handles the admin revoke path, but an
+    operator who simply turns `OAUTH_ACCESS_GATE_ENABLED` on (or sets
+    `enforce_access_gate` on an existing client) does not walk existing
+    tokens.  Without a check on the refresh grant, tokens minted while the
+    client was ungated kept working indefinitely.
+    """
+
+    @pytest.fixture
+    def refresh_provider(self, provider):
+        from navigator_auth.backends.oauth2.client_backend import (
+            MemoryClientStorage,
+        )
+
+        class _Refresh:
+            def __init__(self):
+                self.tokens = {}
+                self.chains = []
+
+            async def get_token(self, token):
+                return self.tokens.get(token)
+
+            async def revoke_chain(self, token):
+                self.chains.append(token)
+
+        provider.client_storage = MemoryClientStorage()
+        provider.refresh_token_storage = _Refresh()
+        return provider
+
+    @staticmethod
+    def _token(client, revoked=False):
+        from datetime import datetime, timedelta
+
+        rt = MagicMock()
+        rt.refresh_token = "rt-live"
+        rt.revoked = revoked
+        rt.revoked_reason = None
+        rt.user_id = USER_ID
+        rt.client = client
+        rt.scope = "default"
+        # Real datetimes: past the gate the handler runs genuine expiry checks.
+        now = datetime.now()
+        rt.issued_at = now
+        rt.expires_at = now + timedelta(days=30)
+        rt.absolute_expires_at = now + timedelta(days=90)
+        return rt
+
+    async def _refresh(self, provider, client):
+        """Drive the refresh grant; returns the gate's response, or None.
+
+        Past the gate the handler goes on to mint a token, which needs a real
+        IdP.  These tests only care whether the gate let the request through,
+        so anything raised beyond it is reported as "permitted".
+        """
+        await provider.client_storage.save_client(client)
+        provider.refresh_token_storage.tokens["rt-live"] = self._token(client)
+        try:
+            return await provider._handle_refresh_token(
+                {"refresh_token": "rt-live", "client_id": CLIENT_UID}, MagicMock()
+            )
+        except Exception:
+            # Got past the gate and failed while minting — that is a pass here.
+            return None
+
+    @pytest.mark.asyncio
+    async def test_refresh_denied_for_a_non_activated_user(self, refresh_provider):
+        import json
+
+        response = await self._refresh(refresh_provider, _client(gated=True))
+
+        assert response.status == 400
+        assert json.loads(response.body)["error"] == "invalid_grant"
+
+    @pytest.mark.asyncio
+    async def test_denied_refresh_kills_the_chain(self, refresh_provider):
+        """A withdrawn user should not keep a live family of tokens."""
+        await self._refresh(refresh_provider, _client(gated=True))
+        assert refresh_provider.refresh_token_storage.chains == ["rt-live"]
+
+    @pytest.mark.asyncio
+    async def test_refresh_proceeds_for_an_activated_user(self, refresh_provider):
+        """An activated user gets past the gate."""
+        await refresh_provider.client_access_storage.grant(USER_ID, CLIENT_UID, 1)
+
+        response = await self._refresh(refresh_provider, _client(gated=True))
+
+        # The gate neither denied nor killed the chain.
+        assert refresh_provider.refresh_token_storage.chains == []
+        assert response is None or response.status != 400
+
+    @pytest.mark.asyncio
+    async def test_refresh_unaffected_when_gate_is_off(
+        self, refresh_provider, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "navigator_auth.backends.oauth2.backend.OAUTH_ACCESS_GATE_ENABLED",
+            False,
+        )
+        response = await self._refresh(refresh_provider, _client(gated=False))
+        assert refresh_provider.refresh_token_storage.chains == []
+        assert response is None or response.status != 400
+
+
+# ---------------------------------------------------------------------------
+# Rate-limit source identity
+# ---------------------------------------------------------------------------
+
+class TestRateLimitSourceIsNotSpoofable:
+    """Regression: X-Forwarded-For was trusted unconditionally.
+
+    Taking the LEFTMOST X-Forwarded-For value from any caller let an attacker
+    reset the DCR rate-limit counter on every request, making the limit on the
+    unauthenticated, open-by-default /oauth2/register endpoint meaningless.
+    """
+
+    @staticmethod
+    def _request(remote, xff=None):
+        request = MagicMock()
+        request.remote = remote
+        request.headers = {"X-Forwarded-For": xff} if xff else {}
+        return request
+
+    def test_untrusted_peer_cannot_spoof_its_identity(self, provider):
+        provider._trusted_proxies = set()
+        identities = {
+            provider._client_source_ip(
+                self._request("203.0.113.5", f"9.9.9.{i}")
+            )
+            for i in range(50)
+        }
+        # All 50 spoofing attempts collapse to the one real peer.
+        assert identities == {"203.0.113.5"}
+
+    def test_trusted_proxy_xff_is_honoured(self, provider):
+        from navigator_auth.authorizations._client_ip import parse_proxies
+
+        provider._trusted_proxies = parse_proxies(["10.0.0.1"])
+        assert provider._client_source_ip(
+            self._request("10.0.0.1", "198.51.100.7")
+        ) == "198.51.100.7"
+
+    def test_left_side_injection_behind_a_trusted_proxy_is_ignored(self, provider):
+        """The proxy appends what it observed on the RIGHT; the left is untrusted."""
+        from navigator_auth.authorizations._client_ip import parse_proxies
+
+        provider._trusted_proxies = parse_proxies(["10.0.0.1"])
+        identities = {
+            provider._client_source_ip(
+                self._request("10.0.0.1", f"{i}.9.9.9, 198.51.100.7")
+            )
+            for i in range(50)
+        }
+        assert identities == {"198.51.100.7"}
+
+    def test_falls_back_to_the_peer_when_no_headers(self, provider):
+        provider._trusted_proxies = set()
+        assert provider._client_source_ip(
+            self._request("203.0.113.9")
+        ) == "203.0.113.9"

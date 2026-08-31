@@ -88,7 +88,22 @@ location /.well-known/oauth-protected-resource {
 `X-Forwarded-Proto` and `X-Forwarded-Host` are what let the issuer be derived
 correctly when `AUTH_ISSUER_URL` is not set. **Setting `AUTH_ISSUER_URL`
 explicitly is strongly recommended** — it removes an entire class of
-misconfiguration.
+misconfiguration, and it also pins the discovery-document cache to a single
+entry instead of one per distinct `Host` value seen.
+
+### Trusted proxies (required for the DCR rate limit to mean anything)
+
+`X-Forwarded-For` is client-supplied, so it is only honoured when the direct
+TCP peer is listed here:
+
+```bash
+ALLOWED_IP_TRUSTED_PROXIES=10.0.0.1,10.0.0.2
+```
+
+Leave it unset and the registration rate limit keys on the direct peer — which
+behind a proxy is the proxy itself, so every client shares one bucket. Set it
+and the chain is walked right-to-left, so values a client injects on the left
+are ignored.
 
 ### Common failure modes
 
@@ -99,6 +114,7 @@ misconfiguration.
 | Issuer is `http://…` | Proxy not sending `X-Forwarded-Proto` | Add the header, or set `AUTH_ISSUER_URL`. |
 | Registration fails | `OAUTH_DCR_POLICY=disabled`, or allowlist | Use `open`, or allowlist the Claude callbacks. |
 | Token exchange 415 | Client sent JSON | Expected — the endpoint requires form-urlencoded. |
+| DCR rate limit ineffective | `ALLOWED_IP_TRUSTED_PROXIES` unset behind a proxy | Set it (below), or every request looks like it comes from the proxy. |
 | User gets `access_denied` | Gate: not activated | Approve them (§4). |
 
 ---

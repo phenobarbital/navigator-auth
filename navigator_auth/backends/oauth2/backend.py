@@ -86,6 +86,8 @@ from ...conf import (
     # FEAT-095 TASK-042
     OAUTH_ACCESS_GATE_ENABLED,
     OAUTH_ACCESS_GATE_QUEUE,
+    # Shared trusted-proxy list (review finding: X-Forwarded-For spoofing).
+    ALLOWED_IP_TRUSTED_PROXIES,
 )
 from navigator_session import (
     get_session,
@@ -131,6 +133,7 @@ from ..external import (
     OAUTH2_RESUME_COOKIE,
 )
 from ...identity.flow_store import IdentityFlowStore
+from ...authorizations._client_ip import get_client_ip, parse_proxies
 from .client_access import get_client_access_storage
 from .dcr import (
     DCRError,
@@ -314,6 +317,8 @@ class Oauth2Provider(BaseAuthBackend):
         self.device_code_storage = None
         # FEAT-095 TASK-042: per-client access gate storage.
         self.client_access_storage = None
+        # Parsed once: trusted reverse proxies whose X-Forwarded-For we honour.
+        self._trusted_proxies = parse_proxies(ALLOWED_IP_TRUSTED_PROXIES)
         # FEAT-095 TASK-039: in-process cache of the built discovery documents,
         # keyed by issuer (a deployment can legitimately serve several hosts).
         self._metadata_cache: dict = {}
@@ -873,6 +878,33 @@ class Oauth2Provider(BaseAuthBackend):
             return True
         return bool(getattr(client, "enforce_access_gate", False))
 
+    async def _gate_permits(self, request: web.Request, client, user_id) -> bool:
+        """May this user hold a token for this client right now?
+
+        The bare predicate, with no redirect and no queueing, so the token
+        endpoint can consult the gate too.  Fails **closed**: an unconfigured
+        or unavailable gate denies rather than admits.
+        """
+        if not self._gate_applies(client):
+            return True
+        if not self.client_access_storage:
+            self.logger.error(
+                "OAuth2 gate: enforced but no ClientAccessStorage is configured; "
+                "denying access."
+            )
+            return False
+        if user_id is None:
+            return False
+        try:
+            return bool(
+                await self.client_access_storage.check(
+                    user_id, client.client_id, request=request
+                )
+            )
+        except Exception as e:  # pylint: disable=W0703
+            self.logger.error(f"OAuth2 gate: check failed, denying: {e}")
+            return False
+
     async def _enforce_access_gate(
         self,
         request: web.Request,
@@ -883,30 +915,16 @@ class Oauth2Provider(BaseAuthBackend):
     ):
         """Return an ``access_denied`` response, or None to let the flow run.
 
-        Called after authentication and **before** consent, from both
-        ``/oauth2/authorize`` and device verification — the device grant would
-        otherwise be a way around the gate entirely (spec §6 risk).
+        Called after authentication and **before** consent, from
+        ``/oauth2/authorize``, ``/oauth2/consent`` and device verification.
+        Every path that reaches ``_issue_code`` must go through here, or the
+        gate is simply routed around (spec §6 risk).
         """
         if not self._gate_applies(client):
             return None
-        if not self.client_access_storage:
-            self.logger.error(
-                "OAuth2 gate: enforced but no ClientAccessStorage is configured; "
-                "denying access."
-            )
-            return self._access_denied(request, redirect_uri, state)
 
         client_uid = client.client_id
-        try:
-            allowed = await self.client_access_storage.check(
-                user_id, client_uid, request=request
-            )
-        except Exception as e:
-            # Fail closed: an unavailable gate must never grant access.
-            self.logger.error(f"OAuth2 gate: check failed, denying: {e}")
-            return self._access_denied(request, redirect_uri, state)
-
-        if allowed:
+        if await self._gate_permits(request, client, user_id):
             return None
 
         # D7: record the denied attempt so an admin can approve it later.
@@ -1165,16 +1183,23 @@ class Oauth2Provider(BaseAuthBackend):
     # ------------------------------------------------------------------
 
     def _client_source_ip(self, request: web.Request) -> str:
-        """Best-effort source identity for rate limiting.
+        """Resolve the rate-limiting identity, honouring trusted proxies only.
 
-        Mirrors the FEAT-094 device-lockout approach, including its caveat:
-        IP-based limits are bypassable behind a shared NAT or a rotating proxy
-        pool.  This is a speed bump against casual abuse, not authentication.
+        ``X-Forwarded-For`` is client-supplied.  Taking its leftmost value
+        unconditionally (the FEAT-094 device-lockout approach) let any caller
+        reset its own counter by rotating the header on every request, which
+        made the limit on the unauthenticated, open-by-default
+        ``/oauth2/register`` endpoint no limit at all.
+
+        ``get_client_ip`` only honours forwarding headers when the direct TCP
+        peer is in ``ALLOWED_IP_TRUSTED_PROXIES``, and walks the chain
+        right-to-left so injected values are never trusted.
+
+        Still IP-based, so a genuine botnet or a large NAT remains a caveat —
+        but it is no longer defeated by a single header.
         """
-        client_ip = request.headers.get("X-Forwarded-For", request.remote)
-        if client_ip:
-            client_ip = client_ip.split(",")[0].strip()
-        return client_ip or "unknown"
+        client_ip = get_client_ip(request, self._trusted_proxies)
+        return client_ip or request.remote or "unknown"
 
     async def _check_dcr_rate_limit(self, request: web.Request) -> bool:
         """Consume one registration token for this source IP.
@@ -1988,6 +2013,19 @@ class Oauth2Provider(BaseAuthBackend):
             if rt.revoked_reason == "rotated" and OAUTH_REFRESH_ROTATION:
                 await self.refresh_token_storage.revoke_chain(refresh_token)
             return self._error_response("invalid_grant", "Refresh token has been revoked.")
+
+        # FEAT-095 TASK-042: ACCESS GATE — re-checked on every refresh.
+        # The admin revoke endpoint cascades the refresh chain, but turning
+        # the gate on globally (or setting enforce_access_gate on an existing
+        # client) does not walk existing tokens; without this check, refresh
+        # tokens minted while the client was ungated would keep working
+        # indefinitely, silently outliving the policy change.
+        if not await self._gate_permits(request, client, rt.user_id):
+            await self.refresh_token_storage.revoke_chain(refresh_token)
+            return self._error_response(
+                "invalid_grant",
+                "Access for this user has been withdrawn.",
+            )
 
         now = _now()
 
