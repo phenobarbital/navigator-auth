@@ -3,14 +3,14 @@
 Description: Backend Authentication/Authorization using Okta Service.
 """
 
-import base64
-from urllib.parse import quote
+import fnmatch
+import secrets
+from urllib.parse import quote, urlparse
 from aiohttp import web
 import jwt
 
 # needed by ADFS
 import requests
-import redis.asyncio as aioredis
 import requests.adapters
 from ..exceptions import AuthException
 from ..conf import (
@@ -32,10 +32,10 @@ from ..conf import (
     AUTH_EXCLUDE_LIST_KEY,
     ADFS_MAPPING,
     ADFS_SAML_RELAY_RP,
+    ALLOWED_HOSTS,
 )
 from .jwksutils import get_public_key
 from .external import ExternalAuth
-from ..libs.json import json_encoder, json_decoder
 
 _jwks_cache = {}
 
@@ -114,13 +114,33 @@ class ADFSAuth(ExternalAuth):
         ## redis connection pool is created by ExternalAuth.on_startup
         await super(ADFSAuth, self).on_startup(app)
 
+    def _validate_internal_redirect(self, uri: str) -> str:
+        """Only honor an absolute ``internal_redirect`` whose host is on
+        ALLOWED_HOSTS; otherwise drop it and fall back to the default
+        finish-redirect behavior in ``home_redirect``. Relative URIs are
+        always safe (``home_redirect`` prepends the current request's own
+        domain to them)."""
+        if not uri:
+            return None
+        netloc = urlparse(uri).netloc
+        if not netloc:
+            return uri
+        for pattern in ALLOWED_HOSTS:
+            if fnmatch.fnmatch(netloc, pattern):
+                return uri
+        self.logger.warning(f"ADFS: rejected internal_redirect to disallowed host: {netloc!r}")
+        return None
+
     async def authenticate(self, request: web.Request):
         """Authenticate, refresh or return the user credentials.
 
         Description: This function returns the ADFS authorization URL.
         """
         domain_url = self.get_domain(request)
-        self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
+        # Local variable, not `self.redirect_uri`: backends are process-wide
+        # singletons, so mutating the instance attribute would race with
+        # concurrent requests from other domains/tenants.
+        redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
         ## getting Finish Redirect URL
         self.get_finish_redirect_url(request)
         qs = self.queryparams(request)
@@ -128,24 +148,28 @@ class ADFSAuth(ExternalAuth):
         if "redirect_uri" in qs:
             redirect = qs.pop("redirect_uri")
         try:
-            self.state = base64.urlsafe_b64encode(self.redirect_uri.encode()).decode()
+            # CSRF/session-fixation protection: random, single-use, per-flow
+            # nonce. (Previously this was base64(redirect_uri), a constant
+            # value shared by every login for the same domain/tenant.)
+            state = secrets.token_urlsafe(32)
             resource = ADFS_RESOURCE if ADFS_RESOURCE else ADFS_DEFAULT_RESOURCE
             query_params = {
                 "client_id": ADFS_CLIENT_ID,
                 "response_type": "code",
-                "redirect_uri": self.redirect_uri,
+                "redirect_uri": redirect_uri,
                 "resource": resource,
                 "response_mode": "query",
-                "state": self.state,
+                "state": state,
                 "scope": ADFS_SCOPES,
             }
             params = requests.compat.urlencode(query_params)
             login_url = f"{self.authorize_uri}?{params}"
-            # Saving redirect info on Redis:
-            flow = {}
-            async with aioredis.Redis(connection_pool=self._pool) as redis:
-                flow["internal_redirect"] = redirect
-                await redis.setex(f"adfs_auth_{self.state}", 600, json_encoder(flow))
+            # Saving redirect info on Redis, scoped to this flow's nonce:
+            await self._flow_store.set(
+                f"adfs_auth_{state}",
+                {"internal_redirect": redirect, "redirect_uri": redirect_uri},
+                ttl=600,
+            )
             # Step A: redirect
             return self.redirect(login_url)
         except Exception as err:
@@ -154,7 +178,10 @@ class ADFSAuth(ExternalAuth):
 
     async def auth_callback(self, request: web.Request):
         domain_url = self.get_domain(request)
-        self.redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
+        # Fallback only; overridden below by the redirect_uri recorded at
+        # authorize-time for this exact flow, so it matches what ADFS was
+        # actually given regardless of which domain handles the callback.
+        redirect_uri = self.redirect_uri.format(domain=domain_url, service=self._service_name)
         try:
             auth_response = dict(request.rel_url.query.items())
             if "error" in auth_response:
@@ -166,16 +193,19 @@ class ADFSAuth(ExternalAuth):
                 state = auth_response["state"]
             except (TypeError, KeyError, ValueError):
                 return self.failed_redirect(request, error="MISSING_AUTH_NONCE", message="Missing Auth Nonce")
-            flow = {}
             internal_redirect = None
-            # making validation with previous state
+            # One-time use: GETDEL atomically fetches and deletes the flow so
+            # it cannot be replayed or read by a second, unrelated callback
+            # racing within the TTL window.
             try:
-                async with aioredis.Redis(connection_pool=self._pool) as redis:
-                    result = await redis.get(f"adfs_auth_{state}")
-                    flow = json_decoder(result)
-                    internal_redirect = flow.pop("internal_redirect", None)
+                flow = await self._flow_store.getdel(f"adfs_auth_{state}")
+                if flow:
+                    internal_redirect = self._validate_internal_redirect(flow.get("internal_redirect"))
+                    redirect_uri = flow.get("redirect_uri", redirect_uri)
             except Exception:
                 pass
+        except web.HTTPForbidden:
+            raise
         except Exception as err:
             raise web.HTTPForbidden(reason=f"ADFS: Invalid Callback response: {err}: {auth_response}") from err
         self.logger.debug(f"Authorization Code: {authorization_code}")
@@ -184,7 +214,7 @@ class ADFSAuth(ExternalAuth):
             "code": authorization_code,
             "client_id": ADFS_CLIENT_ID,
             "grant_type": "authorization_code",
-            "redirect_uri": self.redirect_uri,
+            "redirect_uri": redirect_uri,
             "scope": ADFS_SCOPES,
         }
         self.logger.debug(f"Token Params: {query_params!r}")
