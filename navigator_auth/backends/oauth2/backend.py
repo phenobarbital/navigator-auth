@@ -29,16 +29,19 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 from collections.abc import Awaitable
 from html import escape
+import base64
 import hmac
 import importlib
+import json
 import secrets
-from urllib.parse import urlencode, urlparse, urlunparse
+from urllib.parse import urlencode, unquote_plus, urlparse, urlunparse
 from uuid import uuid4
 
 from aiohttp import web
 from datamodel.exceptions import ValidationError
 from navconfig import config
 import jsonpickle
+import redis.asyncio as aioredis
 
 from ...identities import AuthUser
 from ...conf import (
@@ -65,6 +68,26 @@ from ...conf import (
     OAUTH_DEVICE_VERIFICATION_URI,
     OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS,
     OAUTH_DEVICE_LOCKOUT_TTL,
+    # FEAT-095 TASK-038
+    AUTH_ISSUER_URL,
+    # FEAT-095 TASK-039
+    OAUTH_DCR_POLICY,
+    OAUTH_JWT_KEYS,
+    # FEAT-095 TASK-040
+    OAUTH_DCR_REDIRECT_ALLOWLIST,
+    OAUTH_DCR_DEFAULT_SCOPES,
+    OAUTH_DCR_GATE_NEW_CLIENTS,
+    OAUTH_DCR_RATE_LIMIT,
+    OAUTH_DCR_UNUSED_TTL,
+    # FEAT-095 TASK-041
+    OAUTH_UPSTREAM_IDP_BACKENDS,
+    OAUTH_UPSTREAM_FLOW_TTL,
+    REDIS_AUTH_URL,
+    # FEAT-095 TASK-042
+    OAUTH_ACCESS_GATE_ENABLED,
+    OAUTH_ACCESS_GATE_QUEUE,
+    # Shared trusted-proxy list (review finding: X-Forwarded-For spoofing).
+    ALLOWED_IP_TRUSTED_PROXIES,
 )
 from navigator_session import (
     get_session,
@@ -98,6 +121,56 @@ from .code_backend import (
 )
 from .pkce import verify as pkce_verify
 from .devicecode import generate_user_code, poll_decision as _poll_decision
+from .metadata import (
+    WELL_KNOWN_AS_PATH,
+    WELL_KNOWN_PRM_PATH,
+    DEFAULT_GRANT_TYPES_SUPPORTED,
+    build_as_metadata,
+    build_protected_resource_metadata,
+)
+from ..external import (
+    OAUTH2_PENDING_FLOW_KEY,
+    OAUTH2_RESUME_COOKIE,
+)
+from ...identity.flow_store import IdentityFlowStore
+from ...authorizations._client_ip import get_client_ip, parse_proxies
+from .client_access import get_client_access_storage
+from .dcr import (
+    DCRError,
+    build_registration_response,
+    parse_rate_limit,
+    to_oauth_client,
+    validate_registration,
+)
+
+
+#: Upper bound on the discovery-document memo.  The cache key is the issuer,
+#: which is derived from request headers when AUTH_ISSUER_URL is unset, so it
+#: must never be allowed to grow without limit (FEAT-095 review finding).
+METADATA_CACHE_MAX_ENTRIES: int = 32
+
+#: Internal payload key carrying the percent-decoded variant of a
+#: client_secret presented via HTTP Basic (FEAT-095 review finding).  Never
+#: read as a credential itself — only `_secret_matches` consults it.
+BASIC_SECRET_ALT_KEY: str = "_basic_client_secret_decoded"
+
+
+def validate_resource_uri(resource: str) -> bool:
+    """RFC 8707 §2: a resource indicator is an absolute URI with no fragment.
+
+    Minimal support per D5 — navigator-auth validates the value and reflects
+    it into ``aud``; enforcing that a token is used only at its audience is
+    the resource server's responsibility.
+    """
+    if not resource or not isinstance(resource, str):
+        return False
+    try:
+        parsed = urlparse(resource)
+    except (ValueError, AttributeError):
+        return False
+    if not parsed.scheme or not parsed.netloc:
+        return False
+    return not parsed.fragment
 
 
 def _now_utc() -> datetime:
@@ -106,6 +179,85 @@ def _now_utc() -> datetime:
 
 def _now() -> datetime:
     return datetime.now()
+
+
+# ---------------------------------------------------------------------------
+# FEAT-095 TASK-038 — canonical issuer identity
+# ---------------------------------------------------------------------------
+
+#: Hosts for which a plain-http issuer is tolerated (local development).
+LOCALHOST_NAMES: frozenset = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+
+
+def _is_localhost(host: str) -> bool:
+    """True when ``host`` (optionally ``host:port``) is a loopback name."""
+    if not host:
+        return False
+    hostname = host.split(",")[0].strip()
+    if hostname.startswith("["):          # IPv6 literal, e.g. [::1]:8080
+        hostname = hostname.split("]")[0] + "]"
+    else:
+        hostname = hostname.split(":")[0]
+    return hostname.lower() in LOCALHOST_NAMES
+
+
+def issuer_url(request: Optional[web.Request] = None) -> str:
+    """Return the canonical OAuth2 issuer identifier for this deployment.
+
+    RFC 8414 §2 requires the issuer to be an ``https`` URL without query or
+    fragment, and RFC 8414 §3 requires the metadata document to be served at
+    ``{issuer}/.well-known/oauth-authorization-server``.  ``AUTH_TOKEN_ISSUER``
+    (``urn:Navigator``) is a URN and cannot serve that role, hence the separate
+    ``AUTH_ISSUER_URL`` setting.
+
+    Resolution order:
+      1. ``AUTH_ISSUER_URL`` when configured — returned verbatim (minus any
+         trailing slash).
+      2. Derived from the request: ``X-Forwarded-Proto`` (first value) is
+         honoured for the scheme and ``X-Forwarded-Host`` / ``Host`` for the
+         authority, so the value is correct behind a reverse proxy.
+
+    https is enforced: a derived ``http`` issuer is upgraded to ``https``
+    unless the host is a loopback address (local development).
+
+    Args:
+        request: the current request; may be ``None`` when a static
+            ``AUTH_ISSUER_URL`` is configured.
+
+    Returns:
+        The issuer URL with no trailing slash.
+
+    Raises:
+        RuntimeError: when the issuer cannot be resolved (no setting and no
+            request).
+    """
+    if AUTH_ISSUER_URL:
+        return AUTH_ISSUER_URL.rstrip("/")
+    if request is None:
+        raise RuntimeError(
+            "Oauth2: cannot derive the issuer URL — set AUTH_ISSUER_URL."
+        )
+    headers = request.headers
+    forwarded_proto = headers.get("X-Forwarded-Proto", "")
+    scheme = forwarded_proto.split(",")[0].strip().lower() if forwarded_proto else ""
+    if not scheme:
+        scheme = (getattr(request, "scheme", "") or "https").lower()
+    host = (
+        headers.get("X-Forwarded-Host", "")
+        or headers.get("Host", "")
+        or getattr(getattr(request, "url", None), "netloc", "")
+        or ""
+    )
+    host = host.split(",")[0].strip()
+    if not host:
+        raise RuntimeError(
+            "Oauth2: cannot derive the issuer URL — no Host header; "
+            "set AUTH_ISSUER_URL."
+        )
+    # https enforcement: http is only tolerated for loopback development.
+    if scheme != "https" and not _is_localhost(host):
+        scheme = "https"
+    return f"{scheme}://{host}".rstrip("/")
 
 
 class Oauth2Provider(BaseAuthBackend):
@@ -144,6 +296,16 @@ class Oauth2Provider(BaseAuthBackend):
         self.introspect_uri: str = "/oauth2/introspect"
         self.device_authorization_uri: str = "/oauth2/device_authorization"
         self.device_uri: str = "/oauth2/device"
+        # FEAT-095 TASK-039: discovery documents (RFC 8414 / RFC 9728).
+        self.as_metadata_uri: str = WELL_KNOWN_AS_PATH
+        self.prm_metadata_uri: str = WELL_KNOWN_PRM_PATH
+        # FEAT-095 TASK-040: Dynamic Client Registration (RFC 7591).
+        self.register_uri: str = "/oauth2/register"
+        # FEAT-095 TASK-043: JWK Set (asymmetric verification keys).
+        self.jwks_uri: str = "/oauth2/jwks"
+        # FEAT-095 TASK-041: flow store for parked authorize requests
+        # (built lazily — see the flow_store property).
+        self._flow_store = None
         self.login_failed_uri = AUTH_LOGIN_FAILED_URI
         self.logout_redirect_uri = AUTH_LOGOUT_REDIRECT_URI or "/oauth2/logout/complete"
         self.redirect_uri = None
@@ -153,6 +315,13 @@ class Oauth2Provider(BaseAuthBackend):
         self.grant_storage = None
         self.access_token_storage = None
         self.device_code_storage = None
+        # FEAT-095 TASK-042: per-client access gate storage.
+        self.client_access_storage = None
+        # Parsed once: trusted reverse proxies whose X-Forwarded-For we honour.
+        self._trusted_proxies = parse_proxies(ALLOWED_IP_TRUSTED_PROXIES)
+        # FEAT-095 TASK-039: in-process cache of the built discovery documents,
+        # keyed by issuer (a deployment can legitimately serve several hosts).
+        self._metadata_cache: dict = {}
 
     def configure(self, app):
         router = app.router
@@ -230,6 +399,33 @@ class Oauth2Provider(BaseAuthBackend):
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(self.device_uri)
 
+        # FEAT-095 TASK-039: discovery documents (RFC 8414 + RFC 9728).
+        # RFC 8414 §3 requires the AS metadata at the ORIGIN ROOT; the aliases
+        # under the AS path exist for deployments mounted behind a prefix.
+        for path, handler, name in (
+            (self.as_metadata_uri, self.as_metadata, "nav_oauth2_as_metadata"),
+            (self.prm_metadata_uri, self.protected_resource_metadata,
+             "nav_oauth2_prm_metadata"),
+            (f"/oauth2{self.as_metadata_uri}", self.as_metadata,
+             "nav_oauth2_as_metadata_alias"),
+            (f"/oauth2{self.prm_metadata_uri}", self.protected_resource_metadata,
+             "nav_oauth2_prm_metadata_alias"),
+        ):
+            router.add_route("GET", path, handler, name=name)
+            app[AUTH_EXCLUDE_LIST_KEY].append(path)
+
+        # FEAT-095 TASK-040: Dynamic Client Registration (RFC 7591).
+        # Anonymous by design (D1) — the endpoint must bypass auth entirely.
+        router.add_route(
+            "POST", self.register_uri, self.register, name="nav_oauth2_register"
+        )
+        app[AUTH_EXCLUDE_LIST_KEY].append(self.register_uri)
+
+        # FEAT-095 TASK-043: JWK Set — public verification keys, unauthenticated
+        # (a resource server must be able to fetch it before it holds a token).
+        router.add_route("GET", self.jwks_uri, self.jwks, name="nav_oauth2_jwks")
+        app[AUTH_EXCLUDE_LIST_KEY].append(self.jwks_uri)
+
         super(Oauth2Provider, self).configure(app)
 
     async def on_startup(self, app: web.Application):
@@ -256,6 +452,11 @@ class Oauth2Provider(BaseAuthBackend):
         app["oauth2_access_token_storage"] = self.access_token_storage
         # FEAT-094: device code storage
         self.device_code_storage = get_device_code_storage(storage_type, REDIS_URL)
+        # FEAT-095 TASK-042: per-client access gate storage.
+        self.client_access_storage = get_client_access_storage(
+            storage_type, REDIS_URL
+        )
+        app["oauth2_client_access_storage"] = self.client_access_storage
 
     async def on_cleanup(self, app: web.Application):
         pass
@@ -273,6 +474,15 @@ class Oauth2Provider(BaseAuthBackend):
                     f"Auth Callback: Error getting Callback Function: {fn}, {e!s}"
                 ) from e
         self._callbacks = fns
+
+    def issuer_url(self, request: web.Request = None) -> str:
+        """Canonical issuer for this AS (FEAT-095 TASK-038).
+
+        Thin delegation to the module-level :func:`issuer_url` helper so every
+        FEAT-095 surface (discovery, DCR, JWKS, challenges) shares one
+        definition of "who this authorization server is".
+        """
+        return issuer_url(request)
 
     def get_domain(self, request: web.Request) -> str:
         uri = urlparse(str(request.url))
@@ -470,6 +680,662 @@ class Oauth2Provider(BaseAuthBackend):
         return client
 
     # ------------------------------------------------------------------
+    # Discovery documents (FEAT-095 TASK-039, RFC 8414 + RFC 9728)
+    # ------------------------------------------------------------------
+
+    def _dcr_enabled(self) -> bool:
+        """True when Dynamic Client Registration is offered by this deployment."""
+        return str(OAUTH_DCR_POLICY).lower() != "disabled"
+
+    def _jwks_enabled(self) -> bool:
+        """True when a signing-key registry is configured.
+
+        Read from configuration only: the ``jwks_uri`` must never be advertised
+        without keys behind it, and this must not create a code dependency on
+        the (independently shippable) JWKS module.
+        """
+        return bool(OAUTH_JWT_KEYS)
+
+    def _build_metadata_documents(self, issuer: str) -> dict:
+        """Build (and memoise) both discovery documents for one issuer.
+
+        The cache is **bounded**.  When ``AUTH_ISSUER_URL`` is unset the issuer
+        is derived from the request's ``Host`` / ``X-Forwarded-Host``, so the
+        key is attacker-controlled on an unauthenticated endpoint; an unbounded
+        dict would grow without limit under a flood of distinct Host values.
+        Deployments that set ``AUTH_ISSUER_URL`` (recommended) only ever
+        occupy a single slot.
+        """
+        cached = self._metadata_cache.get(issuer)
+        if cached is not None:
+            return cached
+        if len(self._metadata_cache) >= METADATA_CACHE_MAX_ENTRIES:
+            # Simple FIFO eviction: this is a memo of cheap pure builders, so
+            # the only property that matters is that it cannot grow unbounded.
+            self._metadata_cache.pop(next(iter(self._metadata_cache)), None)
+        documents = {
+            "as": build_as_metadata(
+                issuer,
+                dcr_enabled=self._dcr_enabled(),
+                jwks=self._jwks_enabled(),
+                grant_types=DEFAULT_GRANT_TYPES_SUPPORTED,
+                scopes=OAUTH_SCOPES,
+            ),
+            "prm": build_protected_resource_metadata(
+                resource=issuer,
+                auth_servers=[issuer],
+                scopes=OAUTH_SCOPES,
+            ),
+        }
+        self._metadata_cache[issuer] = documents
+        return documents
+
+    def _metadata_response(self, document: dict) -> web.Response:
+        """Serve a discovery document (public, cacheable, JSON)."""
+        return JSONResponse(
+            document,
+            status=200,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+
+    async def as_metadata(self, request: web.Request):
+        """GET /.well-known/oauth-authorization-server — RFC 8414 §3.
+
+        Unauthenticated (the path is in the exclude list) and served from an
+        in-process cache, so it stays far inside Claude's 10 s discovery budget.
+        """
+        issuer = self.issuer_url(request)
+        return self._metadata_response(self._build_metadata_documents(issuer)["as"])
+
+    async def protected_resource_metadata(self, request: web.Request):
+        """GET /.well-known/oauth-protected-resource — RFC 9728.
+
+        Describes *this* deployment as a protected resource.  External resource
+        servers (ai-parrot MCP mounts, spec D6) serve their own document using
+        :func:`~.metadata.build_protected_resource_metadata` directly.
+        """
+        issuer = self.issuer_url(request)
+        return self._metadata_response(self._build_metadata_documents(issuer)["prm"])
+
+    # ------------------------------------------------------------------
+    # OAuth 2.1 / Claude conformance (FEAT-095 TASK-044, decision D5)
+    # ------------------------------------------------------------------
+
+    def _merge_basic_auth(self, request: web.Request, payload: dict) -> dict:
+        """Fold ``client_secret_basic`` credentials into the payload.
+
+        RFC 6749 §2.3.1 makes HTTP Basic the mandatory-to-implement client
+        authentication method, and TASK-039's metadata advertises both it and
+        ``client_secret_post``; advertising a method we do not accept is how
+        clients end up failing with no useful error.
+
+        Credentials already present in the body win, so this cannot override
+        an explicit ``client_id``/``client_secret``.
+        """
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Basic "):
+            return payload
+        try:
+            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            client_id, client_secret = decoded.split(":", 1)
+        except Exception:  # pylint: disable=W0703
+            # A malformed header is simply not credentials; the downstream
+            # client check will reject the request on its own terms.
+            return payload
+        merged = dict(payload)
+        # RFC 6749 §2.3.1 says the two components are form-urlencoded before
+        # base64, but many real clients send them raw — and a raw secret
+        # containing '+' or '%' would be corrupted by decoding it ('ab+cd'
+        # would become 'ab cd').  The two cases are indistinguishable, so the
+        # raw value is used as-is (this is also what /oauth2/introspect did
+        # before FEAT-095) and the decoded form is carried alongside it for
+        # `_secret_matches` to accept as well.
+        if not merged.get("client_id"):
+            merged["client_id"] = client_id
+        if not merged.get("client_secret"):
+            merged["client_secret"] = client_secret
+            decoded = unquote_plus(client_secret)
+            if decoded != client_secret:
+                merged[BASIC_SECRET_ALT_KEY] = decoded
+        return merged
+
+    @staticmethod
+    def _secret_matches(stored: str, payload: dict) -> bool:
+        """Constant-time client_secret check accepting both Basic encodings.
+
+        Compares against the value as presented and, when the credentials
+        arrived via HTTP Basic and were percent-encoded, against the decoded
+        form too.  Every candidate is always compared so the work done does
+        not depend on which one matches.
+        """
+        stored = stored or ""
+        candidates = [payload.get("client_secret", "") or ""]
+        alternate = payload.get(BASIC_SECRET_ALT_KEY)
+        if alternate:
+            candidates.append(alternate)
+        matched = False
+        for candidate in candidates:
+            if hmac.compare_digest(stored, candidate):
+                matched = True
+        return matched
+
+    def _resource_audience(self, marker: str, resource: Optional[str]):
+        """Build the ``aud`` claim for a token.
+
+        Keeps the FEAT-093 ``'user'``/``'app'`` token-class marker and appends
+        the RFC 8707 canonical resource when one was requested, producing a
+        list-valued audience.  With no resource the claim stays the plain
+        string it has always been — existing tokens are unchanged.
+        """
+        if not resource:
+            return marker
+        return [marker, resource]
+
+    # ------------------------------------------------------------------
+    # JWK Set (FEAT-095 TASK-043, decision D4)
+    # ------------------------------------------------------------------
+
+    async def jwks(self, request: web.Request):
+        """GET /oauth2/jwks — the public JWK Set (RFC 7517).
+
+        Lets a third-party resource server validate tokens **offline**,
+        without an introspection round-trip.  Serves public parameters only:
+        the registry has no code path that can serialise private material.
+
+        When no keys are configured this returns an empty set rather than a
+        404 — the discovery document only advertises ``jwks_uri`` when keys
+        are loaded, so an empty set is the correct answer for a direct hit.
+        """
+        try:
+            document = self._idp.key_registry.jwk_set()
+        except Exception as e:  # pylint: disable=W0703
+            self.logger.error(f"OAuth2: cannot build the JWK Set: {e}")
+            document = {"keys": []}
+        return JSONResponse(
+            document,
+            status=200,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # Per-client access gate (FEAT-095 TASK-042, decisions D3 + D7)
+    # ------------------------------------------------------------------
+
+    def _gate_applies(self, client) -> bool:
+        """Is the access gate enforced for this client?
+
+        Enforced when the global switch is on **or** the client carries its
+        own ``enforce_access_gate`` flag (DCR clients are born gated).  With
+        both off the FEAT-093 behaviour is untouched — the gate is opt-in.
+        """
+        if OAUTH_ACCESS_GATE_ENABLED:
+            return True
+        return bool(getattr(client, "enforce_access_gate", False))
+
+    async def _gate_permits(self, request: web.Request, client, user_id) -> bool:
+        """May this user hold a token for this client right now?
+
+        The bare predicate, with no redirect and no queueing, so the token
+        endpoint can consult the gate too.  Fails **closed**: an unconfigured
+        or unavailable gate denies rather than admits.
+        """
+        if not self._gate_applies(client):
+            return True
+        if not self.client_access_storage:
+            self.logger.error(
+                "OAuth2 gate: enforced but no ClientAccessStorage is configured; "
+                "denying access."
+            )
+            return False
+        if user_id is None:
+            return False
+        try:
+            return bool(
+                await self.client_access_storage.check(
+                    user_id, client.client_id, request=request
+                )
+            )
+        except Exception as e:  # pylint: disable=W0703
+            self.logger.error(f"OAuth2 gate: check failed, denying: {e}")
+            return False
+
+    async def _enforce_access_gate(
+        self,
+        request: web.Request,
+        client,
+        user_id: int,
+        redirect_uri: str,
+        state: str,
+    ):
+        """Return an ``access_denied`` response, or None to let the flow run.
+
+        Called after authentication and **before** consent, from
+        ``/oauth2/authorize``, ``/oauth2/consent`` and device verification.
+        Every path that reaches ``_issue_code`` must go through here, or the
+        gate is simply routed around (spec §6 risk).
+        """
+        if not self._gate_applies(client):
+            return None
+
+        client_uid = client.client_id
+        if await self._gate_permits(request, client, user_id):
+            return None
+
+        # D7: record the denied attempt so an admin can approve it later.
+        # Inert unless a gate is actually enforced, which it is here.
+        if OAUTH_ACCESS_GATE_QUEUE:
+            try:
+                await self.client_access_storage.request_access(
+                    user_id,
+                    client_uid,
+                    client_pk=getattr(client, "client_pk", None),
+                    request=request,
+                )
+            except Exception as e:  # pylint: disable=W0703
+                self.logger.warning(f"OAuth2 gate: could not queue request: {e}")
+
+        self.logger.warning(
+            f"OAuth2 gate: user {user_id} is not activated for client "
+            f"{client_uid}; access_denied."
+        )
+        return self._access_denied(request, redirect_uri, state)
+
+    def _access_denied(self, request: web.Request, redirect_uri: str, state: str):
+        """Standard OAuth ``access_denied`` outcome.
+
+        Redirects to the client's registered callback with the original
+        ``state`` (RFC 6749 §4.1.2.1) so the client can correlate the failure.
+        Falls back to a rendered error when there is no usable redirect_uri —
+        never emit a redirect we have not validated.
+        """
+        if not redirect_uri:
+            return self._error_response(
+                "access_denied",
+                "You are not authorized to use this application. "
+                "An administrator must approve your access.",
+                status=403,
+            )
+        params = {
+            "error": "access_denied",
+            "error_description": (
+                "You are not authorized to use this application. "
+                "An administrator must approve your access."
+            ),
+        }
+        if state:
+            params["state"] = state
+        return web.HTTPFound(self.prepare_url(redirect_uri, params))
+
+    async def cascade_access_revocation(
+        self, user_id: int, client_uid: str, request: web.Request = None
+    ) -> dict:
+        """Revoke everything a (user, client) pair currently holds.
+
+        Deactivation must take effect within one access-token TTL (the
+        FEAT-093 acceptance model), so this uses only existing primitives:
+        the consent grant, the refresh-token chain, and the live ``jti``
+        records.  Access tokens already minted stay syntactically valid until
+        they expire, but introspection and the jti check report them revoked.
+        """
+        result = {"grants": 0, "refresh_chains": 0, "access_tokens": 0}
+
+        # 1. Consent grant.
+        if self.grant_storage:
+            try:
+                if await self.grant_storage.revoke_grant(user_id, client_uid):
+                    result["grants"] = 1
+            except Exception as e:  # pylint: disable=W0703
+                self.logger.warning(f"Gate cascade: grant revoke failed: {e}")
+
+        # 2. Refresh-token families.
+        if self.refresh_token_storage:
+            try:
+                tokens = await self.refresh_token_storage.list_tokens(user_id)
+                for rt in tokens:
+                    rt_client = getattr(getattr(rt, "client", None), "client_id", None)
+                    if rt_client == client_uid and not rt.revoked:
+                        await self.refresh_token_storage.revoke_chain(
+                            rt.refresh_token
+                        )
+                        result["refresh_chains"] += 1
+            except Exception as e:  # pylint: disable=W0703
+                self.logger.warning(f"Gate cascade: refresh revoke failed: {e}")
+
+        # 3. Live access-token jtis for this pair.
+        result["access_tokens"] = await self._revoke_client_jtis(
+            user_id, client_uid
+        )
+
+        self.logger.info(
+            f"OAuth2 gate: revoked access for user {user_id} on {client_uid}: "
+            f"{result}"
+        )
+        return result
+
+    async def _revoke_client_jtis(self, user_id: int, client_uid: str) -> int:
+        """Revoke every live jti belonging to (user, client).
+
+        ``AccessTokenStorage`` is keyed by jti with no (user, client) index,
+        so the live set is swept over its own Redis handle.  This runs only on
+        an administrative deactivation, never on the request path.
+        """
+        storage = self.access_token_storage
+        redis_conn = getattr(storage, "redis", None)
+        if storage is None or redis_conn is None:
+            return 0
+        revoked = 0
+        try:
+            pattern = f"{storage.prefix}*"
+            async for key in redis_conn.scan_iter(match=pattern):
+                # Skip the revocation markers, which share the prefix.
+                if key.startswith(storage.revoked_prefix):
+                    continue
+                raw = await redis_conn.get(key)
+                if not raw:
+                    continue
+                try:
+                    record = json.loads(raw)
+                except Exception:
+                    continue
+                if record.get("client_id") != client_uid:
+                    continue
+                if record.get("user_id") != user_id:
+                    continue
+                if record.get("revoked"):
+                    continue
+                await storage.revoke(record["jti"])
+                revoked += 1
+        except Exception as e:  # pylint: disable=W0703
+            self.logger.warning(f"Gate cascade: jti revoke failed: {e}")
+        return revoked
+
+    # ------------------------------------------------------------------
+    # Upstream IdP proxy login (FEAT-095 TASK-041, decision D2)
+    # ------------------------------------------------------------------
+
+    #: Authorize-request members that MUST survive the upstream hop.
+    #: Losing ``state`` breaks CSRF protection; losing ``code_challenge``
+    #: breaks PKCE and the later token exchange fails outright.
+    PENDING_AUTHORIZE_FIELDS = (
+        "client_id",
+        "redirect_uri",
+        "response_type",
+        "scope",
+        "state",
+        "code_challenge",
+        "code_challenge_method",
+        "nonce",
+        "prompt",
+        "resource",
+    )
+
+    def _upstream_providers(self) -> list:
+        """Upstream IdP service names offered at the AS login page."""
+        return list(OAUTH_UPSTREAM_IDP_BACKENDS or [])
+
+    @property
+    def flow_store(self):
+        """Lazy :class:`IdentityFlowStore` for parked authorize requests.
+
+        ``Oauth2Provider`` extends ``BaseAuthBackend``, not ``ExternalAuth``,
+        so it does not inherit the latter's store; it builds its own over the
+        same Redis URL.  Flow state must never live on ``self`` — backends are
+        process-wide singletons.
+        """
+        if self._flow_store is None:
+            pool = aioredis.ConnectionPool.from_url(
+                REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
+            )
+            self._flow_store = IdentityFlowStore(pool)
+        return self._flow_store
+
+    async def _start_upstream_login(
+        self, request: web.Request, provider: str, data: dict
+    ):
+        """Park the pending authorize request and detour to an upstream IdP."""
+        if provider not in self._upstream_providers():
+            return self._error_response(
+                "invalid_request",
+                f"Unknown or disabled login provider '{provider}'.",
+                status=400,
+            )
+
+        pending = {
+            key: data[key]
+            for key in self.PENDING_AUTHORIZE_FIELDS
+            if data.get(key) is not None
+        }
+        if not pending.get("client_id"):
+            return self._error_response(
+                "invalid_request",
+                "Cannot start provider login without a pending authorize request.",
+                status=400,
+            )
+
+        flow_id = secrets.token_urlsafe(32)
+        try:
+            await self.flow_store.set(
+                OAUTH2_PENDING_FLOW_KEY.format(flow_id=flow_id),
+                pending,
+                ttl=OAUTH_UPSTREAM_FLOW_TTL,
+            )
+        except Exception as e:
+            self.logger.error(f"OAuth2: cannot park the authorize request: {e}")
+            return self._error_response(
+                "server_error",
+                "Unable to start provider login; please retry.",
+                status=500,
+            )
+
+        response = web.HTTPFound(f"/auth/{provider}/login")
+        # Only the opaque handle rides in the browser.
+        response.set_cookie(
+            OAUTH2_RESUME_COOKIE,
+            flow_id,
+            max_age=OAUTH_UPSTREAM_FLOW_TTL,
+            httponly=True,
+            samesite="Lax",
+            secure=(PREFERRED_AUTH_SCHEME == "https"),
+            path="/",
+        )
+        self.logger.notice(
+            f"OAuth2: parked authorize flow {flow_id}, delegating to '{provider}'"
+        )
+        return response
+
+    async def _resume_pending_authorize(self, data: dict) -> Optional[dict]:
+        """Restore an authorize request parked before the upstream hop.
+
+        Single-use (``getdel``): a replayed ``flow`` id must not resurrect the
+        request.  Returns None when the flow is missing or expired, so the
+        caller can restart cleanly instead of emitting a broken redirect.
+        """
+        flow_id = data.get("flow")
+        if not flow_id:
+            return None
+        try:
+            pending = await self.flow_store.getdel(
+                OAUTH2_PENDING_FLOW_KEY.format(flow_id=flow_id)
+            )
+        except Exception as e:
+            self.logger.error(f"OAuth2: cannot read parked authorize flow: {e}")
+            return None
+        if not pending:
+            self.logger.warning(
+                f"OAuth2: authorize flow {flow_id} is missing or expired."
+            )
+            return None
+        # Anything explicitly present on the resume URL wins over the
+        # parked copy, but the parked copy is the source of truth for the
+        # security-critical members (state, PKCE challenge).
+        restored = {**data, **pending}
+        restored.pop("flow", None)
+        return restored
+
+    # ------------------------------------------------------------------
+    # Dynamic Client Registration (FEAT-095 TASK-040, RFC 7591)
+    # ------------------------------------------------------------------
+
+    def _client_source_ip(self, request: web.Request) -> str:
+        """Resolve the rate-limiting identity, honouring trusted proxies only.
+
+        ``X-Forwarded-For`` is client-supplied.  Taking its leftmost value
+        unconditionally (the FEAT-094 device-lockout approach) let any caller
+        reset its own counter by rotating the header on every request, which
+        made the limit on the unauthenticated, open-by-default
+        ``/oauth2/register`` endpoint no limit at all.
+
+        ``get_client_ip`` only honours forwarding headers when the direct TCP
+        peer is in ``ALLOWED_IP_TRUSTED_PROXIES``, and walks the chain
+        right-to-left so injected values are never trusted.
+
+        Still IP-based, so a genuine botnet or a large NAT remains a caveat —
+        but it is no longer defeated by a single header.
+        """
+        client_ip = get_client_ip(request, self._trusted_proxies)
+        return client_ip or request.remote or "unknown"
+
+    async def _check_dcr_rate_limit(self, request: web.Request) -> bool:
+        """Consume one registration token for this source IP.
+
+        Uses a fixed-window counter in Redis (shared across workers) taken from
+        ``self.code_storage``, the one Redis handle that is always present
+        regardless of the configured client-storage tier.
+
+        Returns:
+            True when the request may proceed.  Fails **open** when Redis is
+            unreachable — a broken cache must not make the AS unregisterable.
+        """
+        count, window = parse_rate_limit(OAUTH_DCR_RATE_LIMIT)
+        if count <= 0:
+            return True
+        redis_conn = getattr(self.code_storage, "redis", None)
+        if redis_conn is None:
+            return True
+        key = f"oauth2:dcr:ratelimit:{self._client_source_ip(request)}"
+        try:
+            used = await redis_conn.incr(key)
+            if int(used) == 1:
+                await redis_conn.expire(key, window)
+            return int(used) <= count
+        except Exception as e:
+            self.logger.warning(f"OAuth2 DCR: rate-limit check unavailable: {e}")
+            return True
+
+    async def register(self, request: web.Request):
+        """POST /oauth2/register — RFC 7591 Dynamic Client Registration.
+
+        Open by default (D1): registration is anonymous and confers no
+        privileges.  A registered client still cannot reach anything until a
+        user authenticates and passes the access gate (TASK-042), and DCR
+        clients are born gated via ``OAUTH_DCR_GATE_NEW_CLIENTS``.
+        """
+        if str(OAUTH_DCR_POLICY).strip().lower() == "disabled":
+            return self._error_response(
+                "registration_not_supported",
+                "Dynamic client registration is disabled on this server.",
+                status=400,
+            )
+
+        if not await self._check_dcr_rate_limit(request):
+            _, window = parse_rate_limit(OAUTH_DCR_RATE_LIMIT)
+            return JSONResponse(
+                {
+                    "error": "too_many_requests",
+                    "error_description": (
+                        "Too many client registrations from this source. "
+                        "Please retry later."
+                    ),
+                },
+                status=429,
+                headers={"Retry-After": str(window)},
+            )
+
+        # RFC 7591 §3.1: the registration request is a JSON document.
+        try:
+            body = await request.json()
+        except Exception:
+            return self._error_response(
+                "invalid_client_metadata",
+                "The registration request body must be valid JSON.",
+                status=400,
+            )
+
+        try:
+            reg = validate_registration(
+                body, OAUTH_DCR_POLICY, OAUTH_DCR_REDIRECT_ALLOWLIST
+            )
+        except DCRError as exc:
+            return self._error_response(exc.error, exc.description, status=exc.status)
+
+        client = to_oauth_client(
+            reg,
+            default_scopes=OAUTH_DCR_DEFAULT_SCOPES,
+            gate_new_clients=OAUTH_DCR_GATE_NEW_CLIENTS,
+        )
+
+        saved = await self.client_storage.save_client(client, request)
+        if not saved:
+            self.logger.error(
+                f"OAuth2 DCR: failed to persist client {client.client_id}"
+            )
+            return self._error_response(
+                "server_error",
+                "The client could not be registered; please retry.",
+                status=500,
+            )
+
+        # Never log the generated secret.
+        self.logger.info(
+            f"OAuth2 DCR: registered {client.client_type} client "
+            f"{client.client_id} ({client.client_name}) "
+            f"gated={client.enforce_access_gate}"
+        )
+
+        response = build_registration_response(reg, client)
+        # exclude_none drops client_secret for public clients (RFC 7591 §3.2.1).
+        return JSONResponse(response.model_dump(exclude_none=True), status=201)
+
+    async def reap_unused_dcr_clients(self, request: web.Request = None) -> int:
+        """Sweep DCR clients that never completed a token exchange.
+
+        Anti-abuse counterpart to open registration (``OAUTH_DCR_UNUSED_TTL``).
+        Exposed as a method so deployments can drive it from a scheduler or a
+        maintenance command; it is deliberately not run on the request path.
+
+        The Postgres tier (the default) answers "was this client ever used?"
+        authoritatively in SQL and ignores the predicate below.  The memory and
+        Redis tiers have no index from client to issued tokens, so the
+        predicate fails **safe** — unknown means "assume used", and nothing is
+        deleted.  Those tiers are ephemeral anyway; a process restart is their
+        reaper.
+        """
+        async def _is_used(client_uid: str) -> bool:
+            storage = self.access_token_storage
+            lister = getattr(storage, "list_by_client", None)
+            if lister is None:
+                # Cannot prove the client is unused ⇒ never delete it.
+                return True
+            try:
+                return bool(await lister(client_uid))
+            except Exception:
+                return True
+
+        try:
+            return await self.client_storage.reap_unused_dcr_clients(
+                OAUTH_DCR_UNUSED_TTL, is_used=_is_used, request=request
+            )
+        except Exception as e:
+            self.logger.error(f"OAuth2 DCR: reaper failed: {e}")
+            return 0
+
+    # ------------------------------------------------------------------
     # authorize
     # ------------------------------------------------------------------
 
@@ -480,12 +1346,37 @@ class Oauth2Provider(BaseAuthBackend):
         """
         data = await self.get_payload(request)
 
+        # FEAT-095 TASK-041: resume a request parked before an upstream-IdP
+        # hop.  Single-use; an expired flow restarts cleanly as
+        # invalid_request rather than redirecting somewhere half-formed.
+        if data.get("flow"):
+            restored = await self._resume_pending_authorize(data)
+            if restored is None:
+                return self._error_response(
+                    "invalid_request",
+                    (
+                        "Your sign-in session expired before the authorization "
+                        "request could be completed. Please start again."
+                    ),
+                    status=400,
+                )
+            data = restored
+
         # B4: validate response_type
         response_type = data.get("response_type", "code")
         if response_type != "code":
             return self._error_response(
                 "unsupported_response_type",
                 f"response_type '{response_type}' is not supported; use 'code'.",
+            )
+
+        # FEAT-095 TASK-044 (RFC 8707): validate the resource indicator.
+        resource = data.get("resource")
+        if resource and not validate_resource_uri(resource):
+            return self._error_response(
+                "invalid_target",
+                "The 'resource' parameter must be an absolute URI "
+                "without a fragment.",
             )
 
         client_id = data.get("client_id")
@@ -536,6 +1427,21 @@ class Oauth2Provider(BaseAuthBackend):
             url = location.with_query(**payload)
             self.redirect(url, location=True)
 
+        # FEAT-095 TASK-042: ACCESS GATE — after login, BEFORE consent.
+        # A non-activated user must never see the consent screen and never
+        # receive a code.
+        gate_user = self._decode_session_user(session)
+        if gate_user is not None:
+            denied = await self._enforce_access_gate(
+                request,
+                client,
+                gate_user.user_id,
+                redirect_uri,
+                data.get("state", ""),
+            )
+            if denied is not None:
+                return denied
+
         # TASK-027: Consent-skip — if unrevoked grant exists for these scopes.
         prompt = data.get("prompt", "")
         if prompt != "consent" and self.grant_storage:
@@ -554,6 +1460,7 @@ class Oauth2Provider(BaseAuthBackend):
                             requested_scope, data.get("state", ""),
                             data.get("code_challenge"),
                             data.get("code_challenge_method"),
+                            resource=resource,
                         )
 
         # Show Consent page.
@@ -576,6 +1483,7 @@ class Oauth2Provider(BaseAuthBackend):
         state: str,
         code_challenge: Optional[str] = None,
         code_challenge_method: Optional[str] = None,
+        resource: Optional[str] = None,
     ):
         """Issue an authorization code and redirect to the client."""
         from .models import OauthAuthorizationCode
@@ -591,6 +1499,8 @@ class Oauth2Provider(BaseAuthBackend):
             response_type="code",
             code_challenge=code_challenge,
             code_challenge_method=code_challenge_method,
+            # RFC 8707: carried through the code to the token exchange.
+            resource=resource,
         )
         await self.code_storage.save_code(code_obj)
         payload = {"code": auth_code, "state": state}
@@ -615,6 +1525,15 @@ class Oauth2Provider(BaseAuthBackend):
                 state = data.get("state", "")
                 code_challenge = data.get("code_challenge")
                 code_challenge_method = data.get("code_challenge_method")
+                # FEAT-095 TASK-044 (RFC 8707): the resource indicator must
+                # survive the consent hop, exactly like the PKCE challenge.
+                resource = data.get("resource")
+                if resource and not validate_resource_uri(resource):
+                    return self._error_response(
+                        "invalid_target",
+                        "The 'resource' parameter must be an absolute URI "
+                        "without a fragment.",
+                    )
 
                 # Resolve authenticated user from session — NEVER from client.user.
                 session_user = await self.check_session(request)
@@ -632,6 +1551,17 @@ class Oauth2Provider(BaseAuthBackend):
                 if not client:
                     return self._error_response("invalid_client", "Unknown client.", status=400)
 
+                # FEAT-095 TASK-042: ACCESS GATE — re-checked here, not only in
+                # `authorize`.  This endpoint mints a code on its own, so a
+                # non-activated user could otherwise POST straight to
+                # /oauth2/consent and skip the gate entirely.  Every path that
+                # reaches _issue_code must be gated (cf. the device flow).
+                gate_denied = await self._enforce_access_gate(
+                    request, client, user_obj.user_id, redirect_uri, state
+                )
+                if gate_denied is not None:
+                    return gate_denied
+
                 # TASK-027: upsert grant record.
                 if self.grant_storage:
                     grant = OauthGrant(
@@ -643,7 +1573,8 @@ class Oauth2Provider(BaseAuthBackend):
 
                 return await self._issue_code(
                     request, client, user_obj, redirect_uri, scope, state,
-                    code_challenge, code_challenge_method
+                    code_challenge, code_challenge_method,
+                    resource=resource,
                 )
 
             else:
@@ -682,9 +1613,21 @@ class Oauth2Provider(BaseAuthBackend):
             raise self.auth_error(reason=f"Invalid HTTP Form Data: {request.method}", status=400)
 
     async def auth_login(self, request: web.Request):
-        """Login page for OAuth2 resource owner authentication."""
+        """Login page for OAuth2 resource owner authentication.
+
+        FEAT-095 TASK-041 (D2): when ``OAUTH_UPSTREAM_IDP_BACKENDS`` is
+        configured the page also offers the upstream providers, and a
+        ``provider=`` selection hands the browser to that backend's normal
+        login route.  With the setting empty this method behaves exactly as
+        it did before the feature.
+        """
         if request.method == "GET":
             data = {key: val for (key, val) in request.query.items()}
+            # Provider selected: park the authorize request and detour.
+            provider = data.pop("provider", None)
+            if provider:
+                return await self._start_upstream_login(request, provider, data)
+            data["upstream_providers"] = self._upstream_providers()
             return await self._parser.view(filename="oauth/login.html", params=data)
         elif request.method == "POST":
             username, password, data = await self.get_login_form(request)
@@ -750,8 +1693,37 @@ class Oauth2Provider(BaseAuthBackend):
     # ------------------------------------------------------------------
 
     async def token_request(self, request):
-        """Token endpoint (authorization_code / client_credentials / refresh_token)."""
+        """Token endpoint (authorization_code / client_credentials / refresh_token).
+
+        FEAT-095 TASK-044: OAuth 2.1 requires the token request to be
+        ``application/x-www-form-urlencoded`` (RFC 6749 §4.1.3).  Claude's
+        client sends form; JSON-only servers are what make Claude fail, so we
+        invert that — accept form, refuse JSON with **415**.
+        """
+        if request.method == "POST":
+            # Read the RAW header, not request.content_type: aiohttp defaults
+            # that property to "application/octet-stream" when the header is
+            # absent, which would 415 every caller that simply omits it (and
+            # which pre-FEAT-095 callers were allowed to do).
+            raw_content_type = request.headers.get("Content-Type") or ""
+            content_type = raw_content_type.split(";")[0].strip().lower()
+            if content_type and content_type != "application/x-www-form-urlencoded":
+                return JSONResponse(
+                    {
+                        "error": "invalid_request",
+                        "error_description": (
+                            "The token endpoint requires "
+                            "application/x-www-form-urlencoded; "
+                            f"got '{content_type}'."
+                        ),
+                    },
+                    status=415,
+                    headers={"Accept": "application/x-www-form-urlencoded"},
+                )
+
         payload = await self.get_payload(request)
+        # RFC 6749 §2.3.1 / RFC 8414: client_secret_basic as well as _post.
+        payload = self._merge_basic_auth(request, payload)
         grant_type = payload.get("grant_type")
 
         if grant_type == "authorization_code":
@@ -823,9 +1795,8 @@ class Oauth2Provider(BaseAuthBackend):
 
         # B2: for confidential clients, verify client_secret.
         if client.client_type != "public":
-            client_secret = payload.get("client_secret", "")
             stored_secret = client.client_secret or ""
-            if not hmac.compare_digest(stored_secret, client_secret):
+            if not self._secret_matches(stored_secret, payload):
                 return self._error_response("invalid_client", "Invalid client_secret.")
 
         # TASK-025 PKCE: verify if a challenge was stored.
@@ -865,11 +1836,34 @@ class Oauth2Provider(BaseAuthBackend):
             **await self._token_session_claims(request, user_id),
         }
 
-        # TASK-029: audience = 'user' for 3LO tokens.
+        # FEAT-095 TASK-044 (RFC 8707): a `resource` on the token request must
+        # match the one the code was issued for; otherwise fall back to the
+        # code's own value.  Downgrading silently would let a client swap the
+        # audience after consent.
+        requested_resource = payload.get("resource")
+        if requested_resource:
+            if not validate_resource_uri(requested_resource):
+                return self._error_response(
+                    "invalid_target",
+                    "The 'resource' parameter must be an absolute URI "
+                    "without a fragment.",
+                )
+            code_resource = getattr(auth_code, "resource", None)
+            if code_resource and requested_resource != code_resource:
+                return self._error_response(
+                    "invalid_target",
+                    "The 'resource' does not match the authorization request.",
+                )
+            resource = requested_resource
+        else:
+            resource = getattr(auth_code, "resource", None)
+
+        # TASK-029: audience = 'user' for 3LO tokens; TASK-044 appends the
+        # canonical resource when one was requested (list-valued aud).
         access_token, _, exp_abs, scheme = self._idp.create_token(
             token_data,
             expiration=OAUTH_ACCESS_TOKEN_TTL,
-            audience="user",
+            audience=self._resource_audience("user", resource),
         )
 
         # B1: expires_in is seconds (not an absolute timestamp).
@@ -926,14 +1920,13 @@ class Oauth2Provider(BaseAuthBackend):
         TASK-029: audience = 'app'.
         """
         client_id = payload.get("client_id")
-        client_secret = payload.get("client_secret", "")
 
         client = await self.client_storage.get_client(client_id, request=request)
         if not client:
             return self._error_response("invalid_client", "Unknown client.")
 
         stored_secret = client.client_secret or ""
-        if not hmac.compare_digest(stored_secret, client_secret):
+        if not self._secret_matches(stored_secret, payload):
             return self._error_response("invalid_client", "Invalid client_secret.")
 
         scope = payload.get("scope", " ".join(
@@ -947,11 +1940,22 @@ class Oauth2Provider(BaseAuthBackend):
             "jti": jti,
         }
 
-        # TASK-029: audience = 'app' for 2LO tokens.
+        # FEAT-095 TASK-044 (RFC 8707): client_credentials may also target a
+        # resource; there is no code to carry it, so it comes off the request.
+        cc_resource = payload.get("resource")
+        if cc_resource and not validate_resource_uri(cc_resource):
+            return self._error_response(
+                "invalid_target",
+                "The 'resource' parameter must be an absolute URI "
+                "without a fragment.",
+            )
+
+        # TASK-029: audience = 'app' for 2LO tokens; TASK-044 appends the
+        # canonical resource when one was requested (list-valued aud).
         access_token, _, exp_abs, scheme = self._idp.create_token(
             token_data,
             expiration=OAUTH_ACCESS_TOKEN_TTL,
-            audience="app",
+            audience=self._resource_audience("app", cc_resource),
         )
 
         now_utc = _now_utc()
@@ -983,7 +1987,6 @@ class Oauth2Provider(BaseAuthBackend):
         """
         refresh_token = payload.get("refresh_token")
         client_id = payload.get("client_id")
-        client_secret = payload.get("client_secret", "")
 
         if not refresh_token:
             return self._error_response("invalid_request", "Missing refresh_token.")
@@ -995,7 +1998,7 @@ class Oauth2Provider(BaseAuthBackend):
         # B2: confidential client must verify secret.
         if client.client_type != "public":
             stored_secret = client.client_secret or ""
-            if not hmac.compare_digest(stored_secret, client_secret):
+            if not self._secret_matches(stored_secret, payload):
                 return self._error_response("invalid_client", "Invalid client_secret.")
 
         rt = await self.refresh_token_storage.get_token(refresh_token)
@@ -1010,6 +2013,19 @@ class Oauth2Provider(BaseAuthBackend):
             if rt.revoked_reason == "rotated" and OAUTH_REFRESH_ROTATION:
                 await self.refresh_token_storage.revoke_chain(refresh_token)
             return self._error_response("invalid_grant", "Refresh token has been revoked.")
+
+        # FEAT-095 TASK-042: ACCESS GATE — re-checked on every refresh.
+        # The admin revoke endpoint cascades the refresh chain, but turning
+        # the gate on globally (or setting enforce_access_gate on an existing
+        # client) does not walk existing tokens; without this check, refresh
+        # tokens minted while the client was ungated would keep working
+        # indefinitely, silently outliving the policy change.
+        if not await self._gate_permits(request, client, rt.user_id):
+            await self.refresh_token_storage.revoke_chain(refresh_token)
+            return self._error_response(
+                "invalid_grant",
+                "Access for this user has been withdrawn.",
+            )
 
         now = _now()
 
@@ -1285,6 +2301,9 @@ class Oauth2Provider(BaseAuthBackend):
         Always returns 200 regardless of token validity.
         """
         payload = await self.get_payload(request)
+        # FEAT-095 TASK-044: accept client_secret_basic here too (RFC 8414
+        # advertises it for the revocation endpoint).
+        payload = self._merge_basic_auth(request, payload)
         token = payload.get("token", "")
         hint = payload.get("token_type_hint", "")
 
@@ -1375,18 +2394,10 @@ class Oauth2Provider(BaseAuthBackend):
         payload = await self.get_payload(request)
 
         # --- Authenticate the calling confidential client ---
+        # FEAT-095 TASK-044: client_secret_basic and _post, via the shared
+        # helper (which also form-urldecodes per RFC 6749 §2.3.1).
+        payload = self._merge_basic_auth(request, payload)
         caller_client_id = payload.get("client_id", "")
-        caller_secret = payload.get("client_secret", "")
-        if not caller_client_id:
-            # Also accept HTTP Basic Auth
-            auth_header = request.headers.get("Authorization", "")
-            if auth_header.startswith("Basic "):
-                import base64
-                try:
-                    decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
-                    caller_client_id, caller_secret = decoded.split(":", 1)
-                except Exception:
-                    pass
 
         caller = await self.client_storage.get_client(caller_client_id, request=request)
         if not caller or caller.client_type == "public":
@@ -1397,7 +2408,7 @@ class Oauth2Provider(BaseAuthBackend):
                 text='{"error":"invalid_client","error_description":"Client authentication required."}',
             )
         stored_secret = caller.client_secret or ""
-        if not hmac.compare_digest(stored_secret, caller_secret):
+        if not self._secret_matches(stored_secret, payload):
             return web.Response(
                 status=401,
                 content_type="application/json",
@@ -1725,6 +2736,16 @@ class Oauth2Provider(BaseAuthBackend):
         client = await self.client_storage.get_client(dc.client_id, request=request)
         if not client:
             return self._error_response("invalid_client", "Unknown client.", status=400)
+
+        # FEAT-095 TASK-042: ACCESS GATE — device-flow parity is a security
+        # requirement: without this check the device grant is a way around
+        # the gate entirely (spec §6 risk).  There is no redirect_uri in the
+        # device flow, so denial renders instead of redirecting.
+        gate_denied = await self._enforce_access_gate(
+            request, client, user_obj.user_id, redirect_uri=None, state=""
+        )
+        if gate_denied is not None:
+            return gate_denied
 
         scopes = dc.scopes
         if self.grant_storage:

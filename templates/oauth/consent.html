@@ -40,6 +40,9 @@
             <input type="hidden" name="code_challenge" value="{{ code_challenge }}">
             <input type="hidden" name="code_challenge_method" value="{{ code_challenge_method }}">
             <input type="hidden" name="nonce" value="{{ nonce }}">
+            <!-- RFC 8707: the resource indicator must survive consent too,
+                 otherwise the issued token's `aud` loses the target. -->
+            <input type="hidden" name="resource" value="{{ resource }}">
 
             <div class="actions">
                 <button type="submit" name="action" value="deny" class="btn-deny">Deny</button>

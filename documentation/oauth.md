@@ -468,3 +468,224 @@ clients may omit PKCE.  `plain` method is rejected with `invalid_request`.
 | `OAUTH_DEVICE_VERIFICATION_URI` | `""` | Base verification URI shown to the user. |
 | `OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS` | `5` | Failed entries before IP lockout. |
 | `OAUTH_DEVICE_LOCKOUT_TTL` | `300` s | IP lockout duration. |
+
+---
+
+# FEAT-095 — OAuth 2.1 for MCP Agents
+
+This section covers the surface added so Claude Web/Desktop custom connectors (and
+any other OAuth 2.1 client) can **discover** and **self-register** against this
+authorization server. See `documentation/mcp-connector.md` for the
+operator-facing setup guide and runbooks.
+
+## Issuer identity
+
+RFC 8414 requires an `https` issuer identifier that matches the location the
+metadata is served from. `AUTH_TOKEN_ISSUER` defaults to the URN `urn:Navigator`
+and cannot serve that role, so FEAT-095 adds a separate setting.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `AUTH_ISSUER_URL` | *(derived)* | Canonical https issuer for discovery and the OAuth2 surfaces. |
+
+When unset the issuer is derived per request from `X-Forwarded-Proto` /
+`X-Forwarded-Host` / `Host`, so it is correct behind a reverse proxy. `https` is
+enforced (loopback hosts are exempt for local development). **Set it explicitly
+in production** — a wrong issuer makes Claude show "Disconnected" with no useful
+error.
+
+`AUTH_TOKEN_ISSUER` keeps its existing meaning for the non-OAuth2 JWT `iss`
+claim; nothing about it changed.
+
+## Discovery documents
+
+| Endpoint | RFC | Auth |
+|----------|-----|------|
+| `GET /.well-known/oauth-authorization-server` | RFC 8414 | public |
+| `GET /.well-known/oauth-protected-resource` | RFC 9728 | public |
+
+Both are also aliased under `/oauth2/.well-known/...` for deployments mounted
+behind a path prefix. Documents are built once per issuer and cached in-process.
+
+`registration_endpoint` appears only when `OAUTH_DCR_POLICY != "disabled"`, and
+`jwks_uri` only when a signing-key registry is loaded — the server never
+advertises an endpoint it will not serve.
+
+The RFC 9728 builder is importable standalone, so an external resource server
+can serve its own document pointing back here:
+
+```python
+from navigator_auth.backends.oauth2.metadata import (
+    build_protected_resource_metadata,
+)
+
+doc = build_protected_resource_metadata(
+    resource="https://mcp.example.com",
+    auth_servers=["https://auth.example.com"],
+    scopes=["default"],
+)
+```
+
+## Dynamic Client Registration (RFC 7591)
+
+`POST /oauth2/register` — JSON body, unauthenticated, rate-limited.
+
+Registration is **open by default**: anyone may mint a `client_id`. That is
+deliberate — registration confers no privileges, and the per-client access gate
+below is the actual access control.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `OAUTH_DCR_POLICY` | `open` | `open` / `allowlist` / `disabled`. |
+| `OAUTH_DCR_REDIRECT_ALLOWLIST` | Claude callbacks | Glob patterns for `allowlist` mode. |
+| `OAUTH_DCR_DEFAULT_SCOPES` | `[]` | Scopes given to clients that request none. |
+| `OAUTH_DCR_GATE_NEW_CLIENTS` | `True` | DCR clients are born gated. |
+| `OAUTH_DCR_RATE_LIMIT` | `10/hour` | Per-source-IP registration limit. |
+| `OAUTH_DCR_UNUSED_TTL` | `2592000` | Reap DCR clients that never exchanged a token (s). |
+
+Request (exactly what Claude sends):
+
+```json
+{
+  "client_name": "Claude",
+  "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+  "token_endpoint_auth_method": "none",
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"]
+}
+```
+
+Response — `201 Created`:
+
+```json
+{
+  "client_id": "rX_GeI5PkYtJwY1PHsFkQbjK",
+  "client_id_issued_at": 1788131599,
+  "client_secret_expires_at": 0,
+  "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+  "client_name": "Claude",
+  "token_endpoint_auth_method": "none"
+}
+```
+
+`token_endpoint_auth_method: "none"` designates a **public** client: no
+`client_secret` is issued, and PKCE becomes mandatory through the existing
+`OAUTH_REQUIRE_PKCE_PUBLIC` enforcement. Confidential clients get a
+`client_secret` that does not expire (`client_secret_expires_at: 0`).
+
+Validation rejects missing `redirect_uris`, non-https URIs (loopback exempt),
+fragments, wildcards, and unsupported grant/response types with
+`{"error": "invalid_client_metadata", ...}`. `OAUTH_DCR_POLICY=disabled`
+returns `{"error": "registration_not_supported"}`. Exceeding the rate limit
+returns `429` with `Retry-After`.
+
+New `auth.clients` columns: `token_endpoint_auth_method`, `registration_source`
+(`static` | `dcr`), `enforce_access_gate`. Run `backends/oauth2/ddl.sql`.
+
+## Upstream IdP proxy login
+
+With `OAUTH_UPSTREAM_IDP_BACKENDS` set, the AS login page offers the configured
+`ExternalAuth` backends instead of only local username/password.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `OAUTH_UPSTREAM_IDP_BACKENDS` | `[]` | e.g. `google,azure`. Empty ⇒ local login only. |
+| `OAUTH_UPSTREAM_FLOW_TTL` | `600` | Lifetime of the parked authorize request (s). |
+
+On provider selection the **complete** pending authorize request (including
+`state` and the PKCE `code_challenge`) is parked server-side in
+`IdentityFlowStore` under `oauth2_pending_{flow_id}`. Only an opaque handle
+travels in the browser, in a short-lived HttpOnly cookie. After the provider
+callback the user is returned to `/oauth2/authorize?flow=...`, the parked
+request is restored **single-use**, and the flow continues into the gate and
+consent. Upstream provider tokens are ciphered into `auth.user_identities`.
+
+An expired or missing flow produces a clean `invalid_request`, never a
+half-formed redirect.
+
+## Per-client access gate
+
+Decides whether a given user may obtain a token for a given client. Checked at
+`/oauth2/authorize` **and** at device verification, after login and **before**
+consent — a non-activated user never reaches the consent screen and never
+receives a code.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `OAUTH_ACCESS_GATE_ENABLED` | `False` | Enforce the gate for **all** clients. |
+| `OAUTH_ACCESS_GATE_QUEUE` | `True` | Record `pending` rows on denied attempts. |
+
+The gate is enforced when the global switch is on **or** the client's
+`enforce_access_gate` flag is set. With both off, behaviour is exactly as before
+this feature.
+
+Denial returns the standard `access_denied` error redirect carrying the original
+`state`. When the queue is on, the attempt upserts a single `pending` row per
+(user, client) so an administrator can approve it.
+
+Management API (superuser only):
+
+```
+GET    /api/v1/oauth2/clients/{client_uid}/access
+GET    /api/v1/oauth2/clients/{client_uid}/access?status=pending
+POST   /api/v1/oauth2/clients/{client_uid}/access   {"user_id": 42, "action": "grant"}
+POST   ...                                          {"user_id": 42, "action": "approve"}
+POST   ...                                          {"user_id": 42, "action": "reject"}
+DELETE /api/v1/oauth2/clients/{client_uid}/access?user_id=42
+```
+
+Revoking cascades: the consent grant, the refresh-token chain and live access
+token `jti`s for that (user, client) are all revoked. Effect is immediate for
+refresh and introspection, and within one access-token TTL for tokens already
+minted.
+
+New table `auth.client_access` — see `backends/oauth2/ddl.sql`.
+
+## Asymmetric signing and JWKS
+
+Optional RS256/ES256 signing so third-party resource servers can validate
+tokens offline, without an introspection round-trip. **HS256 remains the
+default and its output is unchanged when this is unconfigured.**
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `OAUTH_JWT_SIGNING_ALG` | `HS256` | `HS256` / `RS256` / `ES256`. |
+| `OAUTH_JWT_KEYS` | `[]` | JSON key registry (see below). |
+
+```json
+[
+  {"kid": "2026-q3", "algorithm": "RS256",
+   "private_key_file": "/etc/navigator/keys/2026-q3.key",
+   "public_key_file":  "/etc/navigator/keys/2026-q3.pub",
+   "active": true},
+  {"kid": "2026-q2", "algorithm": "RS256",
+   "public_key_file":  "/etc/navigator/keys/2026-q2.pub",
+   "active": false}
+]
+```
+
+Exactly one key is `active` (the signer); inactive keys stay published for
+verification, which is what makes rotation non-disruptive. Tokens carry the
+`kid` header and `decode_token` dispatches on it, falling back to the
+`SECRET_KEY` HS256 path for tokens without a known `kid` — so an HS256→RS256
+migration verifies both during the overlap.
+
+`GET /oauth2/jwks` serves the public JWK Set (public parameters only, `use:
+"sig"`). Inline PEM via `private_key` / `public_key` is also accepted.
+
+See `documentation/mcp-connector.md` for the key generation and rotation
+runbook.
+
+## OAuth 2.1 conformance
+
+- `POST /oauth2/token` requires `application/x-www-form-urlencoded`; a JSON body
+  returns **415**.
+- `client_secret_basic` is accepted alongside `client_secret_post` at
+  `/oauth2/token`, `/oauth2/introspect` and `/oauth2/revoke`.
+- The RFC 8707 `resource` parameter is accepted at authorize and token,
+  validated as an absolute URI without a fragment (`invalid_target` otherwise),
+  carried through the authorization code, and reflected into the token `aud`
+  alongside the `'user'` / `'app'` marker (making `aud` list-valued). Audience
+  **enforcement** is the resource server's job.
+- Bearer `401`s carry
+  `WWW-Authenticate: Bearer resource_metadata="{issuer}/.well-known/oauth-protected-resource"`.

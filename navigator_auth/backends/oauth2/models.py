@@ -10,6 +10,12 @@ FEAT-093:
 
 FEAT-094:
   TASK-032 — OauthDeviceCode + DeviceCodeStatus for RFC 8628 device grant.
+
+FEAT-095:
+  TASK-040 — ClientRegistrationRequest/Response (RFC 7591 DCR) and the
+             token_endpoint_auth_method / registration_source /
+             enforce_access_gate members on OAuthClient.
+  TASK-044 — resource (RFC 8707) on OauthAuthorizationCode.
 """
 
 from typing import Optional, Union
@@ -17,7 +23,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 import json
 from uuid import UUID, uuid4
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ...conf import OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS
 
@@ -88,6 +94,13 @@ class OAuthClient(BaseModel):
     user: Optional[OauthUser] = Field(default=None)
     default_scopes: Union[str, list] = Field(default_factory=list)
     allowed_grant_types: list = Field(default_factory=list)
+    # FEAT-095 TASK-040: how this client authenticates at the token endpoint —
+    # "none" marks a public client (no secret; PKCE mandatory downstream).
+    token_endpoint_auth_method: Optional[str] = Field(default=None)
+    # "static" (operator-provisioned) | "dcr" (RFC 7591 self-registration).
+    registration_source: str = Field(default="static")
+    # FEAT-095 TASK-042: per-client access gate; DCR clients are born gated.
+    enforce_access_gate: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     expiration_date: datetime = Field(default_factory=default_expiration)
@@ -131,6 +144,57 @@ class OAuthClient(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Dynamic Client Registration — RFC 7591 (FEAT-095 TASK-040)
+# ---------------------------------------------------------------------------
+
+class ClientRegistrationRequest(BaseModel):
+    """RFC 7591 §2 client metadata, as submitted to ``POST /oauth2/register``.
+
+    Field names are the RFC's, not navigator-auth's — this is the wire
+    contract Claude's connector infrastructure speaks.  Unknown members are
+    ignored rather than rejected: RFC 7591 §2 allows clients to send metadata
+    the server does not understand, and Claude sends a few extras.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    redirect_uris: list[str] = Field()
+    client_name: Optional[str] = Field(default=None)
+    grant_types: list[str] = Field(
+        default_factory=lambda: ["authorization_code", "refresh_token"]
+    )
+    response_types: list[str] = Field(default_factory=lambda: ["code"])
+    token_endpoint_auth_method: str = Field(default="client_secret_post")
+    scope: Optional[str] = Field(default=None)
+    client_uri: Optional[str] = Field(default=None)
+    logo_uri: Optional[str] = Field(default=None)
+
+
+class ClientRegistrationResponse(BaseModel):
+    """RFC 7591 §3.2.1 registration success body.
+
+    ``client_id`` is the opaque public ``client_uid``; the internal integer PK
+    never appears here.  ``client_secret`` is omitted entirely for public
+    clients — serialise with ``exclude_none=True``.
+    """
+
+    client_id: str = Field()
+    client_secret: Optional[str] = Field(default=None)
+    client_id_issued_at: int = Field()
+    # 0 = the secret does not expire (RFC 7591 §3.2.1).
+    client_secret_expires_at: int = Field(default=0)
+    # Echo of the registered metadata.
+    redirect_uris: list[str] = Field(default_factory=list)
+    client_name: Optional[str] = Field(default=None)
+    grant_types: list[str] = Field(default_factory=list)
+    response_types: list[str] = Field(default_factory=list)
+    token_endpoint_auth_method: str = Field(default="client_secret_post")
+    scope: Optional[str] = Field(default=None)
+    client_uri: Optional[str] = Field(default=None)
+    logo_uri: Optional[str] = Field(default=None)
+
+
+# ---------------------------------------------------------------------------
 # Auth code TTL helper
 # ---------------------------------------------------------------------------
 
@@ -163,6 +227,11 @@ class OauthAuthorizationCode(BaseModel):
     expires_at: datetime = Field(default_factory=code_expiration)
     code_challenge: Optional[str] = Field(default=None)
     code_challenge_method: Optional[str] = Field(default=None)
+    # FEAT-095 TASK-044 (RFC 8707): the canonical resource this code was
+    # requested for.  Carried through the code so the token exchange can
+    # reflect it into `aud`; audience *enforcement* is the resource server's
+    # job (D5), navigator-auth only validates and propagates.
+    resource: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.now)
     # Single-use enforcement (B5).
     used: bool = Field(default=False)

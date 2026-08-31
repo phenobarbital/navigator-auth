@@ -9,7 +9,7 @@ from typing import Any, Optional
 from collections.abc import Callable
 import importlib
 from abc import abstractmethod
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 from requests.models import PreparedRequest
 import aiohttp
 from aiohttp import web, hdrs
@@ -36,6 +36,15 @@ from ..conf import (
     REDIS_AUTH_URL,
 )
 from .abstract import BaseAuthBackend
+
+#: FEAT-095 TASK-041 — upstream IdP proxy login for the OAuth2 AS.
+#: Short-lived, HttpOnly cookie carrying the opaque id of the parked
+#: authorize request across the provider round-trip.  Only the handle
+#: travels in the browser; the request itself stays in IdentityFlowStore.
+OAUTH2_RESUME_COOKIE: str = "nav_oauth2_flow"
+
+#: IdentityFlowStore key holding the parked authorize request.
+OAUTH2_PENDING_FLOW_KEY: str = "oauth2_pending_{flow_id}"
 
 
 class OauthUser(AuthUser):
@@ -319,13 +328,124 @@ class ExternalAuth(BaseAuthBackend):
         The identity-link flow shares the provider's registered callback
         URL with the login flow; a single-use Redis record keyed by the
         OAuth2 ``state`` distinguishes them.
+
+        FEAT-095 TASK-041 adds a third outcome: when this login was a detour
+        taken on behalf of the OAuth2 authorization server, the browser is
+        sent back to ``/oauth2/authorize`` to resume the parked request
+        instead of to ``home_redirect``.
         """
         state = request.rel_url.query.get("state")
         if state:
             flow = await self._flow_store.consume_link(state)
             if flow:
                 return await self.finish_identity_link(request, flow)
-        return await self.auth_callback(request)
+        # Read the AS marker BEFORE auth_callback: the backend consumes its
+        # own state-keyed record in there, and the marker must not depend on
+        # any particular backend's flow-record shape.
+        resume_flow_id = self._pending_oauth2_flow(request)
+        response = await self.auth_callback(request)
+        if resume_flow_id:
+            return await self._resume_oauth2_authorize(
+                request, resume_flow_id, response
+            )
+        return response
+
+    # ------------------------------------------------------------------
+    # OAuth2 AS proxy login (FEAT-095 TASK-041, decision D2)
+    # ------------------------------------------------------------------
+
+    def _pending_oauth2_flow(self, request: web.Request) -> Optional[str]:
+        """Return the parked authorize-flow id, if this login is an AS detour.
+
+        The id travels in a short-lived, HttpOnly cookie set by
+        ``Oauth2Provider.auth_login`` when it hands the browser to an upstream
+        provider.  It is an opaque handle only — the authorize request itself
+        (state, PKCE challenge, scope, redirect_uri) never leaves the server;
+        it lives in ``IdentityFlowStore`` under ``oauth2_pending_{flow_id}``.
+
+        A backend that carries ``oauth2_flow`` in its own state-keyed record
+        may set ``request['oauth2_flow']``; that takes precedence.
+        """
+        try:
+            carried = request.get("oauth2_flow")
+        except (AttributeError, TypeError):
+            carried = None
+        return carried or request.cookies.get(OAUTH2_RESUME_COOKIE) or None
+
+    async def _resume_oauth2_authorize(
+        self, request: web.Request, flow_id: str, response
+    ):
+        """Send a freshly authenticated browser back into ``/oauth2/authorize``.
+
+        The session cookie was already written by ``remember()`` during
+        ``auth_callback``; only the redirect target changes, so the response
+        object is edited in place rather than rebuilt — rebuilding it would
+        drop whatever cookies/headers the backend attached.
+        """
+        # A failed login must keep the backend's own error response.
+        status = getattr(response, "status", 500)
+        if status not in (301, 302, 303, 307, 308):
+            self.logger.warning(
+                f"{self._service_name}: upstream login failed; "
+                "not resuming the OAuth2 authorize request."
+            )
+            return response
+
+        # Best-effort: persist the upstream credential in the Identity Vault,
+        # exactly as the identity-link flow does.
+        await self._vault_upstream_token(request)
+
+        domain_url = self.get_domain(request)
+        resume_url = f"{domain_url}/oauth2/authorize?flow={quote(flow_id)}"
+        try:
+            response.headers["Location"] = resume_url
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.error(f"{self._service_name}: cannot resume OAuth2: {err}")
+            return response
+        # The marker is single-use.
+        response.del_cookie(OAUTH2_RESUME_COOKIE)
+        self.logger.notice(f"OAuth2 AS: resuming authorize flow {flow_id}")
+        return response
+
+    async def _vault_upstream_token(self, request: web.Request) -> None:
+        """Store the upstream provider token in ``auth.user_identities``.
+
+        The AS-initiated login is the same kind of event as an explicit
+        identity link — the user has just authorised this deployment against
+        Google/Microsoft — so the credential is ciphered into the vault
+        through the same ``IdentityStore`` path.  Best-effort: a vault failure
+        must never break the login or the authorize resume.
+        """
+        try:
+            from navigator_session import get_session
+            from ..identity.store import IdentityStore
+            from ..identity.types import TokenResponse
+
+            session = await get_session(request, new=False)
+            if not session:
+                return
+            access_token = session.get("auth_token")
+            if not access_token:
+                return
+            user_id = session.get("user_id")
+            if user_id is None:
+                session_obj = session.get(AUTH_SESSION_OBJECT) or {}
+                user_id = session_obj.get("user_id")
+            if user_id is None:
+                return
+            token = TokenResponse(
+                access_token=access_token,
+                token_type=session.get("token_type") or self.scheme,
+                provider_user_id=str(session.get(self.userid_attribute) or ""),
+            )
+            store = IdentityStore(request.app["authdb"])
+            await store.save_linked_identity(
+                user_id, self._service_name, token, {}
+            )
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(
+                f"{self._service_name}: could not vault the upstream token: {err}"
+            )
 
     # ------------------------------------------------------------------
     # Identity-link flow: a logged-in user authorizes this backend's

@@ -83,6 +83,8 @@ class AuthHandler:
         app_name: str = "auth",
         secure_cookies: bool = True,
         enable_authdb: bool = True,
+        backends: Iterable[str] = None,
+        authz_backends: Iterable[str] = None,
         **kwargs,
     ) -> None:
         """AuthHandler.
@@ -97,12 +99,26 @@ class AuthHandler:
                 IdentityProvider — and therefore have no auth database.
                 Backends that do need ``app["authdb"]`` will fail at request
                 time, exactly as they do today when the pool is missing.
+            backends: explicit list of dotted paths to the authentication
+                backends to enable, overriding ``AUTHENTICATION_BACKENDS``.
+                Use it when the enabled backends are a property of the
+                application itself (the bundled examples do) and must not
+                depend on the ``settings.settings`` module that
+                ``navigator_auth.conf`` imports last.
+            authz_backends: explicit list of *authorization* backends,
+                overriding ``AUTHORIZATION_BACKENDS``. Pass an empty list to
+                require authentication for every request: an inherited
+                ``allow_hosts`` / ``allowed_ips`` backend authorizes requests
+                (skipping authentication entirely) by Host or client IP alone.
         """
         self.name: str = app_name
         self.backends: dict = {}
         self._session = None
         self.secure_cookies = secure_cookies
         self.enable_authdb = enable_authdb
+        self._backend_list: tuple = (
+            tuple(backends) if backends is not None else AUTHENTICATION_BACKENDS
+        )
         if "scheme" in kwargs:
             self.auth_scheme = kwargs["scheme"]
         else:
@@ -127,7 +143,9 @@ class AuthHandler:
         # get the authentication backends (all of the list)
         self.backends = self.get_backends(**args)
         self._middlewares = self.get_authorization_middlewares(AUTHORIZATION_MIDDLEWARES)
-        self._authz_backends: list = self.get_authorization_backends(AUTHORIZATION_BACKENDS)
+        self._authz_backends: list = self.get_authorization_backends(
+            AUTHORIZATION_BACKENDS if authz_backends is None else authz_backends
+        )
         # TODO: Session Support with parametrization (other backends):
         self._session = SessionHandler(storage="redis", use_cookies=self.secure_cookies)  # pylint: disable=E1123
         ### JSON encoder
@@ -209,7 +227,7 @@ class AuthHandler:
 
     def get_backends(self, **kwargs):
         backends = {}
-        for backend in AUTHENTICATION_BACKENDS:
+        for backend in self._backend_list:
             try:
                 parts = backend.split(".")
                 bkname = parts[-1]
@@ -765,6 +783,39 @@ class AuthHandler:
             obj = web.HTTPBadRequest(**args)
         return obj
 
+    def bearer_challenge(self, request: web.Request = None) -> dict:
+        """RFC 9728 §5.1 ``WWW-Authenticate`` challenge for bearer 401s.
+
+        FEAT-095 TASK-044.  Points the client at the protected-resource
+        metadata document, which is how Claude's connector infrastructure
+        discovers the authorization server after an unauthenticated call.
+
+        Returns an empty dict — never raises — when this is not a bearer
+        request or the issuer cannot be resolved: a discovery convenience must
+        never turn a 401 into a 500.  The header carries no information about
+        *why* the token was rejected.
+        """
+        if request is not None:
+            try:
+                from .backends.api import BEARER_CHALLENGE_KEY
+
+                if not request.get(BEARER_CHALLENGE_KEY):
+                    return {}
+            except Exception:  # pylint: disable=W0703
+                return {}
+        try:
+            from .backends.oauth2.backend import issuer_url
+            from .backends.oauth2.metadata import WELL_KNOWN_PRM_PATH
+
+            issuer = issuer_url(request)
+        except Exception:  # pylint: disable=W0703
+            return {}
+        return {
+            "WWW-Authenticate": (
+                f'Bearer resource_metadata="{issuer}{WELL_KNOWN_PRM_PATH}"'
+            )
+        }
+
     def ForbiddenAccess(self, reason: Union[str, dict], status: int = 403, **kwargs) -> web.HTTPError:
         return self.auth_error(reason=reason, **kwargs, status=status)
 
@@ -958,6 +1009,27 @@ class AuthHandler:
 
     @web.middleware
     async def auth_middleware(
+        self,
+        request: web.Request,
+        handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
+    ) -> web.StreamResponse:
+        """Basic Auth Middleware.
+
+        FEAT-095 TASK-044: every 401 raised out of the authentication path —
+        including the revoked-``jti`` rejection — is decorated with the RFC
+        9728 ``WWW-Authenticate: Bearer resource_metadata=...`` challenge when
+        the request presented a bearer token.  Doing it once here, at the
+        boundary, guarantees no 401 path is missed.
+        """
+        try:
+            return await self._auth_middleware(request, handler)
+        except web.HTTPUnauthorized as exc:
+            for header, value in self.bearer_challenge(request).items():
+                if header not in exc.headers:
+                    exc.headers[header] = value
+            raise
+
+    async def _auth_middleware(
         self,
         request: web.Request,
         handler: Callable[[web.Request], Awaitable[web.StreamResponse]],

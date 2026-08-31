@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>navigator-auth · Identity Vault example</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg: #f4f6fb;
+            --card: #ffffff;
+            --ink: #1f2430;
+            --muted: #6b7280;
+            --line: #e3e7ef;
+            --accent: #1a73e8;
+            --ok: #157347;
+            --err: #b02a37;
+            --warn: #b06000;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #14161c;
+                --card: #1d212b;
+                --ink: #e8eaf0;
+                --muted: #9aa2b1;
+                --line: #2c3140;
+            }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 2rem 1rem 4rem;
+            background: var(--bg);
+            color: var(--ink);
+            font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+
+        main { max-width: 880px; margin: 0 auto; }
+
+        h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+
+        .lede { color: var(--muted); margin: 0 0 2rem; }
+
+        section {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 1.25rem;
+        }
+
+        section[hidden] { display: none; }
+
+        h2 {
+            font-size: .8rem;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            color: var(--muted);
+            margin: 0 0 .75rem;
+        }
+
+        h3 { font-size: .95rem; margin: 1.2rem 0 .5rem; }
+
+        h3:first-of-type { margin-top: .2rem; }
+
+        .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+
+        button, .btn {
+            font: inherit;
+            padding: .5rem 1rem;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            background: var(--accent);
+            color: #fff;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        button.secondary, .btn.secondary {
+            background: transparent;
+            color: var(--accent);
+            border-color: var(--line);
+        }
+
+        button.danger { background: transparent; color: var(--err); border-color: var(--line); }
+
+        button:disabled { opacity: .45; cursor: not-allowed; }
+
+        input {
+            font: inherit;
+            padding: .5rem .7rem;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--bg);
+            color: var(--ink);
+            min-width: 12rem;
+        }
+
+        code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+
+        pre {
+            background: var(--bg);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: .8rem 1rem;
+            overflow-x: auto;
+            font-size: .82rem;
+            margin: .8rem 0 0;
+            max-height: 22rem;
+        }
+
+        .status { font-size: .85rem; color: var(--muted); }
+        .status.ok { color: var(--ok); }
+        .status.err { color: var(--err); }
+        .status.warn { color: var(--warn); }
+
+        table { width: 100%; border-collapse: collapse; font-size: .87rem; }
+
+        th, td { text-align: left; padding: .55rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+
+        th { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+
+        .badge {
+            display: inline-block;
+            border-radius: 10px;
+            padding: .1rem .55rem;
+            font-size: .72rem;
+            font-weight: 600;
+            border: 1px solid var(--line);
+        }
+
+        .badge.ok { color: var(--ok); }
+        .badge.err { color: var(--err); }
+        .badge.warn { color: var(--warn); }
+
+        .scope {
+            display: inline-block;
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            padding: 0 .35rem;
+            margin: 0 .2rem .2rem 0;
+            font-size: .72rem;
+            color: var(--muted);
+        }
+
+        dl.kv { display: grid; grid-template-columns: 11rem 1fr; gap: .25rem .8rem; margin: 0; font-size: .87rem; }
+        dl.kv dt { color: var(--muted); }
+        dl.kv dd { margin: 0; }
+
+        .note { font-size: .82rem; color: var(--muted); margin: .6rem 0 0; }
+    </style>
+</head>
+
+<body>
+    <main>
+        <h1>navigator-auth · Identity Vault</h1>
+        <p class="lede">
+            Sign in (Basic, this app's own OAuth2, or SSO), then link external
+            accounts so navigator-auth stores their credentials — ciphered — and
+            other systems can act on your behalf without ever seeing a token.
+        </p>
+
+        <!-- ── 1 · Sign in ────────────────────────────────────────────────── -->
+        <section id="login-section">
+            <h2>1 · Sign in — create a Navigator session</h2>
+            <p class="note" id="enabled-backends" style="margin-top:0"></p>
+
+            <h3>Basic — <code>POST /api/v1/login</code></h3>
+            <div class="row">
+                <input id="username" placeholder="username" autocomplete="username">
+                <input id="password" type="password" placeholder="password" autocomplete="current-password">
+                <button id="basic-login">Sign in</button>
+                <span id="login-status" class="status"></span>
+            </div>
+            <p class="note" id="demo-creds"></p>
+
+            <h3>navigator-auth OAuth2 — Authorization Code + PKCE</h3>
+            <p class="note" style="margin-top:0">
+                This same application is the Authorization Server. The flow goes
+                through <code>/oauth2/authorize</code> and
+                <code>/oauth2/token</code>; the access token it returns is bound to
+                the session it creates, so the vault endpoints below accept it too.
+            </p>
+            <div class="row">
+                <button id="oauth2-login" class="secondary">Sign in with navigator-auth OAuth2</button>
+            </div>
+
+            <h3>Single sign-on — external backends</h3>
+            <p class="note" style="margin-top:0">
+                <code>GET /api/v1/auth/{provider}/</code> — the provider
+                authenticates you and navigator-auth creates (or reuses) the
+                matching <code>auth.users</code> row.
+            </p>
+            <div class="row" id="sso-buttons"></div>
+        </section>
+
+        <!-- ── Session ───────────────────────────────────────────────────── -->
+        <section id="session-section" hidden>
+            <h2>Session — <code>GET /api/v1/me</code></h2>
+            <dl class="kv" id="session-view"></dl>
+            <div class="row" style="margin-top:1rem">
+                <button id="refresh-session" class="secondary">Reload</button>
+                <button id="logout" class="danger">Log out</button>
+                <span id="session-status" class="status"></span>
+            </div>
+        </section>
+
+        <!-- ── 2 · Link identities ───────────────────────────────────────── -->
+        <section id="link-section" hidden>
+            <h2>2 · Link an identity — <code>/api/v1/user/identities/link/{provider}</code></h2>
+            <p class="note" style="margin-top:0">
+                A <em>second</em> OAuth2 authorization, run while you are already
+                logged in. It does not touch your session: it captures an access +
+                refresh token (with the provider's <em>identity scopes</em>) and
+                stores it ciphered in <code>auth.user_identities</code>.
+            </p>
+            <div class="row" id="link-buttons"></div>
+            <p class="note" id="link-hint"></p>
+        </section>
+
+        <!-- ── 3 · Linked identities ─────────────────────────────────────── -->
+        <section id="identities-section" hidden>
+            <h2>3 · Linked identities — <code>GET /api/v1/user/identities</code></h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Provider</th>
+                        <th>Account</th>
+                        <th>Scopes</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="identities-body"></tbody>
+            </table>
+            <div class="row" style="margin-top:1rem">
+                <button id="reload-identities" class="secondary">Reload</button>
+                <a class="btn secondary" id="manage-link" href="#" target="_blank" rel="noopener">
+                    Open the management page ↗
+                </a>
+                <span id="identities-status" class="status"></span>
+            </div>
+            <p class="note">
+                Tokens are never listed here — the API returns them masked.
+                The management page (<code>/api/v1/user/identities/manage</code>)
+                is the same data rendered server-side by navigator-auth itself.
+            </p>
+        </section>
+
+        <!-- ── 4 · Use a credential ──────────────────────────────────────── -->
+        <section id="use-section" hidden>
+            <h2>4 · Use a linked credential</h2>
+            <p class="note" style="margin-top:0">
+                <code>GET /api/v1/demo/whoami/{provider}</code> is a plain
+                server-side handler: it asks the IdP for your stored credential
+                (refreshing it if it expired) and calls the provider's API with it —
+                no browser, no interactive flow. The credential endpoint below is
+                the HTTP equivalent for out-of-process consumers.
+            </p>
+            <div class="row" id="use-buttons"></div>
+            <pre id="output">(nothing called yet)</pre>
+        </section>
+    </main>
+
+    <script>
+        const STORE = 'nav_identity_example';
+        let cfg = null;
+
+        const $ = (id) => document.getElementById(id);
+        const load = () => { try { return JSON.parse(sessionStorage.getItem(STORE)) || {}; } catch { return {}; } };
+        const save = (patch) => sessionStorage.setItem(STORE, JSON.stringify({ ...load(), ...patch }));
+        const clearStore = () => sessionStorage.removeItem(STORE);
+
+        function setStatus(el, text, kind) {
+            el.textContent = text;
+            el.className = 'status' + (kind ? ' ' + kind : '');
+        }
+
+        function show(value) {
+            $('output').textContent = typeof value === 'string'
+                ? value : JSON.stringify(value, null, 2);
+        }
+
+        // ---------- requests ------------------------------------------------------
+        // Every call sends the session cookie; when a bearer token is around
+        // (Basic login, the OAuth2 flow, an SSO redirect) it is sent too, so the
+        // page works the same whichever way you signed in.
+        async function api(path, { method = 'GET', body, headers = {} } = {}) {
+            const { token } = load();
+            const opts = { method, credentials: 'include', headers: { ...headers } };
+            if (token) opts.headers.Authorization = `${token.type || 'Bearer'} ${token.value}`;
+            if (body !== undefined) {
+                opts.headers['Content-Type'] = 'application/json';
+                opts.body = JSON.stringify(body);
+            }
+            const res = await fetch(path, opts);
+            const text = await res.text();
+            let data;
+            try { data = JSON.parse(text); } catch { data = text; }
+            return { ok: res.ok, status: res.status, statusText: res.statusText, data };
+        }
+
+        // ---------- PKCE helpers (OAuth2 login) -----------------------------------
+        const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)))
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        const randomString = (size = 32) => b64url(crypto.getRandomValues(new Uint8Array(size)));
+
+        async function s256(verifier) {
+            const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+            return b64url(digest);
+        }
+
+        async function startOauth2Login() {
+            const verifier = randomString(32);
+            const state = randomString(12);
+            save({ pkce: { verifier, state } });
+            const params = new URLSearchParams({
+                response_type: 'code',
+                client_id: cfg.oauth2.client_id,
+                redirect_uri: cfg.oauth2.redirect_uri,
+                scope: cfg.oauth2.scope,
+                state,
+                code_challenge: await s256(verifier),
+                code_challenge_method: 'S256',
+            });
+            window.location.href = `${cfg.oauth2.authorization_endpoint}?${params}`;
+        }
+
+        async function exchangeCode(code, state) {
+            const { pkce } = load();
+            if (!pkce || pkce.state !== state) {
+                throw new Error('state mismatch — possible CSRF, aborting the exchange');
+            }
+            const res = await fetch(cfg.oauth2.token_endpoint, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    code,
+                    client_id: cfg.oauth2.client_id,
+                    redirect_uri: cfg.oauth2.redirect_uri,
+                    code_verifier: pkce.verifier,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error_description || data.error || res.status);
+            save({ token: { value: data.access_token, type: data.token_type || 'Bearer' } });
+        }
+
+        // ---------- login mechanisms ----------------------------------------------
+        async function basicLogin() {
+            setStatus($('login-status'), 'signing in…');
+            // X-Auth-Method targets one backend explicitly instead of letting
+            // AuthHandler try every enabled backend in turn. Each backend
+            // advertises the header to use in /api/v1/auth/methods.
+            const basic = cfg.backends.find(b => b.service === 'basic');
+            const res = await api(cfg.endpoints.basic_login, {
+                method: 'POST',
+                headers: basic ? basic.headers : { 'x-auth-method': 'BasicAuth' },
+                body: { username: $('username').value, password: $('password').value },
+            });
+            if (!res.ok) {
+                setStatus($('login-status'), `${res.status} ${res.statusText}`, 'err');
+                show(res.data);
+                return;
+            }
+            if (res.data.token) save({ token: { value: res.data.token, type: 'Bearer' } });
+            setStatus($('login-status'), 'signed in', 'ok');
+            await refreshAll();
+        }
+
+        async function logout() {
+            await api(cfg.endpoints.logout);
+            clearStore();
+            window.location.href = '/';
+        }
+
+        // ---------- rendering ------------------------------------------------------
+        function renderProviders() {
+            const sso = $('sso-buttons');
+            const link = $('link-buttons');
+            const use = $('use-buttons');
+            sso.innerHTML = '';
+            link.innerHTML = '';
+            use.innerHTML = '';
+            if (!cfg.providers.length) {
+                sso.innerHTML = '<span class="status warn">No external backend is '
+                    + 'configured — set AZURE_ADFS_CLIENT_ID, GITHUB_CLIENT_ID or '
+                    + 'ODOO_DOMAIN in env/dev/.env and restart.</span>';
+                link.innerHTML = sso.innerHTML;
+                return;
+            }
+            for (const p of cfg.providers) {
+                const ssoBtn = document.createElement('button');
+                ssoBtn.className = 'secondary';
+                ssoBtn.textContent = `Sign in with ${p.provider}`;
+                ssoBtn.title = p.description;
+                ssoBtn.onclick = () => { window.location.href = p.login_uri; };
+                sso.appendChild(ssoBtn);
+
+                const linkBtn = document.createElement('button');
+                linkBtn.textContent = `Link ${p.provider}`;
+                linkBtn.title = p.description;
+                linkBtn.disabled = !cfg.vault_ready;
+                linkBtn.onclick = () => {
+                    // come back here and highlight what was just linked
+                    const back = encodeURIComponent(`/?linked=${p.provider}`);
+                    window.location.href = `${p.link_uri}?redirect_uri=${back}`;
+                };
+                link.appendChild(linkBtn);
+
+                if (p.can_call_api) {
+                    const useBtn = document.createElement('button');
+                    useBtn.className = 'secondary';
+                    useBtn.textContent = `Call ${p.provider} API as me`;
+                    useBtn.onclick = async () => {
+                        const res = await api(`${cfg.endpoints.whoami}/${p.provider}`);
+                        show(res.data);
+                    };
+                    use.appendChild(useBtn);
+                }
+                const credBtn = document.createElement('button');
+                credBtn.className = 'secondary';
+                credBtn.textContent = `${p.provider} credential`;
+                credBtn.title = `GET /api/v1/user/identities/${p.provider}/credential`;
+                credBtn.onclick = async () => {
+                    const res = await api(`${cfg.endpoints.identities}/${p.provider}/credential`);
+                    if (res.ok && res.data.access_token) {
+                        // the endpoint returns the real token; don't paint it
+                        // across the screen in a demo.
+                        res.data.access_token = res.data.access_token.slice(0, 12) + '… (truncated by this page)';
+                        if (res.data.refresh_token) res.data.refresh_token = '(present, hidden)';
+                    }
+                    show(res.data);
+                };
+                use.appendChild(credBtn);
+            }
+            if (!cfg.vault_ready) {
+                $('link-hint').innerHTML = '<span class="status warn">VAULT_MASTER_KEY_v1 '
+                    + 'is not configured: the vault endpoints answer 501. The server '
+                    + 'printed a ready-to-paste key at startup.</span>';
+            }
+        }
+
+        function renderSession(me) {
+            $('session-view').innerHTML = Object.entries({
+                user_id: me.user_id,
+                username: me.username,
+                email: me.email,
+                display_name: me.display_name,
+                auth_method: me.auth_method,
+                session_id: me.session_id,
+            }).map(([k, v]) => `<dt>${k}</dt><dd>${v ?? '—'}</dd>`).join('');
+        }
+
+        function renderIdentities(identities) {
+            const body = $('identities-body');
+            if (!identities.length) {
+                body.innerHTML = '<tr><td colspan="5" class="status">'
+                    + 'Nothing linked yet — use the buttons above.</td></tr>';
+                return;
+            }
+            body.innerHTML = '';
+            for (const it of identities) {
+                const profile = it.profile || {};
+                const account = profile.email || profile.login || profile.name
+                    || it.provider_user_id || '—';
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${it.auth_provider}</strong></td>
+                    <td>${account}<div class="status">${it.provider_user_id || ''}</div></td>
+                    <td>${(it.scopes || []).map(s => `<span class="scope">${s}</span>`).join('') || '—'}</td>
+                    <td>
+                        <span class="badge ${it.expired ? 'err' : 'ok'}">${it.expired ? 'expired' : 'active'}</span>
+                        ${it.has_refresh_token ? '' : '<span class="badge warn">no refresh</span>'}
+                        <div class="status">${it.expires_at || 'no expiry'}</div>
+                    </td>
+                    <td class="row"></td>`;
+                const actions = tr.querySelector('td.row');
+
+                const renew = document.createElement('button');
+                renew.className = 'secondary';
+                renew.textContent = 'Renew';
+                renew.disabled = !it.has_refresh_token;
+                renew.title = it.has_refresh_token
+                    ? 'PUT — exchange the stored refresh token for a new credential'
+                    : 'the provider issued no refresh token: re-link instead (the API answers 409)';
+                renew.onclick = async () => {
+                    const res = await api(`${cfg.endpoints.identities}/${it.identity_id}`, { method: 'PUT' });
+                    setStatus($('identities-status'), `${res.status} ${res.statusText}`, res.ok ? 'ok' : 'err');
+                    show(res.data);
+                    loadIdentities();
+                };
+
+                const del = document.createElement('button');
+                del.className = 'danger';
+                del.textContent = 'Delete';
+                del.onclick = async () => {
+                    const res = await api(`${cfg.endpoints.identities}/${it.identity_id}`, { method: 'DELETE' });
+                    setStatus($('identities-status'), `${res.status} ${res.statusText}`, res.ok ? 'ok' : 'err');
+                    show(res.data);
+                    loadIdentities();
+                };
+
+                actions.append(renew, del);
+                body.appendChild(tr);
+            }
+        }
+
+        // ---------- data loading ---------------------------------------------------
+        async function loadIdentities() {
+            const res = await api(cfg.endpoints.identities);
+            if (!res.ok) {
+                const hint = res.status === 501
+                    ? ' — vault master keys missing' : '';
+                setStatus($('identities-status'), `${res.status} ${res.statusText}${hint}`, 'err');
+                renderIdentities([]);
+                return;
+            }
+            setStatus($('identities-status'), '');
+            renderIdentities(res.data.identities || []);
+        }
+
+        async function refreshAll() {
+            const res = await api(cfg.endpoints.me);
+            // 200 alone is not enough: an anonymous backend (NoAuth) answers
+            // the endpoint with an empty identity. Without a user_id there is
+            // no session to show, so keep the login form on screen.
+            const authenticated = res.ok && !!(res.data && res.data.user_id);
+            $('login-section').hidden = authenticated;
+            $('session-section').hidden = !authenticated;
+            $('link-section').hidden = !authenticated;
+            $('identities-section').hidden = !authenticated;
+            $('use-section').hidden = !authenticated;
+            if (!authenticated) {
+                clearStore();
+                return;
+            }
+            renderSession(res.data);
+            await loadIdentities();
+        }
+
+        // ---------- boot ------------------------------------------------------------
+        (async function init() {
+            cfg = await (await fetch('/example-config')).json();
+            $('manage-link').href = cfg.endpoints.manage_page;
+            $('username').value = cfg.demo_user.username;
+            $('password').value = cfg.demo_user.password;
+            $('demo-creds').textContent =
+                `Demo account seeded by the example: ${cfg.demo_user.username} / ${cfg.demo_user.password}`;
+            renderProviders();
+            $('enabled-backends').textContent = 'Enabled backends: '
+                + cfg.backends.map(b => b.backend).join(', ')
+                + ' — the same list /api/v1/auth/methods returns.';
+
+            $('basic-login').onclick = () => basicLogin();
+            $('oauth2-login').onclick = () => startOauth2Login();
+            $('refresh-session').onclick = () => refreshAll();
+            $('reload-identities').onclick = () => loadIdentities();
+            $('logout').onclick = () => logout();
+            $('password').onkeydown = (e) => { if (e.key === 'Enter') basicLogin(); };
+
+            const qs = new URLSearchParams(window.location.search);
+
+            // (a) back from the OAuth2 authorization code flow
+            if (qs.get('code')) {
+                setStatus($('login-status'), 'exchanging the authorization code…');
+                try {
+                    await exchangeCode(qs.get('code'), qs.get('state'));
+                    setStatus($('login-status'), 'signed in with OAuth2', 'ok');
+                } catch (err) {
+                    setStatus($('login-status'), err.message, 'err');
+                }
+                history.replaceState({}, '', '/');
+            }
+            // (b) back from an external (SSO) login: token in the query string
+            else if (qs.get('token')) {
+                save({ token: { value: qs.get('token'), type: qs.get('type') || 'Bearer' } });
+                history.replaceState({}, '', '/');
+            }
+            // (c) back from an identity-link flow
+            else if (qs.get('linked')) {
+                setStatus($('identities-status'), `${qs.get('linked')} linked`, 'ok');
+                history.replaceState({}, '', '/');
+            }
+            // (d) something went wrong upstream
+            else if (qs.get('error') || qs.get('login_error')) {
+                setStatus($('login-status'),
+                    qs.get('message') || qs.get('error') || 'login failed', 'err');
+                history.replaceState({}, '', '/');
+            }
+
+            await refreshAll();
+        })();
+    </script>
+</body>
+
+</html>
