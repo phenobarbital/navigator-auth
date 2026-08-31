@@ -10,6 +10,7 @@ Covers:
     path, unauthenticated (exclude list), JSON, and served from cache.
 """
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -343,3 +344,61 @@ class TestMetadataHandlers:
         assert provider._jwks_enabled() is False
         monkeypatch.setattr(oauth2_backend, "OAUTH_JWT_KEYS", [{"kid": "k1"}])
         assert provider._jwks_enabled() is True
+
+
+# ---------------------------------------------------------------------------
+# Cache bounding (DoS regression)
+# ---------------------------------------------------------------------------
+
+class TestMetadataCacheIsBounded:
+    """Regression: the discovery memo grew without limit.
+
+    When ``AUTH_ISSUER_URL`` is unset — the default — the issuer is derived
+    from the request's ``Host`` / ``X-Forwarded-Host``.  Those are
+    attacker-controlled on an unauthenticated endpoint, so an unbounded dict
+    keyed by issuer let a flood of distinct Host values exhaust memory.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cache_does_not_grow_without_bound(self, monkeypatch):
+        import navigator_auth.backends.oauth2.backend as backend_module
+        from navigator_auth.backends.oauth2.backend import (
+            METADATA_CACHE_MAX_ENTRIES,
+            Oauth2Provider,
+        )
+
+        monkeypatch.setattr(backend_module, "AUTH_ISSUER_URL", "")
+        provider = Oauth2Provider(user_model=MagicMock(), identity=MagicMock())
+
+        flood = METADATA_CACHE_MAX_ENTRIES * 20
+        for i in range(flood):
+            request = MagicMock()
+            request.headers = {
+                "Host": f"h{i}.attacker.example",
+                "X-Forwarded-Proto": "https",
+            }
+            request.scheme = "https"
+            await provider.as_metadata(request)
+
+        assert len(provider._metadata_cache) <= METADATA_CACHE_MAX_ENTRIES
+
+    @pytest.mark.asyncio
+    async def test_configured_issuer_uses_a_single_slot(self, monkeypatch):
+        """With AUTH_ISSUER_URL set, Host is ignored and one entry suffices."""
+        import navigator_auth.backends.oauth2.backend as backend_module
+        from navigator_auth.backends.oauth2.backend import Oauth2Provider
+
+        monkeypatch.setattr(
+            backend_module, "AUTH_ISSUER_URL", "https://auth.example.com"
+        )
+        provider = Oauth2Provider(user_model=MagicMock(), identity=MagicMock())
+
+        for i in range(100):
+            request = MagicMock()
+            request.headers = {"Host": f"h{i}.attacker.example"}
+            request.scheme = "https"
+            document = json.loads((await provider.as_metadata(request)).body)
+            # The attacker's Host never reaches the served document.
+            assert document["issuer"] == "https://auth.example.com"
+
+        assert len(provider._metadata_cache) == 1

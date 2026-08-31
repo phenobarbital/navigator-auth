@@ -141,6 +141,17 @@ from .dcr import (
 )
 
 
+#: Upper bound on the discovery-document memo.  The cache key is the issuer,
+#: which is derived from request headers when AUTH_ISSUER_URL is unset, so it
+#: must never be allowed to grow without limit (FEAT-095 review finding).
+METADATA_CACHE_MAX_ENTRIES: int = 32
+
+#: Internal payload key carrying the percent-decoded variant of a
+#: client_secret presented via HTTP Basic (FEAT-095 review finding).  Never
+#: read as a credential itself — only `_secret_matches` consults it.
+BASIC_SECRET_ALT_KEY: str = "_basic_client_secret_decoded"
+
+
 def validate_resource_uri(resource: str) -> bool:
     """RFC 8707 §2: a resource indicator is an absolute URI with no fragment.
 
@@ -681,10 +692,22 @@ class Oauth2Provider(BaseAuthBackend):
         return bool(OAUTH_JWT_KEYS)
 
     def _build_metadata_documents(self, issuer: str) -> dict:
-        """Build (and memoise) both discovery documents for one issuer."""
+        """Build (and memoise) both discovery documents for one issuer.
+
+        The cache is **bounded**.  When ``AUTH_ISSUER_URL`` is unset the issuer
+        is derived from the request's ``Host`` / ``X-Forwarded-Host``, so the
+        key is attacker-controlled on an unauthenticated endpoint; an unbounded
+        dict would grow without limit under a flood of distinct Host values.
+        Deployments that set ``AUTH_ISSUER_URL`` (recommended) only ever
+        occupy a single slot.
+        """
         cached = self._metadata_cache.get(issuer)
         if cached is not None:
             return cached
+        if len(self._metadata_cache) >= METADATA_CACHE_MAX_ENTRIES:
+            # Simple FIFO eviction: this is a memo of cheap pure builders, so
+            # the only property that matters is that it cannot grow unbounded.
+            self._metadata_cache.pop(next(iter(self._metadata_cache)), None)
         documents = {
             "as": build_as_metadata(
                 issuer,
@@ -758,12 +781,41 @@ class Oauth2Provider(BaseAuthBackend):
             # client check will reject the request on its own terms.
             return payload
         merged = dict(payload)
-        # RFC 6749 §2.3.1 requires form-urlencoding of the two components.
+        # RFC 6749 §2.3.1 says the two components are form-urlencoded before
+        # base64, but many real clients send them raw — and a raw secret
+        # containing '+' or '%' would be corrupted by decoding it ('ab+cd'
+        # would become 'ab cd').  The two cases are indistinguishable, so the
+        # raw value is used as-is (this is also what /oauth2/introspect did
+        # before FEAT-095) and the decoded form is carried alongside it for
+        # `_secret_matches` to accept as well.
         if not merged.get("client_id"):
-            merged["client_id"] = unquote_plus(client_id)
+            merged["client_id"] = client_id
         if not merged.get("client_secret"):
-            merged["client_secret"] = unquote_plus(client_secret)
+            merged["client_secret"] = client_secret
+            decoded = unquote_plus(client_secret)
+            if decoded != client_secret:
+                merged[BASIC_SECRET_ALT_KEY] = decoded
         return merged
+
+    @staticmethod
+    def _secret_matches(stored: str, payload: dict) -> bool:
+        """Constant-time client_secret check accepting both Basic encodings.
+
+        Compares against the value as presented and, when the credentials
+        arrived via HTTP Basic and were percent-encoded, against the decoded
+        form too.  Every candidate is always compared so the work done does
+        not depend on which one matches.
+        """
+        stored = stored or ""
+        candidates = [payload.get("client_secret", "") or ""]
+        alternate = payload.get(BASIC_SECRET_ALT_KEY)
+        if alternate:
+            candidates.append(alternate)
+        matched = False
+        for candidate in candidates:
+            if hmac.compare_digest(stored, candidate):
+                matched = True
+        return matched
 
     def _resource_audience(self, marker: str, resource: Optional[str]):
         """Build the ``aud`` claim for a token.
@@ -1474,6 +1526,17 @@ class Oauth2Provider(BaseAuthBackend):
                 if not client:
                     return self._error_response("invalid_client", "Unknown client.", status=400)
 
+                # FEAT-095 TASK-042: ACCESS GATE — re-checked here, not only in
+                # `authorize`.  This endpoint mints a code on its own, so a
+                # non-activated user could otherwise POST straight to
+                # /oauth2/consent and skip the gate entirely.  Every path that
+                # reaches _issue_code must be gated (cf. the device flow).
+                gate_denied = await self._enforce_access_gate(
+                    request, client, user_obj.user_id, redirect_uri, state
+                )
+                if gate_denied is not None:
+                    return gate_denied
+
                 # TASK-027: upsert grant record.
                 if self.grant_storage:
                     grant = OauthGrant(
@@ -1613,7 +1676,12 @@ class Oauth2Provider(BaseAuthBackend):
         invert that — accept form, refuse JSON with **415**.
         """
         if request.method == "POST":
-            content_type = (request.content_type or "").lower()
+            # Read the RAW header, not request.content_type: aiohttp defaults
+            # that property to "application/octet-stream" when the header is
+            # absent, which would 415 every caller that simply omits it (and
+            # which pre-FEAT-095 callers were allowed to do).
+            raw_content_type = request.headers.get("Content-Type") or ""
+            content_type = raw_content_type.split(";")[0].strip().lower()
             if content_type and content_type != "application/x-www-form-urlencoded":
                 return JSONResponse(
                     {
@@ -1702,9 +1770,8 @@ class Oauth2Provider(BaseAuthBackend):
 
         # B2: for confidential clients, verify client_secret.
         if client.client_type != "public":
-            client_secret = payload.get("client_secret", "")
             stored_secret = client.client_secret or ""
-            if not hmac.compare_digest(stored_secret, client_secret):
+            if not self._secret_matches(stored_secret, payload):
                 return self._error_response("invalid_client", "Invalid client_secret.")
 
         # TASK-025 PKCE: verify if a challenge was stored.
@@ -1828,14 +1895,13 @@ class Oauth2Provider(BaseAuthBackend):
         TASK-029: audience = 'app'.
         """
         client_id = payload.get("client_id")
-        client_secret = payload.get("client_secret", "")
 
         client = await self.client_storage.get_client(client_id, request=request)
         if not client:
             return self._error_response("invalid_client", "Unknown client.")
 
         stored_secret = client.client_secret or ""
-        if not hmac.compare_digest(stored_secret, client_secret):
+        if not self._secret_matches(stored_secret, payload):
             return self._error_response("invalid_client", "Invalid client_secret.")
 
         scope = payload.get("scope", " ".join(
@@ -1896,7 +1962,6 @@ class Oauth2Provider(BaseAuthBackend):
         """
         refresh_token = payload.get("refresh_token")
         client_id = payload.get("client_id")
-        client_secret = payload.get("client_secret", "")
 
         if not refresh_token:
             return self._error_response("invalid_request", "Missing refresh_token.")
@@ -1908,7 +1973,7 @@ class Oauth2Provider(BaseAuthBackend):
         # B2: confidential client must verify secret.
         if client.client_type != "public":
             stored_secret = client.client_secret or ""
-            if not hmac.compare_digest(stored_secret, client_secret):
+            if not self._secret_matches(stored_secret, payload):
                 return self._error_response("invalid_client", "Invalid client_secret.")
 
         rt = await self.refresh_token_storage.get_token(refresh_token)
@@ -2295,7 +2360,6 @@ class Oauth2Provider(BaseAuthBackend):
         # helper (which also form-urldecodes per RFC 6749 §2.3.1).
         payload = self._merge_basic_auth(request, payload)
         caller_client_id = payload.get("client_id", "")
-        caller_secret = payload.get("client_secret", "")
 
         caller = await self.client_storage.get_client(caller_client_id, request=request)
         if not caller or caller.client_type == "public":
@@ -2306,7 +2370,7 @@ class Oauth2Provider(BaseAuthBackend):
                 text='{"error":"invalid_client","error_description":"Client authentication required."}',
             )
         stored_secret = caller.client_secret or ""
-        if not hmac.compare_digest(stored_secret, caller_secret):
+        if not self._secret_matches(stored_secret, payload):
             return web.Response(
                 status=401,
                 content_type="application/json",

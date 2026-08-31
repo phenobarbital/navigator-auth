@@ -297,6 +297,146 @@ class TestGateEnforcement:
 
 
 # ---------------------------------------------------------------------------
+# Every issuance path must be gated
+# ---------------------------------------------------------------------------
+
+class TestConsentEndpointIsGated:
+    """Regression: /oauth2/consent minted codes without consulting the gate.
+
+    The gate was enforced in `authorize` and in device verification, but the
+    consent POST handler calls `_issue_code` on its own.  An authenticated but
+    non-activated user could therefore skip `/oauth2/authorize` entirely,
+    POST straight to `/oauth2/consent`, and receive a valid authorization
+    code — defeating the gate completely.  With the default
+    AUTH_MISSING_ACCOUNT="create", any upstream login self-provisions an
+    account, so this was reachable by anyone.
+    """
+
+    @staticmethod
+    def _consent_provider(provider, gated=True):
+        from navigator_auth.backends.oauth2.pkce import generate_challenge
+
+        user = MagicMock()
+        user.user_id = USER_ID
+        provider.check_session = AsyncMock(return_value={"user_id": USER_ID})
+        provider._decode_session_user = MagicMock(return_value=user)
+        provider.get_payload = AsyncMock(
+            return_value={
+                "action": "approve",
+                "client_id": CLIENT_UID,
+                "redirect_uri": REDIRECT_URI,
+                "scope": "default",
+                "state": STATE,
+                "code_challenge": generate_challenge("v" * 50),
+                "code_challenge_method": "S256",
+            }
+        )
+        request = MagicMock()
+        request.method = "POST"
+        return request
+
+    @pytest.fixture
+    def consent_provider(self, provider):
+        """Provider with the storages `consent` touches."""
+        from navigator_auth.backends.oauth2.client_backend import (
+            MemoryClientStorage,
+        )
+
+        class _Codes:
+            def __init__(self):
+                self.codes = {}
+
+            async def save_code(self, code_obj):
+                self.codes[code_obj.code] = code_obj
+                return True
+
+        class _Grants:
+            def __init__(self):
+                self.grants = {}
+
+            async def save_grant(self, grant):
+                self.grants[(grant.user_id, grant.client_id)] = grant
+                return True
+
+            async def get_grant(self, user_id, client_id):
+                return self.grants.get((user_id, client_id))
+
+        provider.client_storage = MemoryClientStorage()
+        provider.code_storage = _Codes()
+        provider.grant_storage = _Grants()
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_consent_denies_a_non_activated_user(self, consent_provider):
+        await consent_provider.client_storage.save_client(_client(gated=True))
+        request = self._consent_provider(consent_provider)
+
+        response = await consent_provider.consent(request)
+
+        assert consent_provider.code_storage.codes == {}, (
+            "the gate was bypassed: /oauth2/consent issued a code to a "
+            "non-activated user"
+        )
+        assert response.status == 302
+        location = response.headers["Location"]
+        assert "error=access_denied" in location
+        assert f"state={STATE}" in location
+
+    @pytest.mark.asyncio
+    async def test_consent_queues_the_denied_attempt(self, consent_provider):
+        await consent_provider.client_storage.save_client(_client(gated=True))
+        await consent_provider.consent(self._consent_provider(consent_provider))
+
+        pending = await consent_provider.client_access_storage.list_pending(
+            CLIENT_UID
+        )
+        assert [p.user_id for p in pending] == [USER_ID]
+
+    @pytest.mark.asyncio
+    async def test_consent_allows_an_activated_user(self, consent_provider):
+        await consent_provider.client_storage.save_client(_client(gated=True))
+        await consent_provider.client_access_storage.grant(USER_ID, CLIENT_UID, 1)
+
+        # A successful issuance redirects by raising HTTPFound.
+        with pytest.raises(web.HTTPFound) as issued:
+            await consent_provider.consent(
+                self._consent_provider(consent_provider)
+            )
+
+        assert len(consent_provider.code_storage.codes) == 1
+        assert "code=" in issued.value.location
+
+    @pytest.mark.asyncio
+    async def test_consent_unaffected_when_the_gate_is_off(
+        self, consent_provider, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "navigator_auth.backends.oauth2.backend.OAUTH_ACCESS_GATE_ENABLED",
+            False,
+        )
+        await consent_provider.client_storage.save_client(_client(gated=False))
+
+        with pytest.raises(web.HTTPFound):
+            await consent_provider.consent(
+                self._consent_provider(consent_provider)
+            )
+
+        assert len(consent_provider.code_storage.codes) == 1
+
+    def test_every_issue_code_call_site_is_gated(self):
+        """Structural guard: no new ungated path to _issue_code creeps in."""
+        import inspect
+        from navigator_auth.backends.oauth2.backend import Oauth2Provider
+
+        for method in (Oauth2Provider.authorize, Oauth2Provider.consent):
+            source = inspect.getsource(method)
+            if "_issue_code" in source:
+                assert "_enforce_access_gate" in source, (
+                    f"{method.__name__} issues codes without a gate check"
+                )
+
+
+# ---------------------------------------------------------------------------
 # Device-flow parity
 # ---------------------------------------------------------------------------
 

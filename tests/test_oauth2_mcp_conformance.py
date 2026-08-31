@@ -201,7 +201,7 @@ class _Request:
         self.query = query or {}
         self._form = form or {}
         self._json = json_body
-        self.headers = headers or {"Host": "auth.example.com"}
+        self.headers = dict(headers or {"Host": "auth.example.com"})
         self.app = app if app is not None else {}
         self.remote = "203.0.113.10"
         self.scheme = "https"
@@ -214,7 +214,12 @@ class _Request:
         elif form:
             self.content_type = "application/x-www-form-urlencoded"
         else:
-            self.content_type = ""
+            # Match aiohttp: the parsed property defaults to octet-stream
+            # when no Content-Type header was sent.
+            self.content_type = "application/octet-stream"
+        # The guard reads the RAW header, so the double must carry it there.
+        if self.content_type and self.content_type != "application/octet-stream":
+            self.headers.setdefault("Content-Type", self.content_type)
         self._state = {}
 
     async def json(self):

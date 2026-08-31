@@ -26,11 +26,28 @@ def provider():
 
 
 def _post_request(content_type="application/x-www-form-urlencoded", headers=None):
+    """A POST double that carries Content-Type in the HEADERS.
+
+    The guard reads the raw header (aiohttp defaults the parsed
+    ``content_type`` property to application/octet-stream when the header is
+    absent), so a double that only sets the property would not exercise it.
+    """
     request = MagicMock()
     request.method = "POST"
+    merged = dict(headers or {})
+    if content_type:
+        merged.setdefault("Content-Type", content_type)
     request.content_type = content_type
-    request.headers = headers or {}
+    request.headers = merged
     return request
+
+
+def _real_post(content_type=None):
+    """A genuine aiohttp request — the content-type guard is tested on these."""
+    from aiohttp.test_utils import make_mocked_request
+
+    headers = {"Content-Type": content_type} if content_type else {}
+    return make_mocked_request("POST", "/oauth2/token", headers=headers)
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +59,7 @@ class TestTokenEndpointContentType:
     async def test_token_endpoint_415_json(self, provider):
         """JSON-only servers are what make Claude fail; we refuse JSON."""
         response = await provider.token_request(
-            _post_request(content_type="application/json")
+            _real_post("application/json")
         )
 
         assert response.status == 415
@@ -54,7 +71,9 @@ class TestTokenEndpointContentType:
     async def test_form_urlencoded_is_accepted(self, provider):
         """The normal path is reached for form bodies."""
         provider.get_payload = AsyncMock(return_value={"grant_type": "nonsense"})
-        response = await provider.token_request(_post_request())
+        response = await provider.token_request(
+            _real_post("application/x-www-form-urlencoded")
+        )
 
         # Not a 415 — it got through to grant-type dispatch.
         assert response.status == 400
@@ -63,23 +82,41 @@ class TestTokenEndpointContentType:
     @pytest.mark.asyncio
     async def test_multipart_is_rejected(self, provider):
         response = await provider.token_request(
-            _post_request(content_type="multipart/form-data")
+            _real_post("multipart/form-data; boundary=x")
         )
         assert response.status == 415
+
+    @pytest.mark.asyncio
+    async def test_form_urlencoded_with_charset_is_accepted(self, provider):
+        """`; charset=UTF-8` is a legitimate form Content-Type."""
+        provider.get_payload = AsyncMock(return_value={"grant_type": "nonsense"})
+        response = await provider.token_request(
+            _real_post("application/x-www-form-urlencoded; charset=UTF-8")
+        )
+        assert response.status != 415
 
     @pytest.mark.asyncio
     async def test_content_type_is_case_insensitive(self, provider):
         provider.get_payload = AsyncMock(return_value={"grant_type": "nonsense"})
         response = await provider.token_request(
-            _post_request(content_type="APPLICATION/X-WWW-FORM-URLENCODED")
+            _real_post("APPLICATION/X-WWW-FORM-URLENCODED")
         )
         assert response.status != 415
 
     @pytest.mark.asyncio
     async def test_missing_content_type_is_tolerated(self, provider):
-        """An absent Content-Type must not 415 — keeps FEAT-093 tests green."""
+        """An absent Content-Type must not 415.
+
+        Regression: aiohttp reports ``application/octet-stream`` for the
+        parsed property when the header is absent, so a guard reading that
+        property rejected every caller that simply omitted it.  This test
+        runs against a REAL aiohttp request — a hand-rolled double hid the
+        bug by reporting an empty string.
+        """
         provider.get_payload = AsyncMock(return_value={"grant_type": "nonsense"})
-        response = await provider.token_request(_post_request(content_type=""))
+        request = _real_post()
+        assert request.content_type == "application/octet-stream"
+        response = await provider.token_request(request)
         assert response.status != 415
 
 
@@ -111,12 +148,52 @@ class TestClientSecretBasic:
         assert merged["client_id"] == "from_body"
         assert merged["client_secret"] == "body_secret"
 
-    def test_basic_credentials_are_url_decoded(self, provider):
-        """RFC 6749 §2.3.1 form-urlencodes both components."""
-        request = _post_request(headers=_basic("cli%40app", "p%40ss+word"))
-        merged = provider._merge_basic_auth(request, {})
-        assert merged["client_id"] == "cli@app"
-        assert merged["client_secret"] == "p@ss word"
+    def test_basic_credentials_are_not_corrupted(self, provider):
+        """A raw secret containing '+' or '%' must survive verbatim.
+
+        Regression: RFC 6749 §2.3.1 says the components are form-urlencoded
+        before base64, but most clients send them raw.  Blindly decoding
+        turned 'ab+cd' into 'ab cd' and 'pa%73s' into 'pass', silently
+        breaking confidential clients (and changing what /oauth2/introspect
+        had always done).
+        """
+        for secret in ("ab+cd", "pa%73s", "p@ss word", "plain-token_urlsafe"):
+            merged = provider._merge_basic_auth(
+                _post_request(headers=_basic("cli", secret)), {}
+            )
+            assert merged["client_secret"] == secret
+        merged = provider._merge_basic_auth(
+            _post_request(headers=_basic("cli%40app", "x")), {}
+        )
+        assert merged["client_id"] == "cli%40app"
+
+    @pytest.mark.parametrize(
+        "stored,sent",
+        [
+            ("ab+cd", "ab+cd"),        # raw client, secret contains '+'
+            ("ab cd", "ab+cd"),        # RFC-conformant client, encoded
+            ("pa%73s", "pa%73s"),      # raw client, secret contains '%'
+            ("pass", "pa%73s"),        # RFC-conformant client, encoded
+            ("plain", "plain"),        # the ordinary case
+        ],
+    )
+    def test_secret_matches_accepts_both_basic_encodings(
+        self, provider, stored, sent
+    ):
+        """Raw and percent-encoded Basic credentials are indistinguishable."""
+        merged = provider._merge_basic_auth(
+            _post_request(headers=_basic("cli", sent)), {}
+        )
+        assert provider._secret_matches(stored, merged) is True
+
+    def test_secret_matches_rejects_a_wrong_secret(self, provider):
+        merged = provider._merge_basic_auth(
+            _post_request(headers=_basic("cli", "wrong")), {}
+        )
+        assert provider._secret_matches("correct", merged) is False
+
+    def test_secret_matches_rejects_empty_against_a_real_secret(self, provider):
+        assert provider._secret_matches("correct", {}) is False
 
     def test_secret_containing_colon_is_preserved(self, provider):
         request = _post_request(headers=_basic("cli", "a:b:c"))
