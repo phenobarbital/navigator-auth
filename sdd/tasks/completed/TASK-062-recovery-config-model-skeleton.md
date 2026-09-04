@@ -198,10 +198,32 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (session_016Z3wYUV42WJDq92pifU1Fa)
+**Date**: 2026-09-04
+**Notes**: Added the eleven AUTH_RECOVERY_*/FORGOT_PASSWORD_CALLBACK keys to
+`conf.py` right after `TOKEN_EXCHANGE_PROVIDERS`. `AUTH_RECOVERY_SECRET`
+falls back to `SECRET_KEY` and is always coerced to `bytes`.
+`FORGOT_PASSWORD_CALLBACK` emits a `DeprecationWarning` and feeds
+`AUTH_RECOVERY_CALLBACK` when the latter is unset. Created
+`navigator_auth/handlers/recovery/{__init__,types}.py` with the four
+frozen dataclasses; `NotificationPayload` has a custom `__repr__` that
+redacts `token`/`url`. Fixed `User.password` `max=16` -> `max=255` in
+`models.py`. All 5 tests in `tests/test_password_recovery.py` pass.
+`tests/test_basic_auth.py`/`tests/test_login.py` show the same
+pre-existing connection-refused failures (no live server/DB in this
+sandbox) both before and after this change — confirmed identical on
+unmodified `dev`, so no regression was introduced.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: The task anticipated that the new
+`handlers/recovery/` package would collide with the existing
+`handlers/recovery.py` module, and explicitly authorized renaming the
+legacy module to `recovery_legacy.py` if that blocked implementation.
+It did block implementation (Python's package-over-module import
+precedence makes the new package shadow `recovery.py`, breaking
+`handlers/__init__.py`'s `from .recovery import ForgotPasswordHandler,
+ResetPasswordHandler`). Renamed `navigator_auth/handlers/recovery.py`
+-> `navigator_auth/handlers/recovery_legacy.py` and updated the one
+import line in `navigator_auth/handlers/__init__.py` accordingly. Both
+files are outside the task's Files table but the rename path was
+explicitly sanctioned by the task text; TASK-067 will delete
+`recovery_legacy.py` once the new handler replaces it.

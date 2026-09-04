@@ -1190,7 +1190,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "high",
@@ -1198,7 +1198,8 @@
     "depends_on": [],
     "parallel": false,
     "parallelism_notes": "Foundation: every other FEAT-098 task imports the AUTH_RECOVERY_* keys and types.py. Front-loads ALL conf.py edits into one hunk, which is what makes 063/064/065/066 safe to parallelise. Also carries the standalone User.password max=16 -> 255 fix. Must run first.",
-    "file": "sdd/tasks/active/TASK-062-recovery-config-model-skeleton.md"
+    "file": "sdd/tasks/completed/TASK-062-recovery-config-model-skeleton.md",
+    "completed_at": "2026-09-04T21:49:04Z"
   },
   {
     "id": "TASK-063",
