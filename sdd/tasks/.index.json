@@ -1039,7 +1039,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "high",
@@ -1047,7 +1047,8 @@
     "depends_on": [],
     "parallel": false,
     "parallelism_notes": "Foundation: every other FEAT-097 task imports pysaml2 and the new conf keys. Must run first; sequential.",
-    "file": "sdd/tasks/active/TASK-054-saml-deps-config-foundation.md"
+    "file": "sdd/tasks/completed/TASK-054-saml-deps-config-foundation.md",
+    "completed_at": "2026-09-04T22:02:33.840967Z"
   },
   {
     "id": "TASK-055",
