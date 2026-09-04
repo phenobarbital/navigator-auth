@@ -574,23 +574,76 @@ class Oauth2Provider(BaseAuthBackend):
         return None
 
     def _decode_session_user(self, encoded_user) -> Optional[OauthUser]:
-        """Decode the jsonpickle-encoded user from session and extract user_id."""
+        """Rebuild the resource owner from the session user blob.
+
+        The blob is treated as **untrusted data**, never as a pickle. It is
+        parsed with :func:`json.loads` and the resource owner is rebuilt
+        field-by-field; it is deliberately *not* handed to
+        ``jsonpickle.decode``, which reconstructs whatever class the document
+        names and honours ``py/reduce`` — turning any tampered or
+        attacker-planted session into arbitrary code execution. (jsonpickle's
+        ``safe=True`` does **not** close that hole: it still executes
+        ``py/reduce`` payloads.)
+
+        Blobs written by :meth:`_create_user_session` carry jsonpickle's
+        ``py/object``/``__dict__`` envelope; the fields are read straight out
+        of it without importing or instantiating anything it names.
+
+        Returns:
+            The resource owner as an :class:`OauthUser`, or ``None`` when the
+            blob is unparseable or carries no usable ``user_id``.
+        """
+        if encoded_user is None:
+            return None
+        payload = encoded_user
+        if isinstance(payload, (bytes, bytearray)):
+            try:
+                payload = payload.decode("utf-8")
+            except UnicodeDecodeError as e:
+                self.logger.warning(f"Could not decode session user: {e}")
+                return None
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (ValueError, TypeError) as e:
+                self.logger.warning(f"Could not decode session user: {e}")
+                return None
+        if not isinstance(payload, dict):
+            self.logger.warning("Session user is not a JSON object; ignoring.")
+            return None
+        # jsonpickle envelope: the real attributes live under "__dict__",
+        # alongside a "py/object" class name that is read as text and ignored.
+        fields = payload.get("__dict__", payload)
+        if not isinstance(fields, dict):
+            self.logger.warning("Session user has no readable attributes.")
+            return None
+
         try:
-            user_obj = jsonpickle.decode(encoded_user)
-            if hasattr(user_obj, "user_id"):
-                return user_obj
-            # If it's a dict
-            if isinstance(user_obj, dict) and "user_id" in user_obj:
-                return OauthUser(
-                    user_id=int(user_obj["user_id"]),
-                    username=user_obj.get("username", ""),
-                    given_name=user_obj.get("first_name", user_obj.get("given_name", "")),
-                    family_name=user_obj.get("last_name", user_obj.get("family_name", "")),
-                    email=user_obj.get("email"),
-                )
-        except Exception as e:
-            self.logger.warning(f"Could not decode session user: {e}")
-        return None
+            user_id = int(fields["user_id"])
+        except (KeyError, TypeError, ValueError):
+            self.logger.warning("Session user carries no usable user_id.")
+            return None
+
+        def _text(*names: str) -> str:
+            """First non-empty string among ``names``, else an empty string."""
+            for name in names:
+                value = fields.get(name)
+                if isinstance(value, str) and value:
+                    return value
+            return ""
+
+        email = fields.get("email")
+        try:
+            return OauthUser(
+                user_id=user_id,
+                username=_text("username"),
+                given_name=_text("first_name", "given_name"),
+                family_name=_text("last_name", "family_name"),
+                email=email if isinstance(email, str) else None,
+            )
+        except (ValidationError, TypeError, ValueError) as e:
+            self.logger.warning(f"Could not rebuild session user: {e}")
+            return None
 
     # ------------------------------------------------------------------
     # Session binding

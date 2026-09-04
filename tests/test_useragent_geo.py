@@ -4,6 +4,7 @@ The GeoIP database lookup is mocked, so these tests do not require the
 ``geoip2`` package or a ``.mmdb`` file.
 """
 import ipaddress
+import logging
 import pytest
 from navigator_auth.authorizations import useragent as ua_mod
 from navigator_auth.authorizations.useragent import authz_useragent
@@ -28,6 +29,24 @@ def test_parse_proxies_skips_invalid():
     assert ipaddress.ip_address("127.0.0.1") in proxies
     assert ipaddress.ip_address("10.0.0.1") in proxies
     assert len(proxies) == 2
+
+
+def test_parse_proxies_does_not_log_rejected_entry_verbatim(caplog):
+    """A rejected entry is never echoed in full (GHAS py/clear-text-logging).
+
+    Trusted proxies come from configuration, so a mis-pasted credential must
+    not survive into the logs — but the operator still needs to find the bad
+    entry, so its position and length are reported.
+    """
+    secret = "super-secret-api-key-abcdef123456"
+    with caplog.at_level(logging.WARNING):
+        proxies = parse_proxies(["127.0.0.1", secret])
+
+    assert proxies == {ipaddress.ip_address("127.0.0.1")}
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert secret not in logged, "rejected config entry leaked into the logs"
+    assert "position 2" in logged
+    assert f"({len(secret)} chars)" in logged
 
 
 def test_get_client_ip_uses_xff_behind_trusted_proxy():

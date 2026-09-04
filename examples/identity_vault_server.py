@@ -156,13 +156,28 @@ REDIRECT_URI = f"{BASE_URL}/callback"
 SCOPES = "default profile email offline_access"
 
 #: Demo account for the Basic login form.
+#: The throwaway password this example seeds when nothing is configured. It is
+#: a public constant, so the banner and the demo config endpoint may echo it.
+DEFAULT_DEMO_PASSWORD = "demo123"
+
 DEMO_USER = {
     "username": os.getenv("EXAMPLE_USER", "demo"),
-    "password": os.getenv("EXAMPLE_PASSWORD", "demo123"),
+    "password": os.getenv("EXAMPLE_PASSWORD", DEFAULT_DEMO_PASSWORD),
     "first_name": "Demo",
     "last_name": "User",
     "email": "demo@example.com",
 }
+
+#: True while the demo password is still the built-in constant. When an
+#: operator overrides ``EXAMPLE_PASSWORD`` the value is a real secret: it is
+#: used to seed the account, but never printed to the console and never served
+#: over HTTP.
+DEMO_PASSWORD_IS_DEFAULT = DEMO_USER["password"] == DEFAULT_DEMO_PASSWORD
+
+#: What to show instead of an operator-supplied password.
+DEMO_PASSWORD_DISPLAY = (
+    DEFAULT_DEMO_PASSWORD if DEMO_PASSWORD_IS_DEFAULT else "<$EXAMPLE_PASSWORD>"
+)
 
 #: Where to ask "who am I?" with a linked credential. This is what a real
 #: consumer (a Graph client, an Odoo RPC client, ...) would call.
@@ -281,7 +296,9 @@ async def example_config(request: web.Request) -> web.StreamResponse:
             },
             "demo_user": {
                 "username": DEMO_USER["username"],
-                "password": DEMO_USER["password"],
+                # Same rule as the console banner: an operator-supplied
+                # EXAMPLE_PASSWORD is a real secret and is not handed out here.
+                "password": DEMO_PASSWORD_DISPLAY,
             },
         }
     )
@@ -413,7 +430,7 @@ def check_vault_keys() -> bool:
 def print_banner(app: web.Application) -> None:
     """Show what got mounted — including the routes ``setup_handlers`` added."""
     print(f"\n  navigator-auth Identity Vault example — {BASE_URL}/\n")
-    print(f"  Basic login .......... {DEMO_USER['username']} / {DEMO_USER['password']}")
+    print(f"  Basic login .......... {DEMO_USER['username']} / {DEMO_PASSWORD_DISPLAY}")
     print(f"  OAuth2 client ........ {CLIENT_ID} (public, PKCE S256)")
     enabled = ", ".join(CONFIGURED) or "(none configured)"
     print(f"  External providers ... {enabled}")
