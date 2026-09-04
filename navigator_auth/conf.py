@@ -8,6 +8,7 @@ import contextlib
 from cryptography import fernet
 from navconfig import config, BASE_DIR
 from navconfig.logging import logging
+from navigator_session import SESSION_TIMEOUT
 
 ## Disable aiohttp Logging
 logging.getLogger(name='aiohttp.access').setLevel(logging.WARNING)
@@ -556,6 +557,24 @@ ODOO_IDENTITY_SCOPES = [
     for s in config.get(
         "ODOO_IDENTITY_SCOPES", fallback=",".join(ODOO_SCOPES)
     ).split(",")
+]
+
+## External Token Exchange (FEAT-096) — TokenExchangeAuth backend.
+# Caps the internal JWT/session lifetime at the external token's own
+# expiry (D2); when the provider reports no expiry, this fallback is
+# used instead (D6). Defaults to the same value as the Basic session
+# timeout (navigator_session.SESSION_TIMEOUT).
+TOKEN_EXCHANGE_MAX_TTL = config.getint(
+    "TOKEN_EXCHANGE_MAX_TTL", fallback=SESSION_TIMEOUT
+)
+# Providers eligible for X-Auth-Method: TokenExchangeAuth; each must also
+# be a loaded, exchange-capable backend (verify_external_token overridden).
+TOKEN_EXCHANGE_PROVIDERS = [
+    s.strip()
+    for s in config.get(
+        "TOKEN_EXCHANGE_PROVIDERS", fallback="azure,google,github"
+    ).split(",")
+    if s.strip()
 ]
 
 ## Audit Backend
