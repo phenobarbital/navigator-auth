@@ -1,6 +1,5 @@
 import pytest
 import json
-import warnings
 from unittest.mock import AsyncMock, patch
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
@@ -42,12 +41,9 @@ def create_view(mock_vault):
         # _get_vault only need .decode() and dict-style .get(), and an AsyncMock
         # here manufactured coroutines nobody awaited.
         session = _FakeSession()
-        with warnings.catch_warnings():
-            # SESSION_OBJECT is a plain str key, so aiohttp emits
-            # NotAppKeyWarning; navigator_session assigns it the same way, and
-            # this suite runs with warnings as errors.
-            warnings.simplefilter("ignore")
-            request[SESSION_OBJECT] = session
+        # SESSION_OBJECT is a plain str key; NotAppKeyWarning is ignored suite
+        # wide in pyproject.toml, since the code base indexes with strings.
+        request[SESSION_OBJECT] = session
         
         # We need an abstract json method on the request since get_json() isn't trivial on mock
         if body is not None:

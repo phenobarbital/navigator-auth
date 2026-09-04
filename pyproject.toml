@@ -105,6 +105,12 @@ log_cli_date_format = "%Y-%m-%d %H:%M:%S"
 filterwarnings = [
     "error",
     'ignore:The loop argument is deprecated since Python 3\.8, and scheduled for removal in Python 3\.10:DeprecationWarning:asyncio',
+    # aiohttp advises web.AppKey/web.RequestKey over plain str keys. This code
+    # base indexes app and request with strings throughout (app["authdb"],
+    # app["redis"], request["authenticated"]), as does navigator_session, so the
+    # tests must use string keys to match what production looks up. Advisory
+    # only -- revisit if the app/request keys are ever migrated to AppKey.
+    'ignore::aiohttp.web_exceptions.NotAppKeyWarning',
 ]
 
 [tool.black]
