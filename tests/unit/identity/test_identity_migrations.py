@@ -44,15 +44,25 @@ class TestSQLFile:
         ):
             assert column in sql
 
+    def test_id_token_sql_file_exists_and_additive(self):
+        assert (SQL_DIR / "002_identity_id_token.sql").is_file()
+        sql = (SQL_DIR / "002_identity_id_token.sql").read_text()
+        assert "ADD COLUMN IF NOT EXISTS" in sql
+        assert "DROP" not in sql.upper()
+        assert "id_token" in sql
+
 
 class TestEnsureIdentityColumns:
     @pytest.mark.asyncio
     async def test_executes_ddl(self):
         pool, conn = _make_pool_async_cm()
         await ensure_identity_columns(pool)
-        conn.execute.assert_awaited_once()
-        executed = conn.execute.await_args.args[0]
-        assert "auth.user_identities" in executed
+        # FEAT-096 TASK-047: 001 then 002, both idempotent/additive.
+        assert conn.execute.await_count == 2
+        first = conn.execute.await_args_list[0].args[0]
+        second = conn.execute.await_args_list[1].args[0]
+        assert "auth.user_identities" in first
+        assert "id_token" in second
 
     @pytest.mark.asyncio
     async def test_awaitable_acquire_releases(self):
@@ -65,8 +75,9 @@ class TestEnsureIdentityColumns:
         pool.acquire = MagicMock(side_effect=lambda: _acquire())
         pool.release = AsyncMock()
         await ensure_identity_columns(pool)
-        conn.execute.assert_awaited_once()
-        pool.release.assert_awaited_once_with(conn)
+        assert conn.execute.await_count == 2
+        assert pool.release.await_count == 2
+        pool.release.assert_awaited_with(conn)
 
 
 class TestSetupIdentityColumns:
@@ -81,4 +92,4 @@ class TestSetupIdentityColumns:
     async def test_calls_through(self):
         pool, conn = _make_pool_async_cm()
         await setup_identity_columns(pool)
-        conn.execute.assert_awaited_once()
+        assert conn.execute.await_count == 2

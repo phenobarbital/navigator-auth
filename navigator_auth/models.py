@@ -99,6 +99,7 @@ class UserIdentity(Model):
     )
     access_token: bytes = Column(required=False, repr=False)
     refresh_token: bytes = Column(required=False, repr=False)
+    id_token: bytes = Column(required=False, repr=False)
     token_type: str = Column(required=False, repr=False)
     expires_at: datetime = Column(required=False, repr=False)
     refreshed_at: datetime = Column(required=False, repr=False)
