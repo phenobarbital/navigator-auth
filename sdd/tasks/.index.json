@@ -1019,7 +1019,7 @@
     "feature_id": "FEAT-096",
     "feature": "external-token-exchange",
     "spec": "sdd/specs/external-token-exchange.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T17:00:29Z",
     "priority": "medium",
@@ -1029,7 +1029,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Final integration coverage + docs; depends on TASK-052.",
-    "file": "sdd/tasks/active/TASK-053-exchange-integration-docs.md"
+    "file": "sdd/tasks/completed/TASK-053-exchange-integration-docs.md",
+    "completed_at": "2026-09-04T18:06:12Z"
   },
   {
     "id": "TASK-054",
