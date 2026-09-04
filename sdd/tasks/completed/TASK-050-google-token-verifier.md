@@ -107,10 +107,37 @@ test; runs alongside TASK-049 and TASK-051.
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
+**Completed by**: sdd-worker
+**Date**: 2026-09-04
 **Notes**:
+- `GoogleAuth.verify_external_token`: prefers an id_token (given
+  explicitly, or when `token` itself has the 3-part JWT shape and no
+  separate id_token was supplied — id-token-only clients), verified
+  against Google's static JWKS (`https://www.googleapis.com/oauth2/v3/certs`,
+  no OIDC discovery), `aud == GOOGLE_CLIENT_ID`, `iss ∈
+  {accounts.google.com, https://accounts.google.com}`, requiring
+  `email_verified`. Otherwise treats `token` as an opaque access token:
+  `tokeninfo` must report `aud` or `azp == GOOGLE_CLIENT_ID`, then the
+  OIDC userinfo endpoint supplies the (verified-e-mail) profile.
+  `provider_user_id = sub`; `scopes` from tokeninfo `scope`; `expires_at`
+  from id_token `exp` or tokeninfo `expires_in`.
+- Replaced the `check_credentials` stub (`return True`) with verifier ->
+  `build_user_info` -> `validate_user_info` -> JSON session info,
+  mirroring `AzureAuth`'s non-redirect branch; added a `get_auth`
+  header/query token extractor (Google had none) to match.
+- Reused the string-`reason` `auth_error` workaround documented in
+  TASK-049 (pre-existing dict-reason bug in
+  `BaseAuthBackend.auth_error`, out of scope here too).
+- `tests/test_google_token_verifier.py` (11 tests, all passing):
+  id_token ok / unverified-e-mail / wrong-`aud` / expired, a bare
+  JWT-shaped `token` treated as an id_token, tokeninfo `azp` ok/mismatch,
+  userinfo unverified e-mail, a 400 tokeninfo response mapped to
+  `InvalidAuth("expired")`, and two `check_credentials` regression tests
+  proving it no longer returns `True` unconditionally.
+- `pytest tests/test_google_token_verifier.py -v`: 11 passed.
+  `ruff check navigator_auth/backends/google.py
+  tests/test_google_token_verifier.py`: clean.
 
-**Deviations from spec**:
+**Deviations from spec**: None functionally; same string-`reason`
+`auth_error` workaround as TASK-049 (Azure), for the same pre-existing
+reason.
