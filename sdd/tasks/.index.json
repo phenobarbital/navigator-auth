@@ -1248,7 +1248,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "medium",
@@ -1258,7 +1258,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "Owns limiter.py alone; imports parse_rate_limit from oauth2/dcr.py read-only. Fully parallel with 063/064/066.",
-    "file": "sdd/tasks/active/TASK-065-recovery-rate-limiter.md"
+    "file": "sdd/tasks/completed/TASK-065-recovery-rate-limiter.md",
+    "completed_at": "2026-09-04T21:58:55Z"
   },
   {
     "id": "TASK-066",
