@@ -461,3 +461,387 @@ class TestNotificationPayloadSecrecy:
             expires_at=datetime.datetime.now(), found=True,
         )
         assert "SUPERSECRETTOKEN" not in repr(p)
+
+
+# ---------------------------------------------------------------------------
+# Module 6 — PasswordRecoveryHandler, live integration (real Postgres +
+# Redis, real aiohttp server). Mirrors the `live_app` pattern used in
+# tests/test_basic_auth.py.
+# ---------------------------------------------------------------------------
+import warnings  # noqa: E402
+from aiohttp import web  # noqa: E402
+from aiohttp.test_utils import TestServer, TestClient  # noqa: E402
+
+RECOVERY_TEST_USERNAME = "test_recovery_user"
+RECOVERY_TEST_PASSWORD = "OldP@ssw0rd1"
+RECOVERY_TEST_EMAIL = "test_recovery_user@example.com"
+RECOVERY_UNKNOWN_EMAIL = "no_such_recovery_user@example.com"
+RECOVERY_DUP_EMAIL = "dup_recovery_user@example.com"
+
+# Captured NotificationPayloads / failure toggle for the test callback,
+# configured onto handler.AUTH_RECOVERY_CALLBACK below.
+_CAPTURED_NOTIFICATIONS: list = []
+_RAISE_ON_CALLBACK: list = [False]
+
+
+async def _test_recovery_callback(payload):
+    if _RAISE_ON_CALLBACK[0]:
+        raise RuntimeError("callback boom (test)")
+    _CAPTURED_NOTIFICATIONS.append(payload)
+
+
+async def _request_and_confirm_token(client, email=RECOVERY_TEST_EMAIL):
+    """Drive steps 1 -> 2, return (recovery_token, confirmation_token)."""
+    _CAPTURED_NOTIFICATIONS.clear()
+    resp = await client.post("/api/v1/password-recovery", json={"email": email})
+    assert resp.status == 200, await resp.text()
+    assert len(_CAPTURED_NOTIFICATIONS) == 1
+    recovery_token = _CAPTURED_NOTIFICATIONS[0].token
+    resp2 = await client.get(f"/api/v1/password-recovery/{recovery_token}")
+    assert resp2.status == 200, await resp2.text()
+    data = await resp2.json()
+    return recovery_token, data["token"]
+
+
+@pytest_asyncio.fixture(scope="module")
+async def recovery_app():
+    """Real AuthHandler(BasicAuth) app with the FEAT-098 routes wired in."""
+    import navigator_auth.conf as conf
+    from navigator_auth.handlers.recovery import handler as handler_module
+
+    original_backends = conf.AUTHENTICATION_BACKENDS
+    conf.AUTHENTICATION_BACKENDS = ("navigator_auth.backends.BasicAuth",)
+
+    # PasswordRecoveryHandler reads these as module globals at call time,
+    # so patching the handler module's attributes (not conf's) before the
+    # first request takes effect for every request through this app.
+    original_callback = handler_module.AUTH_RECOVERY_CALLBACK
+    original_template = handler_module.AUTH_RECOVERY_URL_TEMPLATE
+    original_rate_email = handler_module.AUTH_RECOVERY_RATE_EMAIL
+    original_rate_ip = handler_module.AUTH_RECOVERY_RATE_IP
+    handler_module.AUTH_RECOVERY_CALLBACK = (
+        "tests.test_password_recovery._test_recovery_callback"
+    )
+    handler_module.AUTH_RECOVERY_URL_TEMPLATE = (
+        "https://app.example/reset?token={token}"
+    )
+    # Generous: many tests in this class hit step 1 for the same address.
+    handler_module.AUTH_RECOVERY_RATE_EMAIL = "1000/hour"
+    handler_module.AUTH_RECOVERY_RATE_IP = "1000/hour"
+
+    from navigator_auth import AuthHandler
+
+    app = web.Application()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        auth = AuthHandler(secure_cookies=False)
+        auth.setup(app)
+
+    server = TestServer(app)
+    client = TestClient(server)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        await client.start_server()
+
+    db_pool = app.get("authdb")
+    assert db_pool is not None, "PostgreSQL pool ('authdb') was not created"
+
+    hashed = set_basic_password(RECOVERY_TEST_PASSWORD)
+    usernames = (RECOVERY_TEST_USERNAME, "dup_recovery_a", "dup_recovery_b")
+
+    async def _cleanup():
+        for uname in usernames:
+            try:
+                await db_pool.execute(
+                    f"DELETE FROM auth.users WHERE username = '{uname}'"
+                )
+            except Exception:  # pylint: disable=W0703
+                pass
+
+    await _cleanup()
+    await db_pool.execute(
+        f"""
+        INSERT INTO auth.users
+            (username, password, email, first_name, last_name,
+             is_active, is_superuser, is_new, is_staff)
+        VALUES (
+            '{RECOVERY_TEST_USERNAME}', '{hashed}', '{RECOVERY_TEST_EMAIL}',
+            'Recovery', 'Test', true, false, false, true
+        )
+        """
+    )
+    # Two active users sharing one e-mail, for the ambiguous-lookup test.
+    await db_pool.execute(
+        f"""
+        INSERT INTO auth.users
+            (username, password, email, first_name, last_name,
+             is_active, is_superuser, is_new, is_staff)
+        VALUES
+            ('dup_recovery_a', '{hashed}', '{RECOVERY_DUP_EMAIL}', 'Dup', 'A',
+             true, false, false, true),
+            ('dup_recovery_b', '{hashed}', '{RECOVERY_DUP_EMAIL}', 'Dup', 'B',
+             true, false, false, true)
+        """
+    )
+
+    # Same hang-avoidance as FEAT-096 TASK-046 (see test_basic_auth.py):
+    # production AUTH_SUCCESSFUL_CALLBACKS reach an external service that
+    # is unavailable here.
+    auth.backends["BasicAuth"]._callbacks = None
+
+    yield client, db_pool
+
+    await _cleanup()
+
+    # Pre-existing gap (backends/oauth2/backend.py, out of TASK-067's file
+    # scope): Oauth2Provider.on_startup gives itself its own
+    # AccessTokenStorage (a *second*, separate redis.from_url() client
+    # from BasicAuth's) but Oauth2Provider.on_cleanup is a no-op — it
+    # never closes it. BasicAuth.on_cleanup (TASK-066) only closes its
+    # own. SessionRevoker.revoke_user() (step 3) walks every backend's
+    # access_token_storage, including Oauth2Provider's, and is the first
+    # thing in this test suite to actually use that particular
+    # connection; left open, it hangs pytest-asyncio's per-test
+    # asyncio.Runner.close() the same way an unclosed AccessTokenStorage
+    # did in TASK-066. Close every backend's access_token_storage here,
+    # defensively, rather than widen this task's file list to patch
+    # Oauth2Provider.on_cleanup.
+    for backend in auth.backends.values():
+        storage = getattr(backend, "access_token_storage", None)
+        if storage is not None:
+            try:
+                await storage.redis.aclose()
+            except Exception:  # pylint: disable=W0703
+                pass
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        await client.close()
+
+    # PasswordRecoveryHandler's ConnectionPool is a class-level singleton
+    # (see handler.py — one pool for the process, never per-request); left
+    # open it hangs pytest-asyncio's per-test asyncio.Runner.close() the
+    # same way an unclosed AccessTokenStorage did in TASK-066.
+    if handler_module.PasswordRecoveryHandler._pool is not None:
+        await handler_module.PasswordRecoveryHandler._pool.disconnect()
+        handler_module.PasswordRecoveryHandler._pool = None
+        handler_module.PasswordRecoveryHandler._store = None
+        handler_module.PasswordRecoveryHandler._policy = None
+        handler_module.PasswordRecoveryHandler._email_limiter = None
+        handler_module.PasswordRecoveryHandler._ip_limiter = None
+        handler_module.PasswordRecoveryHandler._revoker = None
+
+    conf.AUTHENTICATION_BACKENDS = original_backends
+    handler_module.AUTH_RECOVERY_CALLBACK = original_callback
+    handler_module.AUTH_RECOVERY_URL_TEMPLATE = original_template
+    handler_module.AUTH_RECOVERY_RATE_EMAIL = original_rate_email
+    handler_module.AUTH_RECOVERY_RATE_IP = original_rate_ip
+
+
+class TestRecoveryEndpoints:
+    """Module 6 — the three endpoints, live against Postgres + Redis."""
+
+    pytestmark = [
+        pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning"),
+        pytest.mark.filterwarnings("ignore::DeprecationWarning"),
+        pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning"),
+        pytest.mark.asyncio(loop_scope="module"),
+    ]
+
+    async def test_step1_never_returns_token(self, recovery_app):
+        client, _ = recovery_app
+        resp = await client.post(
+            "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
+        )
+        assert resp.status == 200
+        body = await resp.json()
+        assert "token" not in body
+        assert "refresh_token" not in body
+
+    async def test_step1_unknown_email_same_body(self, recovery_app):
+        client, _ = recovery_app
+        known = await client.post(
+            "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
+        )
+        unknown = await client.post(
+            "/api/v1/password-recovery", json={"email": RECOVERY_UNKNOWN_EMAIL}
+        )
+        assert known.status == unknown.status == 200
+        assert await known.json() == await unknown.json()
+
+    async def test_step1_invokes_callback_with_url(self, recovery_app):
+        client, _ = recovery_app
+        _CAPTURED_NOTIFICATIONS.clear()
+        resp = await client.post(
+            "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
+        )
+        assert resp.status == 200
+        assert len(_CAPTURED_NOTIFICATIONS) == 1
+        notif = _CAPTURED_NOTIFICATIONS[0]
+        assert notif.found is True
+        assert notif.token in notif.url
+        assert notif.url.startswith("https://app.example/reset?token=")
+
+    async def test_callback_failure_does_not_leak(self, recovery_app):
+        from navigator_auth.handlers.recovery.handler import _GENERIC_STEP1_BODY
+
+        client, _ = recovery_app
+        _RAISE_ON_CALLBACK[0] = True
+        try:
+            resp = await client.post(
+                "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
+            )
+            assert resp.status == 200
+            assert await resp.json() == _GENERIC_STEP1_BODY
+        finally:
+            _RAISE_ON_CALLBACK[0] = False
+
+    async def test_step2_refresh_is_safe(self, recovery_app):
+        client, _ = recovery_app
+        _CAPTURED_NOTIFICATIONS.clear()
+        resp = await client.post(
+            "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
+        )
+        assert resp.status == 200
+        recovery_token = _CAPTURED_NOTIFICATIONS[0].token
+
+        r1 = await client.get(f"/api/v1/password-recovery/{recovery_token}")
+        c1 = (await r1.json())["token"]
+        r2 = await client.get(f"/api/v1/password-recovery/{recovery_token}")
+        c2 = (await r2.json())["token"]
+        assert c1 != c2  # rotated
+
+        r3 = await client.get(f"/api/v1/password-recovery/{recovery_token}")
+        assert r3.status == 200  # D4 — stage-1 survives repeat validation
+
+    async def test_step3_password_mismatch(self, recovery_app):
+        client, _ = recovery_app
+        _, confirm_token = await _request_and_confirm_token(client)
+        resp = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={
+                "password": "NewPassw0rd1!",
+                "confirm_password": "Different1!",
+                "token": confirm_token,
+            },
+        )
+        assert resp.status == 400
+
+    async def test_step3_policy_violation_keeps_tokens(self, recovery_app):
+        client, _ = recovery_app
+        _, confirm_token = await _request_and_confirm_token(client)
+        weak = "short"
+        resp = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={
+                "password": weak, "confirm_password": weak, "token": confirm_token,
+            },
+        )
+        assert resp.status == 422
+        body = await resp.json()
+        assert "violations" in body
+
+        # 422 must NOT have consumed the confirmation token: retry with a
+        # strong password on the SAME token succeeds.
+        strong = "Str0ngPassword!"
+        resp2 = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={
+                "password": strong, "confirm_password": strong, "token": confirm_token,
+            },
+        )
+        assert resp2.status == 202
+
+    async def test_step3_success(self, recovery_app):
+        client, db_pool = recovery_app
+        _, confirm_token = await _request_and_confirm_token(client)
+        new_pw = "AnotherStr0ng!"
+        resp = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={
+                "password": new_pw, "confirm_password": new_pw, "token": confirm_token,
+            },
+        )
+        assert resp.status == 202
+        body = await resp.json()
+        assert body["status"] == "OK"
+
+        async with await db_pool.acquire() as conn:
+            User.Meta.connection = conn
+            row = await User.get(username=RECOVERY_TEST_USERNAME)
+        assert row.is_new is False  # D17
+
+    async def test_step3_replay_rejected(self, recovery_app):
+        client, _ = recovery_app
+        _, confirm_token = await _request_and_confirm_token(client)
+        pw = "ReplayTest1!"
+        resp1 = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={"password": pw, "confirm_password": pw, "token": confirm_token},
+        )
+        assert resp1.status == 202
+        resp2 = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={"password": pw, "confirm_password": pw, "token": confirm_token},
+        )
+        assert resp2.status == 400
+
+    async def test_no_autologin(self, recovery_app):
+        client, _ = recovery_app
+        _, confirm_token = await _request_and_confirm_token(client)
+        pw = "NoAutoLogin1!"
+        resp = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={"password": pw, "confirm_password": pw, "token": confirm_token},
+        )
+        assert resp.status == 202
+        body = await resp.json()
+        assert "token" not in body
+        assert "refresh_token" not in body
+
+    async def test_duplicate_email_takes_generic_path(self, recovery_app, caplog):
+        import logging
+        client, _ = recovery_app
+        _CAPTURED_NOTIFICATIONS.clear()
+        caplog.set_level(logging.WARNING)
+        resp = await client.post(
+            "/api/v1/password-recovery", json={"email": RECOVERY_DUP_EMAIL}
+        )
+        assert resp.status == 200
+        assert len(_CAPTURED_NOTIFICATIONS) == 1
+        assert _CAPTURED_NOTIFICATIONS[0].found is False
+        assert any(
+            "multiple users match" in rec.message for rec in caplog.records
+        )
+
+    async def test_legacy_routes_aliased(self, recovery_app):
+        client, _ = recovery_app
+        _CAPTURED_NOTIFICATIONS.clear()
+        resp = await client.post(
+            "/api/v1/forgot-password", json={"email": RECOVERY_UNKNOWN_EMAIL}
+        )
+        assert resp.status == 200
+
+        resp2 = await client.post(
+            "/api/v1/reset-password",
+            json={
+                "password": "x", "confirm_password": "x", "token": "not-a-real-token",
+            },
+        )
+        # Reaches step-3 logic (invalid token -> 400), proving the alias
+        # dispatches to the confirm branch rather than step 1.
+        assert resp2.status == 400
+
+    async def test_token_never_logged(self, recovery_app, caplog):
+        client, _ = recovery_app
+        _CAPTURED_NOTIFICATIONS.clear()
+        caplog.set_level("DEBUG")
+        resp = await client.post(
+            "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
+        )
+        assert resp.status == 200
+        token = _CAPTURED_NOTIFICATIONS[0].token
+        resp2 = await client.get(f"/api/v1/password-recovery/{token}")
+        assert resp2.status == 200
+        for rec in caplog.records:
+            assert token not in rec.getMessage()

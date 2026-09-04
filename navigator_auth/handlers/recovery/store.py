@@ -162,13 +162,7 @@ class RecoveryTokenStore:
 
         return confirm_token, confirmation
 
-    async def consume_confirmation(self, token: str) -> Optional[ConfirmationPayload]:
-        """GETDEL — single use."""
-        key = f"{CONFIRM_KEY_PREFIX}{_hash_token(token)}"
-        async with aioredis.Redis(connection_pool=self._pool) as redis:
-            raw = await redis.getdel(key)
-        if not raw:
-            return None
+    def _decode_confirmation(self, raw) -> Optional[ConfirmationPayload]:
         data = json_decoder(raw)
         expected = self._sign_confirmation(
             data["user_id"], data["username"], data["recovery_key"], data["issued_at"]
@@ -182,6 +176,33 @@ class RecoveryTokenStore:
             issued_at=data["issued_at"],
             signature=data["signature"],
         )
+
+    async def peek_confirmation(self, token: str) -> Optional[ConfirmationPayload]:
+        """Read + verify signature WITHOUT consuming (unlike
+        ``consume_confirmation``, this is GET not GETDEL).
+
+        FEAT-098 TASK-067 — lets the handler resolve the user behind a
+        confirmation token (to run the password policy check against their
+        current hash) *before* deciding whether to burn the single-use
+        record, so a policy failure at step 3 leaves both tokens intact
+        (D4/D5 apply to the read; the write path is still single-use via
+        ``consume_confirmation``).
+        """
+        key = f"{CONFIRM_KEY_PREFIX}{_hash_token(token)}"
+        async with aioredis.Redis(connection_pool=self._pool) as redis:
+            raw = await redis.get(key)
+        if not raw:
+            return None
+        return self._decode_confirmation(raw)
+
+    async def consume_confirmation(self, token: str) -> Optional[ConfirmationPayload]:
+        """GETDEL — single use."""
+        key = f"{CONFIRM_KEY_PREFIX}{_hash_token(token)}"
+        async with aioredis.Redis(connection_pool=self._pool) as redis:
+            raw = await redis.getdel(key)
+        if not raw:
+            return None
+        return self._decode_confirmation(raw)
 
     async def drop_pair(self, recovery_key: str, confirm_key: str) -> None:
         """Delete both records so the link cannot be replayed (step 3).
