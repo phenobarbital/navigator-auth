@@ -24,6 +24,9 @@ from aiohttp.test_utils import TestServer, TestClient
 pytestmark = [
     pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning"),
     pytest.mark.filterwarnings("ignore::DeprecationWarning"),
+    # Pre-existing environment limitation: the dev/test SECRET_KEY is shorter
+    # than PyJWT's recommended HMAC key length. Not in scope for FEAT-096.
+    pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning"),
     pytest.mark.asyncio(loop_scope="module"),
 ]
 
@@ -142,6 +145,19 @@ async def test_successful_login_json(live_app: TestClient):
     data = await resp.json()
     assert "token" in data, f"Response missing 'token': {data}"
     assert data.get("username") == TEST_USERNAME
+    # Regression (FEAT-096 TASK-046 open_session factoring): response shape
+    # produced by BasicAuth.authenticate()->open_session() must be unchanged.
+    for key in (
+        "token",
+        "username",
+        "user_id",
+        "auth_method",
+        "refresh_token",
+        "expires_in",
+        "token_type",
+    ):
+        assert key in data, f"Response missing '{key}': {data}"
+    assert data.get("auth_method") == "basic"
 
 
 async def test_successful_login_form(live_app: TestClient):
