@@ -3,6 +3,7 @@ Navigator Auth Configuration.
 """
 # Import Config Class
 import base64
+import warnings
 import orjson
 import contextlib
 from cryptography import fernet
@@ -576,6 +577,55 @@ TOKEN_EXCHANGE_PROVIDERS = [
     ).split(",")
     if s.strip()
 ]
+
+## Backend-Based Password Recovery (FEAT-098) — 3-step signed flow.
+# HMAC key for signing both the recovery and confirmation tokens (D12).
+# Falls back to SECRET_KEY when unset, and is always coerced to bytes so it
+# can be used directly with hmac.new().
+AUTH_RECOVERY_SECRET = config.get("AUTH_RECOVERY_SECRET")
+if not AUTH_RECOVERY_SECRET:
+    AUTH_RECOVERY_SECRET = SECRET_KEY
+if isinstance(AUTH_RECOVERY_SECRET, str):
+    AUTH_RECOVERY_SECRET = AUTH_RECOVERY_SECRET.encode("utf-8")
+# Stage-1 (recovery token) lifetime, in seconds.
+AUTH_RECOVERY_TTL = config.getint("AUTH_RECOVERY_TTL", fallback=3600)
+# Stage-2 (confirmation token) lifetime, in seconds (D5).
+AUTH_RECOVERY_CONFIRM_TTL = config.getint(
+    "AUTH_RECOVERY_CONFIRM_TTL", fallback=900
+)
+# Dotted path to the notification callable (D1). navigator-auth never sends
+# e-mail itself; this callback receives a NotificationPayload.
+AUTH_RECOVERY_CALLBACK = config.get("AUTH_RECOVERY_CALLBACK")
+# e.g. "https://app/reset?token={token}" (D16).
+AUTH_RECOVERY_URL_TEMPLATE = config.get("AUTH_RECOVERY_URL_TEMPLATE")
+# Per-address / per-IP rate limits (D14). "<count>/<window>", parsed by
+# backends/oauth2/dcr.py:parse_rate_limit.
+AUTH_RECOVERY_RATE_EMAIL = config.get(
+    "AUTH_RECOVERY_RATE_EMAIL", fallback="3/hour"
+)
+AUTH_RECOVERY_RATE_IP = config.get("AUTH_RECOVERY_RATE_IP", fallback="10/hour")
+# Password policy applied at step 3 (D13).
+AUTH_RECOVERY_PWD_MIN_LENGTH = config.getint(
+    "AUTH_RECOVERY_PWD_MIN_LENGTH", fallback=8
+)
+AUTH_RECOVERY_PWD_REQUIRE_LETTER = config.getboolean(
+    "AUTH_RECOVERY_PWD_REQUIRE_LETTER", fallback=True
+)
+AUTH_RECOVERY_PWD_REQUIRE_DIGIT = config.getboolean(
+    "AUTH_RECOVERY_PWD_REQUIRE_DIGIT", fallback=True
+)
+# Deprecated: the legacy callback name read by the pre-FEAT-098
+# handlers/recovery.py. Honoured for one release when AUTH_RECOVERY_CALLBACK
+# is not set.
+FORGOT_PASSWORD_CALLBACK = config.get("FORGOT_PASSWORD_CALLBACK")
+if FORGOT_PASSWORD_CALLBACK and not AUTH_RECOVERY_CALLBACK:
+    warnings.warn(
+        "FORGOT_PASSWORD_CALLBACK is deprecated; use AUTH_RECOVERY_CALLBACK "
+        "instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    AUTH_RECOVERY_CALLBACK = FORGOT_PASSWORD_CALLBACK
 
 ## Audit Backend
 # this is the backend for saving Authentication information
