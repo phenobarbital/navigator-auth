@@ -42,7 +42,7 @@ dependencies = [
     "PyJWT>=2.10.1",
     "pycryptodome>=3.21.0",
     "rncryptor>=3.3.0",
-    "msal>=1.28.0,<=1.32.0",
+    "msal>=1.28.0,<=1.37.0",
     "aiogoogle>=5.17.0",
     "okta-jwt-verifier>=0.2.5",
     "python-slugify>=8.0.1",
