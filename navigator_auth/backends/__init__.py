@@ -16,6 +16,7 @@ from .github import GithubAuth
 from .odoo import OdooAuth
 from .oauth2 import Oauth2Provider
 from .saml import SAMLAuth
+from .exchange import TokenExchangeAuth
 
 
 __all__ = (
@@ -33,4 +34,5 @@ __all__ = (
     "OdooAuth",
     "Oauth2Provider",
     "SAMLAuth",
+    "TokenExchangeAuth",
 )

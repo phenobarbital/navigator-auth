@@ -44,6 +44,7 @@ class TestCipherRoundtripThroughStore:
         identity = MagicMock()
         identity.access_token = cipher.encrypt("the-at")
         identity.refresh_token = cipher.encrypt("the-rt")
+        identity.id_token = cipher.encrypt("the-id")
         identity.token_type = "Bearer"
         identity.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
         identity.scopes = ["read:user"]
@@ -51,6 +52,7 @@ class TestCipherRoundtripThroughStore:
         token = store.decrypt_credential(identity)
         assert token.access_token == "the-at"
         assert token.refresh_token == "the-rt"
+        assert token.id_token == "the-id"
         assert token.scopes == ["read:user"]
 
     def test_decrypt_without_refresh_token(self):
@@ -58,6 +60,7 @@ class TestCipherRoundtripThroughStore:
         identity = MagicMock()
         identity.access_token = store._cipher.encrypt("at")
         identity.refresh_token = None
+        identity.id_token = None
         identity.token_type = None
         identity.expires_at = None
         identity.scopes = None
@@ -65,6 +68,7 @@ class TestCipherRoundtripThroughStore:
         token = store.decrypt_credential(identity)
         assert token.access_token == "at"
         assert token.refresh_token is None
+        assert token.id_token is None
         assert token.token_type == "Bearer"
 
 

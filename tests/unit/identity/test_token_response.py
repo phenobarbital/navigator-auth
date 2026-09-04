@@ -41,6 +41,7 @@ class TestTokenResponse:
             "access_token",
             "token_type",
             "refresh_token",
+            "id_token",
             "expires_at",
             "scopes",
             "provider_user_id",

@@ -4,6 +4,7 @@ Navigator Authentication using JSON Web Tokens.
 """
 
 import logging
+from typing import Optional
 from aiohttp import web
 from navigator_session import AUTH_SESSION_OBJECT
 from navigator_session import SESSION_KEY, SESSION_ID, SessionHandler, get_session
@@ -126,6 +127,105 @@ class BasicAuth(BaseAuthBackend):
         else:
             return [None, None]
 
+    # Extra keys (when present in `extra`) that are also mirrored into the
+    # JWT payload by `open_session`. Any other key in `extra` is only merged
+    # into `userdata` / `AUTH_SESSION_OBJECT`.
+    _JWT_EXTRA_KEYS = ("auth_method", "auth_origin", "external_expires_at")
+
+    async def open_session(
+        self,
+        request: web.Request,
+        user: dict,
+        extra: Optional[dict] = None,
+        expiration: Optional[int] = None,
+    ) -> dict:
+        """Open a Basic-style session for an already-validated user.
+
+        Everything ``authenticate()`` does after credentials are validated:
+        ``get_userdata``, ``BASIC_USER_MAPPING``, ``create_user``,
+        ``remember``, JWT payload construction, ``idp.create_token`` and the
+        success callbacks.
+
+        ``extra`` (dict) is merged into ``userdata`` and into
+        ``userdata[AUTH_SESSION_OBJECT]`` before ``remember()``. Keys present
+        in ``extra`` that are also in ``_JWT_EXTRA_KEYS`` (``auth_method``,
+        ``auth_origin``, ``external_expires_at``) are additionally added to
+        the JWT payload.
+
+        ``expiration`` (int seconds), when given, is forwarded to
+        ``idp.create_token(expiration=...)`` and used to cap the returned
+        session's ``max_age`` so the Redis TTL and cookie ``Max-Age`` match
+        the JWT lifetime.
+
+        Raises on failure so the caller decides how to handle it (unlike
+        ``authenticate()``, which logs and returns ``False``).
+        """
+        userdata = self.get_userdata(user=user)
+        username = user[self.username_attribute]
+        uid = user[self.userid_attribute]
+        userdata[self.username_attribute] = username
+        userdata[self.session_key_property] = username
+        usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
+        usr.id = uid
+        usr.set(self.username_attribute, username)
+        for key, val in BASIC_USER_MAPPING.items():
+            userdata[key] = user[val]
+        if extra:
+            userdata.update(extra)
+            userdata[AUTH_SESSION_OBJECT].update(extra)
+        ### saving User data into session:
+        session = await self.remember(request, username, userdata, usr)
+        payload = {
+            self.user_property: user[self.userid_attribute],
+            self.username_attribute: username,
+            "user_id": uid,
+            self.session_key_property: username,
+            self.session_id_property: session.session_id,
+        }
+        if extra:
+            for key in self._JWT_EXTRA_KEYS:
+                if key in extra:
+                    payload[key] = extra[key]
+        # Create the User session and returned.
+        token, refresh_token, exp, scheme = self._idp.create_token(
+            data=payload, expiration=expiration
+        )
+        usr.access_token = token
+        usr.token_type = scheme
+        usr.expires_in = exp
+        userdata["refresh_token"] = refresh_token
+        userdata["expires_in"] = exp
+        userdata["token_type"] = scheme
+        if "auth_method" not in userdata:
+            userdata["auth_method"] = "basic"
+        if expiration is not None:
+            try:
+                # navigator_session's SessionData.__setattr__ routes any
+                # non-underscore attribute (including "max_age") into the
+                # session's own data dict, shadowing the `max_age` property
+                # instead of invoking its setter. Call the property setter
+                # directly (via the descriptor) so `session.max_age` (D9)
+                # actually updates `_max_age`, which RedisStorage.save_session
+                # and save_cookie honour as the TTL / Max-Age.
+                max_age_prop = getattr(type(session), "max_age", None)
+                if isinstance(max_age_prop, property) and max_age_prop.fset:
+                    max_age_prop.fset(session, expiration)
+                else:
+                    session.max_age = expiration
+            except Exception as ex:  # pylint: disable=W0703
+                self.logger.warning(f"Unable to set session.max_age={expiration}: {ex}")
+        # invoke callbacks to update user data:
+        if user and self._callbacks:
+            # construir e invocar callbacks para actualizar data de usuario
+            args = {
+                "username_attribute": self.username_attribute,
+                "userid_attribute": self.userid_attribute,
+                "userdata": userdata,
+            }
+            await self.auth_successful_callback(request, user, **args)
+        ### check if any callbacks exists:
+        return {"token": token, **userdata}
+
     async def authenticate(self, request):
         """Authenticate, refresh or return the user credentials."""
         try:
@@ -145,45 +245,7 @@ class BasicAuth(BaseAuthBackend):
             except Exception as err:
                 raise AuthException(str(err), status=500) from err
             try:
-                userdata = self.get_userdata(user=user)
-                username = user[self.username_attribute]
-                uid = user[self.userid_attribute]
-                userdata[self.username_attribute] = username
-                userdata[self.session_key_property] = username
-                usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
-                usr.id = uid
-                usr.set(self.username_attribute, username)
-                for key, val in BASIC_USER_MAPPING.items():
-                    userdata[key] = user[val]
-                ### saving User data into session:
-                session = await self.remember(request, username, userdata, usr)
-                payload = {
-                    self.user_property: user[self.userid_attribute],
-                    self.username_attribute: username,
-                    "user_id": uid,
-                    self.session_key_property: username,
-                    self.session_id_property: session.session_id,
-                }
-                # Create the User session and returned.
-                token, refresh_token, exp, scheme = self._idp.create_token(data=payload)
-                usr.access_token = token
-                usr.token_type = scheme
-                usr.expires_in = exp
-                userdata["refresh_token"] = refresh_token
-                userdata["expires_in"] = exp
-                userdata["token_type"] = scheme
-                userdata["auth_method"] = "basic"
-                # invoke callbacks to update user data:
-                if user and self._callbacks:
-                    # construir e invocar callbacks para actualizar data de usuario
-                    args = {
-                        "username_attribute": self.username_attribute,
-                        "userid_attribute": self.userid_attribute,
-                        "userdata": userdata,
-                    }
-                    await self.auth_successful_callback(request, user, **args)
-                ### check if any callbacks exists:
-                return {"token": token, **userdata}
+                return await self.open_session(request, user)
             except Exception as err:  # pylint: disable=W0703
                 self.logger.exception(f"BasicAuth: Authentication Error: {err}")
                 return False

@@ -24,6 +24,9 @@ from aiohttp.test_utils import TestServer, TestClient
 pytestmark = [
     pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning"),
     pytest.mark.filterwarnings("ignore::DeprecationWarning"),
+    # Pre-existing environment limitation: the dev/test SECRET_KEY is shorter
+    # than PyJWT's recommended HMAC key length. Not in scope for FEAT-096.
+    pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning"),
     pytest.mark.asyncio(loop_scope="module"),
 ]
 
@@ -111,6 +114,19 @@ async def live_app():
         """
     )
 
+    # FEAT-096 TASK-046: the InsecureKeyLengthWarning filter added below
+    # (module-level pytestmark) unblocks the previously-always-failing
+    # successful-login tests, which now actually reach
+    # AUTH_SUCCESSFUL_CALLBACKS. Those production callbacks (e.g.
+    # resources.auth.saving_troc_user) reach an external service that is
+    # unavailable in this sandbox and hang the fire-and-forget background
+    # task indefinitely, which in turn hangs process/event-loop shutdown
+    # after the tests finish (even though every assertion passes). Disabled
+    # here (must be after on_startup, which populates `_callbacks`), same
+    # fix applied to the synthetic fixtures in test_basic_open_session.py
+    # and test_token_exchange_backend.py.
+    auth.backends["BasicAuth"]._callbacks = None
+
     yield client
 
     # Teardown
@@ -142,6 +158,19 @@ async def test_successful_login_json(live_app: TestClient):
     data = await resp.json()
     assert "token" in data, f"Response missing 'token': {data}"
     assert data.get("username") == TEST_USERNAME
+    # Regression (FEAT-096 TASK-046 open_session factoring): response shape
+    # produced by BasicAuth.authenticate()->open_session() must be unchanged.
+    for key in (
+        "token",
+        "username",
+        "user_id",
+        "auth_method",
+        "refresh_token",
+        "expires_in",
+        "token_type",
+    ):
+        assert key in data, f"Response missing '{key}': {data}"
+    assert data.get("auth_method") == "basic"
 
 
 async def test_successful_login_form(live_app: TestClient):

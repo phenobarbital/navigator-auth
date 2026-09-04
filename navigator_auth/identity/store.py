@@ -45,6 +45,9 @@ class IdentityStore:
                 if token.refresh_token
                 else None
             ),
+            "id_token": (
+                self._cipher.encrypt(token.id_token) if token.id_token else None
+            ),
             "token_type": token.token_type,
             "expires_at": token.expires_at,
             "refreshed_at": now,
@@ -64,6 +67,12 @@ class IdentityStore:
             except NoDataFound:
                 existing = None
             if existing:
+                # D10: a re-save without a new refresh/id token keeps the
+                # previously vaulted one instead of clobbering it with None.
+                if token.refresh_token is None:
+                    values.pop("refresh_token", None)
+                if token.id_token is None:
+                    values.pop("id_token", None)
                 for key, value in values.items():
                     setattr(existing, key, value)
                 return await existing.update()
@@ -181,10 +190,16 @@ class IdentityStore:
             if identity.refresh_token
             else None
         )
+        id_token = (
+            self._cipher.decrypt(identity.id_token)
+            if getattr(identity, "id_token", None)
+            else None
+        )
         return TokenResponse(
             access_token=access_token,
             token_type=identity.token_type or "Bearer",
             refresh_token=refresh_token,
+            id_token=id_token,
             expires_at=identity.expires_at,
             scopes=list(identity.scopes or []),
             provider_user_id=identity.provider_user_id,
@@ -218,8 +233,33 @@ class IdentityStore:
             ),
             "enabled": identity.enabled,
             "has_refresh_token": identity.refresh_token is not None,
+            "has_id_token": getattr(identity, "id_token", None) is not None,
             "profile": identity.auth_data or {},
         }
+
+    async def find_user_by_provider_account(
+        self, provider: str, provider_user_id: str
+    ) -> Optional[Any]:
+        """``user_id`` of the enabled identity for (provider, provider_user_id).
+
+        Uses the existing unique partial index
+        ``(user_id, auth_provider, provider_user_id)``: a plain filter on
+        ``auth_provider``/``provider_user_id`` is enough, then ``enabled``
+        rows are filtered in Python. Returns ``None`` on miss or when only
+        disabled rows match.
+        """
+        async with await self._pool.acquire() as conn:
+            UserIdentity.Meta.connection = conn
+            try:
+                rows = await UserIdentity.filter(
+                    auth_provider=provider, provider_user_id=provider_user_id
+                )
+            except NoDataFound:
+                return None
+        rows = [row for row in rows or [] if getattr(row, "enabled", True)]
+        if not rows:
+            return None
+        return rows[0].user_id
 
 
 # --- Session Vault caching helpers (best-effort; DB is source of truth) ---

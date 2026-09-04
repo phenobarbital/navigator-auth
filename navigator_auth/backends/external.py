@@ -12,6 +12,7 @@ from abc import abstractmethod
 from urllib.parse import urlparse, parse_qs, quote
 from requests.models import PreparedRequest
 import aiohttp
+import jwt
 from aiohttp import web, hdrs
 from aiohttp.client import ClientTimeout, ClientSession
 import redis.asyncio as aioredis
@@ -20,7 +21,7 @@ from navconfig.logging import logging
 from navigator_session import AUTH_SESSION_OBJECT
 from ..identities import AuthUser
 from ..libs.json import json_decoder
-from ..exceptions import UserNotFound, AuthException
+from ..exceptions import UserNotFound, AuthException, InvalidAuth
 from ..identity.flow_store import IdentityFlowStore
 from ..identity.types import TokenResponse
 from ..conf import (
@@ -36,6 +37,23 @@ from ..conf import (
     REDIS_AUTH_URL,
 )
 from .abstract import BaseAuthBackend
+from . import jwksutils
+
+#: FEAT-096 TASK-048 — reason codes surfaced in InvalidAuth messages/logs
+#: for token-exchange verification failures. Shared by the abstract
+#: `_verify_jwt`/`_require_verified_email` helpers below and by the
+#: per-provider verifiers (Azure/Google/GitHub) and the exchange backend.
+EXCHANGE_REASONS = frozenset(
+    {
+        "bad_signature",
+        "wrong_audience",
+        "wrong_issuer",
+        "expired",
+        "email_unverified",
+        "invalid_token",
+        "user_not_found",
+    }
+)
 
 #: FEAT-095 TASK-041 — upstream IdP proxy login for the OAuth2 AS.
 #: Short-lived, HttpOnly cookie carrying the opaque id of the parked
@@ -722,6 +740,151 @@ class ExternalAuth(BaseAuthBackend):
     @abstractmethod
     async def check_credentials(self, request: web.Request):
         """Check the validity of the current issued credentials."""
+
+    # ------------------------------------------------------------------
+    # FEAT-096: Token-exchange verification contract.
+    #
+    # A client that already holds a provider bearer token (mobile app,
+    # desktop tool, partner front-end that ran the provider login itself)
+    # can exchange it for a Navigator session through
+    # `backends/exchange.py::TokenExchangeAuth`, without replaying the
+    # browser redirect flow. That backend calls `verify_external_token` on
+    # the matching provider backend (Azure/Google/GitHub); backends that
+    # don't participate simply inherit the default below.
+    # ------------------------------------------------------------------
+
+    async def verify_external_token(
+        self,
+        token: str,
+        token_type: str = "Bearer",
+        id_token: Optional[str] = None,
+    ) -> tuple[dict, TokenResponse]:
+        """Verify a provider-issued token was minted for THIS client and is
+        live; return (raw userinfo, normalized TokenResponse with
+        provider_user_id, expires_at, id_token).
+
+        Args:
+            token: the provider access token (or, for id_token-only
+                clients, the id_token itself).
+            token_type: bearer scheme reported by the caller (informational
+                only; verification always requires a live/valid token).
+            id_token: optional provider id_token (OIDC JWT), when the
+                client separately holds one alongside the access token.
+
+        Returns:
+            ``(userinfo, TokenResponse)`` — ``userinfo`` is the raw
+            provider profile/claims used to resolve the internal user (by
+            verified e-mail) and audit logging; ``TokenResponse`` carries
+            ``provider_user_id``, ``expires_at`` and ``id_token`` for
+            vaulting.
+
+        Raises:
+            InvalidAuth: the token is invalid — bad signature, wrong
+                audience/issuer, expired, or the identity's e-mail is not
+                verified. The message carries a reason code from
+                ``EXCHANGE_REASONS`` for logging; the HTTP response never
+                reveals it (mapped to a generic 401 by the caller).
+            NotImplementedError: this backend does not support token
+                exchange (the default for every ``ExternalAuth`` subclass
+                that doesn't override this method) — callers map this to a
+                400 "unsupported provider" rather than a 401.
+        """
+        raise NotImplementedError(
+            f"{self._service_name}: token exchange not supported"
+        )
+
+    async def _verify_jwt(
+        self,
+        token: str,
+        *,
+        audience: Any,
+        issuer: Any,
+        jwks_url: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        leeway: int = 30,
+    ) -> dict:
+        """Decode and verify a provider JWT (id_token or JWT-shaped access
+        token) against its JWKS, enforcing signature, ``exp`` and ``aud``.
+
+        ``audience``/``issuer`` each accept a single value or a list of
+        accepted values. The signing key is resolved via
+        ``jwksutils.get_public_key`` — a static ``jwks_url`` (e.g. Google's
+        published certs) when given, otherwise tenant/discovery-based
+        resolution (Azure/ADFS) — off the event loop via this backend's
+        executor, and cached per-process by ``jwksutils``.
+
+        Raises ``InvalidAuth`` with a reason code from ``EXCHANGE_REASONS``
+        in the message on any failure (``bad_signature``,
+        ``wrong_audience``, ``wrong_issuer``, ``expired``). Never logs the
+        token; only ``kid``, ``iss`` and ``aud`` are logged on failure.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            public_key = await loop.run_in_executor(
+                self.executor,
+                jwksutils.get_public_key,
+                token,
+                tenant_id,
+                None,
+                jwks_url,
+            )
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(
+                f"{self._service_name}: JWKS/public-key lookup failed: {err}"
+            )
+            raise InvalidAuth("bad_signature") from err
+        issuers = issuer if isinstance(issuer, (list, tuple, set, frozenset)) else [issuer]
+        try:
+            claims = jwt.decode(
+                token,
+                key=public_key,
+                algorithms=["RS256", "RS384", "RS512"],
+                audience=audience,
+                # `iss` is verified manually right below: PyJWT's built-in
+                # `issuer=` check only accepts a single value, but Azure
+                # tokens may be valid under either of two issuer forms.
+                options={"verify_iss": False},
+                leeway=leeway,
+            )
+        except jwt.ExpiredSignatureError as err:
+            raise InvalidAuth("expired") from err
+        except jwt.InvalidAudienceError as err:
+            self.logger.warning(
+                f"{self._service_name}: JWT wrong audience (expected {audience})"
+            )
+            raise InvalidAuth("wrong_audience") from err
+        except jwt.PyJWTError as err:
+            self.logger.warning(f"{self._service_name}: JWT rejected: {err}")
+            raise InvalidAuth("bad_signature") from err
+        token_iss = claims.get("iss")
+        if token_iss not in issuers:
+            self.logger.warning(
+                f"{self._service_name}: JWT wrong issuer iss={token_iss!r} "
+                f"expected={list(issuers)!r}"
+            )
+            raise InvalidAuth("wrong_issuer")
+        return claims
+
+    def _require_verified_email(
+        self,
+        userinfo: dict,
+        *,
+        key: str = "email",
+        verified_key: str = "email_verified",
+    ) -> str:
+        """Return ``userinfo[key]`` when ``userinfo[verified_key]`` is
+        truthy; raise ``InvalidAuth("email_unverified")`` otherwise
+        (missing e-mail, missing verification flag, or explicitly false).
+        Accepts both boolean and string ("true"/"false") verified flags,
+        as providers are inconsistent about this.
+        """
+        email = userinfo.get(key)
+        verified = userinfo.get(verified_key)
+        if isinstance(verified, str):
+            verified = verified.strip().lower() == "true"
+        if not email or not verified:
+            raise InvalidAuth("email_unverified")
+        return email
 
     def get(self, url, **kwargs) -> web.Response:
         """Perform an HTTP GET request."""
