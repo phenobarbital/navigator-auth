@@ -114,6 +114,19 @@ async def live_app():
         """
     )
 
+    # FEAT-096 TASK-046: the InsecureKeyLengthWarning filter added below
+    # (module-level pytestmark) unblocks the previously-always-failing
+    # successful-login tests, which now actually reach
+    # AUTH_SUCCESSFUL_CALLBACKS. Those production callbacks (e.g.
+    # resources.auth.saving_troc_user) reach an external service that is
+    # unavailable in this sandbox and hang the fire-and-forget background
+    # task indefinitely, which in turn hangs process/event-loop shutdown
+    # after the tests finish (even though every assertion passes). Disabled
+    # here (must be after on_startup, which populates `_callbacks`), same
+    # fix applied to the synthetic fixtures in test_basic_open_session.py
+    # and test_token_exchange_backend.py.
+    auth.backends["BasicAuth"]._callbacks = None
+
     yield client
 
     # Teardown

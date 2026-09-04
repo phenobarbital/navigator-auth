@@ -36,6 +36,8 @@ This project is licensed under the terms of the BSD v3. and Apache 2 Dual licens
    
    api
    config
+   settings
+   token_exchange
    security
    changes
    changelog
