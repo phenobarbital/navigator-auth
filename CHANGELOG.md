@@ -1,5 +1,29 @@
 # Unreleased
 
+- **Abstract SAML 2.0 Backend — SP and IdP roles on `pysaml2` (0.26.0).**
+  **Breaking:** `python3-saml`/`xmlsec` are replaced by `pysaml2>=7.5,<8`;
+  the `xmlsec1` system binary is now required (was: the `xmlsec`
+  Python/libxml2 binding). `navigator_auth/backends/saml.py` is replaced by
+  the `navigator_auth/backends/saml/` package: `SAMLCore` (shared engine:
+  config building, executor-wrapped `pysaml2` calls, attribute mapping,
+  host-validated redirects, replay cache), `AbstractSAMLBackend` (the SP
+  role — SP-initiated and unsolicited login, ACS, Single Logout in both
+  directions) and `AbstractSAMLIdentityProvider` (the IdP role — env-
+  declared SP registry, IdP-initiated SSO, SP-initiated SSO with a parked-
+  request/no-session login detour, SLO; never authenticates, hidden from
+  `/api/v1/auth/methods`). Security parity with the OIDC backends: random
+  single-use `RelayState`, `InResponseTo` validation, an assertion-ID
+  replay cache TTL'd to `NotOnOrAfter`, `ALLOWED_HOSTS`-checked redirects
+  (the ADFS redirect validator is promoted to
+  `BaseAuthBackend.validate_redirect_host`, behavior-preserving),
+  persisted `SessionIndex`/`NameID` for SLO, and an audit event per issued
+  or rejected assertion. `SAMLAuth`'s import path, routes and
+  `SAML_MAPPING` semantics are unchanged; a `SAML_SETTINGS` JSON blob is
+  now translated by `translate_legacy_settings` (hard failure, naming
+  every key, on anything outside the documented translation table — see
+  the migration section in `documentation/saml.md`). See
+  `documentation/saml.md` and `docs/settings.rst`.
+
 - **Backend-Based Password Recovery (0.27.0).** A three-step, HMAC-signed
   self-service password recovery flow —
   `POST /api/v1/password-recovery` (request), `GET
