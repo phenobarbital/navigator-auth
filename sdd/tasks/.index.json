@@ -1157,7 +1157,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "high",
@@ -1168,7 +1168,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Joins the SP and IdP branches; touches backends/__init__.py and deletes the legacy module. Sequential after both roles.",
-    "file": "sdd/tasks/active/TASK-060-saml-generic-subclasses-migration.md"
+    "file": "sdd/tasks/completed/TASK-060-saml-generic-subclasses-migration.md",
+    "completed_at": "2026-09-04T23:39:28.033273Z"
   },
   {
     "id": "TASK-061",
