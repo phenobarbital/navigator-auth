@@ -1,5 +1,6 @@
-"""Tests for FEAT-097 Module 5 (part 1): AbstractSAMLIdentityProvider SP
-registry, metadata, IdP-initiated SSO, audit (TASK-058).
+"""Tests for FEAT-097 Module 5: AbstractSAMLIdentityProvider — SP
+registry, metadata, IdP-initiated SSO, audit (TASK-058); SP-initiated SSO,
+the no-session detour, and SLO (TASK-059).
 """
 import warnings
 from unittest.mock import MagicMock
@@ -45,7 +46,7 @@ class _FakeUser:
 
 
 @pytest.fixture
-def idp_backend():
+def idp_backend(force_https_scheme):
     backend = object.__new__(MinimalIdP)
     backend.logger = MagicMock()
     backend.core = SAMLCore(
@@ -55,7 +56,28 @@ def idp_backend():
         logger=backend.logger,
     )
     backend._sp_registry = backend._parse_service_providers()
+    backend._trust_registered_sps()
+    backend._flow_store = _FakeFlowStore()
     return backend
+
+
+class _FakeFlowStore:
+    """Dict-backed IdentityFlowStore double (single-use semantics)."""
+
+    def __init__(self):
+        self.storage = {}
+
+    async def set(self, key, payload, ttl):
+        self.storage[key] = dict(payload)
+
+    async def get(self, key):
+        return self.storage.get(key)
+
+    async def getdel(self, key):
+        return self.storage.pop(key, None)
+
+    def keys(self):
+        return self.storage.keys()
 
 
 _UNSET = object()
@@ -231,3 +253,234 @@ def test_idp_backend_exports():
     from navigator_auth.backends.saml import AbstractSAMLIdentityProvider as _AbstractIdP
 
     assert _AbstractIdP is AbstractSAMLIdentityProvider
+
+
+# ---------------------------------------------------------------------------
+# TASK-059: SP-initiated SSO (with/without session), signed AuthnRequest,
+# RelayState validation, SLO.
+# ---------------------------------------------------------------------------
+
+SP_KEY = "tests/fixtures/saml/sp.key"
+SP_CERT = "tests/fixtures/saml/sp.crt"
+
+
+@pytest.fixture
+def sp_client_for_idp(force_https_scheme):
+    """A real `pysaml2` SP client trusting the committed IdP metadata
+    fixture, entity/ACS matching MinimalIdP's registered "acme" SP —
+    stands in for the external SP sending AuthnRequests/LogoutRequests."""
+    from navigator_auth.backends.saml import SAMLCore
+
+    core = SAMLCore(
+        prefix="SAML",
+        settings={
+            "key_file": SP_KEY,
+            "cert_file": SP_CERT,
+            "metadata": {"local": ["tests/fixtures/saml/idp-metadata.xml"]},
+        },
+        role="sp",
+        logger=None,
+    )
+    return core
+
+
+@pytest.fixture
+def authn_request(sp_client_for_idp):
+    """Factory: `(encoded_request, relay_state, request_id)` for the
+    Redirect binding, optionally signed with the SP's own key."""
+
+    def _factory(relay_state: str = f"{SCHEME}://sp.example.com/after", sign: bool = False):
+        from urllib.parse import parse_qs, urlparse
+
+        from saml2 import BINDING_HTTP_REDIRECT
+        from saml2.client import Saml2Client
+
+        # Synchronous (like pysaml2's own API): building the client and
+        # request doesn't need an event loop, and this fixture is called
+        # directly from already-running async test bodies.
+        cnf = sp_client_for_idp._load_sp_config(f"{SCHEME}://sp.example.com")
+        client = Saml2Client(config=cnf)
+        req_id, info = client.prepare_for_authenticate(
+            relay_state=relay_state, binding=BINDING_HTTP_REDIRECT, sign=sign
+        )
+        headers = dict(info["headers"])
+        qs = parse_qs(urlparse(headers["Location"]).query)
+        return (
+            qs["SAMLRequest"][0],
+            qs.get("RelayState", [None])[0],
+            qs.get("SigAlg", [None])[0],
+            qs.get("Signature", [None])[0],
+            req_id,
+        )
+
+    return _factory
+
+
+def _sso_url(query: dict) -> str:
+    from urllib.parse import urlencode
+
+    return f"{SCHEME}://idp.example.com/auth/saml-idp/sso?{urlencode(query)}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.xmlsec
+async def test_idp_sso_sp_initiated_with_session(idp_backend, authn_request, authed_request):
+    encoded_req, relay_state, sigalg, signature, req_id = authn_request()
+    query = {"SAMLRequest": encoded_req, "RelayState": relay_state}
+    request = make_mocked_request(
+        "GET", _sso_url(query), headers={"Host": "idp.example.com"}
+    )
+    request.user = _FakeUser()
+    resp = await idp_backend.sso(request)
+    assert resp.status == 200
+    assert 'name="SAMLResponse"' in resp.text
+    last_info = idp_backend.logger.info.call_args[0][0]
+    assert "saml.assertion.issued" in last_info
+
+    # InResponseTo on the issued assertion matches the AuthnRequest's ID.
+    import base64
+    import re
+
+    b64 = re.search(r'name="SAMLResponse" value="([^"]+)"', resp.text).group(1)
+    import html
+
+    xml = base64.b64decode(html.unescape(b64)).decode("utf-8")
+    assert f'InResponseTo="{req_id}"' in xml
+
+
+@pytest.mark.asyncio
+@pytest.mark.xmlsec
+async def test_idp_sso_no_session_detour(idp_backend, authn_request):
+    encoded_req, relay_state, _sigalg, _signature, req_id = authn_request()
+    query = {"SAMLRequest": encoded_req, "RelayState": relay_state}
+    request = make_mocked_request(
+        "GET", _sso_url(query), headers={"Host": "idp.example.com"}
+    )
+    request.user = None
+    resp = await idp_backend.sso(request)
+    assert resp.status == 302
+    # The parked-flow resume URL ("sso?flow=<id>") travels percent-encoded
+    # as this login redirect's own `redirect_uri` query value.
+    from urllib.parse import parse_qs, urlparse
+
+    login_qs = parse_qs(urlparse(resp.headers["Location"]).query)
+    resume_url = login_qs["redirect_uri"][0]
+    assert "sso?flow=" in resume_url
+    assert sum(1 for k in idp_backend._flow_store.keys() if k.startswith("saml_idp_")) == 1
+
+    # Resume: the parked flow is single-use (GETDEL).
+    flow_id = resume_url.split("sso?flow=")[1]
+    resume_request = make_mocked_request(
+        "GET", _sso_url({"flow": flow_id}), headers={"Host": "idp.example.com"}
+    )
+    resume_request.user = _FakeUser()
+    resumed = await idp_backend.sso(resume_request)
+    assert resumed.status == 200
+    assert 'name="SAMLResponse"' in resumed.text
+
+    # Second hit on the same flow fails (already consumed).
+    replay_request = make_mocked_request(
+        "GET", _sso_url({"flow": flow_id}), headers={"Host": "idp.example.com"}
+    )
+    replay_request.user = _FakeUser()
+    replayed = await idp_backend.sso(replay_request)
+    assert replayed.status == 400
+    assert "SAML_STALE_REQUEST" in replayed.text
+
+
+@pytest.mark.asyncio
+async def test_idp_sso_signed_authn_request_missing_signature_rejected(idp_backend, authn_request):
+    """`sp.want_signed_authn_request=True` and no Signature/SigAlg on the
+    request -> rejected, no assertion issued."""
+    idp_backend._sp_registry["acme"] = ServiceProviderConfig(
+        sp_id="acme",
+        entity_id=f"{SCHEME}://sp.example.com/auth/saml/metadata",
+        acs_url=f"{SCHEME}://sp.example.com/auth/saml/callback/",
+        want_signed_authn_request=True,
+    )
+    encoded_req, relay_state, _sigalg, _signature, _req_id = authn_request(sign=False)
+    query = {"SAMLRequest": encoded_req, "RelayState": relay_state}
+    request = make_mocked_request(
+        "GET", _sso_url(query), headers={"Host": "idp.example.com"}
+    )
+    request.user = _FakeUser()
+    resp = await idp_backend.sso(request)
+    assert resp.status == 400
+    assert "SAML_INVALID_AUTHN_REQUEST" in resp.text
+    idp_backend.logger.info.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.xmlsec
+async def test_idp_relaystate_validation(idp_backend, authed_request):
+    """RelayState must match the SP's ACS host or `allowed_relay_hosts`;
+    an off-host value is dropped (assertion is still issued)."""
+    resp = await idp_backend.initiate(authed_request(sp_id="acme"))
+    assert resp.status == 200
+    # Off-host RelayState never reaches issue_assertion's form.
+    idp_backend.logger.reset_mock()
+    from aiohttp.test_utils import make_mocked_request as _mmr
+
+    request = _mmr(
+        "GET",
+        f"{SCHEME}://idp.example.com/auth/saml-idp/initiate/acme?RelayState=https://evil.test/steal",
+        headers={"Host": "idp.example.com"},
+        match_info={"sp_id": "acme"},
+    )
+    request.user = _FakeUser()
+    resp2 = await idp_backend.initiate(request)
+    assert resp2.status == 200
+    assert "evil.test" not in resp2.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.xmlsec
+async def test_idp_slo_inbound_logout_request(idp_backend, sp_client_for_idp):
+    from saml2 import BINDING_HTTP_REDIRECT
+    from saml2.saml import NameID
+
+    idp_backend._sp_registry["acme"] = ServiceProviderConfig(
+        sp_id="acme",
+        entity_id=f"{SCHEME}://sp.example.com/auth/saml/metadata",
+        acs_url=f"{SCHEME}://sp.example.com/auth/saml/callback/",
+        slo_url=f"{SCHEME}://sp.example.com/auth/saml/logout",
+    )
+    idp_backend._trust_registered_sps()
+    sp_client = await sp_client_for_idp.sp_client(f"{SCHEME}://sp.example.com")
+    name_id = NameID(
+        format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+        text="u@x.com",
+        name_qualifier=f"{SCHEME}://idp.example.com/auth/saml-idp/metadata",
+        sp_name_qualifier=sp_client.config.entityid,
+    )
+    req_id, logout_req = sp_client.create_logout_request(
+        f"{SCHEME}://idp.example.com/auth/saml-idp/slo",
+        f"{SCHEME}://idp.example.com/auth/saml-idp/metadata",
+        name_id=name_id,
+        session_indexes=["idx-1"],
+    )
+    req_info = sp_client.apply_binding(
+        BINDING_HTTP_REDIRECT, str(logout_req), f"{SCHEME}://idp.example.com/auth/saml-idp/slo", ""
+    )
+    from urllib.parse import parse_qs, urlparse
+
+    qs = parse_qs(urlparse(dict(req_info["headers"])["Location"]).query)
+    encoded_request = qs["SAMLRequest"][0]
+
+    request = make_mocked_request(
+        "GET", _sso_url({"SAMLRequest": encoded_request}).replace("/sso?", "/slo?"),
+        headers={"Host": "idp.example.com"},
+    )
+    resp = await idp_backend.slo(request)
+    assert resp.status == 302
+    assert "SAMLResponse=" in resp.headers["Location"]
+
+
+@pytest.mark.asyncio
+async def test_idp_slo_unregistered_sp_rejected(idp_backend):
+    request = make_mocked_request(
+        "GET", _sso_url({}).replace("/sso?", "/slo"), headers={"Host": "idp.example.com"}
+    )
+    resp = await idp_backend.slo(request)
+    assert resp.status == 400
+    assert "SAML_SLO_FAILED" in resp.text

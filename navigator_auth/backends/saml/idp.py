@@ -7,26 +7,31 @@ env-registered SPs (`ServiceProviderConfig`). Loaded through the same
 it defines no `auth_middleware`, sets `_external_auth = False`, and hides
 itself from the auth-methods listing (`hidden = True`).
 
-This module (TASK-058) covers the registry, IdP metadata, and the
-IdP-initiated flow (`initiate`/`issue_assertion`). SP-initiated `sso` and
-`slo` are TASK-059 (placeholders here raise 501).
+This module covers the registry, IdP metadata, and both SSO directions
+(IdP-initiated: `initiate`/`issue_assertion`, TASK-058; SP-initiated:
+`sso` with the no-session detour, and `slo`, TASK-059).
 """
 import asyncio
+import secrets
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import quote
 
 import redis.asyncio as aioredis
 from aiohttp import web
 
 from ...conf import (
     AUTH_EXCLUDE_LIST_KEY,
+    AUTH_LOGIN_FAILED_URI,
     REDIS_AUTH_URL,
+    SAML_FLOW_TTL,
     SAML_IDP_REQUIRE_AUTH_METHODS,
 )
 from ...exceptions import ConfigError
 from ...identity.flow_store import IdentityFlowStore
 from .core import SAMLCore
+from .errors import SAMLError, map_pysaml2_error
 from .types import SAMLKeyPair, ServiceProviderConfig
 
 from ..abstract import BaseAuthBackend
@@ -71,7 +76,7 @@ class AbstractSAMLIdentityProvider(BaseAuthBackend, ABC):
             name=f"{self._service_name}_metadata",
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(f"/auth/{self._service_name}/metadata")
-        # TASK-059 placeholders.
+        # SP-initiated SSO / SLO — both check the session themselves.
         router.add_route(
             "*",
             f"/auth/{self._service_name}/sso",
@@ -91,10 +96,50 @@ class AbstractSAMLIdentityProvider(BaseAuthBackend, ABC):
         self.core.check_xmlsec()
         self.core.load_keypair(self.get_keypair())
         self._sp_registry = self._parse_service_providers()
+        self._trust_registered_sps()
         self._pool = aioredis.ConnectionPool.from_url(
             REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
         )
         self._flow_store = IdentityFlowStore(self._pool)
+
+    def _trust_registered_sps(self) -> None:
+        """Feed pysaml2 minimal, generated inline metadata for every
+        registered `ServiceProviderConfig` (ACS, SLO, optional cert). The
+        registry is a plain dataclass, not real SP metadata, but pysaml2's
+        entity-level helpers (`response_args`/`pick_binding`, AuthnRequest
+        signature checks) always resolve destinations/certs through
+        `self.metadata` — never `None` when there's anything to trust."""
+        if not self._sp_registry:
+            return
+        inline = [self._sp_metadata_xml(sp) for sp in self._sp_registry.values()]
+        settings = dict(self.core.settings or {})
+        metadata = dict(settings.get("metadata") or {})
+        metadata["inline"] = [*metadata.get("inline", []), *inline]
+        settings["metadata"] = metadata
+        self.core.settings = settings
+
+    @staticmethod
+    def _sp_metadata_xml(sp: ServiceProviderConfig) -> str:
+        from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT
+        from saml2.config import SPConfig
+        from saml2.metadata import entity_descriptor
+
+        endpoints = {
+            "assertion_consumer_service": [(sp.acs_url, BINDING_HTTP_POST)],
+        }
+        if sp.slo_url:
+            endpoints["single_logout_service"] = [
+                (sp.slo_url, BINDING_HTTP_REDIRECT),
+                (sp.slo_url, BINDING_HTTP_POST),
+            ]
+        cnf: dict = {
+            "entityid": sp.entity_id,
+            "service": {"sp": {"endpoints": endpoints}},
+        }
+        if sp.sp_cert_file:
+            cnf["cert_file"] = sp.sp_cert_file
+        spcnf = SPConfig().load(cnf)
+        return str(entity_descriptor(spcnf))
 
     async def on_cleanup(self, app: web.Application):
         self.core.shutdown()
@@ -257,14 +302,196 @@ class AbstractSAMLIdentityProvider(BaseAuthBackend, ABC):
             f"remote={getattr(request, 'remote', None)}"
         )
 
+    def _error_response(self, error: str, message: str, status: int = 400) -> web.Response:
+        """`BaseAuthBackend` (unlike `ExternalAuth`) has no home/login page
+        of its own to redirect to; SSO/SLO errors are plain responses."""
+        return web.Response(status=status, text=f"{error}: {message}")
+
+    def _find_sp_by_entity_id(self, entity_id: str) -> Optional[ServiceProviderConfig]:
+        for sp in self._sp_registry.values():
+            if sp.entity_id == entity_id:
+                return sp
+        return None
+
+    def _relay_state_for(self, sp: ServiceProviderConfig, raw_relay_state: Optional[str]) -> Optional[str]:
+        from urllib.parse import urlparse
+
+        extra_hosts = list(sp.allowed_relay_hosts)
+        acs_host = urlparse(sp.acs_url).netloc
+        if acs_host:
+            extra_hosts.append(acs_host)
+        return self.validate_redirect_host(raw_relay_state, extra_hosts=extra_hosts)
+
     # ------------------------------------------------------------------
-    # SP-initiated SSO / SLO — TASK-059
+    # SP-initiated SSO (TASK-059)
     # ------------------------------------------------------------------
     async def sso(self, request: web.Request) -> web.Response:
-        raise web.HTTPNotImplemented(reason="SAML SP-initiated SSO is implemented in TASK-059")
+        domain_url = self.get_domain(request)
+        qs = self.queryparams(request) or {}
 
+        # Resume path: browser came back from login with a parked flow.
+        flow_id = qs.get("flow")
+        if flow_id:
+            flow = await self._flow_store.getdel(self.core.idp_key(flow_id))
+            if not flow:
+                return self._error_response("SAML_STALE_REQUEST", "This SSO request has expired")
+            sp = self._sp_registry.get(flow["sp_id"])
+            if sp is None:
+                return self._error_response("SAML_UNKNOWN_SP", "Unknown Service Provider", status=404)
+            user = getattr(request, "user", None)
+            if not user or not getattr(user, "is_authenticated", False):
+                return self._error_response("SAML_NOT_AUTHENTICATED", "Login required", status=401)
+            if not await self.authorize_sp_access(request, user, sp):
+                self._audit_sp_forbidden(request, sp, user)
+                raise self.ForbiddenAccess(reason="SAML_SP_FORBIDDEN")
+            relay = self._relay_state_for(sp, flow.get("relay_state"))
+            return await self.issue_assertion(
+                request, sp, user, in_response_to=flow.get("request_id"), relay_state=relay
+            )
+
+        # Fresh AuthnRequest.
+        if request.method == "POST":
+            post_data = dict(await request.post())
+            from saml2 import BINDING_HTTP_POST as binding
+
+            saml_request = post_data.get("SAMLRequest")
+            relay_state = post_data.get("RelayState")
+            sigalg = None
+            signature = None
+        else:
+            from saml2 import BINDING_HTTP_REDIRECT as binding
+
+            saml_request = qs.get("SAMLRequest")
+            relay_state = qs.get("RelayState")
+            sigalg = qs.get("SigAlg")
+            signature = qs.get("Signature")
+
+        if not saml_request:
+            return self._error_response("SAML_INVALID_AUTHN_REQUEST", "Missing SAMLRequest")
+
+        try:
+            server = await self.core.idp_server(domain_url)
+            req_info = await self.core.run(
+                server.parse_authn_request, saml_request, binding, relay_state, sigalg, signature
+            )
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"{self._service_name}: could not parse AuthnRequest: {err}")
+            saml_err = err if isinstance(err, SAMLError) else map_pysaml2_error(err)
+            return self._error_response("SAML_INVALID_AUTHN_REQUEST", "Invalid AuthnRequest")
+
+        authn_req = req_info.message
+        sp = self._find_sp_by_entity_id(authn_req.issuer.text)
+        if sp is None:
+            # 404, generic body: never reveal which SPs exist.
+            raise web.HTTPNotFound(reason="SAML_UNKNOWN_SP")
+
+        if sp.want_signed_authn_request and not (sigalg and signature):
+            return self._error_response(
+                "SAML_INVALID_AUTHN_REQUEST",
+                "This Service Provider requires signed AuthnRequests",
+            )
+
+        user = getattr(request, "user", None)
+        if not user or not getattr(user, "is_authenticated", False):
+            # Park the request and detour through login.
+            flow_id = secrets.token_urlsafe(32)
+            await self._flow_store.set(
+                self.core.idp_key(flow_id),
+                {
+                    "sp_id": sp.sp_id,
+                    "request_id": authn_req.id,
+                    "acs_url": getattr(authn_req, "assertion_consumer_service_url", None)
+                    or sp.acs_url,
+                    "relay_state": relay_state,
+                },
+                ttl=SAML_FLOW_TTL,
+            )
+            resume_url = f"{domain_url}/auth/{self._service_name}/sso?flow={quote(flow_id)}"
+            login_url = f"{domain_url}{AUTH_LOGIN_FAILED_URI}?redirect_uri={quote(resume_url)}"
+            return web.HTTPFound(login_url)
+
+        if not await self.authorize_sp_access(request, user, sp):
+            self._audit_sp_forbidden(request, sp, user)
+            raise self.ForbiddenAccess(reason="SAML_SP_FORBIDDEN")
+
+        relay = self._relay_state_for(sp, relay_state)
+        return await self.issue_assertion(
+            request, sp, user, in_response_to=authn_req.id, relay_state=relay
+        )
+
+    # ------------------------------------------------------------------
+    # SP-initiated SLO (TASK-059)
+    # ------------------------------------------------------------------
     async def slo(self, request: web.Request) -> web.Response:
-        raise web.HTTPNotImplemented(reason="SAML IdP-side SLO is implemented in TASK-059")
+        domain_url = self.get_domain(request)
+        if request.method == "POST":
+            post_data = dict(await request.post())
+            from saml2 import BINDING_HTTP_POST as binding
+
+            saml_request = post_data.get("SAMLRequest")
+            relay_state = post_data.get("RelayState")
+        else:
+            from saml2 import BINDING_HTTP_REDIRECT as binding
+
+            qs = self.queryparams(request) or {}
+            saml_request = qs.get("SAMLRequest")
+            relay_state = qs.get("RelayState")
+
+        if not saml_request:
+            return web.Response(status=400, text="SAML_SLO_FAILED: missing SAMLRequest")
+
+        try:
+            server = await self.core.idp_server(domain_url)
+            req_info = await self.core.run(server.parse_logout_request, saml_request, binding)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"{self._service_name}: could not parse LogoutRequest: {err}")
+            return web.Response(status=400, text="SAML_SLO_FAILED: invalid LogoutRequest")
+
+        logout_req = req_info.message
+        sp = self._find_sp_by_entity_id(logout_req.issuer.text)
+        if sp is None:
+            return web.Response(status=400, text="SAML_SLO_FAILED: unknown Service Provider")
+        if not sp.slo_url:
+            return web.Response(status=400, text="SAML_SLO_FAILED: SP has no slo_url configured")
+
+        # Best-effort: clear this request's own session if present.
+        try:
+            from navigator_session import get_session
+
+            session = await get_session(request, new=False)
+            if session is not None:
+                session.invalidate()
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"{self._service_name}: could not invalidate local session: {err}")
+
+        try:
+            # Not `server.response_args()`: that resolves the reply
+            # binding/destination from pysaml2's own metadata store, which
+            # is never populated for our env-declared `ServiceProviderConfig`
+            # registry (no real SP metadata is loaded into the IdP config).
+            # Reply on the same binding the request arrived on, to the SP's
+            # declared `slo_url`.
+            logout_resp = await self.core.run(
+                server.create_logout_response, logout_req, [binding]
+            )
+            resp_info = await self.core.run(
+                server.apply_binding,
+                binding,
+                str(logout_resp),
+                sp.slo_url,
+                relay_state or "",
+                response=True,
+            )
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"{self._service_name}: could not build LogoutResponse: {err}")
+            return web.Response(status=400, text="SAML_SLO_FAILED: could not build LogoutResponse")
+
+        headers = dict(resp_info.get("headers") or [])
+        if "Location" in headers:
+            return web.HTTPFound(headers["Location"])
+        data = resp_info.get("data")
+        html = data if isinstance(data, str) else "".join(data or [])
+        return web.Response(text=html, content_type="text/html")
 
     # ------------------------------------------------------------------
     # Provider hooks
