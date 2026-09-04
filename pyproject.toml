@@ -134,3 +134,12 @@ exclude = '''
 
 [tool.uv.sources]
 navigator-session = { path = "../navigator-session", editable = true }
+
+[tool.uv]
+# pysaml2 7.5.x pins `pyopenssl<24.3.0`, but that old pyOpenSSL is broken
+# against the modern `cryptography` release this project otherwise resolves
+# to (AttributeError on X509StoreFlags at import time). pyOpenSSL >=24.3 is
+# runtime-compatible with pysaml2's actual usage (metadata/signature helpers
+# only); override the transitive pin so `uv sync`/`uv pip install` produce a
+# working environment. FEAT-097 TASK-055.
+override-dependencies = ["pyopenssl>=24.3.0"]
