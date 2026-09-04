@@ -1,0 +1,99 @@
+name: Lint
+
+on:
+  pull_request:
+    branches: [ main, dev ]
+  push:
+    branches: [ main, dev ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint changed files
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # darker needs the base commit present to diff against.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      # The linters run standalone via uvx: `uv sync` cannot work on a runner
+      # because uv.lock pins navigator-session to the editable path
+      # ../navigator-session, which does not exist outside a dev checkout.
+      - name: Collect changed Python files
+        id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="$PR_BASE_SHA"
+          else
+            base="$PUSH_BEFORE_SHA"
+          fi
+          # New branches report an all-zero / unreachable "before" SHA.
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="$(git rev-parse HEAD~1)"
+          fi
+          git diff --name-only --diff-filter=ACMR "$base" HEAD -- navigator_auth \
+            | grep -E '\.py$' > changed_files.txt || true
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "count=$(wc -l < changed_files.txt)" >> "$GITHUB_OUTPUT"
+          echo "Base: $base"
+          echo "Changed Python files:"
+          cat changed_files.txt
+
+      - name: Check formatting (black, changed lines only)
+        if: steps.changed.outputs.count != '0'
+        env:
+          BASE: ${{ steps.changed.outputs.base }}
+        run: |
+          uvx --with 'black>=26,<27' --from 'darker>=3,<4' darker \
+            --check --diff --revision "$BASE" -- navigator_auth || {
+            echo "::error::Lines you changed are not black-formatted."
+            echo "Fix locally (rewrites only your changed lines):"
+            echo "  uvx --with black --from darker darker --revision origin/dev navigator_auth"
+            exit 1
+          }
+
+      # graylint runs flake8 but reports only messages landing on changed lines,
+      # so pre-existing E302/C901 debt in a touched file does not block the PR.
+      - name: flake8 (changed lines only)
+        if: steps.changed.outputs.count != '0'
+        env:
+          BASE: ${{ steps.changed.outputs.base }}
+        run: |
+          uvx --with 'flake8>=7,<8' --from 'graylint>=2,<3' graylint \
+            --lint flake8 --revision "$BASE" -- navigator_auth
+
+      # .pylintrc already silences import-error/no-name-in-module; the Cython and
+      # Rust extensions are not built here, so c-extension-no-member is off too.
+      # Style and refactor hints are reported but only E/F fail the job.
+      - name: pylint (errors only)
+        if: steps.changed.outputs.count != '0'
+        run: |
+          xargs -r -a changed_files.txt uvx --from 'pylint>=4,<5' pylint \
+            --rcfile .pylintrc \
+            --fail-under=0 \
+            --fail-on=E,F \
+            --disable=c-extension-no-member \
+            --
