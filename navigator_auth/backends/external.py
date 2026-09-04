@@ -340,19 +340,31 @@ class ExternalAuth(BaseAuthBackend):
     async def auth_callback(self, request: web.Request):
         """auth_callback, Finish method for authentication."""
 
+    async def get_callback_state(self, request: web.Request) -> Optional[str]:
+        """Return the OAuth2 ``state`` (or SAML ``RelayState``) identifying
+        an in-flight identity-link flow for this callback request.
+
+        Default: the query ``state`` param, unchanged for every OIDC/OAuth2
+        backend. FEAT-097's `AbstractSAMLBackend` overrides this — its ACS
+        callback is a POST and the flow key (``RelayState``) arrives in the
+        form body instead of the query string.
+        """
+        return request.rel_url.query.get("state")
+
     async def _auth_callback_dispatch(self, request: web.Request):
         """Route the provider callback to the right flow.
 
         The identity-link flow shares the provider's registered callback
         URL with the login flow; a single-use Redis record keyed by the
-        OAuth2 ``state`` distinguishes them.
+        OAuth2 ``state`` (or SAML ``RelayState``, via `get_callback_state`)
+        distinguishes them.
 
         FEAT-095 TASK-041 adds a third outcome: when this login was a detour
         taken on behalf of the OAuth2 authorization server, the browser is
         sent back to ``/oauth2/authorize`` to resume the parked request
         instead of to ``home_redirect``.
         """
-        state = request.rel_url.query.get("state")
+        state = await self.get_callback_state(request)
         if state:
             flow = await self._flow_store.consume_link(state)
             if flow:

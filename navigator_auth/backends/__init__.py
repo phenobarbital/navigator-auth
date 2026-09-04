@@ -15,8 +15,13 @@ from .azure import AzureAuth
 from .github import GithubAuth
 from .odoo import OdooAuth
 from .oauth2 import Oauth2Provider
-from .saml import SAMLAuth
 from .exchange import TokenExchangeAuth
+from .saml import (
+    AbstractSAMLBackend,
+    AbstractSAMLIdentityProvider,
+    SAMLAuth,
+    SAMLIdentityProvider,
+)
 
 
 __all__ = (
@@ -34,5 +39,8 @@ __all__ = (
     "OdooAuth",
     "Oauth2Provider",
     "SAMLAuth",
+    "AbstractSAMLBackend",
+    "AbstractSAMLIdentityProvider",
+    "SAMLIdentityProvider",
     "TokenExchangeAuth",
 )

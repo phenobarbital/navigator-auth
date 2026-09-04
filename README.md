@@ -45,7 +45,8 @@ the backend's class name):
 | `GithubAuth` | GitHub OAuth2 | |
 | `ADFSAuth` | Microsoft ADFS (OIDC) | |
 | `OktaAuth` | Okta | |
-| `SAMLAuth` | SAML 2.0 (SP and IdP) | |
+| `SAMLAuth` | SAML 2.0 Service Provider | Delegates login to an external IdP (Okta, Entra ID, a partner IdP). See the "SAML Authentication" documentation page. |
+| `SAMLIdentityProvider` | SAML 2.0 Identity Provider | Issues signed assertions for the current session to registered external SPs (e.g. Verizon Connect); never appears in `X-Auth-Method`/`/api/v1/auth/methods` (`hidden = True`) since it never authenticates a login itself. |
 | `Oauth2Provider` | Navigator-as-OAuth2-Authorization-Server | For MCP/AI-agent and 3rd-party client flows. |
 
 ### License ###

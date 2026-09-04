@@ -18,6 +18,90 @@ Settings for the ``TokenExchangeAuth`` backend (see :doc:`token_exchange`).
    ``_service_name``) or exchange requests for it are rejected with
    ``400``.
 
+SAML 2.0 (FEAT-097)
+---------------------
+
+Settings for the abstract SAML SP/IdP roles (see :doc:`../documentation/saml`).
+Every key below is resolved under a subclass's own ``config_prefix`` first
+(default ``SAML`` for the SP role, ``SAML_IDP`` for the IdP role), falling
+back to the ``SAML_*`` name shown.
+
+**Shared (both roles)**
+
+``SAML_XMLSEC_BINARY``
+   Path to the ``xmlsec1`` binary. Auto-detected via ``PATH`` when unset;
+   startup fails fast with a clear message if neither resolves.
+
+``SAML_CLOCK_SKEW``
+   Integer, seconds. Tolerance on assertion/response time conditions.
+   Default ``60``.
+
+``SAML_FLOW_TTL``
+   Integer, seconds. Redis TTL for request/logout/pending-SSO flow
+   records. Default ``600``.
+
+``SAML_EXECUTOR_WORKERS``
+   Integer. Size of the bounded executor every blocking ``pysaml2``/
+   ``xmlsec1`` call runs through. Default ``4``.
+
+**SP role** (``SAMLAuth``)
+
+``SAML_METADATA``
+   Path or URL to the IdP's metadata XML. No default; see
+   :doc:`../documentation/saml` for the ``SAML_PATH`` fallback chain.
+
+``SAML_PATH``
+   Legacy cert/settings directory (kept for the ``python3-saml``
+   migration fallback and for ``SAML_SP_KEY_FILE``/``SAML_SP_CERT_FILE``
+   discovery conventions).
+
+``SAML_SETTINGS``
+   Optional JSON. Legacy ``python3-saml`` settings, translated via
+   ``translate_legacy_settings``; unknown keys fail startup naming them.
+
+``SAML_MAPPING``
+   SAML attribute → user field mapping (existing key, unchanged shape).
+
+``SAML_SP_KEY_FILE`` / ``SAML_SP_CERT_FILE``
+   Optional SP key pair (``AuthnRequest`` signing, assertion decryption).
+
+``SAML_BINDING``
+   ``redirect`` (default) or ``post``. ``AuthnRequest`` binding.
+
+``SAML_ALLOW_UNSOLICITED``
+   Boolean. Accept IdP-initiated (unsolicited) responses. Default
+   ``true``.
+
+``SAML_WANT_ASSERTIONS_SIGNED`` / ``SAML_WANT_RESPONSE_SIGNED``
+   Boolean. Signature requirements on the inbound assertion/response.
+   Defaults ``true`` / ``false``.
+
+``SAML_METADATA_RELOAD``
+   Integer, seconds. IdP metadata reload interval; ``0`` disables.
+   Default ``3600``.
+
+**IdP role** (``SAMLIdentityProvider``)
+
+``SAML_IDP_KEY_FILE`` / ``SAML_IDP_CERT_FILE`` / ``SAML_IDP_KEY_PASSPHRASE``
+   Signing key pair. Required for the IdP role; startup fails without
+   both file paths.
+
+``SAML_IDP_ENTITY_ID``
+   Override the IdP's own entity ID. Default
+   ``{domain}/auth/saml-idp/metadata``.
+
+``SAML_IDP_SERVICE_PROVIDERS``
+   JSON list of registered SP entries (``sp_id``, ``entity_id``,
+   ``acs_url``, and the other ``ServiceProviderConfig`` fields). Default
+   ``[]``.
+
+``SAML_IDP_SETTINGS``
+   Optional JSON ``pysaml2`` overrides for the IdP role.
+
+``SAML_IDP_REQUIRE_AUTH_METHODS``
+   JSON list. If set, only sessions whose ``auth_method`` is listed may
+   receive assertions. Default ``[]`` (no restriction).
+
 Backend-Based Password Recovery (FEAT-098)
 --------------------------------------------
 
