@@ -14,6 +14,7 @@ from navigator_auth.handlers.recovery.store import (
     _hash_token,
 )
 from navigator_auth.handlers.recovery.limiter import RateLimiter
+from navigator_auth.handlers.recovery.revoke import SessionRevoker
 from navigator_auth.libs.json import json_encoder, json_decoder
 from navigator_auth.models import User
 
@@ -297,6 +298,157 @@ class TestRateLimiter:
         import asyncio
         await asyncio.sleep(1.1)
         assert await rl.check("expiring@b.c") is True
+
+
+@pytest.fixture
+def idp():
+    from navigator_auth.backends.idp import IdentityProvider
+
+    provider = IdentityProvider()
+    # Reset the class-level registry cache between tests (mirrors the
+    # pattern in tests/test_oauth2_jwks.py).
+    IdentityProvider._key_registry = None
+    yield provider
+    IdentityProvider._key_registry = None
+
+
+@pytest.fixture
+def revoker(redis_pool):
+    return SessionRevoker(redis_pool)
+
+
+@pytest_asyncio.fixture
+async def access_token_storage():
+    """A real AccessTokenStorage, closed at teardown.
+
+    AccessTokenStorage opens its own redis.asyncio client independent of
+    the `redis_pool` fixture's ConnectionPool; leaving it unclosed hangs
+    pytest-asyncio's per-test asyncio.Runner.close() at teardown.
+    """
+    from navigator_auth.backends.oauth2.code_backend import AccessTokenStorage
+
+    storage = AccessTokenStorage()
+    yield storage
+    await storage.redis.aclose()
+
+
+class TestJTI:
+    """Module 5 — jti emission on Basic/OAuth2 JWTs."""
+
+    # Pre-existing environment limitation (see tests/test_basic_open_session.py):
+    # the dev/test SECRET_KEY is shorter than PyJWT's recommended HMAC key
+    # length. Not in scope for FEAT-098.
+    pytestmark = pytest.mark.filterwarnings(
+        "ignore::jwt.warnings.InsecureKeyLengthWarning"
+    )
+
+    def test_create_token_emits_jti(self, idp):
+        tok, _, _, _ = idp.create_token(data={"user_id": 1})
+        _, payload = idp.decode_token(tok)
+        assert "jti" in payload
+        tok2, _, _, _ = idp.create_token(data={"user_id": 1})
+        assert idp.decode_token(tok2)[1]["jti"] != payload["jti"]
+
+    def test_caller_cannot_inject_jti(self, idp):
+        tok, _, _, _ = idp.create_token(data={"user_id": 1, "jti": "attacker"})
+        assert idp.decode_token(tok)[1]["jti"] != "attacker"
+
+    @pytest.mark.asyncio
+    async def test_jti_absent_token_still_valid(self):
+        """A pre-upgrade JWT with no jti must keep working."""
+        import logging
+        from navigator_auth.auth import AuthHandler
+
+        fake_self = SimpleNamespace(backends={}, logger=logging.getLogger("test"))
+        payload = {"user_id": 1}          # minted the old way, no jti
+        assert await AuthHandler._token_is_revoked(fake_self, payload) is False
+
+
+class TestSessionRevoker:
+    """Module 5 — SessionRevoker, against a real Redis instance."""
+
+    @pytest.mark.asyncio
+    async def test_revoker_kills_session_and_index(self, revoker, redis):
+        username = "revoker_test_user"
+        session_id = "revoker-test-session-id"
+        await redis.set(f"session:{session_id}", "opaque-session-data")
+        await redis.set(f"user:{username}", session_id)
+
+        user = SimpleNamespace(user_id=None, username=username)
+        count = await revoker.revoke_user(None, user)
+
+        assert count == 2
+        assert await redis.get(f"session:{session_id}") is None
+        assert await redis.get(f"user:{username}") is None
+
+    @pytest.mark.asyncio
+    async def test_revoker_revokes_jwt(self, revoker, redis_pool, access_token_storage):
+        from datetime import datetime, timedelta
+        from uuid import uuid4
+        from navigator_auth.backends.oauth2.models import OauthAccessTokenRecord
+
+        storage = access_token_storage
+        user_id = 837465
+        jti = str(uuid4())
+        record = OauthAccessTokenRecord(
+            jti=jti, user_id=user_id, client_id="basic",
+            expires_at=datetime.now() + timedelta(hours=1),
+        )
+        await storage.save(record)
+
+        key = f"auth:user:jti:{user_id}"
+        async with aioredis.Redis(connection_pool=redis_pool) as r:
+            await r.sadd(key, jti)
+
+        fake_backend = SimpleNamespace(access_token_storage=storage)
+        fake_auth = SimpleNamespace(backends={"BasicAuth": fake_backend})
+        fake_request = SimpleNamespace(app={"auth": fake_auth})
+        user = SimpleNamespace(user_id=user_id, username=None)
+
+        count = await revoker.revoke_user(fake_request, user)
+        assert count == 1
+        assert await storage.is_revoked(jti) is True
+
+    @pytest.mark.asyncio
+    async def test_revocation_marker_outlives_token(self, redis, access_token_storage):
+        """TTL comes from the saved record, not the 3600s fallback."""
+        from datetime import datetime, timedelta
+        from uuid import uuid4
+        from navigator_auth.backends.oauth2.models import OauthAccessTokenRecord
+
+        storage = access_token_storage
+        jti = str(uuid4())
+        record = OauthAccessTokenRecord(
+            jti=jti, user_id=1, client_id="basic",
+            expires_at=datetime.now() + timedelta(hours=2),
+        )
+        await storage.save(record)
+        await storage.revoke(jti)
+        ttl = await redis.ttl(f"oauth2:jti:revoked:{jti}")
+        assert ttl > 3600  # not the flat fallback
+
+    @pytest.mark.asyncio
+    async def test_revoker_partial_failure(self, revoker, redis_pool, access_token_storage):
+        """One failing delete does not abort the rest; count reflects reality."""
+        from unittest.mock import AsyncMock
+
+        storage = access_token_storage
+        storage.revoke = AsyncMock(side_effect=[Exception("boom"), True])
+
+        user_id = 918273
+        jti1, jti2 = "jti-fail-case", "jti-ok-case"
+        key = f"auth:user:jti:{user_id}"
+        async with aioredis.Redis(connection_pool=redis_pool) as r:
+            await r.sadd(key, jti1, jti2)
+
+        fake_backend = SimpleNamespace(access_token_storage=storage)
+        fake_auth = SimpleNamespace(backends={"BasicAuth": fake_backend})
+        fake_request = SimpleNamespace(app={"auth": fake_auth})
+        user = SimpleNamespace(user_id=user_id, username=None)
+
+        count = await revoker.revoke_user(fake_request, user)
+        assert count == 1   # only the successful one counted
+        assert storage.revoke.call_count == 2
 
 
 class TestNotificationPayloadSecrecy:

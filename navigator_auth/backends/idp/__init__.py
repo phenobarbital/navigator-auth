@@ -1,6 +1,7 @@
 import time
 from typing import Union
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 import hashlib
 import base64
 import secrets
@@ -394,7 +395,7 @@ class IdentityProvider:
         """
         # Operate on a local copy to avoid mutating the caller's dict.
         data = dict(data) if data else {}
-        for reserved in ("exp", "iat", "iss", "aud"):
+        for reserved in ("exp", "iat", "iss", "aud", "jti"):
             data.pop(reserved, None)
         if not expiration:
             expiration = self.session_timeout
@@ -408,6 +409,7 @@ class IdentityProvider:
             "exp": exp,
             "iat": iat,
             "iss": issuer,
+            "jti": str(uuid4()),  # FEAT-098 — unique per token, enables revocation
             **data,
         }
         # TASK-029: only include aud when the caller explicitly requests it.
