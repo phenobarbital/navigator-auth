@@ -221,16 +221,18 @@ worktrees:
 - **`password-recovery-flow`** (the handler itself) and
   **`recovery-notification-callback`** depend on the four above and land last.
 
-No in-flight worktree touches `handlers/recovery.py`, `backends/basic.py` or
-`backends/idp/__init__.py`.
+No in-flight worktree touches `handlers/recovery.py`. `backends/basic.py` and
+`backends/idp/__init__.py` **are** in flight under FEAT-096 — see *Sequencing*.
 
 ## Sequencing
 
 **This feature lands after FEAT-096 (`external-token-exchange`). Hard
 dependency, not a preference.**
 
-FEAT-096 is approved and decomposed into TASK-046…053, none started. Its
-**TASK-046 (`basic-open-session`)** extracts the tail of
+FEAT-096 is approved, decomposed into TASK-046…053, and **in progress as of
+2026-09-04** on branch `feat-FEAT-096-external-token-exchange` — including
+**TASK-046 (`basic-open-session`)**, which is being implemented now. That task
+extracts the tail of
 `BasicAuth.authenticate()` — build userdata → `remember()` → `create_token()` →
 callbacks — into a reusable `open_session(request, user, extra=None,
 expiration=None)`. That is the *same* region of `backends/basic.py` where this
