@@ -1182,5 +1182,140 @@
     "parallel": false,
     "parallelism_notes": "Final integration coverage + docs; depends on everything.",
     "file": "sdd/tasks/active/TASK-061-saml-roundtrip-tests-docs.md"
+  },
+  {
+    "id": "TASK-062",
+    "slug": "recovery-config-model-skeleton",
+    "title": "Recovery config keys, package skeleton, and User.password width fix",
+    "feature_id": "FEAT-098",
+    "feature": "backend-based-password-recovery",
+    "spec": "sdd/specs/backend-based-password-recovery.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "high",
+    "effort": "S",
+    "depends_on": [],
+    "parallel": false,
+    "parallelism_notes": "Foundation: every other FEAT-098 task imports the AUTH_RECOVERY_* keys and types.py. Front-loads ALL conf.py edits into one hunk, which is what makes 063/064/065/066 safe to parallelise. Also carries the standalone User.password max=16 -> 255 fix. Must run first.",
+    "file": "sdd/tasks/active/TASK-062-recovery-config-model-skeleton.md"
+  },
+  {
+    "id": "TASK-063",
+    "slug": "password-policy-validator",
+    "title": "PasswordPolicy validator (min length, letter, digit, not-current)",
+    "feature_id": "FEAT-098",
+    "feature": "backend-based-password-recovery",
+    "spec": "sdd/specs/backend-based-password-recovery.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "high",
+    "effort": "S",
+    "depends_on": [
+      "TASK-062"
+    ],
+    "parallel": true,
+    "parallelism_notes": "Pure validator; owns policy.py alone. No Redis, no HTTP, no DB. Zero file overlap with 064/065/066 \u2014 fully parallel.",
+    "file": "sdd/tasks/active/TASK-063-password-policy-validator.md"
+  },
+  {
+    "id": "TASK-064",
+    "slug": "recovery-token-store",
+    "title": "RecoveryTokenStore \u2014 two-stage HMAC-signed Redis token store",
+    "feature_id": "FEAT-098",
+    "feature": "backend-based-password-recovery",
+    "spec": "sdd/specs/backend-based-password-recovery.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "high",
+    "effort": "M",
+    "depends_on": [
+      "TASK-062"
+    ],
+    "parallel": true,
+    "parallelism_notes": "Owns store.py alone. Shares only the types.py dataclasses from 062 (read-only). Fully parallel with 063/065/066.",
+    "file": "sdd/tasks/active/TASK-064-recovery-token-store.md"
+  },
+  {
+    "id": "TASK-065",
+    "slug": "recovery-rate-limiter",
+    "title": "RateLimiter for the recovery request endpoint",
+    "feature_id": "FEAT-098",
+    "feature": "backend-based-password-recovery",
+    "spec": "sdd/specs/backend-based-password-recovery.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "medium",
+    "effort": "S",
+    "depends_on": [
+      "TASK-062"
+    ],
+    "parallel": true,
+    "parallelism_notes": "Owns limiter.py alone; imports parse_rate_limit from oauth2/dcr.py read-only. Fully parallel with 063/064/066.",
+    "file": "sdd/tasks/active/TASK-065-recovery-rate-limiter.md"
+  },
+  {
+    "id": "TASK-066",
+    "slug": "basic-jti-session-revocation",
+    "title": "jti claim on Basic JWTs, access_token_storage, and SessionRevoker",
+    "feature_id": "FEAT-098",
+    "feature": "backend-based-password-recovery",
+    "spec": "sdd/specs/backend-based-password-recovery.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "high",
+    "effort": "M",
+    "depends_on": [
+      "TASK-062"
+    ],
+    "parallel": true,
+    "parallelism_notes": "The only FEAT-098 task touching existing files (idp/__init__.py, basic.py) \u2014 files 063/064/065 never open, so still parallel with them. Was blocked on FEAT-096 TASK-046; unblocked since FEAT-096 merged to dev 2026-09-04 and open_session() exists. Largest blast radius in the feature: affects all Basic-auth traffic. Review separately.",
+    "file": "sdd/tasks/active/TASK-066-basic-jti-session-revocation.md"
+  },
+  {
+    "id": "TASK-067",
+    "slug": "password-recovery-handler",
+    "title": "PasswordRecoveryHandler \u2014 three endpoints, routing, legacy aliases",
+    "feature_id": "FEAT-098",
+    "feature": "backend-based-password-recovery",
+    "spec": "sdd/specs/backend-based-password-recovery.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "high",
+    "effort": "L",
+    "depends_on": [
+      "TASK-062",
+      "TASK-063",
+      "TASK-064",
+      "TASK-065",
+      "TASK-066"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Integration point: imports every prior FEAT-098 module and deletes the old recovery.py. Not parallelizable.",
+    "file": "sdd/tasks/active/TASK-067-password-recovery-handler.md"
+  },
+  {
+    "id": "TASK-068",
+    "slug": "recovery-e2e-docs-version",
+    "title": "End-to-end tests, docs, and version bump to 0.27.0",
+    "feature_id": "FEAT-098",
+    "feature": "backend-based-password-recovery",
+    "spec": "sdd/specs/backend-based-password-recovery.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "medium",
+    "effort": "M",
+    "depends_on": [
+      "TASK-067"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Validation and release chores; depends on the assembled handler. Not parallelizable.",
+    "file": "sdd/tasks/active/TASK-068-recovery-e2e-docs-version.md"
   }
 ]
