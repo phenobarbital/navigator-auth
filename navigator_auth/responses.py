@@ -3,8 +3,9 @@ Various kinds of Application Responses.
 
 TODO: add FileResponse or JSONResponse or SSEResponse (server-side).
 """
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 from aiohttp import web
+from aiohttp import web_exceptions
 from aiohttp.web_exceptions import (
     HTTPNoContent,
 )
@@ -92,3 +93,52 @@ def JSONResponse(
         response["headers"] = headers
 
     return web.json_response(content, **response)
+
+
+def _http_exception_classes() -> dict[int, type[web.HTTPException]]:
+    """Map each HTTP status to aiohttp's own exception class for it."""
+    mapping: dict[int, type[web.HTTPException]] = {}
+    for obj in vars(web_exceptions).values():
+        if isinstance(obj, type) and issubclass(obj, web.HTTPException):
+            status = getattr(obj, "status_code", None)
+            if isinstance(status, int) and status > 0:
+                mapping.setdefault(status, obj)
+    return mapping
+
+
+HTTP_EXCEPTIONS = _http_exception_classes()
+
+
+def _status_line_reason(message: str) -> Optional[str]:
+    """Collapse a message into something usable as an HTTP reason phrase.
+
+    These messages embed user input (a vault key name, a client_uid), and
+    aiohttp raises ValueError on CR/LF in a reason -- which would turn an
+    intended 404 into an unhandled 500. Whitespace is collapsed and the result
+    capped so the status line stays sane.
+    """
+    reason = " ".join(message.split())
+    return reason[:200] or None
+
+
+def json_error(status: int, message: str) -> NoReturn:
+    """Raise an HTTP exception carrying a JSON body.
+
+    The class is looked up from aiohttp's own hierarchy so that callers,
+    middleware and tests catching `web.HTTPNotFound` or `web.HTTPClientError`
+    still match. Raising an anonymous subclass of the `web.HTTPException` base
+    (as this used to) is invisible to every one of those handlers, since it is
+    not a subclass of the status-specific classes they catch.
+    """
+    exc_class = HTTP_EXCEPTIONS.get(status)
+    if exc_class is None:
+        # A status aiohttp has no class for: keep the old behaviour rather than
+        # remap it to something with different semantics.
+        exc_class = type(
+            "JSONHTTPError", (web.HTTPException,), {"status_code": status}
+        )
+    raise exc_class(
+        reason=_status_line_reason(message),
+        text=json_encoder({"error": message}),
+        content_type="application/json",
+    )

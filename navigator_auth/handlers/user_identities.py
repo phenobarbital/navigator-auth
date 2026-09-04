@@ -26,22 +26,12 @@ from ..identity.store import (
     invalidate_cached,
 )
 from ..identity.types import TokenResponse
-from ..libs.json import json_encoder
-from ..responses import JSONResponse
+from ..responses import JSONResponse, json_error as _json_error
 from ..conf import IDENTITY_REFRESH_LEEWAY
 
 logger = logging.getLogger("navigator.identity")
 
 
-def _json_error(status: int, message: str):
-    """Raise an HTTP exception with a JSON body."""
-    exc_class = type(
-        "JSONHTTPError", (web.HTTPException,), {"status_code": status}
-    )
-    raise exc_class(
-        text=json_encoder({"error": message}),
-        content_type="application/json",
-    )
 
 
 class BaseIdentityView(web.View, CorsViewMixin):

@@ -3,22 +3,12 @@ from aiohttp import web
 from aiohttp_cors import CorsViewMixin
 from navigator_session import get_session
 from navigator_auth.vault import VAULT_SESSION_KEY, get_session_vault
-from navigator_auth.responses import JSONResponse
+from navigator_auth.responses import JSONResponse, json_error as _json_error
 from navigator_auth.decorators import user_session
-from navigator_auth.libs.json import json_encoder
 
 logger = logging.getLogger("navigator.vault")
 
 
-def _json_error(status: int, message: str):
-    """Raise an HTTP exception with a JSON body."""
-    exc_class = type(
-        "JSONHTTPError", (web.HTTPException,), {"status_code": status}
-    )
-    raise exc_class(
-        text=json_encoder({"error": message}),
-        content_type="application/json",
-    )
 
 
 @user_session()
