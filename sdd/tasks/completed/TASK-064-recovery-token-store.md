@@ -181,10 +181,33 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (session_016Z3wYUV42WJDq92pifU1Fa)
+**Date**: 2026-09-04
+**Notes**: Implemented `RecoveryTokenStore` in
+`navigator_auth/handlers/recovery/store.py` with the exact interface
+from the spec. Redis is keyed by `sha256(token)` under
+`auth:recovery:{hash}` / `auth:recovery:confirm:{hash}`; every payload
+carries an HMAC-SHA256 signature verified with `secrets.compare_digest`.
+`validate_recovery` uses `GET` (not `GETDEL`) so it survives repeat
+calls (D4). `issue_confirmation` rotates: it deletes any previously
+live stage-2 record (tracked via a `confirm_key` back-pointer stored
+alongside the stage-1 payload, not part of the public `RecoveryPayload`
+dataclass) and rewrites the stage-1 record with `SET ... keepttl=True`
+so its remaining TTL is preserved rather than reset. Started the
+project's existing (stopped) `docker_redis_1` container
+(`redis://localhost:6379/1`, matching `REDIS_AUTH_URL`'s default) to
+run the tests against a real Redis instance per the spec's Worktree
+Strategy intent (no mocking of the security-critical signing path).
+Added `TestRecoveryTokenStore` (10 tests, including
+`test_drop_pair_deletes_both_records` beyond the task's literal test
+list) plus `redis_pool`/`redis`/`recovery_user`/`recovery_store`
+pytest-asyncio fixtures, scoped to `tests/test_password_recovery.py`
+only (not `conftest.py`, per the task's file list). All 23 tests in the
+file pass; ruff is clean.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: None architecturally. The back-pointer needed
+for stage-2 rotation (`confirm_key`) is stored as an extra key in the
+Redis-persisted JSON dict, not as a field on the frozen `RecoveryPayload`
+dataclass from TASK-062 (which is not in this task's Files table) — the
+dataclass returned to callers stays exactly as specced; the extra field
+is internal storage-layer metadata only.

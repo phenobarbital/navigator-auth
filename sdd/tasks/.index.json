@@ -1228,7 +1228,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "high",
@@ -1238,7 +1238,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "Owns store.py alone. Shares only the types.py dataclasses from 062 (read-only). Fully parallel with 063/065/066.",
-    "file": "sdd/tasks/active/TASK-064-recovery-token-store.md"
+    "file": "sdd/tasks/completed/TASK-064-recovery-token-store.md",
+    "completed_at": "2026-09-04T21:56:41Z"
   },
   {
     "id": "TASK-065",
