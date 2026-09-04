@@ -4,6 +4,8 @@
 **Author**: Jesus Lara
 **Status**: discussion
 **Feature ID (reserved)**: FEAT-097
+**Depends on**: FEAT-096 (`external-token-exchange`) — **must land first**. See
+*Sequencing* below.
 **Replaces**: `navigator_auth/handlers/recovery.py` (`ForgotPasswordHandler`,
 `ResetPasswordHandler`) and their routes `/api/v1/forgot-password`,
 `/api/v1/reset-password`.
@@ -166,7 +168,10 @@ storage format, or any external provider backend.
   validator.
 - **D8** Session revocation after reset is in scope, and goes all the way:
   Basic JWTs gain a `jti` so already-issued tokens can actually be killed,
-  rather than surviving until `exp`.
+  rather than surviving until `exp`. The `jti` is emitted from
+  `BasicAuth.open_session()` as introduced by FEAT-096 — see *Sequencing*.
+- **D11** This feature lands **after** FEAT-096 (`external-token-exchange`),
+  which owns the `basic.py` refactor the `jti` work builds on.
 - **D9** Unknown e-mail addresses get an identical response body, status and
   approximately identical latency to known ones.
 - **D10** **Every** active user may set a local password through this flow,
@@ -217,7 +222,47 @@ worktrees:
   **`recovery-notification-callback`** depend on the four above and land last.
 
 No in-flight worktree touches `handlers/recovery.py`, `backends/basic.py` or
-`backends/idp/__init__.py`. FEAT-096 (`external-token-exchange`) is specced but
-not started; it refactors the *tail* of `BasicAuth.authenticate` into
-`open_session()`, which is the same region of `basic.py` where the `jti` record
-is written — **sequence these two, or expect a conflict in `basic.py`**.
+`backends/idp/__init__.py`.
+
+## Sequencing
+
+**This feature lands after FEAT-096 (`external-token-exchange`). Hard
+dependency, not a preference.**
+
+FEAT-096 is approved and decomposed into TASK-046…053, none started. Its
+**TASK-046 (`basic-open-session`)** extracts the tail of
+`BasicAuth.authenticate()` — build userdata → `remember()` → `create_token()` →
+callbacks — into a reusable `open_session(request, user, extra=None,
+expiration=None)`. That is the *same* region of `backends/basic.py` where this
+feature writes the `jti` record, and the same `create_token()` call it changes.
+
+Landing FEAT-097 first would mean:
+
+- a near-certain conflict in `backends/basic.py`, in code FEAT-096 is required
+  to leave byte-for-byte unchanged for the password path (its
+  `test_basic_authenticate_unchanged` acceptance criterion);
+- the `jti` record being written into a function that is about to be extracted,
+  so FEAT-096 would have to re-do the work inside `open_session()` and re-verify
+  revocation on a path it did not author.
+
+Landing it after means the `jti` record is written **once, inside
+`open_session()`**, and is inherited for free by every caller — the password
+login, and the token-exchange sessions FEAT-096 introduces. Sessions opened by
+an external-token exchange become revocable by the same mechanism, with no extra
+work in either feature.
+
+Practical consequences for planning:
+
+- The `basic-auth-session` capability in this proposal is written against
+  **post-FEAT-096 `basic.py`**: the `jti` goes in `open_session()`, not in
+  `authenticate()`. The spec must be written against that shape.
+- `/sdd-task` for FEAT-097 should not be run until FEAT-096's TASK-046 is
+  merged, or the task files will reference code that no longer exists.
+- Everything else in this feature is genuinely independent of FEAT-096 and can
+  proceed in parallel with it: `password-policy`, `recovery-token-store`,
+  `recovery-rate-limit`, and the handler itself all touch files FEAT-096 never
+  opens. **Only the `jti` / revocation item is blocked.**
+
+That last point is the useful one — if you want to start before FEAT-096 is
+done, the four unblocked capabilities are ~80 % of this feature, and the `jti`
+work can be a trailing task.
