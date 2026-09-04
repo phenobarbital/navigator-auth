@@ -1,4 +1,5 @@
 from navigator_auth.handlers.users.passwd import set_basic_password
+from navigator_auth.handlers.recovery.policy import PasswordPolicy
 from navigator_auth.models import User
 
 
@@ -30,6 +31,38 @@ class TestUserPasswordWidth:
         u = User(user_id=1, username="t", password=h)
         assert u.password == h
         assert u.is_valid()
+
+
+class TestPasswordPolicy:
+    def test_policy_accepts_valid(self):
+        assert PasswordPolicy().validate("abc12345") == []
+
+    def test_policy_min_length(self):
+        v = PasswordPolicy().validate("abc1234")      # 7 chars
+        assert [x.rule for x in v] == ["min_length"]
+
+    def test_policy_requires_letter_and_digit(self):
+        assert "needs_letter" in [x.rule for x in PasswordPolicy().validate("12345678")]
+        assert "needs_digit" in [x.rule for x in PasswordPolicy().validate("abcdefgh")]
+
+    def test_policy_returns_all_violations(self):
+        rules = {x.rule for x in PasswordPolicy().validate("abc")}
+        assert rules == {"min_length", "needs_digit"}
+
+    def test_policy_rejects_current_password(self):
+        h = set_basic_password("abc12345")
+        v = PasswordPolicy().validate("abc12345", current_hash=h)
+        assert [x.rule for x in v] == ["same_as_current"]
+
+    def test_policy_no_current_hash_is_fine(self):
+        assert PasswordPolicy().validate("abc12345", current_hash=None) == []
+
+    def test_policy_malformed_current_hash_does_not_raise(self):
+        assert PasswordPolicy().validate("abc12345", current_hash="garbage") == []
+
+    def test_policy_message_never_echoes_password(self):
+        for v in PasswordPolicy().validate("a"):
+            assert "a" not in v.message.replace("at least", "")  # no echo of the input
 
 
 class TestNotificationPayloadSecrecy:
