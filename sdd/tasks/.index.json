@@ -1178,7 +1178,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "medium",
@@ -1188,7 +1188,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Final integration coverage + docs; depends on everything.",
-    "file": "sdd/tasks/active/TASK-061-saml-roundtrip-tests-docs.md"
+    "file": "sdd/tasks/completed/TASK-061-saml-roundtrip-tests-docs.md",
+    "completed_at": "2026-09-04T23:51:45.518635Z"
   },
   {
     "id": "TASK-062",

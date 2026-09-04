@@ -130,10 +130,50 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (Claude Sonnet 5, session_01KS7E6KxYXnkgzMnYHaJC2U)
+**Date**: 2026-09-05
+**Notes**: `tests/test_saml_roundtrip.py` configures the generic
+`SAMLIdentityProvider`/`SAMLAuth` against each other on a real aiohttp
+`TestServer`/`TestClient` (a pre-allocated fixed port, since both sides'
+entity IDs/ACS/SSO URLs must be known before the router freezes at
+server start) — genuine HTTP round trips, not direct method calls. Covers
+IdP-initiated login + replay rejection, SP-initiated login (extracting
+and re-posting pysaml2's own auto-submit form, simulating the browser's
+onload script), SP-initiated SLO (both signed legs over real HTTP), the
+FEAT-095 OAuth2-AS resume detour (proving `get_callback_state` works
+end-to-end, not just against `test_oauth2_upstream_idp.py`'s `_FakeBackend`
+double), the ADFS redirect-validator-unchanged regression, an executor
+assertion (wraps `SAMLCore.run` on both backends, asserts no `pysaml2`
+call executes on the event-loop thread during a live round trip), and
+the spec's performance check (20 ACS validations + 20 issuances, p95 <
+150ms — measured ~30-40ms on this sandbox's fixture keys). Rewrote
+`documentation/saml.md` for both roles (prerequisites, SP/IdP
+configuration, subclassing hook tables, routes, stable error codes,
+Migration from `python3-saml`); added the full key reference to
+`docs/settings.rst`; gave the previously-empty `docs/config.rst` stub a
+short SAML overview; split README's single "SAMLAuth (SP and IdP)" row
+into two, noting the IdP role's `hidden` status; added a 0.26.0
+breaking-change entry to `CHANGELOG.md` (included by `docs/changelog.rst`).
+Full SAML suite (80 tests) green; broader adfs/redirect/identity
+regression check green apart from two confirmed pre-existing, unrelated
+flaky failures (reproduced identically against unmodified `dev`):
+`test_identity_crypto`'s key-rotation ID assertion, and
+`test_link_flow`'s `"cs" not in url` check against a random 43-char
+`secrets.token_urlsafe` state value, which collides by pure chance
+roughly 1% of runs independent of anything SAML-related.
+`grep -rn onelogin navigator_auth/` returns nothing.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none in scope/behavior. Two adaptations
+required to make the round-trip harness actually work, both purely
+test-infrastructure: (1) `aiohttp`'s server request-handling loop now
+deprecates *returning* (rather than raising) a `web.HTTPException` —
+every backend in this codebase, SAML included, returns `web.HTTPFound`/
+`web.Response` for redirects (the ADFS/OAuth2 precedent), so this test
+module carries the identical `filterwarnings` suppression
+`tests/test_basic_auth.py` (the only other real-server test file) already
+needed for the same reason; not a FEAT-097 regression. (2) The real
+`SAMLIdentityProvider`/`SAMLAuth` constructors are used (not the
+`object.__new__` bypass pattern from earlier SAML test files), with a
+pre-allocated `aiohttp.test_utils.unused_port()` so both sides' entity
+IDs are known before `app.router` freezes — `TestClient`'s default
+dynamic port assignment happens too late for that.
