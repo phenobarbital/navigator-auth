@@ -29,6 +29,7 @@ from ..conf import (
     AUTH_EXCLUDE_LIST_KEY,
     PREFERRED_AUTH_SCHEME,
     AUTH_REDIRECT_URI,
+    ALLOWED_HOSTS,
 )
 from ..libs.json import json_encoder
 from ..libs.sanitize import sanitize_request
@@ -411,6 +412,31 @@ class BaseAuthBackend(ABC):
         if not bool(urlparse(redirect_url).netloc):
             redirect_url = f"{domain_url}{redirect_url}"
         self.finish_redirect_url = redirect_url
+
+    def validate_redirect_host(
+        self, uri: Optional[str], extra_hosts: Iterable[str] = ()
+    ) -> Optional[str]:
+        """Only honor an absolute redirect URI whose host is on
+        ALLOWED_HOSTS (or ``extra_hosts``); otherwise drop it and let the
+        caller fall back to a safe default. Relative URIs are always safe.
+
+        Promoted from ``ADFSAuth._validate_internal_redirect``
+        (behavior-preserving); shared by every backend that needs to
+        validate a caller-supplied redirect target (ADFS relay, SAML
+        RelayState / redirect_uri).
+        """
+        if not uri:
+            return None
+        netloc = urlparse(uri).netloc
+        if not netloc:
+            return uri
+        for pattern in (*ALLOWED_HOSTS, *extra_hosts):
+            if fnmatch.fnmatch(netloc, pattern):
+                return uri
+        self.logger.warning(
+            f"{self._service}: rejected redirect to disallowed host: {netloc!r}"
+        )
+        return None
 
     def prepare_url(self, url: str, params: dict = None):
         req = PreparedRequest()
