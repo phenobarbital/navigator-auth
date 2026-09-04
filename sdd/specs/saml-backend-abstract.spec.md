@@ -3,11 +3,14 @@
 **Feature ID**: FEAT-097
 **Date**: 2026-09-04
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 0.26.0
 
 > **Input:** `sdd/proposals/saml-backend-abstract.brainstorm.md` (Option A accepted in
 > discovery rounds 1–2 on 2026-09-04).
+> **Hard prerequisite:** FEAT-096 (`external-token-exchange`) lands first (decided
+> 2026-09-04). This feature branches from `dev` after FEAT-096 is merged and rebases onto its
+> `external.py` / `conf.py` changes; see Worktree Strategy.
 > **Scope reminder:** this feature delivers the *abstract* SAML surface and a generic reference
 > subclass. It does **not** deliver a Verizon Connect backend; Verizon Connect (a SAML Service
 > Provider) is the first counterpart the IdP role must be able to serve, and is covered by a
@@ -582,9 +585,9 @@ where request mocks suffice; round-trips use `aiohttp`'s `aiohttp_client`.
   instead of `BaseAuthBackend.executor` (2 workers shared) — OQ5.
 - **Breaking settings change.** Users of `python3-saml` `settings.json` layouts must migrate;
   the translator covers the common keys and fails loudly on the rest (OQ6).
-- **FEAT-096 (`external-token-exchange`) also edits `external.py` and `conf.py`.** Both
-  changes are additive (new abstract method vs new dispatcher hook; new keys); rebase order
-  matters, see Worktree Strategy.
+- **FEAT-096 (`external-token-exchange`) lands first and adds an abstract method to
+  `ExternalAuth`.** The SP base must satisfy that contract or it will not instantiate; see
+  Worktree Strategy.
 
 ### Configuration Keys (navigator_auth.conf)
 
@@ -626,8 +629,9 @@ resolved under that prefix first, falling back to `SAML_*`.
 
 ## 7. Open Questions
 
-> Carried from the brainstorm. None blocks the abstract bases; OQ1–OQ2 block the follow-up
-> Verizon subclass only.
+> Carried from the brainstorm. **Decision 2026-09-04:** none blocks this feature; all seven
+> are deferred to the Verizon Connect subclass spec, where they will be resolved. The defaults
+> stated on each question are the behavior this feature implements.
 
 - [ ] OQ1. Verizon Connect: exact ACS URL, SP Entity ID, required `NameID` format, required
       attributes, and whether they require signed assertions, signed responses, or both. The
@@ -664,11 +668,12 @@ resolved under that prefix first, falling back to `SAML_*`.
   OAuth2 suites and the ADFS tests at each module boundary is the regression gate, since M3
   edits `external.py` and M1 edits `abstract.py`.
 - **Cross-feature dependencies:** FEAT-095 is merged (all tasks in `sdd/tasks/completed/`).
-  **FEAT-096 (`external-token-exchange`, approved, not started)** also edits
-  `backends/external.py` (new abstract `verify_external_token`) and `conf.py`. If FEAT-096
-  starts first, M3 must rebase onto it and the SP base must implement or inherit a default for
-  `verify_external_token`; if this feature starts first, FEAT-096 rebases onto the
-  `get_callback_state` hook. Coordinate the order before `/sdd-start` on either.
+  **FEAT-096 (`external-token-exchange`) lands first** (decided 2026-09-04). Do not
+  `/sdd-start` this feature until FEAT-096 is merged into `dev`. Consequences for this spec:
+  M3 builds on FEAT-096's `external.py` (its new abstract `verify_external_token`), so the SP
+  base must implement or inherit a default for it (`AbstractSAMLBackend` is not a token-exchange
+  provider; default raises `NotImplementedError` or returns "unsupported" per FEAT-096's
+  contract); M1 adds its `conf.py` keys next to FEAT-096's `TOKEN_EXCHANGE_*` keys.
 
 ---
 
@@ -677,3 +682,4 @@ resolved under that prefix first, falling back to `SAML_*`.
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-09-04 | Jesus Lara | Initial draft from `saml-backend-abstract.brainstorm.md` (Option A: two abstract classes on pysaml2 with shared core; all four flows; env-prefix config; env-declared SP registry; four per-flow state stores). OQ1–OQ7 carried. |
+| 0.2 | 2026-09-04 | Jesus Lara | Approved. FEAT-096 lands first (hard prerequisite); OQ1–OQ7 deferred to the Verizon Connect subclass spec, defaults implemented here. |
