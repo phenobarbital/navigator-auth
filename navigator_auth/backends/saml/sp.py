@@ -95,6 +95,15 @@ class AbstractSAMLBackend(ExternalAuth, ABC):
             name=f"{self._service_name}_metadata",
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(f"/auth/{self._service_name}/metadata")
+        # The inherited route is GET only (LogoutResponse/inbound
+        # LogoutRequest via Redirect binding); POST binding needs its own
+        # route (same handler, `finish_logout` branches on `request.method`).
+        router.add_route(
+            "POST",
+            f"/auth/{self._service_name}/logout",
+            self.finish_logout,
+            name=f"{self._service_name}_complete_logout_post",
+        )
 
     async def on_startup(self, app: web.Application):
         await super().on_startup(app)
@@ -373,20 +382,200 @@ class AbstractSAMLBackend(ExternalAuth, ABC):
         return True
 
     # ------------------------------------------------------------------
-    # Single Logout — TASK-057 scope. Stubs only here so this abstract
-    # class satisfies `ExternalAuth`'s `logout`/`finish_logout` contract
-    # and a minimal SP-only subclass (this task's tests) can instantiate;
-    # TASK-057 replaces both with the real SP-initiated/inbound SLO flow.
+    # Single Logout (TASK-057) — both directions, using the
+    # `SAMLSessionInfo` persisted under session["saml"] by `auth_callback`.
+    #
+    # Limitation (spec-acknowledged, out of scope here): SP-initiated
+    # logout resolves the IdP SLO endpoint from the trusted IdP metadata
+    # and builds the `LogoutRequest` directly from the persisted
+    # NameID/SessionIndex (stateless); it does not use `pysaml2`'s
+    # in-process `Saml2Client.global_logout`/`self.users` session cache,
+    # which would not survive across worker processes. Likewise, the
+    # inbound `LogoutRequest` handler can only clear *this* request's own
+    # browser session (matched by `SessionIndex`) — there is no
+    # cross-session lookup by `SessionIndex` in a shared store; a
+    # multi-session-per-user SLO would need one (documented follow-up).
     # ------------------------------------------------------------------
+    async def _get_saml_session(self, request: web.Request):
+        """Return `(session, SAMLSessionInfo | None)`; never raises."""
+        try:
+            from navigator_session import get_session
+
+            session = await get_session(request, new=False)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"{self._service_name}: could not read session: {err}")
+            return None, None
+        if session is None:
+            return None, None
+        raw = session.get("saml")
+        if not raw:
+            return session, None
+        return session, SAMLSessionInfo.from_dict(raw)
+
+    def _clear_local_session(self, session) -> None:
+        if session is None:
+            return
+        try:
+            session.invalidate()
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"{self._service_name}: could not invalidate local session: {err}")
+
     async def logout(self, request: web.Request) -> web.Response:
-        raise NotImplementedError(
-            f"{self._service_name}: Single Logout is implemented in TASK-057"
-        )
+        domain_url = self.get_domain(request)
+        session, saml_info = await self._get_saml_session(request)
+        qs = self.queryparams(request) or {}
+        return_to = None
+        if qs.get("redirect_uri"):
+            return_to = self.validate_redirect_host(qs.get("redirect_uri"))
+
+        # Local session is always cleared, even if the IdP-side request
+        # cannot be built.
+        self._clear_local_session(session)
+
+        if saml_info is None or not saml_info.session_index:
+            return self.home_redirect(request, uri=return_to or "/")
+
+        try:
+            from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT
+            from saml2.mdstore import locations
+            from saml2.saml import NameID
+
+            client = await self.core.sp_client(domain_url)
+            binding = BINDING_HTTP_REDIRECT
+            loc = next(
+                locations(
+                    client.metadata.single_logout_service(
+                        saml_info.idp_entity_id, typ="idpsso", binding=binding
+                    )
+                ),
+                None,
+            )
+            if not loc:
+                binding = BINDING_HTTP_POST
+                loc = next(
+                    locations(
+                        client.metadata.single_logout_service(
+                            saml_info.idp_entity_id, typ="idpsso", binding=binding
+                        )
+                    ),
+                    None,
+                )
+            if not loc:
+                raise SAMLError("IdP metadata does not advertise a SLO endpoint")
+
+            name_id = NameID(
+                format=saml_info.name_id_format,
+                text=saml_info.name_id,
+                name_qualifier=saml_info.idp_entity_id,
+                sp_name_qualifier=client.config.entityid,
+            )
+            request_id, logout_req = await self.core.run(
+                client.create_logout_request,
+                loc,
+                saml_info.idp_entity_id,
+                name_id=name_id,
+                session_indexes=[saml_info.session_index],
+            )
+            await self._flow_store.set(
+                self.core.slo_key(request_id),
+                {"session_index": saml_info.session_index, "return_to": return_to},
+                ttl=SAML_FLOW_TTL,
+            )
+            info = await self.core.run(client.apply_binding, binding, str(logout_req), loc, "")
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(
+                f"{self._service_name}: could not build SP-initiated LogoutRequest: {err}"
+            )
+            return self.home_redirect(request, uri=return_to or "/")
+        return self._render_binding_response(info)
 
     async def finish_logout(self, request: web.Request) -> web.Response:
-        raise NotImplementedError(
-            f"{self._service_name}: Single Logout is implemented in TASK-057"
+        from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT
+
+        if request.method == "POST":
+            params = dict(await request.post())
+            binding = BINDING_HTTP_POST
+        else:
+            params = dict(request.rel_url.query)
+            binding = BINDING_HTTP_REDIRECT
+
+        domain_url = self.get_domain(request)
+        client = await self.core.sp_client(domain_url)
+
+        if params.get("SAMLResponse"):
+            return await self._finish_logout_response(request, client, params, binding)
+        if params.get("SAMLRequest"):
+            return await self._finish_logout_request(request, client, params, binding)
+        return self.failed_redirect(
+            request, error="SAML_SLO_FAILED", message="Missing SAMLRequest/SAMLResponse"
         )
+
+    async def _finish_logout_response(self, request, client, params, binding) -> web.Response:
+        """The IdP's reply to our SP-initiated `LogoutRequest`."""
+        try:
+            resp = await self.core.run(
+                client.parse_logout_request_response, params["SAMLResponse"], binding
+            )
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"{self._service_name}: SLO LogoutResponse parse failed: {err}")
+            resp = None
+
+        in_response_to = getattr(resp, "in_response_to", None) if resp else None
+        flow = None
+        if in_response_to:
+            flow = await self._flow_store.getdel(self.core.slo_key(in_response_to))
+
+        if resp is None:
+            self.logger.warning(
+                f"{self._service_name}: {SAMLError.__name__}: SAML_SLO_FAILED (invalid LogoutResponse)"
+            )
+        return_to = self.validate_redirect_host((flow or {}).get("return_to")) if flow else None
+        return self.home_redirect(request, uri=return_to or "/")
+
+    async def _finish_logout_request(self, request, client, params, binding) -> web.Response:
+        """An inbound, IdP-initiated `LogoutRequest` (another SP's SLO, or
+        the IdP itself, notifying us that the IdP session ended)."""
+        try:
+            req_info = await self.core.run(
+                client.parse_logout_request, params["SAMLRequest"], binding
+            )
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"{self._service_name}: inbound LogoutRequest parse failed: {err}")
+            return self.failed_redirect(
+                request, error="SAML_SLO_FAILED", message="Invalid LogoutRequest"
+            )
+
+        session_index = None
+        try:
+            session_index = req_info.message.session_index[0].text
+        except (AttributeError, IndexError, TypeError):
+            pass
+
+        session, saml_info = await self._get_saml_session(request)
+        if saml_info is not None and (
+            not session_index or saml_info.session_index == session_index
+        ):
+            self._clear_local_session(session)
+
+        try:
+            resp_args = client.response_args(req_info.message, [binding])
+            logout_resp = await self.core.run(
+                client.create_logout_response, req_info.message, [binding]
+            )
+            resp_info = await self.core.run(
+                client.apply_binding,
+                resp_args.get("binding", binding),
+                str(logout_resp),
+                resp_args.get("destination", ""),
+                params.get("RelayState", ""),
+                response=True,
+            )
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"{self._service_name}: could not build LogoutResponse: {err}")
+            return self.failed_redirect(
+                request, error="SAML_SLO_FAILED", message="Could not build LogoutResponse"
+            )
+        return self._render_binding_response(resp_info)
 
     # ------------------------------------------------------------------
     # Provider hooks
