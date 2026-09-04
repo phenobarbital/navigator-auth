@@ -11,7 +11,7 @@ from .user_identities import (
     IdentitiesManageView,
 )
 from .partners import PartnerKeyHandler
-from .recovery import ForgotPasswordHandler, ResetPasswordHandler
+from .recovery_legacy import ForgotPasswordHandler, ResetPasswordHandler
 from .config import ConfigHandler
 from .allowed_ips import AllowedIPHandler
 from .client_access import ClientAccessHandler
