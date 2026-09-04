@@ -94,26 +94,34 @@ def get_jwks_uri(tenant_id: str = None, discovery_url: str = None):
 
 
 @functools.lru_cache
-def get_jwks(tenant_id: str = None, discovery_url: str = None):
-    jwks_uri = get_jwks_uri(tenant_id, discovery_url)
+def get_jwks(tenant_id: str = None, discovery_url: str = None, jwks_url: str = None):
+    """Fetch a provider's JWKS document.
+
+    When ``jwks_url`` is given it is used verbatim (e.g. Google's static
+    ``https://www.googleapis.com/oauth2/v3/certs``), skipping OIDC
+    discovery entirely. Otherwise falls back to the existing
+    tenant/discovery-URL resolution (Azure/ADFS). Cached per-process either
+    way (FEAT-096 TASK-048).
+    """
+    uri = jwks_url or get_jwks_uri(tenant_id, discovery_url)
     try:
-        response = requests.get(jwks_uri, timeout=60)
+        response = requests.get(uri, timeout=60)
         response.raise_for_status()
     except requests.exceptions.HTTPError as err:
         logging.debug(response.text)
-        raise InvalidToken(f"Error getting issuer jwks from {jwks_uri}", err) from err
+        raise InvalidToken(f"Error getting issuer jwks from {uri}", err) from err
     return response.json()
 
 
-def get_jwk(kid, tenant_id: str = None, discovery_url: str = None):
-    for jwk in get_jwks(tenant_id, discovery_url).get("keys"):
+def get_jwk(kid, tenant_id: str = None, discovery_url: str = None, jwks_url: str = None):
+    for jwk in get_jwks(tenant_id, discovery_url, jwks_url).get("keys"):
         if jwk.get("kid") == kid:
             return jwk
     raise InvalidToken("Unknown kid")
 
 
-def get_public_key(token, tenant_id: str = None, discovery_url: str = None):
+def get_public_key(token, tenant_id: str = None, discovery_url: str = None, jwks_url: str = None):
     kid = get_kid(token)
-    jwk = get_jwk(kid, tenant_id, discovery_url)
+    jwk = get_jwk(kid, tenant_id, discovery_url, jwks_url)
     return rsa_pem_from_jwk(jwk)
     # return rsa_pem_from_jwk(get_jwk(get_kid(token)))

@@ -16,6 +16,7 @@ class TokenResponse:
     access_token: str
     token_type: str = "Bearer"
     refresh_token: Optional[str] = None
+    id_token: Optional[str] = None
     expires_in: Optional[int] = None
     expires_at: Optional[datetime] = None
     scopes: list = field(default_factory=list)
@@ -43,6 +44,7 @@ class TokenResponse:
             "access_token": self.access_token,
             "token_type": self.token_type,
             "refresh_token": self.refresh_token,
+            "id_token": self.id_token,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "scopes": list(self.scopes or []),
             "provider_user_id": self.provider_user_id,
@@ -58,6 +60,7 @@ class TokenResponse:
             access_token=data["access_token"],
             token_type=data.get("token_type", "Bearer"),
             refresh_token=data.get("refresh_token"),
+            id_token=data.get("id_token"),
             expires_at=expires_at,
             scopes=list(data.get("scopes") or []),
             provider_user_id=data.get("provider_user_id"),
@@ -80,6 +83,7 @@ class TokenResponse:
             access_token=payload["access_token"],
             token_type=payload.get("token_type") or "Bearer",
             refresh_token=payload.get("refresh_token"),
+            id_token=payload.get("id_token"),
             expires_in=expires_in,
             scopes=list(scopes),
             raw=dict(payload),

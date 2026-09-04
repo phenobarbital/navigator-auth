@@ -1,64 +1,81 @@
-name: Python package build and publish with uv
+name: Build and publish to PyPI
 
 on:
   release:
     types: [created]
+  # Allows a dry run: builds wheels + sdist without publishing.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+  build-wheels:
+    name: Build wheels (linux x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
+      # cibuildwheel 4.x requires Python >= 3.11 to run; the interpreters it
+      # builds against live inside the manylinux containers, not here.
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.13'
 
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-
-      - name: Install dependencies
-        run: |
-          uv pip install --system cibuildwheel twine cython setuptools-rust
-
-      - name: Build wheels on Ubuntu
-        if: matrix.os == 'ubuntu-latest'
+      - name: Build wheels
         env:
           CIBW_ARCHS: x86_64
-          CIBW_BUILD: "cp3{10,11,12,13}-*"
+          CIBW_BUILD: "cp3{10,11,12,13,14}-*"
           CIBW_SKIP: "*-musllinux_*"
-          CIBW_BEFORE_BUILD: "curl https://sh.rustup.rs -sSf | sh -s -- -y && pip install cython setuptools-rust"
-          CIBW_ENVIRONMENT: "PATH=/root/.cargo/bin:$PATH"
-          RUST_SUBPACKAGE_PATH: navigator_auth/rs_pep
+          # Rust and the build deps are installed inside each manylinux container.
+          CIBW_BEFORE_BUILD: "curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal && pip install cython setuptools-rust"
+          CIBW_ENVIRONMENT: 'PATH=$HOME/.cargo/bin:$PATH'
         run: |
-          cibuildwheel --platform linux --output-dir dist
+          uv tool run --from 'cibuildwheel>=4,<5' cibuildwheel --platform linux --output-dir dist
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-wheels-linux-x86_64
+          path: dist/*.whl
+          if-no-files-found: error
+
+  build-sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
 
       - name: Build sdist
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
-        run: uv build --sdist
+        run: uv build --sdist --out-dir dist
 
-      - name: Upload wheel artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload sdist
+        uses: actions/upload-artifact@v7
         with:
-          name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: dist/*
+          name: dist-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
 
-  deploy:
-    needs: build
+  publish:
+    name: Publish to PyPI
+    needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
     environment:
@@ -67,22 +84,17 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      - name: Download all distributions
+        uses: actions/download-artifact@v8
         with:
-          version: "latest"
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: wheels-*
+          pattern: dist-*
           path: dist
           merge-multiple: true
 
-      - name: List files in dist
+      - name: List distributions
         run: ls -l dist
 
       - name: Publish to PyPI
-        run: |
-          uv tool install twine
-          uv tool run twine upload dist/* --username __token__ --password ${{ secrets.NAVIGATORAUTH_PYPI_API_TOKEN }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.NAVIGATORAUTH_PYPI_API_TOKEN }}

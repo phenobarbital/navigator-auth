@@ -1,0 +1,175 @@
+# TASK-048: `ExternalAuth.verify_external_token` contract + shared JWT/JWKS helpers
+
+**Feature**: FEAT-096 external-token-exchange
+**Spec**: `sdd/specs/external-token-exchange.spec.md` (Module 3)
+**Status**: pending
+**Priority**: high
+**Estimated effort**: M (2-4h)
+**Depends-on**: none
+**Assigned-to**: unassigned
+
+---
+
+## Context
+
+Each provider backend must be able to answer "is this bearer token live and
+minted for **this** client, and who is it?" with one uniform signature so the
+exchange backend stays provider-agnostic. Azure and Google id_tokens are JWTs
+verified against a JWKS; this task provides the abstract method and the shared
+verification helpers the three provider tasks (TASK-049/050/051) build on.
+
+**Parallelizable**: touches only `backends/external.py` and
+`backends/jwksutils.py`; no contention with TASK-046/047. It is a hard
+prerequisite of TASK-049/050/051 because it fixes the signature they implement.
+
+---
+
+## Scope
+
+- Add to `ExternalAuth`:
+  ```python
+  async def verify_external_token(
+      self, token: str, token_type: str = "Bearer", id_token: Optional[str] = None
+  ) -> tuple[dict, TokenResponse]:
+      raise NotImplementedError(f"{self._service_name}: token exchange not supported")
+  ```
+  Docstring per spec §2 "New Public Interfaces". Raising `NotImplementedError`
+  (not `InvalidAuth`) lets the exchange backend distinguish "unsupported
+  provider" (400) from "bad token" (401).
+- Shared helper on `ExternalAuth`:
+  `_verify_jwt(token, *, audience, issuer, jwks_url=None, tenant_id=None, leeway=30) -> dict`
+  → decodes with PyJWT using `jwksutils.get_public_key`, enforces `exp`, `aud`
+  (accepts str or list), `iss` (str or list), and returns claims. Any failure →
+  `InvalidAuth` with a reason code in the message (`bad_signature`,
+  `wrong_audience`, `wrong_issuer`, `expired`).
+- Shared helper `_require_verified_email(userinfo, *, key="email", verified_key="email_verified") -> str`
+  → `InvalidAuth("email_unverified")` when missing/false.
+- Extend `jwksutils` so a **static JWKS URL** can be passed (Google publishes
+  `https://www.googleapis.com/oauth2/v3/certs`; current helpers derive it from
+  OIDC discovery). Keep the per-process cache and its existing behaviour for
+  Azure/ADFS callers.
+- Reason codes constant set (e.g. `EXCHANGE_REASONS`) exported from
+  `external.py` for reuse in logging/tests.
+- Unit tests with a throwaway RSA keypair and monkeypatched JWKS fetch.
+
+**NOT in scope**: provider-specific logic (aud values, userinfo calls), the
+exchange backend, Basic changes.
+
+---
+
+## Files to Create / Modify
+
+| File | Action | Description |
+|---|---|---|
+| `navigator_auth/backends/external.py` | MODIFY | Abstract method, `_verify_jwt`, `_require_verified_email`, reason codes |
+| `navigator_auth/backends/jwksutils.py` | MODIFY | Accept explicit `jwks_url`; keep cache |
+| `tests/test_external_verify_helpers.py` | CREATE | Helper tests |
+
+---
+
+## Implementation Notes
+
+### Pattern to Follow
+`backends/adfs.py` already does `jwt.decode(..., key=get_public_key(...))`;
+lift that into the helper. Follow the existing `InvalidAuth(message, status=401)`
+usage in `backends/basic.py`.
+
+### Key Constraints
+- Backends are process-wide singletons: no per-request state on `self`.
+- JWKS fetch is blocking `requests` in `jwksutils`; call it via
+  `asyncio.get_running_loop().run_in_executor(self.executor, ...)` (the
+  `ThreadPoolExecutor` already exists on `BaseAuthBackend`).
+- Never log the token; log only `kid`, `iss`, `aud` and the reason code.
+- The project runs pytest with `filterwarnings = error`; PyJWT key-length
+  warnings must be avoided in fixtures (use a 2048-bit RSA key).
+
+### References in Codebase
+- `navigator_auth/backends/jwksutils.py:115` — `get_public_key`.
+- `navigator_auth/backends/adfs.py:254` — existing JWKS-based decode.
+- `navigator_auth/backends/external.py:552` — `get_identity_userinfo` (style for provider calls).
+
+---
+
+## Acceptance Criteria
+
+- [ ] `ExternalAuth.verify_external_token` exists and raises `NotImplementedError` by default
+- [ ] `_verify_jwt` accepts a valid RS256 token; rejects bad signature / wrong `aud` /
+      wrong `iss` / expired with the matching reason code in `InvalidAuth`
+- [ ] `_require_verified_email` rejects missing and `false` verification
+- [ ] `jwksutils` works with an explicit JWKS URL and still with tenant discovery
+- [ ] `pytest tests/test_external_verify_helpers.py -v` passes; `ruff check` clean
+
+---
+
+## Test Specification
+
+```python
+# tests/test_external_verify_helpers.py
+# fixture rsa_keypair (2048-bit) + jwks_doc; monkeypatch jwksutils.get_jwks
+# test_verify_jwt_ok
+# test_verify_jwt_bad_signature
+# test_verify_jwt_wrong_audience / _wrong_issuer / _expired
+# test_verify_jwt_accepts_audience_list
+# test_require_verified_email_missing / _false / _ok
+# test_default_verify_external_token_not_implemented
+```
+
+---
+
+## Agent Instructions
+
+1. **Read the spec**; 2. **Check dependencies** (none);
+3. **Update index** → in-progress; 4. **Implement**; 5. **Verify**;
+6. **Move to completed/**; 7. **Update index** → done; 8. **Fill Completion Note**.
+
+---
+
+## Completion Note
+
+**Completed by**: sdd-worker
+**Date**: 2026-09-04
+**Notes**:
+- `ExternalAuth.verify_external_token(token, token_type="Bearer",
+  id_token=None) -> (dict, TokenResponse)` added to
+  `navigator_auth/backends/external.py`; default raises
+  `NotImplementedError` so the exchange backend (TASK-052) can 400
+  "unsupported provider" instead of 401.
+- `ExternalAuth._verify_jwt(token, *, audience, issuer, jwks_url=None,
+  tenant_id=None, leeway=30)`: fetches the signing key via
+  `jwksutils.get_public_key` off the event loop (this backend's
+  `ThreadPoolExecutor`), decodes with PyJWT (RS256/384/512), and checks
+  `aud`/`iss` (each accepting a single value or an iterable of accepted
+  values — `iss` is verified manually since PyJWT's built-in check only
+  accepts one issuer string). Raises `InvalidAuth` with a reason code
+  (`bad_signature`, `wrong_audience`, `wrong_issuer`, `expired`).
+- `ExternalAuth._require_verified_email(userinfo, key="email",
+  verified_key="email_verified")`: `InvalidAuth("email_unverified")` on
+  missing e-mail or a falsy/`"false"` verified flag.
+- `EXCHANGE_REASONS` frozenset exported from `external.py` (also
+  includes `invalid_token`, `user_not_found` for downstream tasks).
+- `jwksutils.get_jwks`/`get_jwk`/`get_public_key` gained an explicit
+  `jwks_url` kwarg (used verbatim, skipping OIDC discovery — Google's
+  static certs endpoint) while keeping tenant/discovery resolution and
+  the per-process `lru_cache` for Azure/ADFS unchanged.
+- `tests/test_external_verify_helpers.py` (12 tests, all passing): a
+  throwaway 2048-bit RSA keypair + monkeypatched `jwksutils.requests.get`
+  cover ok/bad-signature/wrong-audience/wrong-issuer/expired/audience-list
+  for `_verify_jwt`, all three `_require_verified_email` branches, the
+  `NotImplementedError` default, the explicit-`jwks_url` path, and the
+  `EXCHANGE_REASONS` contents.
+- `pytest tests/test_external_verify_helpers.py -v`: 12 passed.
+  Regression-checked `tests/test_oauth2_upstream_idp.py`,
+  `tests/test_resource_server_bearer.py` (44 passed) and
+  `tests/unit/identity/` (all green except the pre-existing, unrelated
+  `test_key_rotation_old_ciphertext_still_readable` failure noted in
+  TASK-047). `tests/unit/vault/test_key_rotation.py` hangs on an
+  unrelated background key-rotation batch loop — confirmed unrelated to
+  any file this task touches; not run to completion (pre-existing,
+  separate subsystem).
+- `ruff check navigator_auth/backends/external.py
+  navigator_auth/backends/jwksutils.py tests/test_external_verify_helpers.py`:
+  clean except 2 pre-existing unused-variable warnings at
+  `external.py:1020-1022` (confirmed identical on `dev` before this
+  task, well outside the code this task touches).
+
+**Deviations from spec**: None.

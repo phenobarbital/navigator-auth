@@ -4,15 +4,18 @@ Description: Backend Authentication/Authorization using Microsoft authentication
 """
 
 import base64
+import time
+from datetime import datetime, timezone
 from typing import Optional
 import orjson
+import jwt
 from aiohttp import web
 import msal
 import redis.asyncio as aioredis
 from msal.authority import AuthorityBuilder, AZURE_PUBLIC
 from navconfig.logging import logging
 from navigator_session import get_session
-from ..exceptions import AuthException, UserNotFound
+from ..exceptions import AuthException, UserNotFound, InvalidAuth
 from ..identity.types import TokenResponse
 from ..conf import (
     AZURE_ADFS_CLIENT_ID,
@@ -25,6 +28,17 @@ from ..conf import (
 from ..libs.json import json_encoder, json_decoder
 from ..responses import JSONResponse
 from .external import ExternalAuth
+
+#: FEAT-096 TASK-049 — access-token audiences Azure/Graph issues that this
+#: client may legitimately present (our own client id, or a Graph-audience
+#: token whose `appid`/`azp` is still ours — see `_verify_access_token`).
+_AZURE_GRAPH_AUDIENCES = frozenset(
+    {
+        AZURE_ADFS_CLIENT_ID,
+        "https://graph.microsoft.com",
+        "00000003-0000-0000-c000-000000000000",
+    }
+)
 
 
 logging.getLogger("msal").setLevel(logging.INFO)
@@ -387,19 +401,146 @@ class AzureAuth(ExternalAuth):
             return None
         return [token, token_type]
 
+    # ------------------------------------------------------------------
+    # FEAT-096 TASK-049: verify_external_token — the audience-bound
+    # verifier used by the token-exchange login flow
+    # (backends/exchange.py). Also closes the pre-existing gap in
+    # check_credentials below: any Graph token from any application used
+    # to be accepted.
+    # ------------------------------------------------------------------
+
+    def _accepted_id_token_issuers(self, tid: Optional[str] = None) -> tuple[list, str]:
+        """Accepted `iss` values + tenant id to use for JWKS resolution.
+
+        AZURE_ADFS_TENANT_ID may be a real tenant GUID, or the multi-tenant
+        aliases `common`/`organizations`/`consumers` — in the latter case
+        the accepted issuer is built from the token's own `tid` claim.
+        """
+        tenant = AZURE_ADFS_TENANT_ID
+        if tenant in ("common", "organizations", "consumers") and tid:
+            tenant = tid
+        issuers = [
+            f"https://login.microsoftonline.com/{tenant}/v2.0",
+            f"https://sts.windows.net/{tenant}/",
+        ]
+        return issuers, tenant
+
+    async def _verify_id_token(self, id_token: str) -> dict:
+        """Verify an Azure OIDC id_token: signature, `aud`, `iss`, `exp`."""
+        try:
+            unverified = jwt.decode(id_token, options={"verify_signature": False})
+        except jwt.PyJWTError as err:
+            raise InvalidAuth("bad_signature") from err
+        issuers, tenant = self._accepted_id_token_issuers(unverified.get("tid"))
+        return await self._verify_jwt(
+            id_token,
+            audience=AZURE_ADFS_CLIENT_ID,
+            issuer=issuers,
+            tenant_id=tenant,
+        )
+
+    async def _verify_access_token(self, access_token: str) -> dict:
+        """Best-effort verification for an access-token-only client.
+
+        Azure access tokens minted for Graph are not meant to be validated
+        by third parties (the signing key set may differ from the one
+        published for id_tokens). This path requires `aud` to be one of
+        the Graph-ish audiences *and* `appid`/`azp` to be this
+        application's client id; a subsequent signature-verification
+        failure is tolerated (logged at warning) as long as those checks
+        passed — the Graph `/me` call the caller makes right after this
+        acts as the liveness check.
+        """
+        try:
+            unverified = jwt.decode(access_token, options={"verify_signature": False})
+        except jwt.PyJWTError as err:
+            raise InvalidAuth("bad_signature") from err
+        aud = unverified.get("aud")
+        appid = unverified.get("appid") or unverified.get("azp")
+        if aud not in _AZURE_GRAPH_AUDIENCES:
+            self.logger.warning(f"azure: access-token wrong audience aud={aud!r}")
+            raise InvalidAuth("wrong_audience")
+        if appid != AZURE_ADFS_CLIENT_ID:
+            self.logger.warning(f"azure: access-token appid/azp mismatch appid={appid!r}")
+            raise InvalidAuth("wrong_audience")
+        exp = unverified.get("exp")
+        if exp is not None and exp < time.time():
+            raise InvalidAuth("expired")
+        issuers, tenant = self._accepted_id_token_issuers(unverified.get("tid"))
+        try:
+            await self._verify_jwt(
+                access_token,
+                audience=list(_AZURE_GRAPH_AUDIENCES),
+                issuer=issuers,
+                tenant_id=tenant,
+            )
+        except InvalidAuth as err:
+            self.logger.warning(
+                f"azure: access-token signature not independently verifiable "
+                f"(weaker path, appid/aud already matched): {err}"
+            )
+        return unverified
+
+    async def verify_external_token(
+        self,
+        token: str,
+        token_type: str = "Bearer",
+        id_token: Optional[str] = None,
+    ) -> tuple[dict, TokenResponse]:
+        """Verify a bearer token was minted for THIS Azure AD application.
+
+        Prefers `id_token` (fully signature/aud/iss verified via JWKS);
+        falls back to the weaker access-token-only path
+        (`_verify_access_token`) otherwise. Either way, the profile is
+        fetched from Graph `/me` with `token` (mirrors `auth_callback`).
+        """
+        if id_token:
+            claims = await self._verify_id_token(id_token)
+        else:
+            claims = await self._verify_access_token(token)
+        provider_user_id = claims.get("oid") or claims.get("sub")
+        provider_user_id = str(provider_user_id) if provider_user_id is not None else None
+        expires_at = None
+        exp = claims.get("exp")
+        if exp is not None:
+            expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+        scope = claims.get("scp")
+        scopes = scope.split() if isinstance(scope, str) else list(scope or [])
+        try:
+            userinfo = await self.get(
+                url=self.userinfo_uri, token=token, token_type=token_type
+            )
+        except Exception as err:
+            self.logger.warning(f"azure: Graph /me failed during token exchange: {err}")
+            raise InvalidAuth("expired") from err
+        if not provider_user_id:
+            provider_user_id = self.get_identity_userid(userinfo)
+        normalized = TokenResponse(
+            access_token=token,
+            token_type=token_type,
+            id_token=id_token,
+            expires_at=expires_at,
+            provider_user_id=provider_user_id,
+            scopes=scopes,
+        )
+        return userinfo, normalized
+
     async def check_credentials(self, request):
         """Authentication and create a session."""
         token, token_type = self.get_auth(request)
         try:
-            data = await self.get(
-                url=self.userinfo_uri,
-                token=token,
-                token_type=token_type,
-            )
+            data, _normalized = await self.verify_external_token(token, token_type=token_type)
             if not data:
                 return self.auth_error(
                     reason={"message": "Access Denied", "error": "No user information available"}, status=403
                 )
+        except InvalidAuth as err:
+            self.logger.warning(f"Azure: check_credentials rejected: {err}")
+            # NOTE: `auth_error` has a pre-existing bug where a dict `reason`
+            # with the default json content_type raises KeyError (it never
+            # populates `args["reason"]` on that branch); use a plain string
+            # here to sidestep it without touching backends/abstract.py.
+            return self.auth_error(reason="Invalid or foreign token", status=401)
         except Exception as err:
             self.logger.exception(f"Azure: Error getting User information: {err}")
             return self.auth_error(
