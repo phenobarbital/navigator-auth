@@ -3,7 +3,7 @@
 **Date**: 2026-09-04
 **Author**: Jesus Lara
 **Status**: discussion
-**Feature ID (reserved)**: FEAT-097
+**Feature ID (reserved)**: FEAT-098
 **Depends on**: FEAT-096 (`external-token-exchange`) — **must land first**. See
 *Sequencing* below.
 **Replaces**: `navigator_auth/handlers/recovery.py` (`ForgotPasswordHandler`,
@@ -236,7 +236,7 @@ callbacks — into a reusable `open_session(request, user, extra=None,
 expiration=None)`. That is the *same* region of `backends/basic.py` where this
 feature writes the `jti` record, and the same `create_token()` call it changes.
 
-Landing FEAT-097 first would mean:
+Landing FEAT-098 first would mean:
 
 - a near-certain conflict in `backends/basic.py`, in code FEAT-096 is required
   to leave byte-for-byte unchanged for the password path (its
@@ -256,7 +256,7 @@ Practical consequences for planning:
 - The `basic-auth-session` capability in this proposal is written against
   **post-FEAT-096 `basic.py`**: the `jti` goes in `open_session()`, not in
   `authenticate()`. The spec must be written against that shape.
-- `/sdd-task` for FEAT-097 should not be run until FEAT-096's TASK-046 is
+- `/sdd-task` for FEAT-098 should not be run until FEAT-096's TASK-046 is
   merged, or the task files will reference code that no longer exists.
 - Everything else in this feature is genuinely independent of FEAT-096 and can
   proceed in parallel with it: `password-policy`, `recovery-token-store`,
