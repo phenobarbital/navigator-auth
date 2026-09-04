@@ -152,7 +152,7 @@ STEP 3   POST /api/v1/password-recovery/confirm  {password, confirm_password, to
 | `handlers/__init__.py` | modify | Register the three new routes; repoint `/api/v1/forgot-password` → step 1 and `/api/v1/reset-password` → step 3 as compatibility aliases. |
 | `IdentityFlowStore` (`identity/flow_store.py`) | pattern source | `RecoveryTokenStore` copies its shape: `ConnectionPool` held once, `setex`/`get`/`getdel` helpers. Not subclassed — different key namespace and a signing concern. |
 | `set_basic_password` (`handlers/users/passwd.py:12`) | uses | The only password writer. Unchanged. |
-| `User` model (`models.py:39`) | uses | Lookup by `email` (and `alt_email`); writes `password`, `is_new`. **`idp.get_user()` searches by `username_attribute` only** and cannot be reused for e-mail lookup — this feature adds one. |
+| `User` model (`models.py:39`) | uses + **fix** | Lookup by `email` (and `alt_email`); writes `password`, `is_new`. **`idp.get_user()` searches by `username_attribute` only** and cannot be reused for e-mail lookup — this feature adds one. Separately, `password` is declared `max=16` against a 77-char hash — corrected to `max=255` in M1 (see Gotchas). |
 | `parse_rate_limit` (`backends/oauth2/dcr.py:104`) | reuses | `"<count>/<window>"` parser, already handles a malformed value by disabling the limit rather than failing closed. |
 | `IdentityProvider.create_token` (`backends/idp/__init__.py:378`) | modify | Emit a `jti` claim (`secrets.token_urlsafe`). Additive; `aud` precedent at the same site shows the pattern. |
 | `BasicAuth.open_session()` (`backends/basic.py`, **from FEAT-096**) | modify | Record the minted `jti` in `access_token_storage`. Writing it here rather than in `authenticate()` means token-exchange sessions inherit revocability for free. |
@@ -285,10 +285,13 @@ class SessionRevoker:
 ## 3. Module Breakdown
 
 ### Module 1: Config keys + package skeleton
-- **Path**: `navigator_auth/conf.py`, `navigator_auth/handlers/recovery/__init__.py`
+- **Path**: `navigator_auth/conf.py`, `navigator_auth/models.py`, `navigator_auth/handlers/recovery/__init__.py`
 - **Responsibility**: All eleven `AUTH_RECOVERY_*` keys with defaults, the
   `FORGOT_PASSWORD_CALLBACK` deprecation shim, and the package skeleton
   (`types.py` dataclasses). Front-loaded so later modules never touch `conf.py`.
+  **Also corrects `User.password` from `max=16` to `max=255`** in
+  `navigator_auth/models.py:51` — see Gotchas. One line, no migration, no
+  behaviour change today.
 - **Depends on**: nothing. **Must land first** — every other module imports it.
 
 ### Module 2: `PasswordPolicy`
@@ -358,6 +361,7 @@ class SessionRevoker:
 | `test_limiter_blocks_over_limit` | M4 | 4th call blocked; window expiry re-allows |
 | `test_limiter_fails_open` | M4 | Redis raising → `check()` returns `True` and logs a warning |
 | `test_limiter_malformed_spec_disables` | M4 | `"garbage"` → limiting off, never blocks |
+| `test_user_password_column_fits_hash` | M1 | A `set_basic_password()` output (77 chars) fits `User.password`; the declared `max` is >= `len(hash)` for the configured digest/dklen |
 | `test_create_token_emits_jti` | M5 | `create_token` payload carries a unique `jti` |
 | `test_jti_absent_token_still_valid` | M5 | A token minted without `jti` passes `_token_is_revoked` (backward compat) |
 | `test_revoker_kills_session_and_index` | M5 | Both `session:{sid}` and `user:{username}` are gone |
@@ -419,6 +423,8 @@ async def recoverable_user(authdb):
 - [ ] A completed reset invalidates: both Redis records, the user's sessions,
       and JWTs issued before the reset
 - [ ] A JWT minted before the upgrade (no `jti`) still authenticates
+- [ ] `User.password` is declared `max=255`, and a real 77-char PBKDF2 hash
+      round-trips through the model and the database
 - [ ] Documentation covers the callback contract and every `AUTH_RECOVERY_*` key
 - [ ] No breaking changes to the public API; legacy routes still resolve
 - [ ] Version bumped to `0.27.0`
@@ -468,10 +474,28 @@ async def recoverable_user(authdb):
 - **FEAT-096 conflict.** M5 edits the exact lines TASK-046 is refactoring.
   Writing the `jti` in `authenticate()` instead of `open_session()` would be
   redone and would miss token-exchange sessions. Wait for the merge.
-- **Password column width.** `User.password` is declared `max=16` in
-  `models.py:50` while a PBKDF2 hash is far longer. The existing code already
-  writes through it, so this is pre-existing, but confirm the DB column is wide
-  enough before assuming a write succeeded.
+- **`User.password` is declared `max=16` against a 77-character hash.**
+  Measured at current defaults, `set_basic_password()` produces
+  `pbkdf2_sha256$80000$<12-hex-salt>$<44-char-b64>` = **77 chars**
+  (13 + 1 + 5 + 1 + 12 + 1 + 44). The declaration in `models.py:51` says 16.
+
+  Verified: **`max=` is not enforced today** — a 77-char value constructs and
+  `is_valid()` returns `True` — and the reference DDL already declares
+  `password VARCHAR(255)` (`examples/sql/identity_vault_schema.sql:37`), so the
+  *database* is correct and no migration is needed. This is a latent
+  declaration bug: the day `max=` starts being enforced, **every password write
+  in the project breaks** — Basic login's `password_change`, the superuser
+  `password_reset`, and this feature's step 3 alike.
+
+  Fix in M1: `max=16` → **`max=255`**, matching the column and the convention
+  of its siblings (`email`/`username` pair `max=254` with `VARCHAR(254)`).
+  255 leaves generous headroom for configuration: even sha512 with
+  `AUTH_PWD_LENGTH=64` (88-char hash), a 32-char salt and 7-digit iterations
+  reaches only ~123.
+
+  Note this is **not** scoped to recovery — it is a project-wide latent bug that
+  this feature happens to surface. It can be landed independently at any time;
+  it is placed in M1 only so it does not get lost.
 
 ### External Dependencies
 
@@ -520,3 +544,4 @@ None. D1–D17 in the proposal resolve every question raised at proposal time
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-09-04 | Jesus Lara | Initial draft from `backend-based-password-recovery.proposal.md` (D1–D17 resolved). Three-step signed flow on `BaseHandler`; replaces the non-functional `handlers/recovery.py`. FEAT-096 is a hard prerequisite for M5 only. |
+| 0.2 | 2026-09-04 | Jesus Lara | M1 also corrects `User.password` `max=16` → `max=255` (measured hash is 77 chars; `max=` currently unenforced, DDL already `VARCHAR(255)`). Project-wide latent bug, landable independently. |
