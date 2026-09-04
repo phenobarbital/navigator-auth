@@ -237,10 +237,51 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (session_016Z3wYUV42WJDq92pifU1Fa)
+**Date**: 2026-09-04
+**Notes**: `create_token` (`backends/idp/__init__.py`) now emits
+`"jti": str(uuid4())` and strips any caller-supplied `jti` from `data`
+first. `BasicAuth.access_token_storage = AccessTokenStorage()` is set
+in `on_startup` (and closed in `on_cleanup`, added to prevent a Redis
+client leak that otherwise hangs `pytest-asyncio`'s per-test
+`asyncio.Runner.close()` at teardown). `open_session()` records the
+minted jti's `OauthAccessTokenRecord` (`expires_at` kept **naive** —
+`AccessTokenStorage.revoke()`/`save()` compute `expires_at - _now()`
+where `_now()` is naive `datetime.now()`; an aware `expires_at` raised
+`TypeError: can't subtract offset-naive and offset-aware datetimes`,
+caught silently by the best-effort try/except until traced down via
+`tests/test_basic_open_session.py`) and indexes it in a new
+`auth:user:jti:{user_id}` Redis SET via `BasicAuth._index_user_jti`,
+best-effort so a Redis hiccup never fails a login. `SessionRevoker`
+(`handlers/recovery/revoke.py`) kills `session:{sid}` +
+`user:{identity}` and every jti in the per-user index (found by
+walking `request.app['auth'].backends`, mirroring
+`_token_is_revoked`), with every deletion independently try/excepted.
+`auth.py` was not touched. Started the existing (stopped)
+`docker_postgres_1` container alongside `docker_redis_1` to run the
+regression gate — `tests/test_basic_auth.py`/`tests/test_login.py`
+now mostly execute instead of erroring on missing connections;
+confirmed byte-identical pass/fail counts (8 passed / 1 pre-existing
+`test_login_endpoint` failure needing an external `nav-api.dev.local`
+server) against unmodified `dev` with the same services running, so no
+regression. `tests/test_basic_open_session.py` (FEAT-096) passes
+unchanged (5/5). Added `TestJTI` (3 tests) and `TestSessionRevoker` (4
+tests, including `test_revocation_marker_outlives_token` and
+`test_revoker_partial_failure` from the task's own list) to
+`tests/test_password_recovery.py`; all 37 tests in the file pass;
+ruff clean (only the 4 pre-existing unused-import warnings in
+`basic.py`, confirmed present before this task too).
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: None architecturally. Two things worth
+flagging: (1) added a `BasicAuth.on_cleanup` body (closing
+`access_token_storage.redis`) — not in the task's Files table, but
+required once `access_token_storage` became a real live connection
+held for the backend's lifetime, otherwise tests using a
+module-scoped app hang indefinitely at asyncio teardown; `on_cleanup`
+was previously an empty stub. (2) `OauthAccessTokenRecord.expires_at`
+is constructed with a naive `datetime.fromtimestamp(exp)` rather than
+an aware one, to match the naive-datetime convention `_now()` and
+every other caller of `AccessTokenStorage`/`OauthAccessTokenRecord`
+in `backends/oauth2/backend.py` already use — using `timezone.utc`
+here (the more "correct" choice in isolation) breaks TTL computation
+against that pre-existing convention.

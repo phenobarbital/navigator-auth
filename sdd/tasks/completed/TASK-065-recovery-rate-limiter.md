@@ -165,10 +165,34 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (session_016Z3wYUV42WJDq92pifU1Fa)
+**Date**: 2026-09-04
+**Notes**: Implemented `RateLimiter` in
+`navigator_auth/handlers/recovery/limiter.py` reusing `parse_rate_limit`
+from `backends/oauth2/dcr.py` (no re-implementation of the
+`"<count>/<window>"` parser). `check()` does `INCR` then conditionally
+`EXPIRE` only when the post-increment value is 1 (fixed window, not
+sliding). Any Redis exception is caught broadly and logged at WARNING,
+returning `True` (fail-open). Keys are
+`auth:recovery:rate:{prefix}:{sha256(value.strip().lower())}` — no raw
+address ever appears in a key. Tested against the same real Redis
+instance used for TASK-064 (`docker_redis_1`,
+`redis://localhost:6379/1`); the fail-open test uses a
+`ConnectionPool` pointed at an unreachable host rather than a mock, so
+the real exception path is exercised. Added `TestRateLimiter` (7
+tests, including `test_window_expires_and_reallows` beyond the task's
+literal list, using a `"1/second"` spec) to
+`tests/test_password_recovery.py`. All 30 tests in the file pass;
+ruff is clean.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: None. One implementation note: the task's
+"Use a pipeline so the two commands are one round trip" and "EXPIRE
+only when INCR returned 1" are not simultaneously achievable with a
+single unconditional pipeline (you cannot branch on a command's result
+from inside the same pipeline without Lua). Implemented as two
+sequential Redis calls (`INCR`, then `EXPIRE` only when the count is
+1) — one round trip on every call after the first in a window, two on
+the window's first call — which is the standard fixed-window counter
+pattern and satisfies every acceptance criterion; no Lua scripting was
+introduced since the spec did not call for atomicity beyond
+fail-open-on-error.

@@ -184,10 +184,59 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (Claude Sonnet 5, session_01KS7E6KxYXnkgzMnYHaJC2U)
+**Date**: 2026-09-05
+**Notes**: Implemented `AbstractSAMLBackend(ExternalAuth, ABC)` in
+`navigator_auth/backends/saml/sp.py` per spec: SP-initiated `authenticate`
+(random RelayState, flow record with request_id/internal_redirect/acs_url/
+oauth2_flow, Redirect or POST binding per `SAML_BINDING`), `auth_callback`
+(GETDEL flow lookup, InResponseTo validation, `SAML_STALE_REQUEST` for an
+unmatched InResponseTo with no flow, unsolicited path gated by
+`SAML_ALLOW_UNSOLICITED` with a `saml_assert_{id}` replay cache TTL'd to
+`NotOnOrAfter`, `AssertionResult` construction via `core.flatten_attributes`,
+`resolve_user_identifier`/`authorize`/`on_assertion` hooks,
+`build_user_info`/`validate_user_info` using a *separate* raw-SAML-attribute
+flatten — `core.flatten_attributes`'s user-field-keyed output is for the
+hooks/`AssertionResult`, not for `build_user_info`, whose `mapping` param
+expects source-attribute-keyed data, mirroring every other backend's
+`build_user_info(raw_provider_data, mapping=user_field->raw_field)` contract
+— session `saml` block, host-validated `internal_redirect`), SP metadata,
+`check_credentials`. `logout`/`finish_logout` are `NotImplementedError`
+stubs (TASK-057). Every `SAMLError` maps to its stable code on
+`failed_redirect`; audit is a structured `self.logger` line (`AuditLog.log()`
+expects a PDP policy "answer" object, not a generic event — a real mismatch,
+not an oversight). Added `ExternalAuth.get_callback_state()` (default: query
+`state`) and switched `_auth_callback_dispatch` to await it, so the SP's
+POST-body `RelayState` (cached via a `web.RequestKey`, not a raw string —
+avoids aiohttp's `NotAppKeyWarning` under this repo's `filterwarnings=
+["error", ...]`) is found by dispatch exactly like every OIDC backend's
+query `state`. Added `tests/conftest.py` fixtures (`saml_keys`, `redis_stub`,
+`post_request`, `saml_idp_core`/`signed_response`, `sp_backend`); all SAML
+fixture URLs are forced to "https" (`force_https_scheme`) to match the
+scheme baked into TASK-055's committed metadata fixtures regardless of this
+sandbox's own `PREFERRED_AUTH_SCHEME=http`. `tests/test_saml_sp.py` (13
+tests) covers every M3 spec §4 row exercisable without a real backing user
+DB. Verified `pytest tests/test_saml_sp.py -v` (13 passed) and
+`tests/test_oauth2_upstream_idp.py tests/test_oauth2_3lo_session_binding.py
+-v` (23 passed; the 3 `test_oauth2_3lo_session_binding.py` failures are
+pre-existing/environmental — `InsecureKeyLengthWarning`, reproduced
+identically on unmodified `dev`). A full `tests/` run intermittently hangs
+after `test_basic_auth.py` in this worktree specifically when a concurrent
+session is exercising the same real Postgres/Redis from a different
+worktree (confirmed: the same full suite completes in ~7s with only the
+already-known pre-existing failures when run from the main `dev` checkout);
+this is shared-infrastructure contention, not a regression from this task.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: `resolve_user_identifier`, `authorize`,
+`on_assertion` and `build_user_info` are wired as described, but the spec's
+own pseudocode reuses the word "flattened" for two different shapes
+(`AssertionResult.attributes`, user-field-keyed, vs. the raw-SAML-attribute-
+keyed dict `build_user_info` actually needs) — implemented as two distinct
+values (`core.flatten_attributes(...)` and a small local `_flatten_raw`
+helper) rather than literally passing the same dict through both, since the
+literal reading breaks `build_user_info`'s existing `get_user_mapping`
+contract (used unchanged by every other backend). `tests/
+test_oauth2_upstream_idp.py` was modified (not in TASK-056's file list) to
+keep `_FakeBackend` working after the `_auth_callback_dispatch` change —
+required by this task's own acceptance criterion that this suite still
+passes.

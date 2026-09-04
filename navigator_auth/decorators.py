@@ -1,11 +1,12 @@
 from functools import wraps
 import fnmatch
 import inspect
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar, Union
 from collections.abc import Callable, Awaitable
 from aiohttp import web, hdrs
 from aiohttp.abc import AbstractView
 from navigator_session import get_session
+from navconfig.logging import logger
 from .exceptions import AuthException
 from .conf import AUTH_SESSION_OBJECT, AUTH_EXCLUDE_LIST_KEY
 from .vault.integration import _attach_vault_to_request
@@ -901,3 +902,373 @@ def is_restricted(
             return _wrap_function(handler)
 
     return _wrapper
+
+
+# --------------------------------------------------------------------------
+# ABAC: access check against a named Policy.
+# --------------------------------------------------------------------------
+# NOTE: every ABAC import below is done lazily, inside the functions, because
+# ``navigator_auth.abac.decorators`` imports ``_apply_decorator`` from this
+# module; importing ABAC at module level would create a circular import.
+
+
+def _find_request(args: tuple, kwargs: dict) -> Optional[web.Request]:
+    """Locate the ``web.Request`` among the arguments of a decorated callable.
+
+    Supports the three call shapes that ``check_access`` must serve:
+
+    * bare function handlers — ``async def handler(request)`` (aiohttp may also
+      pass the request in last position),
+    * class-based views — ``self`` is an ``AbstractView`` carrying ``.request``,
+    * plain class methods — ``self`` exposes a ``request`` attribute.
+
+    Args:
+        args: Positional arguments the wrapped callable was called with.
+        kwargs: Keyword arguments the wrapped callable was called with.
+
+    Returns:
+        The request, or None when no request could be found.
+    """
+    request = kwargs.get("request")
+    if isinstance(request, web.Request):
+        return request
+    for arg in args:
+        if isinstance(arg, web.Request):
+            return arg
+    if args:
+        this = args[0]
+        if isinstance(this, AbstractView):
+            return this.request
+        candidate = getattr(this, "request", None)
+        if isinstance(candidate, web.Request):
+            return candidate
+    return None
+
+
+def _apply_to_callable(handler: F, wrapper: Callable) -> F:
+    """Apply a single (request-resolving) wrapper to a function or a class.
+
+    Unlike :func:`_apply_decorator`, one wrapper serves both functions and
+    methods, because the request is resolved at call time by
+    :func:`_find_request`.  For classes:
+
+    * class-based views (or any class exposing HTTP-verb methods) get every
+      HTTP method wrapped,
+    * any other class gets every public coroutine method wrapped
+      (``staticmethod``/``classmethod`` members are left untouched).
+    """
+    if not inspect.isclass(handler):
+        return wrapper(handler)
+    wrapped_any = False
+    for method_name in hdrs.METH_ALL:
+        method = getattr(handler, method_name.lower(), None)
+        if method is not None and callable(method):
+            setattr(handler, method_name.lower(), wrapper(method))
+            wrapped_any = True
+    if wrapped_any:
+        return handler
+    # Not a view: protect every public coroutine method of the class.
+    for name, member in inspect.getmembers(handler, inspect.iscoroutinefunction):
+        if name.startswith("_"):
+            continue
+        raw = inspect.getattr_static(handler, name, None)
+        if isinstance(raw, (staticmethod, classmethod)):
+            continue
+        setattr(handler, name, wrapper(member))
+    return handler
+
+
+def _get_pdp(request: web.Request) -> Any:
+    """Return the ABAC PDP registered on the Application (or None)."""
+    pdp = request.app.get("abac")
+    if pdp is None:
+        guardian = request.app.get("security")
+        pdp = getattr(guardian, "pdp", None)
+    return pdp
+
+
+def _find_policy(pdp: Any, name: str) -> Any:
+    """Find a Policy by name on the PDP (indexed lookup, then linear scan)."""
+    evaluator = getattr(pdp, "_evaluator", None)
+    index = getattr(evaluator, "_index", None) if evaluator is not None else None
+    if index is not None:
+        found = index.get_by_name(name)
+        if found is not None:
+            return found
+    for policy in getattr(pdp, "policies", None) or []:
+        if getattr(policy, "name", None) == name:
+            return policy
+    return None
+
+
+def _coerce_resource_type(value: Any) -> Any:
+    """Coerce a ``ResourceType`` given as string (``"kb"``, ``"KB"``)."""
+    from navigator_auth.abac.policies.resources import ResourceType
+
+    if value is None or isinstance(value, ResourceType):
+        return value
+    if isinstance(value, str):
+        try:
+            return ResourceType(value.lower())
+        except ValueError:
+            return ResourceType[value.upper()]
+    return value
+
+
+def _policy_allows(effect: Any) -> bool:
+    """Normalize a PolicyResponse effect (enum, str or bool) into a boolean."""
+    from navigator_auth.abac.policies import PolicyEffect
+
+    if isinstance(effect, PolicyEffect):
+        return bool(effect)
+    if isinstance(effect, str):
+        return effect.strip().lower() in ("allow", "true", "1")
+    if isinstance(effect, (bool, int)):
+        return bool(effect)
+    return False
+
+
+async def _abac_eval_context(request: web.Request) -> Any:
+    """Build an ``EvalContext`` for the current request, as the PDP does."""
+    from navigator_auth.abac.context import EvalContext
+
+    try:
+        session = await get_session(request, new=False)
+    except RuntimeError:
+        session = None
+    user = None
+    userinfo = None
+    if session is not None:
+        try:
+            user = session.decode("user")
+        except (AttributeError, KeyError, TypeError, RuntimeError):
+            user = None
+        try:
+            userinfo = session[AUTH_SESSION_OBJECT]
+        except (KeyError, TypeError):
+            userinfo = None
+    if user is None and isinstance(userinfo, dict) and userinfo:
+        # Same fallback as PDP.authorize(): userinfo stands in for the User.
+        user = userinfo
+    if user is None:
+        user = request.get("user", getattr(request, "user", None))
+    return EvalContext(request, user, userinfo, session)
+
+
+def _evaluate_policy(
+    policy: Any,
+    ctx: Any,
+    env: Any,
+    action: str,
+    resource: str,
+    resource_type: Any,
+) -> Any:
+    """Evaluate one Policy object, honouring both Policy implementations.
+
+    ``ResourcePolicy`` and the legacy ``Policy`` expose different
+    ``is_allowed()`` signatures, so the resource/action arguments are routed
+    to whichever one the policy actually understands.  Without any
+    resource/action constraint the policy is simply evaluated against the
+    context (subject, groups, conditions, scopes and environment).
+    """
+    is_resource_policy = hasattr(policy, "covers_resource")
+    if is_resource_policy:
+        if action or resource or resource_type:
+            return policy.is_allowed(
+                ctx,
+                env,
+                resource_type=resource_type,
+                resource_name=resource,
+                action=action,
+            )
+        return policy.evaluate(ctx, env)
+    if action:
+        return policy.is_allowed(ctx, env, action=action)
+    return policy.evaluate(ctx, env)
+
+
+async def _check_policies(
+    request: web.Request,
+    names: list,
+    action: str,
+    resource: str,
+    resource_type: Any,
+    require_all: bool,
+) -> tuple:
+    """Evaluate the named policies for the current request.
+
+    Returns:
+        Tuple ``(allowed, reason, response)`` where ``response`` is the last
+        ``PolicyResponse`` produced (or None when nothing could be evaluated).
+    """
+    from navigator_auth.abac.policies import Environment
+
+    pdp = _get_pdp(request)
+    if pdp is None:
+        logger.error(
+            "check_access: ABAC is not enabled on this Application, "
+            "denying access to %s", request.path
+        )
+        return False, "ABAC is not enabled on this Application.", None
+
+    try:
+        rtype = _coerce_resource_type(resource_type)
+    except (KeyError, ValueError):
+        logger.error("check_access: unknown resource type %r", resource_type)
+        return False, f"Unknown resource type: {resource_type}", None
+    if resource and rtype is None:
+        from navigator_auth.abac.policies.resources import ResourceType
+
+        rtype = ResourceType.URI
+
+    ctx = await _abac_eval_context(request)
+    env = Environment()
+    reasons = []
+    last_response = None
+
+    for name in names:
+        policy = _find_policy(pdp, name)
+        if policy is None:
+            # Fail closed: a policy that is not declared can never grant access.
+            logger.error(
+                "check_access: Policy '%s' is not declared on ABAC.", name
+            )
+            reasons.append(f"Policy '{name}' is not declared on ABAC.")
+            if require_all:
+                return False, "; ".join(reasons), None
+            continue
+        try:
+            response = _evaluate_policy(
+                policy, ctx, env, action, resource, rtype
+            )
+        except Exception as exc:  # noqa: BLE001 - never leak a 500 from a check
+            logger.exception(
+                "check_access: Policy '%s' failed to evaluate: %s", name, exc
+            )
+            reasons.append(f"Policy '{name}' failed to evaluate.")
+            if require_all:
+                return False, "; ".join(reasons), None
+            continue
+        last_response = response
+        reason = getattr(response, "response", None) or f"Policy '{name}'"
+        reasons.append(reason)
+        if _policy_allows(getattr(response, "effect", response)):
+            if not require_all:
+                return True, reason, response
+        elif require_all:
+            return False, reason, response
+
+    if require_all and reasons:
+        return True, "; ".join(reasons), last_response
+    return False, "; ".join(reasons) or "Access Denied", last_response
+
+
+def check_access(
+    policy: Union[str, list],
+    action: str = None,
+    resource: str = None,
+    resource_type: Any = None,
+    require_all: bool = False,
+    content_type: str = "application/json",
+) -> Callable:
+    """Restrict a Handler to users allowed by an existing ABAC Policy.
+
+    Works like :func:`allowed_groups` or :func:`allowed_programs`, but the
+    decision is delegated to a Policy already declared on the ABAC PDP
+    (loaded from DB or YAML storage) and looked up **by name**, so the access
+    rules live with the policies instead of being hardcoded on the handler.
+
+    Usable on the three handler shapes:
+
+    * bare functions::
+
+        @check_access('view_articles')
+        async def handler(request): ...
+
+    * methods of a class (the request is taken from ``self.request``)::
+
+        class ArticleView(web.View):
+            @check_access('post_articles')
+            async def post(self): ...
+
+    * whole classes (class-based views get every HTTP method protected; any
+      other class gets every public coroutine method protected)::
+
+        @check_access('admin_articles')
+        class AdminView(web.View): ...
+
+    Args:
+        policy: Name of the ABAC Policy — or a list of names.  With a list,
+            access is granted when **any** of them allows it, unless
+            ``require_all`` is True.
+        action: Optional action (``"article:create"``) that the policy must
+            cover for access to be granted.
+        resource: Optional resource name the policy must cover (defaults the
+            resource type to ``ResourceType.URI`` when none is given).
+        resource_type: Optional ``ResourceType`` (or its string value, e.g.
+            ``"kb"``) used together with ``resource``.
+        require_all: Require every named policy to allow access.
+        content_type: Content-Type header for the error responses.
+
+    Returns:
+        Callable: the decorator to apply to the handler, method or class.
+
+    Raises:
+        web.HTTPUnauthorized: the request is not authenticated.
+        web.HTTPForbidden: the policy denied access, is not declared on the
+            ABAC, or ABAC is not enabled (the check always fails closed).
+        ValueError: no ``web.Request`` was found in the handler arguments.
+    """
+    names = [policy] if isinstance(policy, str) else list(policy)
+    if not names:
+        raise ValueError(
+            "check_access requires at least one ABAC Policy name."
+        )
+
+    def _wrapper(func):
+        @wraps(func)
+        async def _wrap(*args, **kwargs) -> web.StreamResponse:
+            request = _find_request(args, kwargs)
+            if request is None:
+                raise ValueError(
+                    f"web.Request was not found in arguments. {func!s}"
+                )
+            # avoid check on OPTION method:
+            if request.method == hdrs.METH_OPTIONS:
+                return await func(*args, **kwargs)
+            # Short-circuit for explicitly excluded paths (public URLs etc.)
+            if _is_path_excluded(request) or getattr(
+                request, "allow_anonymous", False
+            ):
+                return await func(*args, **kwargs)
+            if request.get("authenticated", False) is False:
+                raise web.HTTPUnauthorized(
+                    reason="Access Denied",
+                    headers={
+                        hdrs.CONTENT_TYPE: content_type,
+                        hdrs.CONNECTION: "keep-alive",
+                    },
+                )
+            allowed, reason, response = await _check_policies(
+                request,
+                names,
+                action,
+                resource,
+                resource_type,
+                require_all,
+            )
+            if allowed:
+                # Expose the decision, as the ABAC middleware does.
+                request["policy_response"] = response
+                return await func(*args, **kwargs)
+            raise web.HTTPForbidden(
+                reason=f"Access Denied: {reason}".replace("\n", " "),
+                headers={
+                    hdrs.CONTENT_TYPE: content_type,
+                    hdrs.CONNECTION: "keep-alive",
+                },
+            )
+
+        return _wrap
+
+    return lambda handler: _apply_to_callable(handler, _wrapper)

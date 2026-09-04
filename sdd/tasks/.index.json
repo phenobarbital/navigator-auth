@@ -1039,7 +1039,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "high",
@@ -1047,7 +1047,8 @@
     "depends_on": [],
     "parallel": false,
     "parallelism_notes": "Foundation: every other FEAT-097 task imports pysaml2 and the new conf keys. Must run first; sequential.",
-    "file": "sdd/tasks/active/TASK-054-saml-deps-config-foundation.md"
+    "file": "sdd/tasks/completed/TASK-054-saml-deps-config-foundation.md",
+    "completed_at": "2026-09-04T22:02:33.840967Z"
   },
   {
     "id": "TASK-055",
@@ -1056,7 +1057,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "high",
@@ -1066,7 +1067,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Defines the config/engine contract both roles depend on; must land before the SP and IdP tasks. Sequential.",
-    "file": "sdd/tasks/active/TASK-055-saml-core.md"
+    "file": "sdd/tasks/completed/TASK-055-saml-core.md",
+    "completed_at": "2026-09-04T22:13:33.882394Z"
   },
   {
     "id": "TASK-056",
@@ -1075,7 +1077,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "high",
@@ -1085,7 +1087,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Edits backends/external.py (dispatcher hook) and creates saml/sp.py. Shares the core with TASK-058 but no files; runs in the feature worktree.",
-    "file": "sdd/tasks/active/TASK-056-saml-sp-login-flows.md"
+    "file": "sdd/tasks/completed/TASK-056-saml-sp-login-flows.md",
+    "completed_at": "2026-09-04T23:04:13.878746Z"
   },
   {
     "id": "TASK-057",
@@ -1094,7 +1097,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "medium",
@@ -1104,7 +1107,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Extends saml/sp.py from TASK-056; same file, sequential.",
-    "file": "sdd/tasks/active/TASK-057-saml-sp-single-logout.md"
+    "file": "sdd/tasks/completed/TASK-057-saml-sp-single-logout.md",
+    "completed_at": "2026-09-04T23:14:32.466436Z"
   },
   {
     "id": "TASK-058",
@@ -1113,7 +1117,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "high",
@@ -1123,7 +1127,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "Parallelizable after TASK-055: creates saml/idp.py and touches only auth.py (hidden flag). No shared files with TASK-056/057 (sp.py, external.py). May run in a second worktree branched after TASK-055 merges.",
-    "file": "sdd/tasks/active/TASK-058-saml-idp-registry-initiate.md"
+    "file": "sdd/tasks/completed/TASK-058-saml-idp-registry-initiate.md",
+    "completed_at": "2026-09-04T23:23:11.238621Z"
   },
   {
     "id": "TASK-059",
@@ -1190,7 +1195,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "high",
@@ -1198,7 +1203,8 @@
     "depends_on": [],
     "parallel": false,
     "parallelism_notes": "Foundation: every other FEAT-098 task imports the AUTH_RECOVERY_* keys and types.py. Front-loads ALL conf.py edits into one hunk, which is what makes 063/064/065/066 safe to parallelise. Also carries the standalone User.password max=16 -> 255 fix. Must run first.",
-    "file": "sdd/tasks/active/TASK-062-recovery-config-model-skeleton.md"
+    "file": "sdd/tasks/completed/TASK-062-recovery-config-model-skeleton.md",
+    "completed_at": "2026-09-04T21:49:04Z"
   },
   {
     "id": "TASK-063",
@@ -1207,7 +1213,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "high",
@@ -1217,7 +1223,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "Pure validator; owns policy.py alone. No Redis, no HTTP, no DB. Zero file overlap with 064/065/066 \u2014 fully parallel.",
-    "file": "sdd/tasks/active/TASK-063-password-policy-validator.md"
+    "file": "sdd/tasks/completed/TASK-063-password-policy-validator.md",
+    "completed_at": "2026-09-04T21:51:05Z"
   },
   {
     "id": "TASK-064",
@@ -1226,7 +1233,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "high",
@@ -1236,7 +1243,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "Owns store.py alone. Shares only the types.py dataclasses from 062 (read-only). Fully parallel with 063/065/066.",
-    "file": "sdd/tasks/active/TASK-064-recovery-token-store.md"
+    "file": "sdd/tasks/completed/TASK-064-recovery-token-store.md",
+    "completed_at": "2026-09-04T21:56:41Z"
   },
   {
     "id": "TASK-065",
@@ -1245,7 +1253,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "medium",
@@ -1255,7 +1263,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "Owns limiter.py alone; imports parse_rate_limit from oauth2/dcr.py read-only. Fully parallel with 063/064/066.",
-    "file": "sdd/tasks/active/TASK-065-recovery-rate-limiter.md"
+    "file": "sdd/tasks/completed/TASK-065-recovery-rate-limiter.md",
+    "completed_at": "2026-09-04T21:58:55Z"
   },
   {
     "id": "TASK-066",
@@ -1264,7 +1273,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "high",
@@ -1274,7 +1283,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "The only FEAT-098 task touching existing files (idp/__init__.py, basic.py) \u2014 files 063/064/065 never open, so still parallel with them. Was blocked on FEAT-096 TASK-046; unblocked since FEAT-096 merged to dev 2026-09-04 and open_session() exists. Largest blast radius in the feature: affects all Basic-auth traffic. Review separately.",
-    "file": "sdd/tasks/active/TASK-066-basic-jti-session-revocation.md"
+    "file": "sdd/tasks/completed/TASK-066-basic-jti-session-revocation.md",
+    "completed_at": "2026-09-04T22:18:27Z"
   },
   {
     "id": "TASK-067",
@@ -1283,7 +1293,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "high",
@@ -1297,7 +1307,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Integration point: imports every prior FEAT-098 module and deletes the old recovery.py. Not parallelizable.",
-    "file": "sdd/tasks/active/TASK-067-password-recovery-handler.md"
+    "file": "sdd/tasks/completed/TASK-067-password-recovery-handler.md",
+    "completed_at": "2026-09-04T22:54:28Z"
   },
   {
     "id": "TASK-068",
@@ -1306,7 +1317,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "medium",
@@ -1316,6 +1327,25 @@
     ],
     "parallel": false,
     "parallelism_notes": "Validation and release chores; depends on the assembled handler. Not parallelizable.",
-    "file": "sdd/tasks/active/TASK-068-recovery-e2e-docs-version.md"
+    "file": "sdd/tasks/completed/TASK-068-recovery-e2e-docs-version.md",
+    "completed_at": "2026-09-04T23:03:13Z"
+  },
+  {
+    "id": "TASK-069",
+    "slug": "oauth2-provider-cleanup-leak",
+    "title": "Oauth2Provider.on_cleanup() never closes its Redis-backed storages",
+    "feature_id": "FEAT-093",
+    "feature": "oauth2-3lo-implementation",
+    "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
+    "status": "done",
+    "assigned_to": "unassigned",
+    "priority": "medium",
+    "effort": "S",
+    "depends_on": [],
+    "parallel": true,
+    "parallelism_notes": "Isolated bugfix in Oauth2Provider.on_cleanup(); no shared files with other active tasks.",
+    "file": "sdd/tasks/completed/TASK-069-oauth2-provider-cleanup-leak.md",
+    "started_at": "2026-09-04T23:10:33Z",
+    "completed_at": "2026-09-04T23:13:03Z"
   }
 ]

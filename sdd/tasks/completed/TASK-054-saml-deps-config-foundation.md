@@ -166,10 +166,31 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (Claude Sonnet 5, session_01KS7E6KxYXnkgzMnYHaJC2U)
+**Date**: 2026-09-05
+**Notes**: Swapped `python3-saml`/`xmlsec` for `pysaml2>=7.5,<8` in `pyproject.toml`
+(added `tool.pytest.ini_options.markers` registering `xmlsec`); added every
+`SAML_*`/`SAML_IDP_*` key from spec §6 to `conf.py` next to the existing SAML
+block, with the stated defaults and the existing `orjson`/`logging.exception`
+fallback style for JSON-valued keys; promoted `validate_redirect_host(uri,
+extra_hosts=())` onto `BaseAuthBackend` (`abstract.py`), imported `ALLOWED_HOSTS`
+there; `ADFSAuth._validate_internal_redirect` now delegates to it (removed the
+now-unused `fnmatch`/`urlparse` imports from `adfs.py`); guarded the legacy
+`from .saml import SAMLAuth` in `backends/__init__.py` with try/except so the
+package still imports (logs a warning) until TASK-060 replaces it. Created
+`tests/test_saml_foundation.py` (validator + conf-defaults + package-import
+tests) — all pass. Verified `pytest tests/test_saml_foundation.py tests/ -k
+"adfs or redirect" -v` (34 passed) and a full-suite run; the only full-suite
+failures are pre-existing environment/infra issues (no Postgres/Redis/vault
+session storage in this sandbox) reproduced identically against unmodified
+`dev` — confirmed zero regressions from this task's changes. `uv pip list`
+confirms `pysaml2` present, no `python3-saml`/`xmlsec`.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: No `.github/workflows/*.yml` or `Dockerfile` was
+modified to install `xmlsec1` — this repository currently has no CI workflow
+that runs `pytest` (only `codeql-analysis.yml`, a CodeQL scan with no test
+step, and `release.yml`, a release-build/publish workflow) and no Dockerfile
+exists in the repo. There is nothing in scope to add the binary to. `uv.lock`
+is `.gitignore`d and not tracked in this repo, so it was not committed
+(dependency resolution was verified with a local `uv pip install -e .`
+instead).
