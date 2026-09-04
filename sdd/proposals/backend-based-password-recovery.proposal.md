@@ -4,6 +4,7 @@
 **Author**: Jesus Lara
 **Status**: accepted
 **Feature ID (reserved)**: FEAT-098
+**Spec**: sdd/specs/backend-based-password-recovery.spec.md
 **Depends on**: FEAT-096 (`external-token-exchange`) — **must land first**. See
 *Sequencing* below.
 **Replaces**: `navigator_auth/handlers/recovery.py` (`ForgotPasswordHandler`,
