@@ -124,11 +124,14 @@ own password behaviour, session storage format.
   id_token for identity and **vault both** (new ciphered `id_token` column).
 - **D8** A successful exchange fires the Basic `AUTH_SUCCESSFUL_CALLBACKS` and
   updates `last_login`, "as if Basic".
+- **D9** navigator_session supports a per-session max-age; the Redis session
+  TTL and cookie are aligned with the JWT cap.
+- **D10** A re-exchange without a refresh token keeps the previously vaulted
+  refresh token.
 
 ## Open Questions
 
-- Carried into the spec (Section 7): per-session Redis TTL alignment with the
-  JWT cap; refresh-token preservation on re-exchange.
+None. Spec approved 2026-09-04.
 
 ## Parallelism Potential
 

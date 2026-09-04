@@ -3,10 +3,10 @@
 **Feature ID**: FEAT-096
 **Date**: 2026-09-04
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 0.25.0
 
-> **Inputs:** `sdd/proposals/external-token-exchange.proposal.md` (decisions D1–D8
+> **Inputs:** `sdd/proposals/external-token-exchange.proposal.md` (decisions D1–D10
 > resolved 2026-09-04).
 > **Hard prerequisites (landed):** Identity Vault (`IdentityStore`,
 > `auth.user_identities` credential columns, `/api/v1/user/identities/{provider}/credential`),
@@ -299,6 +299,15 @@ which of these occurred beyond "Invalid Credentials".
      else `TOKEN_EXCHANGE_MAX_TTL`; must be ≥ 60 s else 401 `expired`.
   6. `open_session(request, user, extra={auth_method:"basic", auth_origin,
      external_expires_at, provider_user_id}, expiration=cap)`.
+  7. Align the Redis session TTL with the cap (D9): `open_session` sets
+     `session.max_age = cap` on the `SessionData` returned by `remember()`
+     (navigator_session `data.py` setter); `RedisStorage.save_session` uses
+     `session.max_age` as the Redis `expire`, and `save_cookie` receives the
+     same value so the cookie expires with the session.
+  8. Re-exchange with an existing linked identity and no new refresh token
+     keeps the previously vaulted refresh token (D10); `save_linked_identity`
+     already preserves it when `token.refresh_token is None` — add a test, no
+     code change expected.
   Config: `TOKEN_EXCHANGE_MAX_TTL`, `TOKEN_EXCHANGE_PROVIDERS`.
 - **Depends on**: Modules 1–6.
 
@@ -335,6 +344,8 @@ which of these occurred beyond "Invalid Credentials".
 | `test_exchange_expiration_cap` | 7 | `exp` ≤ external `expires_at`; no expiry → `TOKEN_EXCHANGE_MAX_TTL`; < 60 s → 401. |
 | `test_exchange_vaults_credential_not_session` | 7 | `user_identities` row has access/refresh/id_token; Redis session has no raw token. |
 | `test_exchange_fires_basic_callbacks` | 7 | `AUTH_SUCCESSFUL_CALLBACKS` invoked, `last_login` updated. |
+| `test_exchange_session_max_age_matches_cap` | 7 | `session.max_age == cap`; Redis key TTL and cookie `Max-Age` equal the cap. |
+| `test_reexchange_preserves_refresh_token` | 7 | second exchange without refresh token leaves the vaulted refresh token intact. |
 
 ### Integration Tests
 | Test | Description |
@@ -376,7 +387,8 @@ def linked_identity(db, existing_user):   # user_identities row with provider_us
 - [ ] Session + JWT carry `auth_method="basic"` and `auth_origin="<provider>"`
       at top level and inside `AUTH_SESSION_OBJECT`.
 - [ ] JWT `exp` never exceeds the external token `expires_at`; fallback cap uses
-      `TOKEN_EXCHANGE_MAX_TTL`.
+      `TOKEN_EXCHANGE_MAX_TTL`. Redis session TTL and cookie `Max-Age` equal the
+      same cap.
 - [ ] Raw provider tokens are absent from the Redis session; present (ciphered)
       in `auth.user_identities` including `id_token`; retrievable through
       `GET /api/v1/user/identities/{provider}/credential`.
@@ -400,11 +412,14 @@ def linked_identity(db, existing_user):   # user_identities row with provider_us
   `TOKEN_EXCHANGE_PROVIDERS`.
 
 ### Known Risks / Gotchas
-- **Redis session TTL vs JWT cap.** `remember()` → `new_session()` uses the
-  global `SESSION_TIMEOUT`; if navigator_session cannot set a per-session TTL,
-  enforcement relies on the JWT `exp` (the middleware rejects expired JWTs).
-  Task for Module 7 must check `navigator_session` for a per-session max-age hook
-  and use it if present; document the result.
+- **Redis session TTL vs JWT cap.** `remember()` → `new_session()` creates the
+  session with the storage-wide `SESSION_TIMEOUT`, but `SessionData.max_age` is
+  settable per session and `RedisStorage.save_session` honours it as the Redis
+  `expire`. `open_session` must set it **before** the session is saved by
+  `api_login` → `storage.load_session(..., response=)`; verify in the
+  integration test that the Redis TTL is the cap, not `SESSION_TIMEOUT`.
+  `SessionData` also rejects loads older than `max_age` (`data.py:105`), so the
+  cap is enforced on both the storage and the JWT side.
 - **Azure access tokens for Graph** are signed for Graph's audience and are not
   meant to be validated by third parties (signature may use a different key set).
   Mitigation: prefer `id_token`; for access-token-only clients require
@@ -440,15 +455,13 @@ def linked_identity(db, existing_user):   # user_identities row with provider_us
 - [x] D6 No provider expiry → `TOKEN_EXCHANGE_MAX_TTL` (default `SESSION_TIMEOUT`).
 - [x] D7 Vault **both** `id_token` and access token (new ciphered column).
 - [x] D8 Fire Basic success callbacks and update `last_login`.
+- [x] D9 navigator_session offers a per-session max-age (`SessionData.max_age`
+      setter, honoured by `RedisStorage.save_session`); the Redis TTL and cookie
+      `Max-Age` are aligned with the JWT cap.
+- [x] D10 A re-exchange without a refresh token keeps the previously vaulted
+      refresh token.
 
-> Still open (resolve during Module 7):
-
-- [ ] Whether `navigator_session` exposes a per-session max-age so the Redis
-      session TTL can match the JWT cap — *Owner: Jesus Lara*.
-- [ ] Should a successful exchange for a user with an **existing** linked identity
-      overwrite its refresh token when the new grant has none? Proposal: keep the
-      existing refresh token (`save_linked_identity` already preserves it when
-      `token.refresh_token` is `None`) — *Owner: Jesus Lara*.
+No open questions remain.
 
 ---
 
@@ -457,3 +470,4 @@ def linked_identity(db, existing_user):   # user_identities row with provider_us
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-09-04 | Jesus Lara | Initial draft generated from proposal (D1–D8 resolved) |
+| 0.2 | 2026-09-04 | Jesus Lara | D9 (per-session max-age) and D10 (refresh-token preservation) resolved; approved |
