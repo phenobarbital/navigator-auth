@@ -126,10 +126,50 @@ usage in `backends/basic.py`.
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
+**Completed by**: sdd-worker
+**Date**: 2026-09-04
 **Notes**:
+- `ExternalAuth.verify_external_token(token, token_type="Bearer",
+  id_token=None) -> (dict, TokenResponse)` added to
+  `navigator_auth/backends/external.py`; default raises
+  `NotImplementedError` so the exchange backend (TASK-052) can 400
+  "unsupported provider" instead of 401.
+- `ExternalAuth._verify_jwt(token, *, audience, issuer, jwks_url=None,
+  tenant_id=None, leeway=30)`: fetches the signing key via
+  `jwksutils.get_public_key` off the event loop (this backend's
+  `ThreadPoolExecutor`), decodes with PyJWT (RS256/384/512), and checks
+  `aud`/`iss` (each accepting a single value or an iterable of accepted
+  values — `iss` is verified manually since PyJWT's built-in check only
+  accepts one issuer string). Raises `InvalidAuth` with a reason code
+  (`bad_signature`, `wrong_audience`, `wrong_issuer`, `expired`).
+- `ExternalAuth._require_verified_email(userinfo, key="email",
+  verified_key="email_verified")`: `InvalidAuth("email_unverified")` on
+  missing e-mail or a falsy/`"false"` verified flag.
+- `EXCHANGE_REASONS` frozenset exported from `external.py` (also
+  includes `invalid_token`, `user_not_found` for downstream tasks).
+- `jwksutils.get_jwks`/`get_jwk`/`get_public_key` gained an explicit
+  `jwks_url` kwarg (used verbatim, skipping OIDC discovery — Google's
+  static certs endpoint) while keeping tenant/discovery resolution and
+  the per-process `lru_cache` for Azure/ADFS unchanged.
+- `tests/test_external_verify_helpers.py` (12 tests, all passing): a
+  throwaway 2048-bit RSA keypair + monkeypatched `jwksutils.requests.get`
+  cover ok/bad-signature/wrong-audience/wrong-issuer/expired/audience-list
+  for `_verify_jwt`, all three `_require_verified_email` branches, the
+  `NotImplementedError` default, the explicit-`jwks_url` path, and the
+  `EXCHANGE_REASONS` contents.
+- `pytest tests/test_external_verify_helpers.py -v`: 12 passed.
+  Regression-checked `tests/test_oauth2_upstream_idp.py`,
+  `tests/test_resource_server_bearer.py` (44 passed) and
+  `tests/unit/identity/` (all green except the pre-existing, unrelated
+  `test_key_rotation_old_ciphertext_still_readable` failure noted in
+  TASK-047). `tests/unit/vault/test_key_rotation.py` hangs on an
+  unrelated background key-rotation batch loop — confirmed unrelated to
+  any file this task touches; not run to completion (pre-existing,
+  separate subsystem).
+- `ruff check navigator_auth/backends/external.py
+  navigator_auth/backends/jwksutils.py tests/test_external_verify_helpers.py`:
+  clean except 2 pre-existing unused-variable warnings at
+  `external.py:1020-1022` (confirmed identical on `dev` before this
+  task, well outside the code this task touches).
 
-**Deviations from spec**:
+**Deviations from spec**: None.

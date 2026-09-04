@@ -916,7 +916,7 @@
     "feature_id": "FEAT-096",
     "feature": "external-token-exchange",
     "spec": "sdd/specs/external-token-exchange.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T17:00:29Z",
     "priority": "high",
@@ -924,7 +924,8 @@
     "depends_on": [],
     "parallel": true,
     "parallelism_notes": "Only backends/external.py + jwksutils.py; prerequisite of the three provider verifiers.",
-    "file": "sdd/tasks/active/TASK-048-external-verify-abstract.md"
+    "file": "sdd/tasks/completed/TASK-048-external-verify-abstract.md",
+    "completed_at": "2026-09-04T17:23:43Z"
   },
   {
     "id": "TASK-049",
