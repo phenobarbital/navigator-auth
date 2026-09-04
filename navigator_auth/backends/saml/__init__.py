@@ -38,6 +38,7 @@ from .errors import (
 )
 from .core import SAMLCore
 from .sp import AbstractSAMLBackend
+from .idp import AbstractSAMLIdentityProvider
 
 __all__ = (
     "SAMLKeyPair",
@@ -62,4 +63,5 @@ __all__ = (
     "map_pysaml2_error",
     "SAMLCore",
     "AbstractSAMLBackend",
+    "AbstractSAMLIdentityProvider",
 )
