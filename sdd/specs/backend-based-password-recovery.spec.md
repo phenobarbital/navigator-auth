@@ -3,7 +3,7 @@
 **Feature ID**: FEAT-098
 **Date**: 2026-09-04
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 0.27.0
 
 > **Inputs:** `sdd/proposals/backend-based-password-recovery.proposal.md`
