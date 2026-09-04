@@ -110,10 +110,48 @@ and its test; it can run in a worktree alongside TASK-050 and TASK-051.
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
+**Completed by**: sdd-worker
+**Date**: 2026-09-04
 **Notes**:
+- `AzureAuth.verify_external_token`: id_token path fully verified via
+  `_verify_jwt` (signature, `aud == AZURE_ADFS_CLIENT_ID`, `iss` from
+  `_accepted_id_token_issuers`, which handles the `common`/`organizations`/
+  `consumers` multi-tenant alias by reading the token's own `tid` claim).
+  Access-token-only path (`_verify_access_token`) requires `aud` in
+  `{AZURE_ADFS_CLIENT_ID, "https://graph.microsoft.com",
+  "00000003-0000-0000-c000-000000000000"}` and `appid`/`azp` ==
+  `AZURE_ADFS_CLIENT_ID`; a subsequent signature-verification failure is
+  tolerated (logged `warning`) since Graph-audience tokens aren't meant
+  for third-party signature validation and the Graph `/me` call right
+  after acts as the liveness check. `provider_user_id` = `oid` (fallback
+  `sub`); `expires_at` from `exp`.
+- `check_credentials` now calls `verify_external_token` before
+  `build_user_info`/`validate_user_info`; redirect/JSON response shapes
+  are byte-for-byte unchanged, only the new 401 branch is added.
+- Found and worked around (without touching `backends/abstract.py`) a
+  pre-existing bug in `BaseAuthBackend.auth_error()`: a dict `reason`
+  with the default `application/json` content type raises `KeyError`
+  (the dict branch never populates `args["reason"]`, which the trailing
+  `if content_type == "application/json"` block unconditionally reads).
+  The new 401 branch passes a plain string reason instead, sidestepping
+  it; the existing dict-reason call sites elsewhere in `check_credentials`
+  are pre-existing and out of scope.
+- `tests/test_azure_token_verifier.py` (6 tests, all passing): id_token
+  ok / wrong-`aud`, access-token `appid` enforcement (reject + accept),
+  expiry, and the `check_credentials` audience-bound regression (a Graph
+  token with a foreign `appid` — previously accepted unconditionally —
+  now gets 401). Mocks both steps of Azure/ADFS discovery (`.well-known`
+  → `jwks_uri` → JWKS) and `AzureAuth.get` (Graph `/me`); no real network
+  calls. Also ignores a second pre-existing, unrelated
+  `DeprecationWarning` surfaced by the same `auth_error` bug
+  (`aiohttp.web.HTTPUnauthorized(body=...)` is deprecated) since this
+  project's pytest config turns warnings into errors.
+- `pytest tests/test_azure_token_verifier.py -v`: 6 passed. Regression:
+  `tests/test_oauth2_upstream_idp.py` (Azure-adjacent, still green).
+  `ruff check navigator_auth/backends/azure.py
+  tests/test_azure_token_verifier.py`: clean.
 
-**Deviations from spec**:
+**Deviations from spec**: None functionally. The 401 error path in
+`check_credentials` uses a string `reason` instead of the file's usual
+dict `reason` to avoid triggering the pre-existing `auth_error` bug
+described above.
