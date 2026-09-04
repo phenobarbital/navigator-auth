@@ -13,6 +13,7 @@ from navigator_auth.handlers.recovery.store import (
     CONFIRM_KEY_PREFIX,
     _hash_token,
 )
+from navigator_auth.handlers.recovery.limiter import RateLimiter
 from navigator_auth.libs.json import json_encoder, json_decoder
 from navigator_auth.models import User
 
@@ -103,6 +104,22 @@ def recovery_user():
         username="recovery_test_user",
         email="recovery_test@example.com",
     )
+
+
+@pytest_asyncio.fixture
+async def broken_redis_pool():
+    """A pool pointing nowhere, so every command raises a connection error.
+
+    Used to exercise RateLimiter's fail-open behaviour without mocking.
+    """
+    pool = aioredis.ConnectionPool.from_url(
+        "redis://recovery-test-unreachable-host.invalid:6379/0",
+        decode_responses=True,
+        encoding="utf-8",
+        socket_connect_timeout=1,
+    )
+    yield pool
+    await pool.disconnect()
 
 
 @pytest.fixture
@@ -215,6 +232,71 @@ class TestRecoveryTokenStore:
         await recovery_store.drop_pair(recovery_key_hash, confirm_key_hash)
         assert await redis.get(f"{RECOVERY_KEY_PREFIX}{recovery_key_hash}") is None
         assert await redis.get(f"{CONFIRM_KEY_PREFIX}{confirm_key_hash}") is None
+
+
+class TestRateLimiter:
+    """Module 4 — RateLimiter, against a real Redis instance."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def _clean(self, redis_pool):
+        from navigator_auth.handlers.recovery.limiter import RATE_KEY_PREFIX
+
+        async def _purge():
+            async with aioredis.Redis(connection_pool=redis_pool) as r:
+                keys = await r.keys(f"{RATE_KEY_PREFIX}*")
+                if keys:
+                    await r.delete(*keys)
+        await _purge()
+        yield
+        await _purge()
+
+    @pytest.mark.asyncio
+    async def test_limiter_allows_under_limit(self, redis_pool):
+        rl = RateLimiter(redis_pool, "3/hour", "email")
+        assert all([await rl.check("a@b.c") for _ in range(3)])
+
+    @pytest.mark.asyncio
+    async def test_limiter_blocks_over_limit(self, redis_pool):
+        rl = RateLimiter(redis_pool, "3/hour", "email")
+        for _ in range(3):
+            await rl.check("a@b.c")
+        assert await rl.check("a@b.c") is False
+
+    @pytest.mark.asyncio
+    async def test_limiter_fails_open(self, broken_redis_pool, caplog):
+        import logging
+        caplog.set_level(logging.WARNING)
+        rl = RateLimiter(broken_redis_pool, "3/hour", "email")
+        assert await rl.check("a@b.c") is True
+        assert "WARNING" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_limiter_malformed_spec_disables(self, redis_pool):
+        rl = RateLimiter(redis_pool, "garbage", "email")
+        assert all([await rl.check("a@b.c") for _ in range(50)])
+
+    @pytest.mark.asyncio
+    async def test_limiter_prefixes_independent(self, redis_pool):
+        e = RateLimiter(redis_pool, "3/hour", "email")
+        i = RateLimiter(redis_pool, "3/hour", "ip")
+        for _ in range(3):
+            await e.check("x")
+        assert await i.check("x") is True
+
+    @pytest.mark.asyncio
+    async def test_no_raw_email_in_keys(self, redis_pool, redis):
+        rl = RateLimiter(redis_pool, "3/hour", "email")
+        await rl.check("user@example.com")
+        assert not any("user@example.com" in k for k in await redis.keys("*"))
+
+    @pytest.mark.asyncio
+    async def test_window_expires_and_reallows(self, redis_pool):
+        rl = RateLimiter(redis_pool, "1/second", "email")
+        assert await rl.check("expiring@b.c") is True
+        assert await rl.check("expiring@b.c") is False
+        import asyncio
+        await asyncio.sleep(1.1)
+        assert await rl.check("expiring@b.c") is True
 
 
 class TestNotificationPayloadSecrecy:
