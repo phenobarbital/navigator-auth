@@ -1117,7 +1117,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "high",
@@ -1127,7 +1127,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "Parallelizable after TASK-055: creates saml/idp.py and touches only auth.py (hidden flag). No shared files with TASK-056/057 (sp.py, external.py). May run in a second worktree branched after TASK-055 merges.",
-    "file": "sdd/tasks/active/TASK-058-saml-idp-registry-initiate.md"
+    "file": "sdd/tasks/completed/TASK-058-saml-idp-registry-initiate.md",
+    "completed_at": "2026-09-04T23:23:11.238621Z"
   },
   {
     "id": "TASK-059",
