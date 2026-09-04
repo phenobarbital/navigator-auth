@@ -1057,7 +1057,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "high",
@@ -1067,7 +1067,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Defines the config/engine contract both roles depend on; must land before the SP and IdP tasks. Sequential.",
-    "file": "sdd/tasks/active/TASK-055-saml-core.md"
+    "file": "sdd/tasks/completed/TASK-055-saml-core.md",
+    "completed_at": "2026-09-04T22:13:33.882394Z"
   },
   {
     "id": "TASK-056",
