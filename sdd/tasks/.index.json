@@ -1137,7 +1137,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "medium",
@@ -1147,7 +1147,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "Continues saml/idp.py from TASK-058 in the same (possibly second) worktree; no shared files with the SP tasks.",
-    "file": "sdd/tasks/active/TASK-059-saml-idp-sso-slo.md"
+    "file": "sdd/tasks/completed/TASK-059-saml-idp-sso-slo.md",
+    "completed_at": "2026-09-04T23:32:49.316788Z"
   },
   {
     "id": "TASK-060",

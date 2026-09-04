@@ -110,10 +110,48 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (Claude Sonnet 5, session_01KS7E6KxYXnkgzMnYHaJC2U)
+**Date**: 2026-09-05
+**Notes**: Replaced the TASK-058 `web.HTTPNotImplemented` stubs with the
+real `sso()`/`slo()` flows. `sso()`: `?flow=` resumes a parked request
+(GETDEL, missing -> `SAML_STALE_REQUEST`); otherwise parses the AuthnRequest
+(Redirect via `SigAlg`/`Signature` query params, or POST) via
+`core.run(server.parse_authn_request, ...)`; issuer resolves to a
+registered SP by **entity_id** (not `sp_id`) else a generic 404
+`SAML_UNKNOWN_SP`; `sp.want_signed_authn_request` requires both
+`SigAlg`/`Signature` else `SAML_INVALID_AUTHN_REQUEST`; no session parks
+`{sp_id, request_id, acs_url, relay_state}` under `idp_key(flow_id)` (TTL
+`SAML_FLOW_TTL`) and redirects to `AUTH_LOGIN_FAILED_URI` with
+`redirect_uri=.../sso?flow=<id>`; with a session, `authorize_sp_access`
+gate then `issue_assertion(..., in_response_to=<AuthnRequest ID>,
+relay_state=<validated>)`. `slo()`: parses the inbound `LogoutRequest`
+(Redirect or POST); issuer resolves to a registered SP with a `slo_url`
+else 400 `SAML_SLO_FAILED`; best-effort invalidates this request's own
+session; replies with a signed `LogoutResponse` on the same binding.
+`BaseAuthBackend` has no `failed_redirect`/`home_redirect` (those are
+`ExternalAuth`-only); added a local `_error_response()` plain-text helper
+for both handlers instead. `tests/test_saml_idp.py` adds the M5 SSO/SLO
+rows (7 new tests, 19 total in the file): SP-initiated SSO with a session
+(decodes the issued assertion to verify `InResponseTo` matches the
+AuthnRequest ID), the no-session park→resume→single-use-replay-rejected
+round trip, missing-signature rejection, RelayState host validation, a
+successful inbound `LogoutRequest`, and an unregistered-SP rejection.
+All pass with `xmlsec1` installed; full SAML suite (81 tests incl.
+`test_oauth2_upstream_idp.py`) still green.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none in the handlers themselves, but a real
+scope addition was necessary to make them work at all:
+`create_authn_response`'s signature-verification path and
+`create_logout_response`/`response_args` (`slo`'s reply binding/
+destination) both call `self.metadata.<service>(...)` **unconditionally**
+— `self.metadata` is `None` whenever no metadata is configured, which is
+always true for our env-declared `ServiceProviderConfig` registry (a
+plain dataclass, not real pysaml2 SP metadata). Added
+`on_startup`/`_trust_registered_sps()`/`_sp_metadata_xml()`: generates
+minimal inline pysaml2 metadata (entity ID, ACS, SLO, optional
+`sp_cert_file`) for every registered SP and merges it into the IdP core's
+settings, so `self.metadata` is never `None` when there's anything to
+trust. Not in TASK-059's file list (only `idp.py`, which is where it
+landed) or explicitly called out in the spec's pseudocode, but without it
+`slo()` cannot function and `want_signed_authn_request` cannot be
+verified — a required enabler, not scope creep.
