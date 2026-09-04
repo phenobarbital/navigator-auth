@@ -974,7 +974,7 @@
     "feature_id": "FEAT-096",
     "feature": "external-token-exchange",
     "spec": "sdd/specs/external-token-exchange.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T17:00:29Z",
     "priority": "high",
@@ -984,7 +984,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "After TASK-048: only backends/github.py; runs alongside TASK-049/050.",
-    "file": "sdd/tasks/active/TASK-051-github-token-verifier.md"
+    "file": "sdd/tasks/completed/TASK-051-github-token-verifier.md",
+    "completed_at": "2026-09-04T17:34:59Z"
   },
   {
     "id": "TASK-052",

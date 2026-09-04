@@ -104,10 +104,52 @@ App refresh tokens (not presented in an exchange).
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
+**Completed by**: sdd-worker
+**Date**: 2026-09-04
 **Notes**:
+- `GithubAuth.verify_external_token` -> `_check_app_token`: POSTs
+  `/applications/{GITHUB_CLIENT_ID}/token` with our own client
+  credentials as Basic auth (via `self.post`), confirming the caller's
+  token both is valid and belongs to this app. `provider_user_id =
+  str(user.id)`; `expires_at` from the GitHub-Apps-only `expires_at`
+  field (`None` for classic OAuth tokens); `scopes` from the response.
+- **Deviation-with-reason**: `ExternalAuth.request()` collapses every
+  non-200 response into a generic `AuthException` whose message is the
+  stringified response body, discarding the actual HTTP status code —
+  so 404 ("foreign/revoked token") and 401 ("our own client credentials
+  are wrong") can't be told apart by status. GitHub's "check a token"
+  endpoint has two stable, documented response bodies for exactly these
+  two cases (`"Not Found"` / `"Bad credentials"`), so `_check_app_token`
+  branches on that substring instead: 404-equivalent ->
+  `InvalidAuth("wrong_audience")`; 401-equivalent -> a fresh 500-class
+  `AuthException` (misconfigured client credentials, logged at `error`).
+  Still uses only `ExternalAuth.post()`/`request()` — no new HTTP
+  library — per the task's constraint.
+- Tightened `get_github_email`: new `verified_only: bool = False` param;
+  `True` (used by the verifier) restricts the result to a
+  `primary and verified` entry with no fallback; the default (login
+  callback, unchanged) still falls back to the first listed e-mail.
+  `user.email` empty -> `get_github_email(token, verified_only=True)` ->
+  `InvalidAuth("email_unverified")` when none found.
+- Replaced the `check_credentials` stub (`return True`) with verifier ->
+  `build_user_info` -> `validate_user_info` -> JSON session info
+  (mirrors `AzureAuth`'s non-redirect branch); added a matching
+  `get_auth` header/query extractor (GitHub had none). Reused the
+  string-`reason` `auth_error` workaround from TASK-049/050.
+- `tests/test_github_token_verifier.py` (9 tests, all passing): classic
+  vs GitHub-App token check shape, the 404/401 branches, the tightened
+  verified-only e-mail path (plus a direct regression proving the
+  default/login-callback fallback is unchanged), and two
+  `check_credentials` tests proving it no longer returns `True`
+  unconditionally.
+- `pytest tests/test_github_token_verifier.py -v`: 9 passed. No
+  pre-existing `GithubAuth`-specific tests found to regress-check.
+  `ruff check navigator_auth/backends/github.py
+  tests/test_github_token_verifier.py`: clean.
 
-**Deviations from spec**:
+**Deviations from spec**: `_check_app_token` distinguishes 404 vs 401 by
+response-body substring rather than HTTP status code, because
+`ExternalAuth.request()` (which the task requires reusing) does not
+preserve the status code on error — documented above. Functionally
+equivalent to a status-code check against GitHub's real, stable API
+responses.
