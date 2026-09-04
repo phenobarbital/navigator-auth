@@ -845,3 +845,289 @@ class TestRecoveryEndpoints:
         assert resp2.status == 200
         for rec in caplog.records:
             assert token not in rec.getMessage()
+
+
+# ---------------------------------------------------------------------------
+# Module 7 — full-flow, enumeration/timing and token-secrecy end-to-end
+# tests. Reuses the module-scoped `recovery_app` fixture (same live
+# Postgres + Redis + aiohttp server as TestRecoveryEndpoints).
+# ---------------------------------------------------------------------------
+import secrets as _secrets  # noqa: E402
+import statistics  # noqa: E402
+import time as _time  # noqa: E402
+
+
+@pytest_asyncio.fixture(loop_scope="module")
+async def e2e_user(recovery_app):
+    """A fresh, isolated user per test (own username/email), so E2E tests
+    that mutate password/is_new/sessions never interfere with each other
+    or with TestRecoveryEndpoints's shared RECOVERY_TEST_USERNAME."""
+    _, db_pool = recovery_app
+    suffix = _secrets.token_hex(4)
+    username = f"e2e_recovery_{suffix}"
+    email = f"e2e_recovery_{suffix}@example.com"
+    password = "OldE2EPassw0rd1!"
+    hashed = set_basic_password(password)
+    await db_pool.execute(
+        f"""
+        INSERT INTO auth.users
+            (username, password, email, first_name, last_name,
+             is_active, is_superuser, is_new, is_staff)
+        VALUES (
+            '{username}', '{hashed}', '{email}', 'E2E', 'Recovery',
+            true, false, false, true
+        )
+        """
+    )
+    yield {"username": username, "email": email, "password": password}
+    try:
+        await db_pool.execute(f"DELETE FROM auth.users WHERE username = '{username}'")
+    except Exception:  # pylint: disable=W0703
+        pass
+
+
+class TestRecoveryEndToEnd:
+    """Module 7 — the two properties no single module owns end to end:
+    non-enumerability (identical body/status/latency) and token secrecy
+    (never in a response, never in Redis, never in a log)."""
+
+    pytestmark = [
+        pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning"),
+        pytest.mark.filterwarnings("ignore::DeprecationWarning"),
+        pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning"),
+        pytest.mark.asyncio(loop_scope="module"),
+    ]
+
+    async def test_full_recovery_flow(self, recovery_app, e2e_user):
+        """1 -> 2 -> 3, then the user logs in with the new password."""
+        client, _ = recovery_app
+        _, confirm_token = await _request_and_confirm_token(
+            client, email=e2e_user["email"]
+        )
+        new_password = "NewE2EPassw0rd1!"
+        resp = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={
+                "password": new_password, "confirm_password": new_password,
+                "token": confirm_token,
+            },
+        )
+        assert resp.status == 202
+
+        login_resp = await client.post(
+            "/api/v1/login",
+            json={"username": e2e_user["username"], "password": new_password},
+            headers={"X-Auth-Method": "BasicAuth"},
+        )
+        assert login_resp.status == 200, await login_resp.text()
+        login_data = await login_resp.json()
+        assert "token" in login_data
+        assert login_data.get("username") == e2e_user["username"]
+
+    async def test_step1_unknown_email_identical(self, recovery_app):
+        """D9 — body, status and median latency indistinguishable."""
+        client, _ = recovery_app
+
+        async def timed_post(email: str) -> float:
+            start = _time.monotonic()
+            resp = await client.post(
+                "/api/v1/password-recovery", json={"email": email}
+            )
+            elapsed = _time.monotonic() - start
+            assert resp.status == 200
+            return elapsed
+
+        known_samples = [await timed_post(RECOVERY_TEST_EMAIL) for _ in range(5)]
+        unknown_samples = [
+            await timed_post(RECOVERY_UNKNOWN_EMAIL) for _ in range(5)
+        ]
+        known_median = statistics.median(known_samples)
+        unknown_median = statistics.median(unknown_samples)
+        # 50ms tolerance against a ~250ms floor (task's own guidance).
+        assert abs(known_median - unknown_median) < 0.05
+
+    async def test_token_never_leaks(self, recovery_app, caplog, e2e_user):
+        """Not in any response, log record, or Redis key/value."""
+        import logging
+        from navigator_auth.handlers.recovery import handler as handler_module
+        from navigator_auth.handlers.recovery.store import RECOVERY_KEY_PREFIX
+
+        client, _ = recovery_app
+        caplog.set_level(logging.DEBUG)
+        recovery_token, confirm_token = await _request_and_confirm_token(
+            client, email=e2e_user["email"]
+        )
+        new_password = "TokenLeakTest1!"
+        resp = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={
+                "password": new_password, "confirm_password": new_password,
+                "token": confirm_token,
+            },
+        )
+        assert resp.status == 202
+        body_text = await resp.text()
+        assert recovery_token not in body_text
+        assert confirm_token not in body_text
+
+        for rec in caplog.records:
+            msg = rec.getMessage()
+            assert recovery_token not in msg
+            assert confirm_token not in msg
+
+        pool = handler_module.PasswordRecoveryHandler._pool
+        async with aioredis.Redis(connection_pool=pool) as r:
+            keys = await r.keys(f"{RECOVERY_KEY_PREFIX}*")
+            for k in keys:
+                assert recovery_token not in k
+                assert confirm_token not in k
+                val = await r.get(k)
+                if val:
+                    assert recovery_token not in val
+                    assert confirm_token not in val
+
+    async def test_step3_revokes_sessions(self, recovery_app, e2e_user):
+        """A JWT and session issued before the reset are dead after it."""
+        import jwt as pyjwt
+        from navigator_auth.handlers.recovery.handler import PasswordRecoveryHandler
+        from navigator_auth.backends.oauth2.code_backend import AccessTokenStorage
+
+        client, _ = recovery_app
+        login_resp = await client.post(
+            "/api/v1/login",
+            json={
+                "username": e2e_user["username"], "password": e2e_user["password"],
+            },
+            headers={"X-Auth-Method": "BasicAuth"},
+        )
+        assert login_resp.status == 200, await login_resp.text()
+        old_token = (await login_resp.json())["token"]
+        old_payload = pyjwt.decode(old_token, options={"verify_signature": False})
+        old_jti = old_payload["jti"]
+
+        _, confirm_token = await _request_and_confirm_token(
+            client, email=e2e_user["email"]
+        )
+        new_password = "RevokeSessTest1!"
+        resp = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={
+                "password": new_password, "confirm_password": new_password,
+                "token": confirm_token,
+            },
+        )
+        assert resp.status == 202
+
+        storage = AccessTokenStorage()
+        try:
+            assert await storage.is_revoked(old_jti) is True
+        finally:
+            await storage.redis.aclose()
+
+        pool = PasswordRecoveryHandler._pool
+        async with aioredis.Redis(connection_pool=pool) as r:
+            assert await r.get(f"user:{e2e_user['username']}") is None
+
+    async def test_federated_user_can_recover(self, recovery_app):
+        """D10 — a user with no local password completes the flow."""
+        client, db_pool = recovery_app
+        username = "e2e_federated_user"
+        email = "e2e_federated_user@example.com"
+        await db_pool.execute(f"DELETE FROM auth.users WHERE username = '{username}'")
+        await db_pool.execute(
+            f"""
+            INSERT INTO auth.users
+                (username, password, email, first_name, last_name,
+                 is_active, is_superuser, is_new, is_staff)
+            VALUES (
+                '{username}', '', '{email}', 'Federated', 'User',
+                true, false, false, true
+            )
+            """
+        )
+        try:
+            _, confirm_token = await _request_and_confirm_token(client, email=email)
+            new_password = "FederatedPass1!"
+            resp = await client.post(
+                "/api/v1/password-recovery/confirm",
+                json={
+                    "password": new_password, "confirm_password": new_password,
+                    "token": confirm_token,
+                },
+            )
+            assert resp.status == 202
+        finally:
+            await db_pool.execute(
+                f"DELETE FROM auth.users WHERE username = '{username}'"
+            )
+
+    async def test_step3_sets_is_new_false(self, recovery_app, e2e_user):
+        client, db_pool = recovery_app
+        _, confirm_token = await _request_and_confirm_token(
+            client, email=e2e_user["email"]
+        )
+        new_password = "IsNewFalseTest1!"
+        resp = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={
+                "password": new_password, "confirm_password": new_password,
+                "token": confirm_token,
+            },
+        )
+        assert resp.status == 202
+        async with await db_pool.acquire() as conn:
+            User.Meta.connection = conn
+            row = await User.get(username=e2e_user["username"])
+        assert row.is_new is False
+
+    async def test_rate_limit_per_email(self, recovery_app):
+        """4th request for one address within the hour is refused."""
+        from navigator_auth.handlers.recovery.limiter import RateLimiter
+        from navigator_auth.handlers.recovery.handler import PasswordRecoveryHandler
+
+        client, _ = recovery_app
+        # A never-before-touched address, so its Redis counter starts at 0
+        # (the shared recovery_app fixture's generous "1000/hour" limiter
+        # has already incremented RECOVERY_TEST_EMAIL/RECOVERY_UNKNOWN_EMAIL
+        # many times across the other tests in this module).
+        email = "e2e_rate_limit_only@example.com"
+        original_limiter = PasswordRecoveryHandler._email_limiter
+        strict_limiter = RateLimiter(PasswordRecoveryHandler._pool, "3/hour", "email")
+        PasswordRecoveryHandler._email_limiter = strict_limiter
+        try:
+            for _ in range(3):
+                _CAPTURED_NOTIFICATIONS.clear()
+                resp = await client.post(
+                    "/api/v1/password-recovery", json={"email": email}
+                )
+                assert resp.status == 200
+                assert len(_CAPTURED_NOTIFICATIONS) == 1  # allowed -> lookup ran
+
+            _CAPTURED_NOTIFICATIONS.clear()
+            resp4 = await client.post(
+                "/api/v1/password-recovery", json={"email": email}
+            )
+            assert resp4.status == 200  # same generic body (D9), not 429
+            assert len(_CAPTURED_NOTIFICATIONS) == 0  # blocked -> no lookup at all
+        finally:
+            PasswordRecoveryHandler._email_limiter = original_limiter
+
+    async def test_step3_recovery_token_dead_after_success(
+        self, recovery_app, e2e_user
+    ):
+        client, _ = recovery_app
+        recovery_token, confirm_token = await _request_and_confirm_token(
+            client, email=e2e_user["email"]
+        )
+        new_password = "DeadTokenTest1!"
+        resp = await client.post(
+            "/api/v1/password-recovery/confirm",
+            json={
+                "password": new_password, "confirm_password": new_password,
+                "token": confirm_token,
+            },
+        )
+        assert resp.status == 202
+
+        resp2 = await client.get(f"/api/v1/password-recovery/{recovery_token}")
+        assert resp2.status == 400
