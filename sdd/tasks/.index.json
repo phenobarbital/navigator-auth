@@ -880,7 +880,7 @@
     "feature_id": "FEAT-096",
     "feature": "external-token-exchange",
     "spec": "sdd/specs/external-token-exchange.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T17:00:29Z",
     "priority": "high",
@@ -888,7 +888,8 @@
     "depends_on": [],
     "parallel": true,
     "parallelism_notes": "Only backends/basic.py + its tests; no shared files with TASK-047/048.",
-    "file": "sdd/tasks/active/TASK-046-basic-open-session.md"
+    "file": "sdd/tasks/completed/TASK-046-basic-open-session.md",
+    "completed_at": "2026-09-04T17:16:07Z"
   },
   {
     "id": "TASK-047",
@@ -897,7 +898,7 @@
     "feature_id": "FEAT-096",
     "feature": "external-token-exchange",
     "spec": "sdd/specs/external-token-exchange.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T17:00:29Z",
     "priority": "high",
@@ -905,7 +906,8 @@
     "depends_on": [],
     "parallel": true,
     "parallelism_notes": "Only identity/* and models.py; no shared files with TASK-046/048.",
-    "file": "sdd/tasks/active/TASK-047-vault-id-token-provider-lookup.md"
+    "file": "sdd/tasks/completed/TASK-047-vault-id-token-provider-lookup.md",
+    "completed_at": "2026-09-04T17:16:07Z"
   },
   {
     "id": "TASK-048",

@@ -123,10 +123,59 @@ order is fine).
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
+**Completed by**: sdd-worker
+**Date**: 2026-09-04
 **Notes**:
+- `TokenResponse.id_token: Optional[str] = None` added; `credential()` /
+  `from_credential()` / `from_oauth_response()` all carry it; `raw` still
+  never leaves `credential()`.
+- `navigator_auth/identity/sql/002_identity_id_token.sql` created
+  (`ADD COLUMN IF NOT EXISTS id_token BYTEA`); `identity/migrations.py`
+  now runs a `_MIGRATION_FILES` tuple (`001` then `002`) in order, each
+  additive/idempotent — verified with a 2-file-execution-order test and a
+  run-twice-no-error test.
+- `UserIdentity.id_token: bytes = Column(required=False, repr=False)`.
+- `IdentityStore.save_linked_identity` ciphers and stores `id_token` (same
+  `IdentityCipher`/`key_version` as `access_token`/`refresh_token`).
+  Implemented D10 for **both** `refresh_token` and `id_token`: on an
+  existing row, when the incoming `token.refresh_token`/`token.id_token`
+  is `None`, that field is left out of the update instead of being
+  overwritten with `None` — the previously vaulted value survives a
+  re-exchange that doesn't return a fresh one.
+- `decrypt_credential` decrypts `id_token` when present; `masked()` now
+  reports `has_id_token: bool` instead of ever exposing the raw column
+  (mirrors `has_refresh_token`).
+- `IdentityStore.find_user_by_provider_account(provider, provider_user_id)`
+  added: `UserIdentity.filter(auth_provider=, provider_user_id=)`, then
+  `enabled` rows filtered in Python, returns the first `user_id` or `None`
+  on miss/disabled-only/`NoDataFound`.
+- The credential endpoint (`handlers/user_identities.py`) was **not**
+  modified, as specified; verified with a dedicated test that
+  `decrypt_credential(...).credential()` now serializes `id_token`
+  automatically.
+- Fixed 3 pre-existing unit tests in `tests/unit/identity/` that the
+  additive change legitimately invalidated (not a new file per the task's
+  table, but required to avoid leaving the suite red):
+  - `test_token_response.py::test_credential_shape_and_no_raw` — exact key
+    set now includes `id_token`.
+  - `test_identity_store.py::TestCipherRoundtripThroughStore` (2 tests) —
+    bare `MagicMock()` identities didn't set `.id_token`, so the mock
+    auto-attribute (truthy) was fed to the cipher; now explicitly set to a
+    real ciphertext / `None` per case.
+  - `test_identity_migrations.py` (3 tests) — updated `assert_awaited_once`
+    → 2-call assertions (001 then 002) and added coverage for the new
+    `002_identity_id_token.sql` file.
+  - `test_identity_crypto.py::test_key_rotation_old_ciphertext_still_readable`
+    remains failing — confirmed identical failure on `dev` before this
+    task (unrelated pre-existing bug in key-selection ordering), left
+    untouched.
+- `pytest tests/test_identity_id_token.py tests/unit/identity/ -v`: 115
+  passed, 1 pre-existing unrelated failure. `ruff check
+  navigator_auth/identity`: clean except the pre-existing unused
+  `typing.Any` import in `flow_store.py` (confirmed identical on `dev`,
+  untouched — out of scope, not a file this task modifies).
 
-**Deviations from spec**:
+**Deviations from spec**: None functionally; touched three existing
+`tests/unit/identity/*.py` files beyond the task's file table to fix
+regressions the additive `id_token` field/migration directly caused
+(documented above).
