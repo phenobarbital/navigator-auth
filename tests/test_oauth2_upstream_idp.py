@@ -340,6 +340,9 @@ class _FakeBackend:
         self._auth_callback_dispatch = (
             ExternalAuth._auth_callback_dispatch.__get__(self)
         )
+        # FEAT-097: `_auth_callback_dispatch` now awaits `get_callback_state`
+        # (default: query `state`) instead of reading it inline.
+        self.get_callback_state = ExternalAuth.get_callback_state.__get__(self)
 
     def get_domain(self, request):
         return "https://auth.example.com"

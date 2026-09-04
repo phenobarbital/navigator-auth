@@ -3,7 +3,15 @@ import json
 from unittest.mock import AsyncMock, patch
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
+from navigator_session import SESSION_OBJECT
 from navigator_auth.handlers.vault import VaultView
+
+class _FakeSession(dict):
+    """Minimal stand-in for SessionData: dict-like, plus decode()."""
+
+    def decode(self, key):
+        return {"id": 42, "user_id": 42}
+
 
 @pytest.fixture
 def mock_vault():
@@ -22,6 +30,20 @@ def create_view(mock_vault):
             method, path, match_info=match_info or {},
             payload=payload
         )
+
+        # VaultView is wrapped in @user_session(), which calls
+        # get_session(request) before any method body runs -- so overriding
+        # _get_session_and_vault below is not enough on its own; without a
+        # session on the request the decorator raised "Missing Configuration of
+        # Session Storage" first. get_session() returns early when the request
+        # already carries SESSION_OBJECT, so seed one.
+        # A plain dict subclass, not an AsyncMock: the decorator and
+        # _get_vault only need .decode() and dict-style .get(), and an AsyncMock
+        # here manufactured coroutines nobody awaited.
+        session = _FakeSession()
+        # SESSION_OBJECT is a plain str key; NotAppKeyWarning is ignored suite
+        # wide in pyproject.toml, since the code base indexes with strings.
+        request[SESSION_OBJECT] = session
         
         # We need an abstract json method on the request since get_json() isn't trivial on mock
         if body is not None:

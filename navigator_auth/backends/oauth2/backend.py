@@ -459,7 +459,35 @@ class Oauth2Provider(BaseAuthBackend):
         app["oauth2_client_access_storage"] = self.client_access_storage
 
     async def on_cleanup(self, app: web.Application):
-        pass
+        """Close every Redis-backed storage opened in ``on_startup``.
+
+        Several of these storages are selectable at runtime
+        (``OAUTH2_CLIENT_STORAGE=memory|postgres|redis``) and only the
+        Redis-backed implementations expose a ``.redis`` attribute, so each
+        is guarded with ``getattr(storage, "redis", None)`` before closing.
+        A failure closing one storage's connection is logged and does not
+        prevent the others from being closed (mirrors the pattern in
+        ``BasicAuth.on_cleanup``, ``navigator_auth/backends/basic.py``).
+        """
+        for attr in (
+            "client_storage",
+            "code_storage",
+            "refresh_token_storage",
+            "grant_storage",
+            "access_token_storage",
+            "device_code_storage",
+            "client_access_storage",
+        ):
+            storage = getattr(self, attr, None)
+            redis_conn = getattr(storage, "redis", None)
+            if redis_conn is None:
+                continue
+            try:
+                await redis_conn.aclose()
+            except Exception as ex:  # pylint: disable=W0703
+                self.logger.warning(
+                    f"Oauth2Provider: error closing {attr} Redis connection: {ex}"
+                )
 
     def get_successful_callbacks(self) -> list[Awaitable]:
         fns = []

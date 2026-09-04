@@ -118,7 +118,12 @@ class TestEnsureVaultTables:
         pool_ctx.__aenter__ = AsyncMock(return_value=conn)
         pool_ctx.__aexit__ = AsyncMock(return_value=False)
         pool = MagicMock()
-        pool.acquire = AsyncMock(return_value=pool_ctx)
+        # acquire() must return the context manager itself, not a coroutine, the
+        # way an asyncpg pool does. As an AsyncMock it returned a coroutine, so
+        # `hasattr(ctx, "__aenter__")` was False and production fell into the
+        # manual-release branch -- where `hasattr(db_pool, "release")` is True on
+        # any MagicMock and awaiting that MagicMock raised TypeError.
+        pool.acquire = MagicMock(return_value=pool_ctx)
 
         await ensure_vault_tables(pool)
 

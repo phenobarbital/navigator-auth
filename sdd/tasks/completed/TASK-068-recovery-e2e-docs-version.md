@@ -142,10 +142,52 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (session_016Z3wYUV42WJDq92pifU1Fa)
+**Date**: 2026-09-04
+**Notes**: Added `TestRecoveryEndToEnd` (8 tests) to
+`tests/test_password_recovery.py`, each using a fresh, function-scoped
+`e2e_user` fixture (own username/email, cleaned up per test) layered
+on the shared module-scoped `recovery_app` from TASK-067, so
+password/`is_new`/session-mutating tests never interfere with each
+other. Covers: full flow through a real `/api/v1/login`,
+D9 enumeration timing (median of 5 samples each, known vs unknown,
+delta asserted `< 0.05s` against the ~250ms floor — median rather than
+a single sample so it doesn't flake), token-secrecy sweep (response
+body, `caplog` records, and a live Redis key/value scan), session +
+jti revocation (`AccessTokenStorage.is_revoked` on a JWT minted before
+the reset, plus the `user:{username}` session index), D10 (federated
+user, empty `password` column), D17 (`is_new` false), rate limiting
+(4th request for one address silently absorbed via a temporarily
+swapped strict `RateLimiter`), and stage-1 token death after a
+completed reset. All 58 tests in the file pass; the regression gate
+(`test_basic_auth.py`, `test_login.py`, `test_basic_open_session.py`)
+is unaffected (13 passed, 1 pre-existing unrelated failure needing an
+external `nav-api.dev.local` server). Did not run the full `tests/`
+directory (many files need SAML/external-IdP infrastructure not
+present in this sandbox); validated the feature's own test file plus
+the documented regression gate, consistent with how earlier FEAT-098
+tasks validated. ruff clean.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
+Wrote `docs/password_recovery.rst` (endpoints with request/response
+examples, the `NotificationPayload` callback contract including the
+`found=False` semantics, the enumeration-resistance design, and the
+`FORGOT_PASSWORD_CALLBACK` migration note) and a new
+"Backend-Based Password Recovery (FEAT-098)" section in
+`docs/settings.rst` documenting all eleven `AUTH_RECOVERY_*`/
+`FORGOT_PASSWORD_CALLBACK` keys with defaults, matching the
+`token_exchange.rst`/settings.rst precedent from FEAT-096. Wired
+`password_recovery` into `docs/index.rst`'s toctree. Bumped
+`navigator_auth/version.py` to `0.27.0` (`pyproject.toml` derives its
+version dynamically from this file, so no second edit was needed) and
+added the feature's `CHANGELOG.md` entry at the top of `# Unreleased`
+(FEAT-097/0.26.0 has no entry yet as of this writing, per the task's
+own note to still use `0.27.0` regardless of FEAT-097's landing
+status).
 
-**Deviations from spec**: none | describe if any
+No behavioural defects were found while writing these tests, so
+nothing needed fixing here beyond what TASK-067 already covered.
+
+**Deviations from spec**: None beyond what TASK-067 already documented
+(the `peek_confirmation` addition, the raw-SQL email lookup, and the
+`Oauth2Provider.on_cleanup` test-only workaround — all inherited by
+this task's tests since they exercise the same handler).

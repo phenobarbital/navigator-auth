@@ -125,10 +125,46 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (Claude Sonnet 5, session_01KS7E6KxYXnkgzMnYHaJC2U)
+**Date**: 2026-09-05
+**Notes**: `SAMLAuth`/`SAMLIdentityProvider` added to
+`navigator_auth/backends/saml/__init__.py` exactly per spec's hook
+mapping (`get_idp_metadata`'s `SAML_METADATA` → `SAML_PATH` fallback
+chain, `resolve_user_identifier`'s username→email→NameID fallback,
+`get_settings` → `translate_legacy_settings(SAML_SETTINGS)`;
+`SAMLIdentityProvider.build_attributes` as the inverse of `SAML_MAPPING`
+restricted to `sp.attribute_map`'s keys). New
+`navigator_auth/backends/saml/legacy.py`:
+`translate_legacy_settings(settings) -> dict` walks the flattened
+dotted-path keys, translates the documented `python3-saml` keys into a
+`pysaml2` config shape, and raises `ConfigError` naming every key not in
+the known set (`grep -rn onelogin navigator_auth/` now returns nothing).
+`backends/__init__.py`'s TASK-054 guard is removed (unconditional import,
+matching every other backend); `backends/_legacy_saml.py` deleted.
+`version.py` → `0.26.0`. `tests/test_saml_generic.py` (15 tests) covers
+every M6 row; full SAML suite (96 incl. `test_oauth2_upstream_idp.py`)
+and a broader adfs/redirect/identity regression check (145 passed, 1
+pre-existing unrelated failure) both green.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: the legacy translator's IdP-metadata generation
+is a hand-templated XML string (`_build_idp_metadata_xml`), not built via
+`saml2.metadata.entity_descriptor`/`IdPConfig` (as every other metadata
+renderer in this feature does) — deliberate, not an oversight: Key
+Constraints says "The translator is pure and unit-tested without pysaml2
+objects," and `entity_descriptor()` actually *parses and validates* the
+certificate file it's given, which breaks on the placeholder cert content
+(`"MIIB..."`) the task's own `test_legacy_settings_translation` pseudocode
+uses. Legacy `sp.x509cert`/`sp.privateKey`/`idp.x509cert` values are raw
+PEM *content* (per `documentation/saml.md`'s example), not file paths;
+spilled to `tempfile.NamedTemporaryFile` for the SP key/cert (`pysaml2`'s
+`key_file`/`cert_file` config wants paths) and string-embedded directly
+for the IdP's `<X509Certificate>` (no file needed since the hand-built
+metadata doesn't go through `pysaml2`'s file-reading validation path).
+`build_attributes`'s "inverse restricted to `sp.attribute_map`" reading:
+the spec's own field comment for `ServiceProviderConfig.attribute_map` is
+`saml_attr -> user_field` (opposite direction from `SAML_MAPPING`'s
+`user_field -> saml_attr`), so "restricted to `sp.attribute_map`" is
+implemented as restricting the inverse-mapping's *keys* (SAML attribute
+names) to `sp.attribute_map`'s own keys, using `sp.attribute_map`'s value
+as a per-attribute user-field override when given — documented in the
+method's docstring since the one-line spec text underspecifies this.

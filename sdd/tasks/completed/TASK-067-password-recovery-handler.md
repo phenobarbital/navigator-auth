@@ -203,10 +203,114 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (session_016Z3wYUV42WJDq92pifU1Fa)
+**Date**: 2026-09-04
+**Notes**: Implemented `PasswordRecoveryHandler(BaseView)` in
+`navigator_auth/handlers/recovery/handler.py`, registered at all five
+paths (canonical three + `/forgot-password`/`/reset-password` legacy
+aliases) via `router.add_view()`. Since `web.View` dispatches by HTTP
+method per registered path, `post()` disambiguates step 1 (request)
+from step 3 (confirm) using the matched route's *name*
+(`self.request.match_info.route.name`), not its literal path — this is
+what lets the legacy aliases dispatch identically to their canonical
+counterparts through the same `post()` method. Class-level, lazily
+created `RecoveryTokenStore`/`PasswordPolicy`/`RateLimiter`x2/
+`SessionRevoker` (and their shared `aioredis.ConnectionPool`) stand in
+for the "created at startup" requirement, since `BaseView` instances
+are created fresh per request with no per-class `on_startup` hook to
+use.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
+Step 1: pads to a ~250ms floor via `time.monotonic()`/`asyncio.sleep`
+on both hit and miss; email lookup uses a raw parameterized
+`SELECT user_id ... WHERE LOWER(email)=$1 OR LOWER(alt_email)=$1 AND
+is_active` (see Deviation 1 below) falling back to `User.get(user_id=)`
+once unambiguous; a >1-row match logs a warning and takes the
+not-found path. Rate-limit rejection returns the same generic 200 body
+rather than the spec diagram's sketched 429 (see Deviation 2). Step 2
+uses `store.validate_recovery` (non-destructive) then
+`store.issue_confirmation` (rotates). Step 3 uses the new
+`peek_confirmation` (see Deviation 3) to resolve the user and run the
+policy check *before* consuming the confirmation token, keeping the
+whole lookup+policy+`user.update()` sequence inside one acquired
+`authdb` connection (see Deviation 4). `SessionRevoker.revoke_user` is
+called after the password write; response is always `202
+{"action": ..., "status": "OK"}` with no `token`/`refresh_token` (D15).
 
-**Deviations from spec**: none | describe if any
+Deleted `handlers/recovery_legacy.py` (TASK-062's renamed
+`recovery.py`) and updated `handlers/__init__.py`'s import/route
+registration accordingly. `tests/test_password_recovery.py` gained
+`TestRecoveryEndpoints`: 13 live integration tests against real
+Postgres + Redis (mirroring `test_basic_auth.py`'s `live_app`
+pattern), covering every item in the task's Test Specification list.
+All 50 tests in the file pass; the regression gate
+(`test_basic_auth.py`, `test_login.py`, `test_basic_open_session.py`)
+shows 13 passed / 1 pre-existing unrelated failure (external
+`nav-api.dev.local`, confirmed identical against unmodified `dev`).
+ruff is clean.
+
+**Deviations from spec**:
+
+1. **Email lookup uses raw SQL, not `User.filter()`.** This dev
+   database's `auth.users` table has a `registration_key` column the
+   `User` model does not declare. `asyncdb`'s `Model.get()` filters a
+   row's columns down to the model's known fields before constructing
+   it; `Model.filter()` does not, and raised
+   `TypeError: User.__init__() got an unexpected keyword argument
+   'registration_key'` on every step-1 call. Switched to a
+   parameterized `SELECT user_id FROM auth.users WHERE ...` (so
+   duplicate detection is still just `len(rows)`), then
+   `User.get(user_id=...)` for the single unambiguous match — `.get()`
+   is unaffected by the same column mismatch. Pre-existing environment
+   defect, unrelated to this task's logic.
+
+2. **Rate-limit rejection at step 1 returns the generic 200, not a
+   429.** The task explicitly left this as an open choice ("prefer the
+   generic 200 unless you have a reason otherwise — note your choice
+   here"). Chose the generic 200: a distinct 429 would itself tell an
+   attacker the address/IP is being rate-limited, undermining D9's
+   "identical body/status for known and unknown addresses" as much as
+   returning the token would.
+
+3. **Added `RecoveryTokenStore.peek_confirmation()` to `store.py`**
+   (not in this task's Files table). The task's own "Ordering trap"
+   note requires validating the password policy *before* consuming the
+   confirmation token, so a 422 leaves both tokens usable
+   (`test_step3_policy_violation_keeps_tokens`). Doing that requires
+   knowing the user behind the confirmation token, which the TASK-064
+   store only exposed via `consume_confirmation` (`GETDEL` — already
+   single-use). `peek_confirmation` is a `GET`-based, non-destructive
+   twin of `consume_confirmation` (both now share a
+   `_decode_confirmation` helper), mirroring the
+   `validate_recovery`/`consume_confirmation` split that already exists
+   for stage 1. No existing method's signature or behavior changed.
+
+4. **Discovered and fixed a real connection-lifetime bug during
+   testing** (contained entirely within this task's own new code, so
+   not a file-scope deviation, but worth flagging): an earlier draft of
+   `_step3_confirm` acquired an `authdb` connection to look up the user,
+   released it, and only *afterward* called `user.update()`. Under
+   pytest's live-Postgres integration tests this reliably hung the
+   whole process at teardown (confirmed via `faulthandler`/manual
+   bisection: `_revoke_jtis` — added correctly per Module 5 — was
+   actually incidental; the real cause was a stale
+   `Model.Meta.connection` reference outstanding after the connection
+   had already been returned to the pool). Fixed by keeping the lookup,
+   policy check, `consume_confirmation` and `user.update()` inside one
+   `async with await db.acquire() as conn:` block, matching
+   `handlers/users/session.py`'s proven `password_change`/
+   `password_reset` pattern.
+
+5. **Test-only workaround, not a code deviation**: while bisecting the
+   hang above I found a second, independent pre-existing gap —
+   `Oauth2Provider.on_cleanup()` (`backends/oauth2/backend.py`, out of
+   this task's file scope) never closes the separate
+   `AccessTokenStorage` it gives itself in `on_startup`.
+   `SessionRevoker._revoke_jtis` (Module 5, correct per spec) is simply
+   the first code path in this test suite to actually use that
+   connection, exposing the leak as a hang at pytest-asyncio's
+   `asyncio.Runner.close()`. Rather than widen this task's file list to
+   patch an unrelated backend, `tests/test_password_recovery.py`'s
+   `recovery_app` fixture now defensively closes every backend's
+   `access_token_storage.redis` at teardown. Flagging
+   `Oauth2Provider.on_cleanup()` as a pre-existing bug worth its own
+   follow-up task outside FEAT-098.

@@ -4,6 +4,8 @@ Navigator Authentication using JSON Web Tokens.
 """
 
 import logging
+import time
+from datetime import datetime
 from typing import Optional
 from aiohttp import web
 from navigator_session import AUTH_SESSION_OBJECT
@@ -13,6 +15,8 @@ from datamodel.exceptions import ValidationError
 # Authenticated Entity
 from ..conf import AUTH_EXCLUDE_LIST_KEY, BASIC_USER_MAPPING
 from .abstract import BaseAuthBackend
+from .oauth2.code_backend import AccessTokenStorage
+from .oauth2.models import OauthAccessTokenRecord
 from ..exceptions import (
     AuthException,
     FailedAuth,
@@ -21,6 +25,11 @@ from ..exceptions import (
 )
 from ..responses import JSONResponse
 from ..identities import AuthUser
+
+# FEAT-098 — per-user index of live jti's, so a password reset (or any
+# future admin action) can find and revoke every outstanding JWT for a
+# user without scanning the whole jti keyspace.
+JTI_INDEX_PREFIX = "auth:user:jti:"
 
 
 class BasicUser(AuthUser):
@@ -54,6 +63,10 @@ class BasicAuth(BaseAuthBackend):
 
     async def on_startup(self, app: web.Application):
         """Used to initialize Backend requirements."""
+        # FEAT-098 — jti-based revocation storage. The attribute name is
+        # load-bearing: AuthHandler._token_is_revoked (auth.py) looks up
+        # every backend for exactly `access_token_storage`.
+        self.access_token_storage = AccessTokenStorage()
         ## Using Startup for detecting and loading functions.
         if self._success_callbacks:
             # self._user_model = self.get_authmodel(AUTH_USER_MODEL)
@@ -62,6 +75,14 @@ class BasicAuth(BaseAuthBackend):
 
     async def on_cleanup(self, app: web.Application):
         """Used to cleanup and shutdown any db connection."""
+        storage = getattr(self, "access_token_storage", None)
+        if storage is not None:
+            try:
+                await storage.redis.aclose()
+            except Exception as ex:  # pylint: disable=W0703
+                self.logger.warning(
+                    f"BasicAuth: error closing access_token_storage Redis: {ex}"
+                )
 
     async def validate_user(self, login: str = None, password: str = None):
         # get the user based on Model
@@ -132,6 +153,21 @@ class BasicAuth(BaseAuthBackend):
     # into `userdata` / `AUTH_SESSION_OBJECT`.
     _JWT_EXTRA_KEYS = ("auth_method", "auth_origin", "external_expires_at")
 
+    async def _index_user_jti(self, user_id, jti: str, ttl: int) -> None:
+        """SADD ``jti`` onto ``auth:user:jti:{user_id}`` and refresh the
+        set's TTL to the longest member lifetime (never shrink it), so
+        ``SessionRevoker`` can find every live jti for a user.
+
+        Best-effort: a failure here must not fail the login that triggered
+        it (the caller already wraps this in a try/except).
+        """
+        key = f"{JTI_INDEX_PREFIX}{user_id}"
+        redis_conn = self.access_token_storage.redis
+        await redis_conn.sadd(key, jti)
+        current_ttl = await redis_conn.ttl(key)
+        new_ttl = max(current_ttl, ttl) if current_ttl and current_ttl > 0 else ttl
+        await redis_conn.expire(key, new_ttl)
+
     async def open_session(
         self,
         request: web.Request,
@@ -190,6 +226,33 @@ class BasicAuth(BaseAuthBackend):
         token, refresh_token, exp, scheme = self._idp.create_token(
             data=payload, expiration=expiration
         )
+        # FEAT-098 — record the minted jti so a password reset (or any
+        # future admin action) can revoke live tokens. Written here rather
+        # than in authenticate() so token-exchange sessions (FEAT-096's
+        # TokenExchangeAuth, a BasicAuth subclass that also calls
+        # open_session) inherit revocability for free. Best-effort: a
+        # Redis hiccup here must not fail the login.
+        if getattr(self, "access_token_storage", None) is not None:
+            try:
+                _, decoded = self._idp.decode_token(token)
+                jti = decoded.get("jti") if decoded else None
+                if jti:
+                    # AccessTokenStorage.revoke()/save() compute remaining
+                    # TTL as `record.expires_at - datetime.now()` (naive) —
+                    # keep expires_at naive too, or that subtraction raises.
+                    record = OauthAccessTokenRecord(
+                        jti=jti,
+                        user_id=uid,
+                        client_id="basic",
+                        expires_at=datetime.fromtimestamp(exp),
+                    )
+                    await self.access_token_storage.save(record)
+                    ttl = max(int(exp - time.time()), 1)
+                    await self._index_user_jti(uid, jti, ttl)
+            except Exception as ex:  # pylint: disable=W0703
+                self.logger.warning(
+                    f"BasicAuth: unable to record jti for user {uid}: {ex}"
+                )
         usr.access_token = token
         usr.token_type = scheme
         usr.expires_in = exp

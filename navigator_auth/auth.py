@@ -548,11 +548,17 @@ class AuthHandler:
         if request.method == "GET":
             # get info about all enable backends
             for name, backend in self.backends.items():
+                # FEAT-097: backends that never authenticate anyone (e.g.
+                # AbstractSAMLIdentityProvider) opt out of this listing.
+                if getattr(backend, "hidden", False):
+                    continue
                 response[name] = backend.get_backend_info()
         else:
             try:
                 backends = await request.json(loads=orjson.loads)
                 for name, backend in self.backends.items():
+                    if getattr(backend, "hidden", False):
+                        continue
                     bk = backend.get_backend_info()
                     if bk.name in backends:
                         response[name] = backend.get_backend_info()

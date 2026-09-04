@@ -152,9 +152,17 @@ class TestTrocTokenStrategy:
             await self.strategy.validate("BAD", None, None)
 
 
+# RFC 7518 3.2 requires an HMAC key at least as long as the hash output, and
+# PyJWT warns below 32 bytes for HS256. The suite runs with warnings as errors,
+# so short test secrets fail the run rather than just nagging.
+JWT_TEST_SECRET = "test-secret-key-for-hs256-32-byte"
+
+
 class TestJWTStrategy:
     def setup_method(self):
-        self.strategy = JWTStrategy(secret_key="secret", algorithm="HS256")
+        self.strategy = JWTStrategy(
+            secret_key=JWT_TEST_SECRET, algorithm="HS256"
+        )
 
     def test_extract_bearer_only(self):
         request = make_mocked_request(
@@ -181,7 +189,9 @@ class TestJWTStrategy:
     @pytest.mark.asyncio
     async def test_validate_decodes_jwt(self):
         import jwt as pyjwt
-        encoded = pyjwt.encode({"user_id": 42}, "secret", algorithm="HS256")
+        encoded = pyjwt.encode(
+            {"user_id": 42}, JWT_TEST_SECRET, algorithm="HS256"
+        )
         result = await self.strategy.validate(encoded, "Bearer", None)
         assert result["user_id"] == 42
 
@@ -191,7 +201,7 @@ class TestJWTStrategy:
         import time
         encoded = pyjwt.encode(
             {"user_id": 42, "exp": int(time.time()) - 100},
-            "secret", algorithm="HS256",
+            JWT_TEST_SECRET, algorithm="HS256",
         )
         with pytest.raises(web.HTTPBadRequest, match="Expired"):
             await self.strategy.validate(encoded, "Bearer", None)

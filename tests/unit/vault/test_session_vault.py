@@ -46,7 +46,12 @@ def session_uuid() -> str:
 
 def _make_mock_conn():
     """Create a mock asyncpg connection."""
-    conn = AsyncMock()
+    # spec= is load-bearing: session_vault probes the driver with
+    # `hasattr(conn, "fetch_all")`, and a bare AsyncMock answers True to every
+    # hasattr. That sent the loader down the fetch_all branch, where it awaited
+    # an auto-created Mock and read zero rows out of it, so these tests silently
+    # exercised an empty result set instead of the rows they set up.
+    conn = AsyncMock(spec=["execute", "fetch", "fetchrow", "fetchval"])
     conn.execute = AsyncMock()
     conn.fetch = AsyncMock(return_value=[])
     conn.fetchrow = AsyncMock(return_value=None)

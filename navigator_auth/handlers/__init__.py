@@ -11,7 +11,7 @@ from .user_identities import (
     IdentitiesManageView,
 )
 from .partners import PartnerKeyHandler
-from .recovery import ForgotPasswordHandler, ResetPasswordHandler
+from .recovery.handler import PasswordRecoveryHandler
 from .config import ConfigHandler
 from .allowed_ips import AllowedIPHandler
 from .client_access import ClientAccessHandler
@@ -99,13 +99,29 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     router.add_post("/api/v2/user/password_reset/{userid:.*}", usr.password_reset)
     router.add_get("/api/v2/user/gen_token/{userid:.*}", usr.gen_token, allow_head=True)
     
-    ## Recovery Methods:
+    ## Password Recovery (FEAT-098): three-step, HMAC-signed flow.
+    # The literal /confirm segment must be registered before {token}, or
+    # "confirm" would be captured as a token (same ordering problem solved
+    # above for the identity routes).
     router.add_view(
-        r"/api/v1/forgot-password", ForgotPasswordHandler,
+        "/api/v1/password-recovery/confirm", PasswordRecoveryHandler,
+        name="api_password_recovery_confirm"
+    )
+    router.add_view(
+        r"/api/v1/password-recovery/{token}", PasswordRecoveryHandler,
+        name="api_password_recovery_validate"
+    )
+    router.add_view(
+        "/api/v1/password-recovery", PasswordRecoveryHandler,
+        name="api_password_recovery_request"
+    )
+    # Legacy aliases: /forgot-password -> step 1, /reset-password -> step 3.
+    router.add_view(
+        r"/api/v1/forgot-password", PasswordRecoveryHandler,
         name="api_forgot_password"
     )
     router.add_view(
-        r"/api/v1/reset-password", ResetPasswordHandler,
+        r"/api/v1/reset-password", PasswordRecoveryHandler,
         name="api_reset_password"
     )
 

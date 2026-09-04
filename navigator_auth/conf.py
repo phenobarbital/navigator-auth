@@ -3,6 +3,7 @@ Navigator Auth Configuration.
 """
 # Import Config Class
 import base64
+import warnings
 import orjson
 import contextlib
 from cryptography import fernet
@@ -484,6 +485,61 @@ if saml_mapping is not None:
             "Auth: Invalid SAML Mapping on *SAML_MAPPING*"
         )
 
+# FEAT-097: AbstractSAMLBackend (SP role) configuration.
+SAML_METADATA = config.get("SAML_METADATA")
+SAML_SP_KEY_FILE = config.get("SAML_SP_KEY_FILE")
+SAML_SP_CERT_FILE = config.get("SAML_SP_CERT_FILE")
+SAML_BINDING = config.get("SAML_BINDING", fallback="redirect")
+SAML_ALLOW_UNSOLICITED = config.getboolean("SAML_ALLOW_UNSOLICITED", fallback=True)
+SAML_WANT_ASSERTIONS_SIGNED = config.getboolean(
+    "SAML_WANT_ASSERTIONS_SIGNED", fallback=True
+)
+SAML_WANT_RESPONSE_SIGNED = config.getboolean(
+    "SAML_WANT_RESPONSE_SIGNED", fallback=False
+)
+
+# FEAT-097: AbstractSAMLIdentityProvider (IdP role) configuration.
+SAML_IDP_KEY_FILE = config.get("SAML_IDP_KEY_FILE")
+SAML_IDP_CERT_FILE = config.get("SAML_IDP_CERT_FILE")
+SAML_IDP_KEY_PASSPHRASE = config.get("SAML_IDP_KEY_PASSPHRASE")
+SAML_IDP_ENTITY_ID = config.get("SAML_IDP_ENTITY_ID")
+
+SAML_IDP_SERVICE_PROVIDERS = []
+saml_idp_service_providers = config.get("SAML_IDP_SERVICE_PROVIDERS")
+if saml_idp_service_providers:
+    try:
+        SAML_IDP_SERVICE_PROVIDERS = orjson.loads(saml_idp_service_providers)
+    except orjson.JSONDecodeError:
+        logging.exception(
+            "Auth: Invalid SAML IdP Service Providers on *SAML_IDP_SERVICE_PROVIDERS*"
+        )
+
+SAML_IDP_SETTINGS = config.get("SAML_IDP_SETTINGS")
+if SAML_IDP_SETTINGS:
+    try:
+        SAML_IDP_SETTINGS = orjson.loads(SAML_IDP_SETTINGS)
+    except orjson.JSONDecodeError:
+        logging.exception(
+            "Auth: Invalid SAML IdP Settings on *SAML_IDP_SETTINGS*"
+        )
+
+SAML_IDP_REQUIRE_AUTH_METHODS = []
+saml_idp_require_auth_methods = config.get("SAML_IDP_REQUIRE_AUTH_METHODS")
+if saml_idp_require_auth_methods:
+    try:
+        SAML_IDP_REQUIRE_AUTH_METHODS = orjson.loads(saml_idp_require_auth_methods)
+    except orjson.JSONDecodeError:
+        logging.exception(
+            "Auth: Invalid SAML IdP Auth Methods on *SAML_IDP_REQUIRE_AUTH_METHODS*"
+        )
+
+# FEAT-097: shared between SP and IdP roles.
+SAML_XMLSEC_BINARY = config.get("SAML_XMLSEC_BINARY")
+SAML_CLOCK_SKEW = config.getint("SAML_CLOCK_SKEW", fallback=60)
+SAML_FLOW_TTL = config.getint("SAML_FLOW_TTL", fallback=600)
+SAML_METADATA_RELOAD = config.getint("SAML_METADATA_RELOAD", fallback=3600)
+SAML_EXECUTOR_WORKERS = config.getint("SAML_EXECUTOR_WORKERS", fallback=4)
+
 
 # Okta
 OKTA_CLIENT_ID = config.get("OKTA_CLIENT_ID")
@@ -576,6 +632,55 @@ TOKEN_EXCHANGE_PROVIDERS = [
     ).split(",")
     if s.strip()
 ]
+
+## Backend-Based Password Recovery (FEAT-098) — 3-step signed flow.
+# HMAC key for signing both the recovery and confirmation tokens (D12).
+# Falls back to SECRET_KEY when unset, and is always coerced to bytes so it
+# can be used directly with hmac.new().
+AUTH_RECOVERY_SECRET = config.get("AUTH_RECOVERY_SECRET")
+if not AUTH_RECOVERY_SECRET:
+    AUTH_RECOVERY_SECRET = SECRET_KEY
+if isinstance(AUTH_RECOVERY_SECRET, str):
+    AUTH_RECOVERY_SECRET = AUTH_RECOVERY_SECRET.encode("utf-8")
+# Stage-1 (recovery token) lifetime, in seconds.
+AUTH_RECOVERY_TTL = config.getint("AUTH_RECOVERY_TTL", fallback=3600)
+# Stage-2 (confirmation token) lifetime, in seconds (D5).
+AUTH_RECOVERY_CONFIRM_TTL = config.getint(
+    "AUTH_RECOVERY_CONFIRM_TTL", fallback=900
+)
+# Dotted path to the notification callable (D1). navigator-auth never sends
+# e-mail itself; this callback receives a NotificationPayload.
+AUTH_RECOVERY_CALLBACK = config.get("AUTH_RECOVERY_CALLBACK")
+# e.g. "https://app/reset?token={token}" (D16).
+AUTH_RECOVERY_URL_TEMPLATE = config.get("AUTH_RECOVERY_URL_TEMPLATE")
+# Per-address / per-IP rate limits (D14). "<count>/<window>", parsed by
+# backends/oauth2/dcr.py:parse_rate_limit.
+AUTH_RECOVERY_RATE_EMAIL = config.get(
+    "AUTH_RECOVERY_RATE_EMAIL", fallback="3/hour"
+)
+AUTH_RECOVERY_RATE_IP = config.get("AUTH_RECOVERY_RATE_IP", fallback="10/hour")
+# Password policy applied at step 3 (D13).
+AUTH_RECOVERY_PWD_MIN_LENGTH = config.getint(
+    "AUTH_RECOVERY_PWD_MIN_LENGTH", fallback=8
+)
+AUTH_RECOVERY_PWD_REQUIRE_LETTER = config.getboolean(
+    "AUTH_RECOVERY_PWD_REQUIRE_LETTER", fallback=True
+)
+AUTH_RECOVERY_PWD_REQUIRE_DIGIT = config.getboolean(
+    "AUTH_RECOVERY_PWD_REQUIRE_DIGIT", fallback=True
+)
+# Deprecated: the legacy callback name read by the pre-FEAT-098
+# handlers/recovery.py. Honoured for one release when AUTH_RECOVERY_CALLBACK
+# is not set.
+FORGOT_PASSWORD_CALLBACK = config.get("FORGOT_PASSWORD_CALLBACK")
+if FORGOT_PASSWORD_CALLBACK and not AUTH_RECOVERY_CALLBACK:
+    warnings.warn(
+        "FORGOT_PASSWORD_CALLBACK is deprecated; use AUTH_RECOVERY_CALLBACK "
+        "instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    AUTH_RECOVERY_CALLBACK = FORGOT_PASSWORD_CALLBACK
 
 ## Audit Backend
 # this is the backend for saving Authentication information

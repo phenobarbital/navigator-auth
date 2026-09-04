@@ -113,10 +113,37 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (Claude Sonnet 5, session_01KS7E6KxYXnkgzMnYHaJC2U)
+**Date**: 2026-09-05
+**Notes**: Replaced the `logout`/`finish_logout` `NotImplementedError` stubs
+in `navigator_auth/backends/saml/sp.py` with the real SP-role SLO flows.
+`logout()` reads `SAMLSessionInfo` from `session["saml"]`; with a
+`session_index`, resolves the IdP's SLO endpoint from the trusted metadata
+(`client.metadata.single_logout_service(..., typ="idpsso")`, Redirect
+preferred, POST fallback), builds a `LogoutRequest` from the persisted
+NameID/SessionIndex, stores `{session_index, return_to}` under
+`core.slo_key(request_id)` (TTL `SAML_FLOW_TTL`), and redirects; the local
+session is invalidated *first*, unconditionally (`session.invalidate()`),
+satisfying "local session always cleared" even when no `session_index` is
+present or the IdP request fails to build. `finish_logout()` branches on
+`SAMLResponse` (GETDEL the stored flow by `resp.response.in_response_to`
+— not `resp.in_response_to`, which is unreliable on `LogoutResponse` the
+same way it is on `AuthnResponse`; redirect to the validated `return_to`
+else `/`) vs `SAMLRequest` (inbound IdP-initiated logout: match against
+*this* request's own session by `SessionIndex`, clear it, reply with a
+signed `LogoutResponse` on the same binding). Added the POST route for
+`/auth/<svc>/logout` (inherited route is GET only). `tests/test_saml_slo.py`
+(4 tests, all spec §4 M4 rows) builds full SP<->fake-IdP round trips with
+`pysaml2`'s own `Server`/`Saml2Client` (`create_logout_request`,
+`apply_binding`, `parse_logout_request`/`parse_logout_request_response`,
+`create_logout_response`) against the TASK-055 fixtures; all pass with
+`xmlsec1` installed. Verified `test_saml_sp.py` and the rest of the SAML
+suite (39) plus `test_oauth2_upstream_idp.py` (23) still pass — 62 total.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none. One implementation-detail note: `pysaml2`'s
+`create_logout_response(request)` crashes with `AttributeError:
+'LogoutRequest' object has no attribute 'protocol_binding'` unless
+`bindings=[binding]` is passed explicitly (its `response_args()` internal
+default path assumes an `AuthnRequest`-shaped message) — not a spec
+deviation, just a library quirk worth flagging for whoever touches this
+code next.

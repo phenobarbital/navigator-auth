@@ -309,3 +309,229 @@ def confidential_client():
         default_scopes=["default", "profile", "email"],
         allowed_grant_types=["authorization_code", "client_credentials", "refresh_token"],
     )
+
+
+# ---------------------------------------------------------------------------
+# SAML fixtures (FEAT-097) — self-signed test keys, an in-memory
+# IdentityFlowStore double, a real POST-request factory (aiohttp
+# StreamReader-backed, so ``request.post()`` parses form bodies), and a
+# factory for signed SAMLResponse XML built with a real ``pysaml2`` IdP
+# ``Server`` against the committed test fixtures.
+# ---------------------------------------------------------------------------
+
+SAML_FIXTURES_DIR = "tests/fixtures/saml"
+
+
+def _saml_scheme() -> str:
+    """Every URL baked into the committed SAML fixtures
+    (idp-metadata.xml/sp-metadata.xml entity IDs) uses "https". `get_domain()`
+    always builds URLs with `PREFERRED_AUTH_SCHEME` (never the inbound
+    request's own scheme), so tests must force that setting to "https"
+    regardless of this environment's own config (this sandbox's
+    `env/dev/.env` sets "http") — see `force_https_scheme` below."""
+    return "https"
+
+
+def _saml_url(host: str, path: str) -> str:
+    return f"{_saml_scheme()}://{host}{path}"
+
+
+class SAMLFlowStoreStub:
+    """Dict-backed IdentityFlowStore double (single-use semantics),
+    same shape as `navigator_auth.identity.flow_store.IdentityFlowStore`."""
+
+    def __init__(self):
+        self.storage = {}
+        self.ttls = {}
+
+    async def set(self, key, payload, ttl):
+        self.storage[key] = dict(payload)
+        self.ttls[key] = ttl
+
+    async def get(self, key):
+        return self.storage.get(key)
+
+    async def getdel(self, key):
+        self.ttls.pop(key, None)
+        return self.storage.pop(key, None)
+
+    async def delete(self, key):
+        self.storage.pop(key, None)
+
+    def keys(self):
+        return self.storage.keys()
+
+
+@pytest.fixture
+def saml_keys() -> dict:
+    """Paths to the committed self-signed IdP/SP key pairs and metadata."""
+    return {
+        "idp_key": f"{SAML_FIXTURES_DIR}/idp.key",
+        "idp_cert": f"{SAML_FIXTURES_DIR}/idp.crt",
+        "sp_key": f"{SAML_FIXTURES_DIR}/sp.key",
+        "sp_cert": f"{SAML_FIXTURES_DIR}/sp.crt",
+        "idp_metadata": f"{SAML_FIXTURES_DIR}/idp-metadata.xml",
+        "sp_metadata": f"{SAML_FIXTURES_DIR}/sp-metadata.xml",
+    }
+
+
+@pytest.fixture
+def redis_stub():
+    return SAMLFlowStoreStub()
+
+
+@pytest.fixture
+def post_request():
+    """Factory building a real (aiohttp) POST web.Request with a
+    form-urlencoded body, so ``await request.post()`` works exactly like
+    in production (no ``.json()``/``.post()`` mocking needed)."""
+    import asyncio
+    from urllib.parse import urlencode
+
+    from aiohttp.base_protocol import BaseProtocol
+    from aiohttp.streams import StreamReader
+    from aiohttp.test_utils import make_mocked_request
+
+    def _factory(
+        form: dict, path: str = "/auth/saml/callback/", host: str = "sp.example.com"
+    ):
+        body = urlencode(form).encode("utf-8")
+        loop = asyncio.get_event_loop()
+        protocol = BaseProtocol(loop=loop)
+        payload = StreamReader(protocol, limit=2**16, loop=loop)
+        payload.feed_data(body)
+        payload.feed_eof()
+        return make_mocked_request(
+            "POST",
+            _saml_url(host, path),
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Content-Length": str(len(body)),
+                "Host": host,
+            },
+            payload=payload,
+        )
+
+    return _factory
+
+
+@pytest.fixture
+def saml_idp_core(saml_keys):
+    """A `SAMLCore` (IdP role) trusting the SP test metadata, used only to
+    mint signed test responses — a stand-in for a real external IdP."""
+    from navigator_auth.backends.saml import SAMLCore
+
+    return SAMLCore(
+        prefix="SAML_IDP",
+        settings={
+            "key_file": saml_keys["idp_key"],
+            "cert_file": saml_keys["idp_cert"],
+            "metadata": {"local": [saml_keys["sp_metadata"]]},
+        },
+        role="idp",
+        logger=None,
+    )
+
+
+@pytest.fixture
+def signed_response(saml_idp_core):
+    """Factory: build a signed SAMLResponse (base64-encoded, for form POST)
+    from a fake IdP `Server` targeting the SP test fixture's entity/ACS.
+
+    ``in_response_to=None`` produces an unsolicited response. Synchronous
+    (like the real `saml2.server.Server` API) so it can be called directly
+    from test bodies without an `await`; `SAMLCore.idp_server`'s executor
+    wrapping is only needed on the request-handling path, not here.
+    """
+    import base64
+
+    from saml2.saml import AUTHN_PASSWORD
+
+    def _factory(
+        in_response_to: str = None,
+        attrs: dict = None,
+        not_on_or_after=None,
+        destination: str = None,
+        sp_entity_id: str = None,
+        idp_entity_id: str = None,
+        userid: str = "a@x.com",
+        sign_response: bool = True,
+        sign_assertion: bool = True,
+    ) -> str:
+        destination = destination or _saml_url("sp.example.com", "/auth/saml/callback/")
+        sp_entity_id = sp_entity_id or _saml_url("sp.example.com", "/auth/saml/metadata")
+        idp_entity_id = idp_entity_id or _saml_url(
+            "idp.example.com", "/auth/saml-idp/metadata"
+        )
+        server = saml_idp_core._load_idp_config(idp_entity_id.rsplit("/auth/", 1)[0])
+        from saml2.server import Server
+
+        server = Server(config=server)
+        kwargs = {}
+        if not_on_or_after is not None:
+            kwargs["session_not_on_or_after"] = not_on_or_after
+        resp = server.create_authn_response(
+            identity=attrs or {"mail": ["a@x.com"], "uid": ["auser"]},
+            in_response_to=in_response_to,
+            destination=destination,
+            sp_entity_id=sp_entity_id,
+            userid=userid,
+            sign_response=sign_response,
+            sign_assertion=sign_assertion,
+            authn={"class_ref": AUTHN_PASSWORD, "authn_auth": idp_entity_id},
+            **kwargs,
+        )
+        return base64.b64encode(str(resp).encode("utf-8")).decode("utf-8")
+
+    return _factory
+
+
+@pytest.fixture
+def force_https_scheme(monkeypatch):
+    """Force `get_domain()` (used by every SAML URL derivation) to build
+    "https://" URLs, matching the scheme baked into the committed
+    `idp-metadata.xml`/`sp-metadata.xml` entity IDs, regardless of this
+    environment's own `PREFERRED_AUTH_SCHEME` (this sandbox's
+    `env/dev/.env` sets "http")."""
+    monkeypatch.setattr("navigator_auth.backends.external.PREFERRED_AUTH_SCHEME", "https")
+    monkeypatch.setattr("navigator_auth.backends.abstract.PREFERRED_AUTH_SCHEME", "https")
+
+
+@pytest.fixture
+def sp_backend(saml_keys, redis_stub, force_https_scheme):
+    """A minimal, concrete `AbstractSAMLBackend` subclass configured
+    against the committed IdP test fixture, `_flow_store` backed by
+    `redis_stub`. `validate_user_info` is left to the real implementation
+    of `ExternalAuth` in most tests — callers that need a DB-free login
+    should monkeypatch it explicitly."""
+    from navigator_auth.backends.saml import AbstractSAMLBackend
+
+    class MinimalSP(AbstractSAMLBackend):
+        def get_idp_metadata(self):
+            return saml_keys["idp_metadata"]
+
+        def get_attribute_mapping(self):
+            return {"email": "mail", "username": "uid"}
+
+        async def resolve_user_identifier(self, result):
+            return result.attributes.get("email")
+
+    backend = object.__new__(MinimalSP)
+    backend.logger = MagicMock()
+    backend._flow_store = redis_stub
+    backend.scheme = "Bearer"
+    backend.session_key_property = "session_key"
+    backend.session_id_property = "session_id"
+    backend.user_property = "user"
+    backend.username_attribute = "username"
+    backend.userid_attribute = "user_id"
+    backend.finish_redirect_url = None
+    backend._service_name = "saml"
+    backend.config_prefix = "SAML"
+    settings = {"metadata": {"local": [saml_keys["idp_metadata"]]}}
+    from navigator_auth.backends.saml import SAMLCore
+
+    backend.core = SAMLCore(
+        prefix="SAML", settings=settings, role="sp", logger=backend.logger
+    )
+    return backend

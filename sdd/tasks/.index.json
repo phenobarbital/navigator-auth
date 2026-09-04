@@ -1077,7 +1077,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "high",
@@ -1087,7 +1087,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Edits backends/external.py (dispatcher hook) and creates saml/sp.py. Shares the core with TASK-058 but no files; runs in the feature worktree.",
-    "file": "sdd/tasks/active/TASK-056-saml-sp-login-flows.md"
+    "file": "sdd/tasks/completed/TASK-056-saml-sp-login-flows.md",
+    "completed_at": "2026-09-04T23:04:13.878746Z"
   },
   {
     "id": "TASK-057",
@@ -1096,7 +1097,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "medium",
@@ -1106,7 +1107,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Extends saml/sp.py from TASK-056; same file, sequential.",
-    "file": "sdd/tasks/active/TASK-057-saml-sp-single-logout.md"
+    "file": "sdd/tasks/completed/TASK-057-saml-sp-single-logout.md",
+    "completed_at": "2026-09-04T23:14:32.466436Z"
   },
   {
     "id": "TASK-058",
@@ -1115,7 +1117,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "high",
@@ -1125,7 +1127,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "Parallelizable after TASK-055: creates saml/idp.py and touches only auth.py (hidden flag). No shared files with TASK-056/057 (sp.py, external.py). May run in a second worktree branched after TASK-055 merges.",
-    "file": "sdd/tasks/active/TASK-058-saml-idp-registry-initiate.md"
+    "file": "sdd/tasks/completed/TASK-058-saml-idp-registry-initiate.md",
+    "completed_at": "2026-09-04T23:23:11.238621Z"
   },
   {
     "id": "TASK-059",
@@ -1134,7 +1137,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "medium",
@@ -1144,7 +1147,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "Continues saml/idp.py from TASK-058 in the same (possibly second) worktree; no shared files with the SP tasks.",
-    "file": "sdd/tasks/active/TASK-059-saml-idp-sso-slo.md"
+    "file": "sdd/tasks/completed/TASK-059-saml-idp-sso-slo.md",
+    "completed_at": "2026-09-04T23:32:49.316788Z"
   },
   {
     "id": "TASK-060",
@@ -1153,7 +1157,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "high",
@@ -1164,7 +1168,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Joins the SP and IdP branches; touches backends/__init__.py and deletes the legacy module. Sequential after both roles.",
-    "file": "sdd/tasks/active/TASK-060-saml-generic-subclasses-migration.md"
+    "file": "sdd/tasks/completed/TASK-060-saml-generic-subclasses-migration.md",
+    "completed_at": "2026-09-04T23:39:28.033273Z"
   },
   {
     "id": "TASK-061",
@@ -1173,7 +1178,7 @@
     "feature_id": "FEAT-097",
     "feature": "saml-backend-abstract",
     "spec": "sdd/specs/saml-backend-abstract.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:43:59.991128Z",
     "priority": "medium",
@@ -1183,7 +1188,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Final integration coverage + docs; depends on everything.",
-    "file": "sdd/tasks/active/TASK-061-saml-roundtrip-tests-docs.md"
+    "file": "sdd/tasks/completed/TASK-061-saml-roundtrip-tests-docs.md",
+    "completed_at": "2026-09-04T23:51:45.518635Z"
   },
   {
     "id": "TASK-062",
@@ -1290,7 +1296,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "high",
@@ -1304,7 +1310,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Integration point: imports every prior FEAT-098 module and deletes the old recovery.py. Not parallelizable.",
-    "file": "sdd/tasks/active/TASK-067-password-recovery-handler.md"
+    "file": "sdd/tasks/completed/TASK-067-password-recovery-handler.md",
+    "completed_at": "2026-09-04T22:54:28Z"
   },
   {
     "id": "TASK-068",
@@ -1313,7 +1320,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "medium",
@@ -1323,6 +1330,25 @@
     ],
     "parallel": false,
     "parallelism_notes": "Validation and release chores; depends on the assembled handler. Not parallelizable.",
-    "file": "sdd/tasks/active/TASK-068-recovery-e2e-docs-version.md"
+    "file": "sdd/tasks/completed/TASK-068-recovery-e2e-docs-version.md",
+    "completed_at": "2026-09-04T23:03:13Z"
+  },
+  {
+    "id": "TASK-069",
+    "slug": "oauth2-provider-cleanup-leak",
+    "title": "Oauth2Provider.on_cleanup() never closes its Redis-backed storages",
+    "feature_id": "FEAT-093",
+    "feature": "oauth2-3lo-implementation",
+    "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
+    "status": "done",
+    "assigned_to": "unassigned",
+    "priority": "medium",
+    "effort": "S",
+    "depends_on": [],
+    "parallel": true,
+    "parallelism_notes": "Isolated bugfix in Oauth2Provider.on_cleanup(); no shared files with other active tasks.",
+    "file": "sdd/tasks/completed/TASK-069-oauth2-provider-cleanup-leak.md",
+    "started_at": "2026-09-04T23:10:33Z",
+    "completed_at": "2026-09-04T23:13:03Z"
   }
 ]

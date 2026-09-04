@@ -22,21 +22,11 @@ from navconfig.logging import logging
 from navigator_session import get_session
 
 from ..decorators import user_session
-from ..libs.json import json_encoder
-from ..responses import JSONResponse
+from ..responses import JSONResponse, json_error as _json_error
 
 logger = logging.getLogger("navigator.oauth2.access")
 
 
-def _json_error(status: int, message: str):
-    """Raise an HTTP exception with a JSON body."""
-    exc_class = type(
-        "JSONHTTPError", (web.HTTPException,), {"status_code": status}
-    )
-    raise exc_class(
-        text=json_encoder({"error": message}),
-        content_type="application/json",
-    )
 
 
 def _serialize(access) -> dict:

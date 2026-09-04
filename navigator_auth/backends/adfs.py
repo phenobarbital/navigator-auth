@@ -3,9 +3,8 @@
 Description: Backend Authentication/Authorization using Okta Service.
 """
 
-import fnmatch
 import secrets
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 from aiohttp import web
 import jwt
 
@@ -32,7 +31,6 @@ from ..conf import (
     AUTH_EXCLUDE_LIST_KEY,
     ADFS_MAPPING,
     ADFS_SAML_RELAY_RP,
-    ALLOWED_HOSTS,
 )
 from .jwksutils import get_public_key
 from .external import ExternalAuth
@@ -119,17 +117,11 @@ class ADFSAuth(ExternalAuth):
         ALLOWED_HOSTS; otherwise drop it and fall back to the default
         finish-redirect behavior in ``home_redirect``. Relative URIs are
         always safe (``home_redirect`` prepends the current request's own
-        domain to them)."""
-        if not uri:
-            return None
-        netloc = urlparse(uri).netloc
-        if not netloc:
-            return uri
-        for pattern in ALLOWED_HOSTS:
-            if fnmatch.fnmatch(netloc, pattern):
-                return uri
-        self.logger.warning(f"ADFS: rejected internal_redirect to disallowed host: {netloc!r}")
-        return None
+        domain to them).
+
+        Delegates to ``BaseAuthBackend.validate_redirect_host`` (promoted,
+        behavior-preserving; FEAT-097 Module 1)."""
+        return self.validate_redirect_host(uri)
 
     async def authenticate(self, request: web.Request):
         """Authenticate, refresh or return the user credentials.
