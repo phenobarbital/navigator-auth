@@ -1270,7 +1270,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "high",
@@ -1280,7 +1280,8 @@
     ],
     "parallel": true,
     "parallelism_notes": "The only FEAT-098 task touching existing files (idp/__init__.py, basic.py) \u2014 files 063/064/065 never open, so still parallel with them. Was blocked on FEAT-096 TASK-046; unblocked since FEAT-096 merged to dev 2026-09-04 and open_session() exists. Largest blast radius in the feature: affects all Basic-auth traffic. Review separately.",
-    "file": "sdd/tasks/active/TASK-066-basic-jti-session-revocation.md"
+    "file": "sdd/tasks/completed/TASK-066-basic-jti-session-revocation.md",
+    "completed_at": "2026-09-04T22:18:27Z"
   },
   {
     "id": "TASK-067",
