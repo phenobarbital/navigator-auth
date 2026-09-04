@@ -1,6 +1,22 @@
+from types import SimpleNamespace
+
+import pytest
+import pytest_asyncio
+import redis.asyncio as aioredis
+
+from navigator_auth.conf import REDIS_AUTH_URL
 from navigator_auth.handlers.users.passwd import set_basic_password
 from navigator_auth.handlers.recovery.policy import PasswordPolicy
+from navigator_auth.handlers.recovery.store import (
+    RecoveryTokenStore,
+    RECOVERY_KEY_PREFIX,
+    CONFIRM_KEY_PREFIX,
+    _hash_token,
+)
+from navigator_auth.libs.json import json_encoder, json_decoder
 from navigator_auth.models import User
+
+TEST_SECRET = b"test-secret-key"
 
 
 class TestRecoveryConfig:
@@ -63,6 +79,142 @@ class TestPasswordPolicy:
     def test_policy_message_never_echoes_password(self):
         for v in PasswordPolicy().validate("a"):
             assert "a" not in v.message.replace("at least", "")  # no echo of the input
+
+
+@pytest_asyncio.fixture
+async def redis_pool():
+    pool = aioredis.ConnectionPool.from_url(
+        REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
+    )
+    yield pool
+    await pool.disconnect()
+
+
+@pytest_asyncio.fixture
+async def redis(redis_pool):
+    async with aioredis.Redis(connection_pool=redis_pool) as r:
+        yield r
+
+
+@pytest.fixture
+def recovery_user():
+    return SimpleNamespace(
+        user_id=424242,
+        username="recovery_test_user",
+        email="recovery_test@example.com",
+    )
+
+
+@pytest.fixture
+def recovery_store(redis_pool):
+    return RecoveryTokenStore(redis_pool, secret=TEST_SECRET)
+
+
+class TestRecoveryTokenStore:
+    """Module 3 — RecoveryTokenStore, against a real Redis instance."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def _clean(self, redis_pool):
+        async def _purge():
+            async with aioredis.Redis(connection_pool=redis_pool) as r:
+                keys = await r.keys(f"{RECOVERY_KEY_PREFIX}*")
+                if keys:
+                    await r.delete(*keys)
+        await _purge()
+        yield
+        await _purge()
+
+    @pytest.mark.asyncio
+    async def test_store_key_is_hashed(self, recovery_store, redis, recovery_user):
+        token, _ = await recovery_store.issue_recovery(recovery_user)
+        await recovery_store.issue_confirmation(token)
+        keys = await redis.keys(f"{RECOVERY_KEY_PREFIX}*")
+        assert not any(token in k for k in keys)
+        for k in keys:
+            value = await redis.get(k)
+            assert token not in (value or "")
+
+    @pytest.mark.asyncio
+    async def test_store_recovery_survives_validate(self, recovery_store, recovery_user):
+        token, _ = await recovery_store.issue_recovery(recovery_user)
+        assert await recovery_store.validate_recovery(token) is not None
+        assert await recovery_store.validate_recovery(token) is not None   # D4
+
+    @pytest.mark.asyncio
+    async def test_store_confirmation_rotates(self, recovery_store, recovery_user):
+        token, _ = await recovery_store.issue_recovery(recovery_user)
+        c1, _ = await recovery_store.issue_confirmation(token)
+        c2, _ = await recovery_store.issue_confirmation(token)
+        assert await recovery_store.consume_confirmation(c1) is None
+        assert await recovery_store.consume_confirmation(c2) is not None
+
+    @pytest.mark.asyncio
+    async def test_rotation_preserves_stage1_ttl(self, recovery_store, redis, recovery_user):
+        token, _ = await recovery_store.issue_recovery(recovery_user)
+        key = f"{RECOVERY_KEY_PREFIX}{_hash_token(token)}"
+        before = await redis.ttl(key)
+        await recovery_store.issue_confirmation(token)
+        after = await redis.ttl(key)
+        assert after <= before
+
+    @pytest.mark.asyncio
+    async def test_store_confirmation_single_use(self, recovery_store, recovery_user):
+        token, _ = await recovery_store.issue_recovery(recovery_user)
+        c, _ = await recovery_store.issue_confirmation(token)
+        assert await recovery_store.consume_confirmation(c) is not None
+        assert await recovery_store.consume_confirmation(c) is None
+
+    @pytest.mark.asyncio
+    async def test_store_signature_roundtrip(self, recovery_store, redis, recovery_user):
+        token, _ = await recovery_store.issue_recovery(recovery_user)
+        assert await recovery_store.validate_recovery(token) is not None
+        # Tamper with the payload directly in Redis.
+        key = f"{RECOVERY_KEY_PREFIX}{_hash_token(token)}"
+        raw = await redis.get(key)
+        data = json_decoder(raw)
+        data["username"] = "tampered"
+        await redis.set(key, json_encoder(data), keepttl=True)
+        assert await recovery_store.validate_recovery(token) is None
+
+    @pytest.mark.asyncio
+    async def test_store_wrong_secret_rejected(self, redis_pool, recovery_user):
+        store_a = RecoveryTokenStore(redis_pool, secret=b"secret-a")
+        store_b = RecoveryTokenStore(redis_pool, secret=b"secret-b")
+        token, _ = await store_a.issue_recovery(recovery_user)
+        assert await store_b.validate_recovery(token) is None
+
+    @pytest.mark.asyncio
+    async def test_store_ttls(self, recovery_store, redis, recovery_user):
+        token, _ = await recovery_store.issue_recovery(recovery_user)
+        key = f"{RECOVERY_KEY_PREFIX}{_hash_token(token)}"
+        ttl = await redis.ttl(key)
+        assert 0 < ttl <= 3600
+
+        c, _ = await recovery_store.issue_confirmation(token)
+        ckey = f"{CONFIRM_KEY_PREFIX}{_hash_token(c)}"
+        cttl = await redis.ttl(ckey)
+        assert 0 < cttl <= 900
+
+    @pytest.mark.asyncio
+    async def test_store_expired_returns_none(self, redis_pool, recovery_user):
+        store = RecoveryTokenStore(redis_pool, secret=TEST_SECRET)
+        token, _ = await store.issue_recovery(recovery_user)
+        key = f"{RECOVERY_KEY_PREFIX}{_hash_token(token)}"
+        async with aioredis.Redis(connection_pool=redis_pool) as r:
+            await r.delete(key)  # simulate expiry
+        assert await store.validate_recovery(token) is None
+
+    @pytest.mark.asyncio
+    async def test_drop_pair_deletes_both_records(
+        self, recovery_store, redis, recovery_user
+    ):
+        token, _ = await recovery_store.issue_recovery(recovery_user)
+        c, confirmation = await recovery_store.issue_confirmation(token)
+        recovery_key_hash = confirmation.recovery_key
+        confirm_key_hash = _hash_token(c)
+        await recovery_store.drop_pair(recovery_key_hash, confirm_key_hash)
+        assert await redis.get(f"{RECOVERY_KEY_PREFIX}{recovery_key_hash}") is None
+        assert await redis.get(f"{CONFIRM_KEY_PREFIX}{confirm_key_hash}") is None
 
 
 class TestNotificationPayloadSecrecy:
