@@ -2,7 +2,8 @@
 
 **Date**: 2026-09-04
 **Author**: Jesus Lara
-**Status**: discussion
+**Status**: accepted
+**Spec**: sdd/specs/external-token-exchange.spec.md
 **Feature ID (reserved)**: FEAT-096
 **Depends on**: Identity Vault / identity-link flow (landed: `IdentityStore`,
 `auth.user_identities` credential columns, `/api/v1/user/identities/{provider}/credential`),
@@ -47,11 +48,13 @@ provider name and its bearer token. navigator-auth:
 4. Caps the internal session/JWT lifetime at the external token's `expires_at`
    (when the provider reports one). The internal session never outlives the
    credential it was exchanged from.
-5. Stores the external token **only in the identity vault** (ciphered in
-   `auth.user_identities`, same path as identity-link). The raw token is not
-   written into the Redis session. The frontend obtains it on demand through
-   the already-existing `GET /api/v1/user/identities/{provider}/credential`
-   endpoint (which handles caching and refresh).
+5. Stores the external credential **only in the identity vault** (ciphered in
+   `auth.user_identities`, same path as identity-link): the access token, the
+   refresh token when present, **and the id_token** (new ciphered column). The
+   raw tokens are not written into the Redis session. The frontend obtains them
+   on demand through the already-existing
+   `GET /api/v1/user/identities/{provider}/credential` endpoint (which handles
+   caching and refresh).
 6. Returns the same response shape as a Basic login (`token`, `refresh_token`,
    `expires_in`, `type`, user data).
 
@@ -104,21 +107,28 @@ own password behaviour, session storage format.
 - **Dependencies**: none new (`msal`, PyJWT, `jwksutils` already present).
 - **Breaking changes**: none.
 
+## Decisions (resolved 2026-09-04)
+
+- **D1** Session and JWT carry `auth_method: "basic"` plus `auth_origin: "<provider>"`.
+- **D2** Internal session/JWT lifetime is capped at the external token `expires_at`.
+- **D3** External credential lives in the identity vault only; the frontend
+  requests it through the existing credential endpoint. Nothing raw in the
+  Redis session.
+- **D4** Users must already exist in `auth.users`; this flow never creates
+  accounts, regardless of `AUTH_MISSING_ACCOUNT`.
+- **D5** `auth_origin` is mirrored into `AUTH_SESSION_OBJECT` as well as the
+  session top level and the JWT.
+- **D6** When the provider reports no expiry (GitHub classic tokens), cap at a
+  new `TOKEN_EXCHANGE_MAX_TTL` setting, default equal to `SESSION_TIMEOUT`.
+- **D7** When both `id_token` and access token are presented, verify the
+  id_token for identity and **vault both** (new ciphered `id_token` column).
+- **D8** A successful exchange fires the Basic `AUTH_SUCCESSFUL_CALLBACKS` and
+  updates `last_login`, "as if Basic".
+
 ## Open Questions
 
-- Should `auth_origin` also be mirrored into `AUTH_SESSION_OBJECT` (the
-  `session` sub-dict the frontend reads) or only at the top level of the
-  session and the JWT? Proposal: both, it is cheap and avoids a second lookup.
-- Session cap when the provider reports **no** expiry (GitHub classic OAuth
-  tokens never expire): fall back to the normal `SESSION_TIMEOUT`, or to a
-  dedicated shorter `TOKEN_EXCHANGE_MAX_TTL`? Proposal: dedicated setting,
-  default equal to `SESSION_TIMEOUT`.
-- When the caller presents both `id_token` and an access token (Azure/Google),
-  verify the id_token for identity and vault the access token? Proposal: yes;
-  the id_token is what proves audience, the access token is what is useful
-  later.
-- Should a successful exchange refresh `last_login` / fire the same
-  `AUTH_SUCCESSFUL_CALLBACKS` as Basic? Proposal: yes, "as if Basic".
+- Carried into the spec (Section 7): per-session Redis TTL alignment with the
+  JWT cap; refresh-token preservation on re-exchange.
 
 ## Parallelism Potential
 
