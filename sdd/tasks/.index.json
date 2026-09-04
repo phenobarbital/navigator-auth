@@ -1314,7 +1314,7 @@
     "feature_id": "FEAT-098",
     "feature": "backend-based-password-recovery",
     "spec": "sdd/specs/backend-based-password-recovery.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "sdd-worker",
     "started_at": "2026-09-04T21:44:03Z",
     "priority": "medium",
@@ -1324,6 +1324,7 @@
     ],
     "parallel": false,
     "parallelism_notes": "Validation and release chores; depends on the assembled handler. Not parallelizable.",
-    "file": "sdd/tasks/active/TASK-068-recovery-e2e-docs-version.md"
+    "file": "sdd/tasks/completed/TASK-068-recovery-e2e-docs-version.md",
+    "completed_at": "2026-09-04T23:03:13Z"
   }
 ]
