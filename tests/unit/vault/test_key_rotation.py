@@ -1,4 +1,6 @@
 """Unit tests for navigator_session.vault.key_rotation module."""
+import asyncio
+import contextlib
 import struct
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -48,7 +50,11 @@ def _make_mock_pool(rows_batches: list[list]):
     rows_batches: list of lists, each inner list is returned by successive fetch() calls.
     """
     pool = AsyncMock()
-    conn = AsyncMock()
+    # spec= is load-bearing: rotate_master_key selects its fetch method with
+    # `hasattr(conn, "fetch_all")`, and a bare AsyncMock answers True to every
+    # hasattr. That sent production down the fetch_all branch while this double
+    # only primed .fetch, so the loop span forever on an empty-but-truthy Mock.
+    conn = AsyncMock(spec=["fetch", "execute", "fetchval", "transaction"])
 
     # fetch returns batches sequentially, then empty list
     fetch_side_effects = list(rows_batches) + [[]]
@@ -301,3 +307,161 @@ class TestErrorHandling:
             await rotate_master_key(
                 pool, 1, 2, {2: master_key_v2}
             )
+
+
+# ---------------------------------------------------------------------------
+# Cursor advance / loop termination
+# ---------------------------------------------------------------------------
+
+# A runaway rotation loop cannot be caught with asyncio.wait_for: awaiting an
+# AsyncMock (or a plain `async def` that never really suspends) yields no
+# control back to the event loop, so the timeout never fires and the suite
+# hangs instead of failing. Every double below therefore counts its fetches and
+# raises once the count passes what the scenario could legitimately need.
+class _FetchBudgetExceeded(AssertionError):
+    """Raised when the rotation loop refetches far more often than it should."""
+
+
+@contextlib.asynccontextmanager
+async def _acquire(conn):
+    yield conn
+
+
+def _make_sql_accurate_pool(rows: dict, max_fetches: int = 50):
+    """A pool whose SELECT honours `WHERE key_version = $1 ... LIMIT/OFFSET`.
+
+    The mock pool above hands back canned batches, so it cannot observe that
+    rotating a row removes it from the result set. That shrinking set is what
+    makes the cursor arithmetic subtle, so these tests model it for real.
+    """
+    calls = {"fetch": 0}
+
+    class Conn:
+        async def fetch(self, sql, key_version, limit, offset):
+            calls["fetch"] += 1
+            if calls["fetch"] > max_fetches:
+                raise _FetchBudgetExceeded(
+                    f"rotation refetched {calls['fetch']} times "
+                    f"(budget {max_fetches}) - the cursor is not advancing"
+                )
+            matching = [rows[i] for i in sorted(rows)
+                        if rows[i]["key_version"] == key_version]
+            return matching[offset:offset + limit]
+
+        async def execute(self, sql, *args):
+            if "UPDATE" in sql.upper():
+                ciphertext, key_version, row_id = args
+                rows[row_id]["ciphertext_db"] = ciphertext
+                rows[row_id]["key_version"] = key_version
+
+        def transaction(self):
+            tx = MagicMock()
+            tx.start, tx.commit, tx.rollback = (
+                AsyncMock(), AsyncMock(), AsyncMock()
+            )
+            return tx
+
+    pool = MagicMock()
+    pool.acquire = lambda: _acquire(Conn())
+    return pool
+
+
+def _seed(n: int, master_key: bytes, bad_ids: frozenset = frozenset()) -> dict:
+    rows = {}
+    for i in range(n):
+        if i in bad_ids:
+            ciphertext = b"\x00\x01" + b"\x00" * 30  # key_id=1, undecryptable
+        else:
+            ciphertext = encrypt_for_db(
+                f"secret-{i}".encode(), key_id=1, master_key=master_key
+            )
+        rows[i] = {
+            "id": i, "user_id": 42, "key": f"key_{i}",
+            "ciphertext_db": ciphertext, "key_version": 1,
+        }
+    return rows
+
+
+class TestCursorAdvance:
+    @pytest.mark.asyncio
+    async def test_no_secret_is_skipped_across_batches(
+        self, master_keys, master_key_v1
+    ):
+        """Every row is rotated when the set spans several batches.
+
+        Regression: the cursor advanced by len(rows) each pass, but rotated rows
+        drop out of `WHERE key_version = old`, so the next OFFSET stepped over
+        secrets that were never processed. Rotation then reported success while
+        leaving them encrypted under the retired key.
+        """
+        rows = _seed(250, master_key_v1)
+        pool = _make_sql_accurate_pool(rows)
+
+        stats = await rotate_master_key(pool, 1, 2, master_keys, batch_size=100)
+
+        assert stats["rotated"] == 250
+        assert stats["total"] == 250
+        assert stats["errors"] == 0
+        left_behind = [i for i in rows if rows[i]["key_version"] == 1]
+        assert left_behind == [], f"secrets stranded on the old key: {left_behind}"
+
+    @pytest.mark.asyncio
+    async def test_undecryptable_rows_do_not_loop_forever(
+        self, master_keys, master_key_v1
+    ):
+        """Rows that always fail are visited once and then stepped over.
+
+        They keep key_version = old, so they stay in the result set; the cursor
+        has to move past them or the same batch is refetched forever.
+        """
+        bad = frozenset({7, 55, 130, 240})
+        rows = _seed(250, master_key_v1, bad_ids=bad)
+        pool = _make_sql_accurate_pool(rows)
+
+        stats = await rotate_master_key(pool, 1, 2, master_keys, batch_size=100)
+
+        assert stats["total"] == 250, "a row was visited more than once"
+        assert stats["errors"] == len(bad)
+        assert stats["rotated"] == 250 - len(bad)
+        assert sorted(i for i in rows if rows[i]["key_version"] == 1) == sorted(bad)
+
+    @pytest.mark.asyncio
+    async def test_truthy_but_empty_batch_terminates(self, master_keys):
+        """An empty-but-truthy fetch result ends the loop instead of spinning.
+
+        Drivers -- and loose test doubles, which is how this surfaced -- can
+        return an object that is truthy yet holds no rows. `while True` must
+        still terminate on it.
+        """
+        class Truthy:
+            def __bool__(self):
+                return True
+
+            def __len__(self):
+                return 0
+
+            def __iter__(self):
+                return iter([])
+
+        calls = {"n": 0}
+
+        async def fetch(*args):
+            calls["n"] += 1
+            if calls["n"] > 5:
+                raise _FetchBudgetExceeded(
+                    "loop did not terminate on an empty-but-truthy batch"
+                )
+            return Truthy()
+
+        conn = AsyncMock(spec=["fetch", "execute", "transaction"])
+        conn.fetch = fetch
+        tx = MagicMock()
+        tx.start, tx.commit, tx.rollback = AsyncMock(), AsyncMock(), AsyncMock()
+        conn.transaction = MagicMock(return_value=tx)
+
+        pool = MagicMock()
+        pool.acquire = lambda: _acquire(conn)
+
+        stats = await rotate_master_key(pool, 1, 2, master_keys)
+        assert stats["total"] == 0
+        assert calls["n"] == 1
