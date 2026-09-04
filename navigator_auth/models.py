@@ -48,7 +48,7 @@ class User(Model):
     display_name: str = Column(required=False, repr=False)
     email: str = Column(required=False, max=254, label="User's Email")
     alt_email: str = Column(required=False, max=254, label="Alternate Email")
-    password: str = Column(required=False, max=16, secret=True, repr=False)
+    password: str = Column(required=False, max=255, secret=True, repr=False)
     username: str = Column(required=True)
     user_role: UserType = Column(required=False, widget="/properties/select")
     is_superuser: bool = Column(required=True, default=False)
