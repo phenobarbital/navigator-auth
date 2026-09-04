@@ -1023,5 +1023,156 @@
     "parallel": false,
     "parallelism_notes": "Final integration coverage + docs; depends on TASK-052.",
     "file": "sdd/tasks/active/TASK-053-exchange-integration-docs.md"
+  },
+  {
+    "id": "TASK-054",
+    "slug": "saml-deps-config-foundation",
+    "title": "pysaml2 dependency swap, SAML config keys, redirect-validator promotion, xmlsec1 in CI",
+    "feature_id": "FEAT-097",
+    "feature": "saml-backend-abstract",
+    "spec": "sdd/specs/saml-backend-abstract.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "high",
+    "effort": "M",
+    "depends_on": [],
+    "parallel": false,
+    "parallelism_notes": "Foundation: every other FEAT-097 task imports pysaml2 and the new conf keys. Must run first; sequential.",
+    "file": "sdd/tasks/active/TASK-054-saml-deps-config-foundation.md"
+  },
+  {
+    "id": "TASK-055",
+    "slug": "saml-core",
+    "title": "SAMLCore engine wrapper, types and error codes",
+    "feature_id": "FEAT-097",
+    "feature": "saml-backend-abstract",
+    "spec": "sdd/specs/saml-backend-abstract.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "high",
+    "effort": "L",
+    "depends_on": [
+      "TASK-054"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Defines the config/engine contract both roles depend on; must land before the SP and IdP tasks. Sequential.",
+    "file": "sdd/tasks/active/TASK-055-saml-core.md"
+  },
+  {
+    "id": "TASK-056",
+    "slug": "saml-sp-login-flows",
+    "title": "AbstractSAMLBackend: SP-initiated and unsolicited login, ACS, metadata",
+    "feature_id": "FEAT-097",
+    "feature": "saml-backend-abstract",
+    "spec": "sdd/specs/saml-backend-abstract.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "high",
+    "effort": "L",
+    "depends_on": [
+      "TASK-055"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Edits backends/external.py (dispatcher hook) and creates saml/sp.py. Shares the core with TASK-058 but no files; runs in the feature worktree.",
+    "file": "sdd/tasks/active/TASK-056-saml-sp-login-flows.md"
+  },
+  {
+    "id": "TASK-057",
+    "slug": "saml-sp-single-logout",
+    "title": "AbstractSAMLBackend: Single Logout (SP-initiated and inbound)",
+    "feature_id": "FEAT-097",
+    "feature": "saml-backend-abstract",
+    "spec": "sdd/specs/saml-backend-abstract.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "medium",
+    "effort": "M",
+    "depends_on": [
+      "TASK-056"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Extends saml/sp.py from TASK-056; same file, sequential.",
+    "file": "sdd/tasks/active/TASK-057-saml-sp-single-logout.md"
+  },
+  {
+    "id": "TASK-058",
+    "slug": "saml-idp-registry-initiate",
+    "title": "AbstractSAMLIdentityProvider: SP registry, metadata, IdP-initiated SSO, audit",
+    "feature_id": "FEAT-097",
+    "feature": "saml-backend-abstract",
+    "spec": "sdd/specs/saml-backend-abstract.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "high",
+    "effort": "L",
+    "depends_on": [
+      "TASK-055"
+    ],
+    "parallel": true,
+    "parallelism_notes": "Parallelizable after TASK-055: creates saml/idp.py and touches only auth.py (hidden flag). No shared files with TASK-056/057 (sp.py, external.py). May run in a second worktree branched after TASK-055 merges.",
+    "file": "sdd/tasks/active/TASK-058-saml-idp-registry-initiate.md"
+  },
+  {
+    "id": "TASK-059",
+    "slug": "saml-idp-sso-slo",
+    "title": "AbstractSAMLIdentityProvider: SP-initiated SSO endpoint, no-session detour, SLO",
+    "feature_id": "FEAT-097",
+    "feature": "saml-backend-abstract",
+    "spec": "sdd/specs/saml-backend-abstract.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "medium",
+    "effort": "M",
+    "depends_on": [
+      "TASK-058"
+    ],
+    "parallel": true,
+    "parallelism_notes": "Continues saml/idp.py from TASK-058 in the same (possibly second) worktree; no shared files with the SP tasks.",
+    "file": "sdd/tasks/active/TASK-059-saml-idp-sso-slo.md"
+  },
+  {
+    "id": "TASK-060",
+    "slug": "saml-generic-subclasses-migration",
+    "title": "Generic SAMLAuth / SAMLIdentityProvider subclasses, legacy settings translation, package exports",
+    "feature_id": "FEAT-097",
+    "feature": "saml-backend-abstract",
+    "spec": "sdd/specs/saml-backend-abstract.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "high",
+    "effort": "M",
+    "depends_on": [
+      "TASK-057",
+      "TASK-059"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Joins the SP and IdP branches; touches backends/__init__.py and deletes the legacy module. Sequential after both roles.",
+    "file": "sdd/tasks/active/TASK-060-saml-generic-subclasses-migration.md"
+  },
+  {
+    "id": "TASK-061",
+    "slug": "saml-roundtrip-tests-docs",
+    "title": "SP↔IdP round-trip integration tests, OAuth2 resume regression, documentation and changelog",
+    "feature_id": "FEAT-097",
+    "feature": "saml-backend-abstract",
+    "spec": "sdd/specs/saml-backend-abstract.spec.md",
+    "status": "pending",
+    "assigned_to": null,
+    "started_at": null,
+    "priority": "medium",
+    "effort": "L",
+    "depends_on": [
+      "TASK-060"
+    ],
+    "parallel": false,
+    "parallelism_notes": "Final integration coverage + docs; depends on everything.",
+    "file": "sdd/tasks/active/TASK-061-saml-roundtrip-tests-docs.md"
   }
 ]
