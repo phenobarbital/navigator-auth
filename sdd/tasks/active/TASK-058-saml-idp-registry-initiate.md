@@ -163,10 +163,49 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (Claude Sonnet 5, session_01KS7E6KxYXnkgzMnYHaJC2U)
+**Date**: 2026-09-05
+**Notes**: Implemented `AbstractSAMLIdentityProvider(BaseAuthBackend, ABC)`
+in `navigator_auth/backends/saml/idp.py` per spec: inert auth surface
+(`authenticate`->None, `check_credentials`->False, `get_payload`->None, no
+`auth_middleware`, never touches `request.user`/`request["authenticated"]`);
+`on_startup` validates `xmlsec1`, loads/validates the IdP key pair
+(`get_keypair()`), parses/validates `get_service_providers()` into the
+registry (`ConfigError` on a duplicate `sp_id` or a config that fails
+`ServiceProviderConfig` validation), and owns its own Redis pool +
+`IdentityFlowStore` (mirrors `ExternalAuth.on_startup` since this class
+does not extend `ExternalAuth`); `metadata()`; `initiate()` (401 unless
+`request.user.is_authenticated`, generic 404 for an unknown `sp_id`,
+optional `SAML_IDP_REQUIRE_AUTH_METHODS` gate, `authorize_sp_access` hook
+-> 403 + `saml.sp.forbidden` audit on denial, `RelayState` validated
+against the ACS host + `sp.allowed_relay_hosts`); `issue_assertion()`
+(signed `AuthnResponse`, `saml.assertion.issued` audit, pysaml2's own
+POST-binding auto-submit HTML form, `Cache-Control: no-store`); `sso`/`slo`
+501 placeholders (TASK-059); hooks per spec. `auth.py`'s `auth_methods`
+(both GET/POST branches) now skips `hidden=True` backends. Two real
+pysaml2 API details needed for a *parseable* assertion, not mentioned in
+the spec's pseudocode: (1) `create_authn_response` without an `authn=`
+argument produces an assertion with zero `AuthnStatement` elements, which
+a real SP's `parse_authn_request_response` then rejects
+("Invalid number of AuthnStatement found in Response: 0") — so `authn=
+{"class_ref": AUTHN_PASSWORD, "authn_auth": <this IdP's entity_id>}` is
+required; (2) `session_not_on_or_after` must be a `saml2.time_util.instant`
+string, not a `datetime` or a raw epoch int (both raise a
+`TypeError`/serialization error deep inside `pysaml2`). `tests/
+test_saml_idp.py` (13 tests) covers every acceptance criterion, including
+exercising the real (modified) `AuthHandler.auth_methods`, not just a
+unit-level `hidden` attribute check. All pass with `xmlsec1` installed;
+full SAML suite (75 tests incl. `test_oauth2_upstream_idp.py`) still green.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none functionally; one pre-existing,
+unrelated-to-this-task issue surfaced while testing:
+`BaseAuthBackend.auth_error()` (used by `self.Unauthorized`/
+`self.ForbiddenAccess`, both called here exactly as the spec directs)
+passes a deprecated `body=` kwarg to `web.HTTPForbidden`/`HTTPUnauthorized`
+on the aiohttp version this project resolves to; under this repo's strict
+`filterwarnings=["error", ...]` pytest config exercising a real
+`web.Request`, that `DeprecationWarning` becomes a raised exception. Not a
+FEAT-097/`abstract.py` change — worked around locally in the two affected
+tests with `warnings.catch_warnings()`; flagging here since any other
+backend calling those two methods with a real `web.Request` under this
+test config would hit the same thing.
