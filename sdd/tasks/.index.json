@@ -1335,14 +1335,15 @@
     "feature_id": "FEAT-093",
     "feature": "oauth2-3lo-implementation",
     "spec": "sdd/specs/oauth2-3lo-implementation.spec.md",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "unassigned",
     "priority": "medium",
     "effort": "S",
     "depends_on": [],
     "parallel": true,
     "parallelism_notes": "Isolated bugfix in Oauth2Provider.on_cleanup(); no shared files with other active tasks.",
-    "file": "sdd/tasks/active/TASK-069-oauth2-provider-cleanup-leak.md",
-    "started_at": "2026-09-04T23:10:33Z"
+    "file": "sdd/tasks/completed/TASK-069-oauth2-provider-cleanup-leak.md",
+    "started_at": "2026-09-04T23:10:33Z",
+    "completed_at": "2026-09-04T23:13:03Z"
   }
 ]

@@ -163,10 +163,32 @@ class TestOauth2ProviderCleanup:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (session_016Z3wYUV42WJDq92pifU1Fa)
+**Date**: 2026-09-05
+**Notes**: Implemented `Oauth2Provider.on_cleanup()` in
+`navigator_auth/backends/oauth2/backend.py` to iterate the seven storage
+attributes set in `on_startup()` (`client_storage`, `code_storage`,
+`refresh_token_storage`, `grant_storage`, `access_token_storage`,
+`device_code_storage`, `client_access_storage`), guard each with
+`getattr(storage, "redis", None)`, and `await redis_conn.aclose()` inside a
+try/except that logs a warning and continues on failure — exactly mirroring
+the reference pattern in `BasicAuth.on_cleanup()`
+(`navigator_auth/backends/basic.py`, from the not-yet-merged
+`feat-FEAT-098-backend-based-password-recovery` branch, confirmed via
+`git show` against that branch since it wasn't yet in `dev`). Added
+`tests/test_oauth2_provider_cleanup.py` with the four specified cases:
+closes every Redis-backed storage, skips storages with no `.redis` attribute,
+tolerates one storage's `aclose()` raising without blocking the others, and
+is a no-op when called with no prior `on_startup` (all storage attrs still
+`None`). All 4 new tests pass; `ruff check` on the modified file shows only
+3 pre-existing unrelated `F401` warnings (verified identical against
+unmodified `dev`); the broader regression run
+`pytest tests/test_oauth2*.py -v` shows 454 passed / 1 skipped / 3 failed,
+where the 3 failures (`TestDecodeTokenAudience` in
+`test_oauth2_3lo_session_binding.py`, an `InsecureKeyLengthWarning` from a
+short test `SECRET_KEY`) are pre-existing and reproduce identically against
+unmodified `dev` — confirmed not a regression from this change.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none. Did not touch `on_startup()`, the storage
+classes, or add `close()`/`aclose()` to any storage ABC, per the task's
+explicit out-of-scope list.
