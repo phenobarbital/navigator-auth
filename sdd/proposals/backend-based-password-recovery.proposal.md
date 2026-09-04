@@ -2,7 +2,7 @@
 
 **Date**: 2026-09-04
 **Author**: Jesus Lara
-**Status**: discussion
+**Status**: accepted
 **Feature ID (reserved)**: FEAT-098
 **Depends on**: FEAT-096 (`external-token-exchange`) — **must land first**. See
 *Sequencing* below.
@@ -172,6 +172,27 @@ storage format, or any external provider backend.
   `BasicAuth.open_session()` as introduced by FEAT-096 — see *Sequencing*.
 - **D11** This feature lands **after** FEAT-096 (`external-token-exchange`),
   which owns the `basic.py` refactor the `jti` work builds on.
+- **D12** The recovery token is an HMAC-SHA256 over
+  `(user_id, username, issued_at, nonce)` keyed by a new **`AUTH_RECOVERY_SECRET`**,
+  falling back to `SECRET_KEY` when unset. Redis is keyed by **`sha256(token)`**,
+  never the raw token, so a Redis dump yields nothing usable. Rotating the
+  secret invalidates every in-flight recovery by design.
+- **D13** Password policy defaults: **minimum 8 characters, at least one letter
+  and one digit**, rejected when identical to the current password. All
+  thresholds configurable.
+- **D14** Rate limits on step 1 default to **3/hour per e-mail address** and
+  **10/hour per IP**, both expressed in the `"<count>/<window>"` form
+  `parse_rate_limit()` already understands.
+- **D15** Step 3 does **not** log the user in. It returns success only; the
+  frontend sends the user to the login page. Mailbox possession alone never
+  yields a live session.
+- **D16** The step-2 URL handed to the callback is built from a configurable
+  **`AUTH_RECOVERY_URL_TEMPLATE`**, so multi-tenant and per-deployment front
+  ends can each point at their own landing page.
+- **D17** A successful reset sets **`is_new = False`** — the user chose this
+  password themselves. (The superuser `password_reset` path sets it `True`
+  because an administrator picked the password and the user must replace it;
+  that path is unchanged.)
 - **D9** Unknown e-mail addresses get an identical response body, status and
   approximately identical latency to known ones.
 - **D10** **Every** active user may set a local password through this flow,
@@ -180,27 +201,8 @@ storage format, or any external provider backend.
 
 ## Open Questions
 
-- **Q1** What is the exact composition of the "internal signature"? The
-  description says the checksum is built from time, date, username and an
-  internal signature. An HMAC over `(user_id, username, issued_at, nonce)` keyed
-  by `SECRET_KEY` gives integrity and lets the payload be validated without
-  trusting Redis alone. To settle at spec time: which secret keys it
-  (`SECRET_KEY` vs a dedicated `AUTH_RECOVERY_SECRET`), and whether the Redis
-  key is the token itself or a hash of it, so a Redis dump does not hand over
-  usable tokens.
-- **Q2** What are the default password-policy rules? Proposed starting point:
-  minimum 8 characters, at least one letter and one digit, rejected if identical
-  to the current password — all overridable by setting. Needs your call.
-- **Q3** What are the default rate limits? Proposed: 3 requests per hour per
-  e-mail address, 10 per hour per IP.
-- **Q4** Should step 3 log the user straight in (return a session/JWT like a
-  Basic login) or require a fresh login? Proposed: require a fresh login, which
-  is the safer default and keeps step 3 free of session-minting logic.
-- **Q5** Does the step-2 URL handed to the callback need to be per-tenant or
-  per-deployment configurable (`AUTH_RECOVERY_URL_TEMPLATE`), or is a single
-  base URL enough?
-- **Q6** Should a successful reset clear the `is_new` flag on the user record,
-  the way `password_reset` currently **sets** it?
+None. All six questions raised at proposal time were resolved on 2026-09-04 and
+are recorded as **D12**–**D17** above.
 
 ## Parallelism Potential
 
