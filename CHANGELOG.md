@@ -1,5 +1,23 @@
 # Unreleased
 
+- **Open-redirect protection — `AUTH_TRUSTED_DOMAINS`.** Every
+  frontend-supplied redirect target (`?redirect_uri=` on login routes, SAML
+  `RelayState`, Azure/ADFS `internal_redirect`, the identity-link
+  `finish_redirect`) now goes through a single gate,
+  `navigator_auth.libs.redirect.safe_redirect_url`, before a `302` is
+  issued. Relative paths are resolved on the current domain; absolute
+  `http(s)` targets are honoured only when their *hostname* is one of
+  `AUTH_TRUSTED_DOMAINS` (or a sub-domain of one, or the host serving the
+  request); mobile deep-link schemes are accepted (optionally restricted by
+  `AUTH_TRUSTED_REDIRECT_SCHEMES`), browser-executable schemes never are.
+  Protocol-relative (`//evil.com`), backslash and `user@host` netloc tricks
+  that bypassed the previous per-backend checks are rejected; a rejected
+  target logs a warning and falls back to `AUTH_REDIRECT_URI` instead of
+  breaking the login. Defaults to `localhost` plus `DOMAIN`/`DOMAIN_HOST`,
+  so single-domain deployments need no change; multi-app deployments should
+  set `AUTH_TRUSTED_DOMAINS` explicitly. `BaseAuthBackend.validate_redirect_host` (ADFS relay, SAML
+  RelayState / `redirect_uri`) now delegates to the same gate instead of
+  glob-matching the raw netloc against `ALLOWED_HOSTS`. See `documentation/trusted-redirects.md`.
 - **Abstract SAML 2.0 Backend — SP and IdP roles on `pysaml2` (0.26.0).**
   **Breaking:** `python3-saml`/`xmlsec` are replaced by `pysaml2>=7.5,<8`;
   the `xmlsec1` system binary is now required (was: the `xmlsec`

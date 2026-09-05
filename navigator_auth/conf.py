@@ -148,6 +148,33 @@ ALLOWED_HOSTS = [
 ## Redirections:
 AUTH_REDIRECT_URI = config.get("AUTH_REDIRECT_URI", fallback="/")
 AUTH_FAILED_REDIRECT_URI = config.get("AUTH_FAILED_REDIRECT_URI", fallback="/login")
+
+# Open-redirect protection for user-supplied redirect targets
+# (``?redirect_uri=``, SAML ``RelayState``, identity-link ``finish_redirect``).
+# Base domains the browser may be sent to after login; every subdomain of an
+# entry is trusted too, and the host serving the current request is always
+# trusted. Defaults to ``localhost`` plus DOMAIN and the host part of
+# DOMAIN_HOST, so a single-domain deployment works with no extra setting.
+# Production deployments serving several apps should set it explicitly, e.g.
+# ``AUTH_TRUSTED_DOMAINS: trocdigital.io,localhost``.
+AUTH_TRUSTED_DOMAINS = [
+    e.strip()
+    for e in config.get(
+        "AUTH_TRUSTED_DOMAINS",
+        fallback=f"localhost,{DOMAIN},{DOMAIN_HOST}",
+    ).split(",")
+    if e.strip()
+]
+# Optional allow-list of non-HTTP schemes (mobile deep links such as
+# ``navigator://`` or reverse-DNS ``com.example.app:/``). Empty (the default)
+# accepts any custom scheme except the ones a browser would execute
+# (``javascript:``, ``data:`` ...), because the set of Android apps served by
+# the API is open-ended.
+AUTH_TRUSTED_REDIRECT_SCHEMES = [
+    e.strip().lower()
+    for e in config.get("AUTH_TRUSTED_REDIRECT_SCHEMES", fallback="").split(",")
+    if e.strip()
+]
 AUTH_LOGIN_FAILED_URI = config.get("AUTH_LOGIN_FAILED_URI", fallback="/login")
 AUTH_LOGOUT_REDIRECT_URI = config.get("AUTH_LOGOUT_REDIRECT_URI", fallback="/oauth2/logout/complete")
 AUTH_SUCCESSFUL_CALLBACKS = ()

@@ -294,13 +294,13 @@ async def test_saml_oauth2_resume_detour(saml_app):
 
 @pytest.mark.xmlsec
 def test_adfs_redirect_validator_unchanged(monkeypatch):
-    """The redirect-validator promotion (TASK-054) preserves ADFS's exact
-    existing behavior."""
+    """ADFS's relay validator keeps its verdict-style contract on top of the
+    AUTH_TRUSTED_DOMAINS gate."""
     from unittest.mock import MagicMock as _MM
 
     from navigator_auth.backends.adfs import ADFSAuth
 
-    monkeypatch.setattr("navigator_auth.backends.abstract.ALLOWED_HOSTS", ["*.example.com"])
+    monkeypatch.setattr("navigator_auth.libs.redirect.AUTH_TRUSTED_DOMAINS", ["example.com"])
     backend = object.__new__(ADFSAuth)
     backend.logger = _MM()
     backend._service = "ADFSAuth"
