@@ -11,14 +11,31 @@ from aiohttp import web
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 
+def _redacted(value: object) -> str:
+    """Render a rejected configuration entry safely for a log line.
+
+    Trusted proxies are read from configuration, which is also where secrets
+    live, so a mis-pasted credential must never reach the logs verbatim. Only a
+    short prefix and the length survive — enough to recognise the bad entry.
+    """
+    text = str(value)
+    if not text:
+        return "<empty>"
+    return f"{text[:4]}... ({len(text)} chars)"
+
+
 def parse_proxies(entries: list[str]) -> set[IPAddress]:
     """Build a set of proxy IP addresses, skipping (and logging) invalid ones."""
     proxies: set[IPAddress] = set()
-    for entry in entries:
+    for position, entry in enumerate(entries, start=1):
         try:
             proxies.add(ipaddress.ip_address(entry))
         except ValueError:
-            logging.warning(f"authz: ignoring invalid trusted proxy IP: {entry}")
+            logging.warning(
+                "authz: ignoring invalid trusted proxy IP at position %d: %s",
+                position,
+                _redacted(entry),
+            )
     return proxies
 
 

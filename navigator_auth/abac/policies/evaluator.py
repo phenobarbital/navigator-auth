@@ -356,7 +356,10 @@ class PolicyEvaluator:
             f"{user_id}|{groups_str}|{rtype_val}|{resource_name}|{action}"
             f"|{env_str}|{org_id}|{client_id}|{scopes_str}|{uid_str}"
         )
-        return hashlib.md5(key_data.encode(), usedforsecurity=False).hexdigest()
+        # SHA-256, not MD5: a collision between two different ``key_data``
+        # strings would hand one tenant/user a decision cached for another,
+        # so this key is security-relevant and needs collision resistance.
+        return hashlib.sha256(key_data.encode()).hexdigest()
 
     def _check_cache(self, cache_key: str) -> Optional[EvaluationResult]:
         """Check cache for previous evaluation result."""
@@ -387,11 +390,11 @@ class PolicyEvaluator:
         """Invalidate cache entries, optionally for specific user.
 
         Note: user-specific invalidation rebuilds the cache key for each
-        entry to check the user_id component, since keys are MD5 hashes.
+        entry to check the user_id component, since keys are opaque digests.
         For full invalidation, simply clears the entire cache.
         """
         if user_id:
-            # Cache keys are MD5 hashes, so we cannot filter by prefix.
+            # Cache keys are opaque digests, so we cannot filter by prefix.
             # For user-specific invalidation, clear the entire cache to be safe.
             # A more efficient approach would require a secondary index.
             self._cache.clear()
