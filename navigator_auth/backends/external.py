@@ -21,6 +21,7 @@ from navconfig.logging import logging
 from navigator_session import AUTH_SESSION_OBJECT
 from ..identities import AuthUser
 from ..libs.json import json_decoder
+from ..libs.redirect import safe_redirect_url
 from ..exceptions import UserNotFound, AuthException, InvalidAuth
 from ..identity.flow_store import IdentityFlowStore
 from ..identity.types import TokenResponse
@@ -245,15 +246,25 @@ class ExternalAuth(BaseAuthBackend):
         return f"{domain_url}/auth/{self._service_name}/callback/"
 
     def get_finish_redirect_url(self, request: web.Request) -> str:
+        """Resolve where to send the browser once authentication finishes.
+
+        ``?redirect_uri=`` is frontend-supplied and therefore untrusted: it
+        is passed through :func:`safe_redirect_url`, which only honours
+        relative paths, hosts under ``AUTH_TRUSTED_DOMAINS`` and mobile
+        deep-link schemes, falling back to ``AUTH_REDIRECT_URI`` otherwise.
+        """
         domain_url = self.get_domain(request)
+        fallback = AUTH_REDIRECT_URI if AUTH_REDIRECT_URI else "/"
         try:
             redirect_url = request.query["redirect_uri"]
         except (TypeError, KeyError):
-            redirect_url = AUTH_REDIRECT_URI if AUTH_REDIRECT_URI else "/"
-        if not bool(urlparse(redirect_url).netloc):
-            redirect_url = f"{domain_url}{redirect_url}"
+            redirect_url = fallback
+        redirect_url = safe_redirect_url(
+            request, redirect_url, fallback=fallback, domain_url=domain_url
+        )
         self.logger.notice(f"Redirect URL: {redirect_url}")
         self.finish_redirect_url = redirect_url
+        return redirect_url
 
     def redirect(self, uri: str):
         """redirect.
@@ -302,11 +313,14 @@ class ExternalAuth(BaseAuthBackend):
             params = {**params, **_auth}
         if uri:
             self.logger.notice(f"Redirect to: {uri}")
-            if not bool(urlparse(uri).netloc):
-                domain_url = self.get_domain(request)
-                redirect_url = f"{domain_url}{uri}"
-            else:
-                redirect_url = uri
+            # ``uri`` comes from the client (RelayState, internal_redirect,
+            # ?redirect_uri=) and must pass the trusted-domain gate.
+            redirect_url = safe_redirect_url(
+                request,
+                uri,
+                fallback=self.finish_redirect_url,
+                domain_url=self.get_domain(request),
+            )
         elif AUTH_OAUTH2_REDIRECT_URL is not None:
             # TODO: relative URL and calculate based on Domain
             redirect_url = AUTH_OAUTH2_REDIRECT_URL
@@ -633,9 +647,14 @@ class ExternalAuth(BaseAuthBackend):
                 )
         except Exception:  # pylint: disable=W0703
             pass
-        redirect_to = flow.get("finish_redirect") or "/"
-        if not bool(urlparse(redirect_to).netloc):
-            redirect_to = f"{self.get_domain(request)}{redirect_to}"
+        # ``finish_redirect`` was captured from the query string when the
+        # link flow started: untrusted, so it goes through the same gate.
+        redirect_to = safe_redirect_url(
+            request,
+            flow.get("finish_redirect") or "/",
+            fallback="/",
+            domain_url=self.get_domain(request),
+        )
         return web.HTTPFound(redirect_to)
 
     @abstractmethod
