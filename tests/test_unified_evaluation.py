@@ -309,3 +309,51 @@ class TestUnifiedPolicyEvaluation:
         other_ctx = EvalContext(MagicMock(), MagicMock(), other_info, None)
         r4 = evaluator.check_access(other_ctx, ResourceType.URI, "/resource", "uri:read", env=env1)
         assert r4.allowed is False
+
+
+class TestUriGlobSemantics:
+    """Pin the glob/regex semantics of the Rust engine over ``uri:`` patterns.
+
+    A single ``*`` never crosses ``/`` (``glob-match`` semantics), so
+    ``uri:/api/v2/groups*`` does NOT cover sub-routes. Use ``**`` or an
+    anchored regex to cover a subtree. ``.*`` without ``^``/``$`` is a glob
+    with a literal dot and matches nothing useful.
+    """
+
+    PATHS = [
+        "/api/v2/groups",
+        "/api/v2/groups/",
+        "/api/v2/groups/123",
+        "/api/v2/groups/123/members",
+        "/api/v2/groupsets",
+    ]
+
+    @pytest.mark.parametrize("pattern, expected", [
+        ("uri:/api/v2/groups*",   {"/api/v2/groups", "/api/v2/groupsets"}),
+        ("uri:/api/v2/groups/*",  {"/api/v2/groups/", "/api/v2/groups/123"}),
+        ("uri:/api/v2/groups**",  {"/api/v2/groups", "/api/v2/groups/", "/api/v2/groups/123",
+                                   "/api/v2/groups/123/members", "/api/v2/groupsets"}),
+        ("uri:/api/v2/groups/**", {"/api/v2/groups/", "/api/v2/groups/123",
+                                   "/api/v2/groups/123/members"}),
+        ("uri:/api/v2/groups.*",  set()),
+        ("uri:^/api/v2/groups.*", {"/api/v2/groups", "/api/v2/groups/", "/api/v2/groups/123",
+                                   "/api/v2/groups/123/members", "/api/v2/groupsets"}),
+        ("uri:^/api/v2/groups(/.*)?$", {"/api/v2/groups", "/api/v2/groups/", "/api/v2/groups/123",
+                                        "/api/v2/groups/123/members"}),
+    ])
+    def test_uri_pattern_matching(self, evaluator, eval_context, environment, pattern, expected):
+        evaluator.load_policies([ResourcePolicy(
+            name="groups_pattern",
+            effect=PolicyEffect.ALLOW,
+            resources=[pattern],
+            actions=["uri:read"],
+            subjects={"groups": ["*"]},
+            priority=10,
+        )])
+        matched = {
+            path for path in self.PATHS
+            if evaluator.check_access(
+                eval_context, ResourceType.URI, path, "uri:read", environment
+            ).allowed
+        }
+        assert matched == expected, f"{pattern}: matched {sorted(matched)}"
