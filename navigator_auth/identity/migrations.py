@@ -18,6 +18,7 @@ SQL_DIR = Path(__file__).parent / "sql"
 _MIGRATION_FILES = (
     "001_identity_credentials.sql",
     "002_identity_id_token.sql",
+    "003_identity_key_version_integer.sql",
 )
 
 
