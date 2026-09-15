@@ -1463,8 +1463,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "in-progress",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -1473,7 +1473,7 @@
     "parallel": true,
     "parallelism_notes": "Creates the new migrate/ package only; no shared files with TASK-073/074.",
     "file": "sdd/tasks/active/TASK-075-vault-migrator-runner.md",
-    "started_at": null
+    "started_at": "2026-09-15T21:48:42Z"
   },
   {
     "id": "TASK-076",
