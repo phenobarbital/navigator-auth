@@ -153,8 +153,31 @@ When you pick up this task:
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-15
 **Notes**:
+- navigator-session worktree `.claude/worktrees/feat-FEAT-099-vault-crypto-hardening`, branch
+  `feat-FEAT-099-vault-crypto-hardening` created from `origin/main` (d72f736; local `main` was
+  stale and lacked the vault package; `origin/main` == `session-data` code). Worktree dir ignored
+  via `.git/info/exclude` (no `.gitignore` change on the user's branch). Commit `3bda7bb`.
+- `navigator_session/vault/keyring.py`: `KeyRing` (explicit ctor + `from_env`), `active_key_id`,
+  `write_alg_id`, `naming_key_id`, `key_ids`, `has_key`, `naming_hmac`, kernel-internal
+  `derive_db_key` (cached per `(key_id, alg_id)`) and `derive_session_key` (not cached);
+  helpers `lp()`, `resolve_cipher_backend()`, constants `ALG_AESGCM`/`ALG_CHACHA20`.
+- `config.py`: `get_naming_key_id()`; `VaultConfig.naming_key_id`, `effective_naming_key_id`,
+  validator for naming key presence.
+- Tests: `tests/vault/conftest.py` (`clean_vault_env`, `master_keys`, `master_key_env`,
+  `keyring` — reusable by TASK-071..075) and `tests/vault/test_keyring.py` (37 tests).
+- Test runs (navigator-session `.venv` lacks aiohttp/pydantic, so navigator-auth's venv was
+  used with `PYTHONPATH=<worktree>`): `tests/vault` 37 passed; navigator-session `tests/`
+  96 passed; navigator-auth `tests/unit/vault` against worktree code 183 passed; `ruff check`
+  clean.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- Key ids are validated to `[1, 65535]` (u16 header field); `VAULT_MASTER_KEY_v0` is rejected.
+- Unknown `VAULT_CIPHER_BACKEND` now fails fast (`ValueError`) instead of v1's silent AES-GCM
+  fallback; value is case/whitespace-insensitive.
+- Derivation errors: unknown key id → `KeyError`, unknown alg id / empty session id →
+  `ValueError`. TASK-071 maps these to `UnknownKeyVersionError` / `UnsupportedFormatError`.
+- Extra hardening not in scope list: `KeyRing.__reduce__` raises `TypeError` (no
+  pickling/serialization), `__slots__` (no instance `__dict__`).
