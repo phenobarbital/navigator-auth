@@ -130,8 +130,46 @@ async def test_post_returns_metadata(client_with_vault):
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-16
 **Notes**:
+- navigator-auth worktree `.claude/worktrees/feat-FEAT-099-vault-crypto-hardening`, commit `d9906ac`.
+- `handlers/vault.py` (`VaultView`): `GET /api/v1/user/vault` → `{"secrets": [{key, updated_at,
+  key_version}]}` from `list_metadata()`; `GET /{key}` → metadata only, after verifying the secret
+  still opens (`vault.get` result discarded) → `409 {"error": "vault_integrity_error"}` on any
+  `VaultCryptoError`; missing metadata (Redis-only cache) → `{key, updated_at: null, key_version:
+  null}`; `POST` → `201 {key, updated_at, key_version, message}`; `DELETE` unchanged; vault not
+  loadable / no DB pool → `503 {"error": "vault_unavailable"}` (previously 500).
+- `vault/integration.py`: `setup_vault_keyring(app)` stores a shared `KeyRing` at
+  `app["vault_keyring"]` (`VAULT_KEYRING_APP_KEY`), non-blocking; `load_vault_for_session(...,
+  keyring=None)` forwards it; `get_session_vault` passes the app keyring; error logs show the
+  exception class only. `auth.py` calls `setup_vault_keyring(app)` on startup and passes the
+  keyring on login.
+- `vault/sql/002_vault_crypto_hardening.sql` + `vault/migrations.py` (`MIGRATION_FILES`
+  001→002): conditional `DO` blocks (no locks once applied) — `user_vault_audit.session_id`
+  → `VARCHAR(64)` + column comment, `user_vault_audit_operation_check` replaced to add
+  `quarantine`/`integrity_fail` (only when outdated), `user_vault_secrets.key_version`,
+  `user_vault_audit.key_version`, `vault_key_registry.key_id` → `INTEGER` (only while smallint).
+- `identity/sql/003_identity_key_version_integer.sql` registered in identity migrations
+  (`user_identities.key_version` → INTEGER when smallint).
+- Tests: rewrote `tests/unit/vault/test_vault_view.py` (metadata-only list/detail, no value in any
+  body, 409 for integrity/format errors, POST metadata body, colon keys, 400/500 without leaking
+  the value, 503 for unavailable/failed load); `test_integration.py` (keyring forwarded, app
+  keyring wiring); `test_migrations.py` (002 registered, guarded changes); identity migration
+  tests updated to 3 files.
+- Real PostgreSQL validation (dev DB, one transaction rolled back, scratch schema
+  `feat099_scratch` — the `auth` schema was not touched): 001 tables → old CHECK rejects
+  `quarantine` → 002+003 applied twice without error → columns INTEGER / VARCHAR(64),
+  constraint includes new operations, inserts with 64-char session id, new operations and
+  key_version 65535 succeed, column comment set; schema absent after rollback.
+- Results: vault + identity suites 233 passed; full navigator-auth suite 32 failed / 1342 passed
+  with no failures beyond the dev baseline. `ruff`: only the 2 pre-existing warnings in
+  `tests/unit/vault/test_migrations.py`.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- Migration file named `002_vault_crypto_hardening.sql` (covers audit sid, operation CHECK and
+  key version widening, not only the session id).
+- Also widened `auth.user_identities.key_version` (identity migration 003) for consistency with
+  `IdentityTarget`.
+- `GET /{key}` decrypts server-side (value discarded) to detect integrity failures for the 409.
+- The "no DB pool" configuration error also returns `503 vault_unavailable` (was 500).

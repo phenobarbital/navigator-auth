@@ -1527,7 +1527,7 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-auth",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "claude-session",
     "priority": "high",
     "effort": "M",
@@ -1537,8 +1537,9 @@
     ],
     "parallel": false,
     "parallelism_notes": "Same navigator-auth worktree as TASK-077 (shared pyproject/tests/unit/vault); needs SessionVault.list_metadata from TASK-073.",
-    "file": "sdd/tasks/active/TASK-078-vault-http-api-v2.md",
-    "started_at": "2026-09-15T22:18:03Z"
+    "file": "sdd/tasks/completed/TASK-078-vault-http-api-v2.md",
+    "started_at": "2026-09-15T22:18:03Z",
+    "completed_at": "2026-09-15T22:23:47Z"
   },
   {
     "id": "TASK-079",
