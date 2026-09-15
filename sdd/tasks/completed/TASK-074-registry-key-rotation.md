@@ -116,8 +116,40 @@ async def test_idempotent(keyring_two_keys, fake_single_target):
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-15
 **Notes**:
+- navigator-session worktree branch `feat-FEAT-099-vault-crypto-hardening`, commit `fa267c5`.
+- `key_rotation.py` rewritten: `rotate_master_key(targets, old_key_id, new_key_id, keyring,
+  batch_size=100) -> dict[target_name, stats]`, stats = `total`, `rotated`, `skipped`, `errors`,
+  `failed_refs`. Validates both key ids (`UnknownKeyVersionError`) and `old != new`,
+  `batch_size >= 1` before any read. Iterates `target.iter_batches()` (keyset), one
+  `target.transaction()` per batch; per row: parse headers of non-NULL fields, skip if none on
+  `old_key_id`, re-seal every field not already on `new_key_id` via
+  `open_sealed(context_for) → seal(key_id=new)`, single `target.write(row, blobs, new_key_id)`,
+  then optional `target.record_rotation(row, new_key_id)`.
+  `VaultCryptoError` (tamper, swapped context, v1 blob, missing key version) and `LookupError`
+  (row vanished) → row untouched, counted as error with its ref; any other exception rolls back
+  the batch and propagates.
+- `UserVaultTarget.record_rotation`: audit `operation='rotate'`, `session_id` NULL, on the
+  current transaction connection.
+- `_legacy_v1_shim.py` deleted — no v1 crypto remains in the runtime package (migrator gets its
+  own isolated reader in TASK-075). Package docstring updated.
+- `tests/vault/fake_pg.py`: `NULL` literal support in INSERT.
+- Tests `tests/vault/test_key_rotation.py` (14): both targets rotated incl. soft-deleted rows
+  and NULL fields, audit rows, mixed-version multi-field row only re-seals old fields,
+  idempotency (byte-identical second run), third key version untouched, tampered/swapped/v1
+  rows reported and left intact, field on a key version missing from the ring, unknown key ids
+  rejected with zero SQL, argument validation, vanished row, mid-batch failure rolls back only
+  that batch, no plaintext/blobs in logs, shim import fails.
+- Results: navigator-session `tests/` 273 passed; `ruff check` clean.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- Rotation iterates **all** rows of each target (keyset over PK) instead of filtering by the
+  `key_version` column, because the authoritative key id is in each blob header and multi-field
+  rows can mix versions. Cost is a full scan per rotation (acceptable for an operator job).
+- Fields on a third key version (neither old nor new) in a row that also has an old-key field
+  are re-sealed to `new_key_id` too, so the row ends consistent with `key_version = new_key_id`.
+- The stats dict gained `failed_refs`; the return type changed from one flat dict to per-target
+  stats (no external callers of the old signature exist).
+- No CLI wiring here (planned as `navigator-vault rotate` in TASK-076).
