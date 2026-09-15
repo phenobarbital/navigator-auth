@@ -131,8 +131,42 @@ def test_context_for(sample_row):
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-15
 **Notes**:
+- navigator-session worktree branch `feat-FEAT-099-vault-crypto-hardening`, commit `dcdd785`.
+- `registry.py`: `VaultRow` (frozen dataclass: `ref`, `pk`, `identity`, `values`,
+  `key_version`, `state`), protocols `TargetRow`, `ProtectedTarget` (runtime-checkable),
+  `BackupSink.write(target, record)`, `BackupSource.read(target)`; `discover_targets(**resources)`
+  loads entry points sorted by name, passes the resources mapping to each factory, skips
+  factories that raise / return `None` / return a non-target (logged), rejects duplicate names.
+- `targets/postgres.py`: `quote_ident`, `acquire_connection`, `fetch_rows` (shared pool/driver
+  compatibility helpers) and `PostgresTarget` (declarative class attributes; keyset pagination;
+  connection released before yielding a batch; `transaction()` nested-safe via a per-target
+  `ContextVar`; `write`; `quarantine` = `quarantine_assignments` + `audit_quarantine` hook in
+  one transaction; `export_raw`/`restore_raw` restore blobs + key version + lifecycle columns in
+  one transaction; `LookupError` when a row is missing).
+- `targets/user_vault.py`: `UserVaultTarget` (`id` UUID pk, identity `(user_id:int, key:str)`,
+  `ciphertext_db`, state `deleted_at`/`updated_at`, quarantine
+  `deleted_at = COALESCE(deleted_at, NOW())`, audit `operation='quarantine'`,
+  `session_id='run:<run_id>'`, run_id `[A-Za-z0-9_-]{1,32}`) + `factory` (needs `db_pool`).
+- `pyproject.toml`: entry point `user_vault` in `navigator_session.vault_targets`.
+- Tests: `tests/vault/fake_pg.py` (in-memory PG double enforcing pool size and transactions,
+  reusable by TASK-073/074/075), `test_registry.py`, `test_postgres_target.py` (32 tests,
+  incl. 250-row keyset iteration with soft-deleted rows, write-while-iterating on a 1-connection
+  pool, rollback, awaitable pools, sealed cross-user swap detection, quarantine audit,
+  byte-identical export→migrate→quarantine→restore). navigator-session `tests/` 213 passed;
+  `ruff check` clean.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- `ProtectedTarget` gained `transaction()` (needed for per-batch transactions in rotation and
+  migration, since `write()` takes no connection).
+- `restore_raw` also restores lifecycle columns (`deleted_at`, `updated_at`) so rollback is
+  byte-identical, including rows quarantined by the migration.
+- Schema findings pushed to TASK-078 (migration 002) and TASK-073: audit `operation` CHECK
+  rejects `quarantine`/`integrity_fail`, `session_id VARCHAR(36)` < 64-char HMAC,
+  `key_version SMALLINT` < `KeyRing` max key id 65535. Migration 002 must run before the
+  migrator.
+- Entry-point discovery is tested with patched `entry_points` and by resolving the
+  `pyproject.toml` declaration; the installed-metadata path is exercised in TASK-085 once the
+  package is reinstalled.

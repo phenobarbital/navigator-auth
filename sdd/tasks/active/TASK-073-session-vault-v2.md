@@ -67,6 +67,13 @@ The runtime face of F1, F2 and F4. `SessionVault` currently derives the session 
   keep working.
 - `get()` keeps lookup order memory → Redis → default (no DB fallback; spec non-goal).
 - Deterministic callers (`telegram-persistent:{user_id}`) must work unchanged.
+- Schema constraints (found in TASK-072, fixed by navigator-auth migration 002 in TASK-078):
+  `auth.user_vault_audit.operation` CHECK currently rejects `'integrity_fail'`, and
+  `session_id VARCHAR(36)` is too short for the 64-char HMAC. Implement against the target
+  schema; tests use `tests/vault/fake_pg.py` (no constraints), and document the dependency.
+- Reuse `tests/vault/fake_pg.py` (`FakeDatabase`, `FakePool`, `AwaitablePool`) and
+  `targets/postgres.py` helpers `acquire_connection` / `fetch_rows` instead of re-implementing
+  the pool compatibility code.
 - Never log values, blobs, raw session ids.
 
 ### References in Codebase

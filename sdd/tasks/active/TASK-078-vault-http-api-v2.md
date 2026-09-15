@@ -34,9 +34,19 @@ response shapes here must match it exactly.
 - `navigator_auth/vault/integration.py`: pass/obtain `KeyRing` once per app (store on
   `app["vault_keyring"]` at startup, fallback to `KeyRing.from_env()`); loading stays
   non-blocking; non-integer `user_id` still skipped.
-- `navigator_auth/vault/sql/002_vault_audit_sid_hmac.sql` + `vault/migrations.py`: document that
-  `auth.user_vault_audit.session_id` holds `naming_hmac(session_uuid)` (column comment; widen to
-  `VARCHAR(64)` if narrower) — idempotent migration.
+- `navigator_auth/vault/sql/002_vault_audit_sid_hmac.sql` + `vault/migrations.py` — idempotent
+  migration, **must be applied before running the migrator** (add to runbook in TASK-085).
+  Findings from TASK-072 against `001_create_vault_tables.sql`:
+  - `auth.user_vault_audit.session_id` is `VARCHAR(36)`; `naming_hmac()` is 64 hex chars →
+    widen to `VARCHAR(64)` and add a column comment (HMAC of the session id, or `run:<run_id>`
+    for migration audit rows).
+  - `auth.user_vault_audit.operation` has `CHECK (operation IN ('set','get','delete','rotate'))`
+    → replace the constraint to also allow `'quarantine'` (written by
+    `UserVaultTarget.audit_quarantine`, TASK-072) and `'integrity_fail'` (TASK-073). Both fit
+    `VARCHAR(16)`.
+  - `auth.user_vault_secrets.key_version` is `SMALLINT` (max 32767) while `KeyRing` accepts
+    key ids up to 65535 → widen to `INTEGER` (and `auth.user_vault_audit.key_version`,
+    `auth.vault_key_registry.key_id`), or document a 32767 cap. Recommended: widen.
 - Tests: update `tests/unit/vault/test_vault_view.py`, `tests/unit/vault/test_integration.py`,
   `tests/unit/vault/test_migrations.py`.
 
