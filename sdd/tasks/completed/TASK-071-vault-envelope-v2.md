@@ -155,8 +155,39 @@ class TestEnvelope:
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-15
 **Notes**:
+- navigator-session worktree branch `feat-FEAT-099-vault-crypto-hardening`, commit `a05daae`.
+- `context.py`: frozen `VaultContext` (purpose pattern `[a-z0-9][a-z0-9._-]{0,63}`, layer
+  `db|session`, ordered unique fields, values `str|int|UUID|None`, bool/float/bytes rejected),
+  `canonical_bytes()`, `get()`.
+- `envelope.py`: `EnvelopeHeader` (`to_bytes`/`from_bytes`), `read_header()`, `build_aad()`,
+  `seal()` (with `key_id=` override already available for TASK-074), `open_sealed()`,
+  `seal_value()`, `open_value()`; errors `VaultCryptoError`, `VaultIntegrityError`,
+  `UnknownKeyVersionError` (also `KeyError`, clean `str()`), `UnsupportedFormatError`.
+- `crypto.py` reduced to `serialize_value`/`deserialize_value`. v1 primitives moved verbatim
+  to private `navigator_session/vault/_legacy_v1_shim.py`, imported only by
+  `session_vault.py` (TODO TASK-073) and `key_rotation.py` (TODO TASK-074) — delete it there.
+- `__init__.py`: exports the kernel API; threat model updated (with a transitional note until
+  TASK-073/074).
+- `tests/vault/fixtures/v1_blobs.json`: 7 frozen v1 blobs (db: aesgcm/chacha20, key ids 1/2,
+  str/dict/int/bytes/None; session: aesgcm/chacha20) generated with the pre-change code,
+  verified against v1 decrypt, test-only random master keys + session uuid included for
+  TASK-075. Session blobs were regenerated if their first byte was 0xA2.
+- Tests: `test_context.py` + `test_envelope.py` (84 new, incl. independent known-answer
+  vectors for db/AES-GCM and session/ChaCha20 built from spec §2, tamper matrix, v1 rejection).
+  navigator-session `tests/` 181 passed; `ruff check` clean.
+- Expected downstream breakage when navigator-auth runs against this worktree
+  (`PYTHONPATH=<worktree>`): the 3 v1 test modules in `tests/unit/vault/` fail to collect
+  (removed by TASK-077), and 23 identity tests fail because `IdentityCipher` imports
+  `encrypt_for_db` (rewritten by TASK-077). navigator-auth's own venv is unaffected (it has a
+  non-editable copy of navigator-session 0.10.2).
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- `seal()` gained an optional `key_id=` keyword now (TASK-074 would otherwise add it).
+- Added `read_header()` and `VaultContext.get()` helpers (for rotation/migration and targets).
+- Crypto errors deliberately do **not** subclass `ValueError`, so handlers that map
+  `ValueError` → 400 cannot swallow integrity failures.
+- Context values are strictly typed: `1`, `"1"` and `UUID(...)` vs its string all encode
+  differently — targets must use consistent Python types on seal and open.
