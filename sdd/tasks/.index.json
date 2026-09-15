@@ -1484,7 +1484,7 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "M",
@@ -1494,8 +1494,9 @@
     ],
     "parallel": false,
     "parallelism_notes": "Wires runner and SessionVault Redis layout; edits pyproject.toml shared with TASK-072.",
-    "file": "sdd/tasks/active/TASK-076-navigator-vault-cli.md",
-    "started_at": "2026-09-15T21:58:00Z"
+    "file": "sdd/tasks/completed/TASK-076-navigator-vault-cli.md",
+    "started_at": "2026-09-15T21:58:00Z",
+    "completed_at": "2026-09-15T22:01:16Z"
   },
   {
     "id": "TASK-077",

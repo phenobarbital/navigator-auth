@@ -127,8 +127,47 @@ async def test_purge_redis_uses_scan(fake_redis_with_keys, monkeypatch):
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-16
 **Notes**:
+- navigator-session worktree branch `feat-FEAT-099-vault-crypto-hardening`, commit `97e5eed`.
+- `navigator_session/vault/migrate/cli.py`: `main(argv, *, resources_factory, discover, confirm,
+  out) -> int` (injectable for tests), `console_entry()`, `build_parser()`, `purge_redis()`,
+  `select_targets()`, `resolve_dsn()`, `resolve_redis_url()`, `default_resources()`.
+  - Subcommands: `migrate --dry-run | --run --backup-dir DIR [--quarantine] [--run-id]
+    [--batch-size] [--target ...]`, `verify [--backup-dir RUN_DIR] [--target ...]`,
+    `restore --backup-dir RUN_DIR [--yes] [--target ...]`, `rotate --from N --to M`,
+    `purge-redis [--sessions] [--dry-run]`, `list-targets`; global `--dsn`, `--redis-url`,
+    `--report PATH` (JSON, 0600), `--log-level`.
+  - Resources: DSN from `--dsn` → `VAULT_DB_DSN` → navconfig `DBUSER/DBPWD/DBHOST/DBPORT/DBNAME`
+    (asyncpg imported lazily, not a navigator-session dependency); Redis from `--redis-url` →
+    `VAULT_REDIS_URL` → `SESSION_URL`. Errors report exception class only (DSN never printed).
+  - Exit codes: 0 ok, 1 restore aborted, 2 failed rows / verification failed / rotation errors,
+    3 usage (argparse errors mapped from 2 to 3) or configuration (keys, unknown targets, bad
+    args), 4 backup errors.
+  - `migrate --run` requires `--backup-dir` (checked before opening resources) and refuses to run
+    when fewer targets are configured than registered entry points, unless `--target` is used.
+  - Concurrent-writer check: compares `max(created_at)` of user-initiated audit operations
+    (`set/get/delete`) before/after `--run` and logs a warning (best-effort; returns None on error).
+  - `purge-redis`: `SCAN` + `UNLINK` over `vault:*` (covers v1 and `vault:v2:*` names) and, with
+    `--sessions`, `session:*`. `user:*` identity index keys are left untouched (they point to
+    deleted sessions and are ignored on next login).
+  - `restore` without `--yes` asks the operator to type the run id.
+- `pyproject.toml`: `[project.scripts] navigator-vault = "navigator_session.vault.migrate.cli:console_entry"`.
+- Tests `tests/vault/test_cli.py` (25): help/usage exit codes, backup-dir required before
+  resources open, missing keys, unknown/unconfigured targets, list-targets, full runbook
+  (dry run → run with JSON report → verify with backup exclusions → aborted restore → restore
+  byte-identical), failures exit 2 vs quarantine exit 0, tampered backup and unsafe dir exit 4,
+  concurrent-writer warning, rotate ok/unknown key/errors, purge-redis dry run / vault only /
+  sessions with paginated SCAN on a double without `KEYS`, DSN/Redis URL resolution.
+- Results: navigator-session `tests/` 337 passed; `ruff check` clean; `python -m
+  navigator_session.vault.migrate.cli --help` works.
+- Not exercised against real PostgreSQL/Redis (`default_resources` path) — covered by the
+  cross-repo rehearsal in TASK-085.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- Added exit code `1` (operator aborted restore) and mapped argparse usage errors to `3`, so `2`
+  always means "data failures".
+- `verify` accepts `--backup-dir` to exclude rows quarantined by that run.
+- `list-targets` opens the database pool (factories need it to report configured targets).
+- The concurrent-writer warning (deferred from TASK-075) is implemented here.
