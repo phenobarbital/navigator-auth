@@ -20,6 +20,7 @@ from ..decorators import user_session
 from ..exceptions import AuthException, ConfigError
 from ..identity.crypto import IdentityCipher
 from ..identity.store import (
+    IdentityCredentialError,
     IdentityStore,
     cache_credential,
     cached_credential,
@@ -69,6 +70,17 @@ class BaseIdentityView(web.View, CorsViewMixin):
             _json_error(404, f"Unknown or disabled provider: {provider}")
         return backend
 
+    def _decrypt(self, store: IdentityStore, identity) -> TokenResponse:
+        """Decrypt a stored credential; unreadable tokens → 409 (re-link)."""
+        try:
+            return store.decrypt_credential(identity)
+        except IdentityCredentialError as err:
+            _json_error(
+                409,
+                f"{err.provider}: stored credential cannot be read; "
+                "re-link the identity.",
+            )
+
     def _store(self) -> IdentityStore:
         db_pool = self.request.app.get("authdb")
         if not db_pool:
@@ -115,7 +127,7 @@ class UserIdentitiesHandler(BaseIdentityView):
         identity = await store.get_one(user_id, identity_id)
         if not identity:
             _json_error(404, f"Identity {identity_id} not found.")
-        current = store.decrypt_credential(identity)
+        current = self._decrypt(store, identity)
         if not current.refresh_token:
             _json_error(
                 409,
@@ -181,7 +193,7 @@ class IdentityCredentialHandler(BaseIdentityView):
         identity = await store.get_by_provider(user_id, provider)
         if not identity:
             _json_error(404, f"No linked identity for provider: {provider}")
-        token = store.decrypt_credential(identity)
+        token = self._decrypt(store, identity)
         # 3) auto-refresh when expiring
         if token.is_expiring(leeway=IDENTITY_REFRESH_LEEWAY):
             if not token.refresh_token:

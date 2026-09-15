@@ -37,14 +37,21 @@ def _store():
     return IdentityStore(pool, cipher=IdentityCipher(master_keys=MASTER_KEYS))
 
 
+def _enc(store, value, field, user_id=1, provider="github", puid="99"):
+    return store._cipher.encrypt(
+        value, user_id=user_id, auth_provider=provider, provider_user_id=puid, field=field
+    )
+
+
 class TestCipherRoundtripThroughStore:
     def test_decrypt_credential(self):
         store = _store()
-        cipher = store._cipher
         identity = MagicMock()
-        identity.access_token = cipher.encrypt("the-at")
-        identity.refresh_token = cipher.encrypt("the-rt")
-        identity.id_token = cipher.encrypt("the-id")
+        identity.user_id = 1
+        identity.auth_provider = "github"
+        identity.access_token = _enc(store, "the-at", "access_token")
+        identity.refresh_token = _enc(store, "the-rt", "refresh_token")
+        identity.id_token = _enc(store, "the-id", "id_token")
         identity.token_type = "Bearer"
         identity.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
         identity.scopes = ["read:user"]
@@ -58,7 +65,9 @@ class TestCipherRoundtripThroughStore:
     def test_decrypt_without_refresh_token(self):
         store = _store()
         identity = MagicMock()
-        identity.access_token = store._cipher.encrypt("at")
+        identity.user_id = 1
+        identity.auth_provider = "github"
+        identity.access_token = _enc(store, "at", "access_token", puid=None)
         identity.refresh_token = None
         identity.id_token = None
         identity.token_type = None
