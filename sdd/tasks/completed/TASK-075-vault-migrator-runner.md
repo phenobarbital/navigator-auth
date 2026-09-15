@@ -140,8 +140,43 @@ async def test_migrate_then_restore_is_byte_identical(keyring, fake_v1_target, t
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-15
 **Notes**:
+- navigator-session worktree branch `feat-FEAT-099-vault-crypto-hardening`, commit `e1cfcee`.
+- `migrate/legacy_v1.py`: `LegacyV1Reader(master_keys, cipher_backend)` / `.from_env()`,
+  `decrypt(blob)` (v1 `key_id‖nonce‖ct‖tag`, HKDF `vault-db-v{N}`, no AAD); raises
+  `UnknownKeyVersionError` / `LegacyV1Error`; not serializable; not exported from
+  `navigator_session.vault` nor `navigator_session.vault.migrate`.
+- `migrate/backup.py`: `prepare_backup_dir(backup_dir, run_id) -> (run_dir, resumed)`,
+  `JsonlBackupSink` (`begin`/`write`/`finish`/`abort`/`is_complete`/`record_quarantine`, atomic
+  fsync'ed manifest), `JsonlBackupSource` (`targets`, `verify`, `read`, `quarantined_refs`),
+  `BackupError`, `BackupIntegrityError`. Manifest format `navigator-vault-backup/1`.
+- `migrate/runner.py`: `new_run_id()`, `migrate_v1_to_v2(...)`, `verify_v2(...)`,
+  `restore_backup(...)` — see the API notes added to TASK-076.
+- `migrate/models.py`: `MigrationTargetReport` (total, migrated, already_v2, empty, failed,
+  quarantined, restored, backup_records, failed_refs), `MigrationReport` (operation, run_id,
+  timestamps, dry_run, backup_dir, targets, verified, `ok` property).
+- Tests (39 new): `test_legacy_v1.py` (frozen fixture both algorithms, helper parity, errors,
+  not exported), `test_backup.py` (permissions 0700/0600, world-accessible dir rejected, resume,
+  checksum/incomplete/count detection, quarantine refs), `test_migrate_runner.py` (dry run with
+  zero UPDATEs, argument/backup-dir validation with zero SQL, backup-before-first-write asserted
+  inside `write` — confirmed by a mutation check that moving the export after the writes makes
+  it fail, soft-deleted rows, multi-field target with `legacy_unwrap` rejecting a copied `_ctx`
+  envelope, empty rows, already-v2 rows, crash + resume without re-export and restore still
+  yielding pre-migration data, failures with/without quarantine, verify exclusions, tampered v2,
+  byte-identical migrate→quarantine→restore across two targets, restore verifies checksum
+  before writing, no plaintext in logs/backup). Helper `tests/vault/v1_helpers.py`.
+- Results: navigator-session `tests/` 312 passed; `ruff check` clean.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- `migrate_v1_to_v2` has extra keyword args `run_id=` and `legacy=` (injectable reader).
+- The v1 reader tries both AEAD algorithms (configured first): safe thanks to authentication and
+  tolerant to historical `VAULT_CIPHER_BACKEND` changes.
+- Resume is implicit: an existing `<backup_dir>/<run_id>/manifest.json` resumes the run; a
+  non-empty run dir without manifest is rejected.
+- Quarantined refs are stored in the manifest and `verify_v2` takes `exclude_refs`, otherwise rows
+  quarantined with their v1 blobs would fail verification.
+- Reports gained `empty`, `restored` and `operation` fields.
+- The "warn about concurrent writers" check is not implemented (no generic target hook);
+  deferred to the CLI (TASK-076) and covered operationally by the runbook (services stopped).

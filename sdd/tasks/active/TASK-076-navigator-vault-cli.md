@@ -54,6 +54,21 @@ SCAN-based Redis purge used for the forced re-login.
 
 ## Implementation Notes
 
+### Runner API delivered by TASK-075 (use as-is)
+- `migrate_v1_to_v2(targets, keyring, *, dry_run, quarantine, backup_dir, batch_size, run_id=None,
+  legacy=None)` → `MigrationReport`; `report.ok` is False when unquarantined failures remain
+  (→ exit 2). Raises `ValueError` (bad args → exit 3) and `BackupError` (→ exit 4).
+  `--run-id` resumes when `<backup-dir>/<run_id>/manifest.json` exists.
+- `verify_v2(targets, keyring, *, exclude_refs=())` → `report.verified`. For `verify`, accept an
+  optional `--backup-dir DIR/<run_id>` and pass `JsonlBackupSource(run_dir).quarantined_refs()`
+  as `exclude_refs`, otherwise quarantined rows (still v1) fail verification.
+- `restore_backup(targets, run_dir, *, only=None)` verifies checksums before writing
+  (`BackupIntegrityError` → exit 4).
+- `LegacyV1Reader.from_env()` is the default v1 reader; `KeyRing.from_env()` for v2.
+- Reports serialize with `report.model_dump_json()`.
+- Not implemented in TASK-075 (do it here if cheap): warning about concurrent writers during a
+  run (e.g. compare `auth.user_vault_audit` max `created_at` before/after).
+
 ### Key Constraints
 - Async entry via `asyncio.run()`; optional `uvloop` must not be required.
 - Never print values; report shows refs, counts, durations.
