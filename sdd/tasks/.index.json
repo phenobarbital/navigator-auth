@@ -1420,8 +1420,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "in-progress",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -1431,7 +1431,7 @@
     "parallel": true,
     "parallelism_notes": "Touches session_vault.py/models.py only; can run in a separate navigator-session worktree alongside TASK-074 and TASK-075 after TASK-072 (rebase on __init__.py export hunk).",
     "file": "sdd/tasks/active/TASK-073-session-vault-v2.md",
-    "started_at": null
+    "started_at": "2026-09-15T21:17:32Z"
   },
   {
     "id": "TASK-074",
