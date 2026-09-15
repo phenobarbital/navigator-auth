@@ -1442,8 +1442,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "in-progress",
+    "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "M",
     "depends_on": [
@@ -1452,7 +1452,7 @@
     "parallel": true,
     "parallelism_notes": "Touches key_rotation.py (+ optional seal key_id kwarg in envelope.py); independent of TASK-073/075 files.",
     "file": "sdd/tasks/active/TASK-074-registry-key-rotation.md",
-    "started_at": null
+    "started_at": "2026-09-15T21:26:15Z"
   },
   {
     "id": "TASK-075",
