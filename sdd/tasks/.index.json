@@ -1399,8 +1399,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "in-progress",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -1409,7 +1409,7 @@
     "parallel": false,
     "parallelism_notes": "Defines ProtectedTarget protocols consumed by rotation, migration and all downstream targets.",
     "file": "sdd/tasks/active/TASK-072-vault-registry-postgres-target.md",
-    "started_at": null
+    "started_at": "2026-09-15T21:00:05Z"
   },
   {
     "id": "TASK-073",
