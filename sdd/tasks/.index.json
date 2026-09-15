@@ -1378,8 +1378,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "in-progress",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -1388,7 +1388,7 @@
     "parallel": false,
     "parallelism_notes": "Builds on KeyRing derivations; removes v1 public API that later tasks replace.",
     "file": "sdd/tasks/active/TASK-071-vault-envelope-v2.md",
-    "started_at": null
+    "started_at": "2026-09-15T20:47:17Z"
   },
   {
     "id": "TASK-072",
