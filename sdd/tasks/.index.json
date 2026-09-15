@@ -1359,15 +1359,15 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "in-progress",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "M",
     "depends_on": [],
     "parallel": false,
     "parallelism_notes": "Foundation of the kernel; every other task imports KeyRing.",
     "file": "sdd/tasks/active/TASK-070-vault-keyring.md",
-    "started_at": null
+    "started_at": "2026-09-15T19:50:06Z"
   },
   {
     "id": "TASK-071",
