@@ -79,8 +79,9 @@ consumer.
   nonce) for DB and session layers; the header is authenticated.
 - **G4** — One **context registry** drives runtime seal/open, master-key rotation and the
   migration, for every store in the inventory (PostgreSQL and DocumentDB).
-- **G5** — An **offline batch migrator** converts all v1 data to v2 with dry-run, verify,
-  resume and explicit quarantine; after migration v1 is rejected at runtime.
+- **G5** — An **offline batch migrator** converts all v1 data to v2 with dry-run, mandatory
+  pre-migration raw export (backup), verify, resume, restore and explicit quarantine; after
+  migration v1 is rejected at runtime.
 - **G6** — `GET /api/v1/user/vault/{key}` no longer returns plaintext; the HTTP API exposes
   metadata only.
 - **G7** — Frontend: vault secrets management UI (list/create/update/delete, write-only
@@ -228,7 +229,7 @@ Field order is fixed by the target definition; `NULL` and `""` are distinct.
 | `parrot/handlers/integrations.py` | extends | `status` incl. `needs_reconnect` |
 | `navigator-frontend-next/src/lib/api/http.ts` | modifies | Forced re-login reason, no redirect loop |
 | `navigator-frontend-next/src/lib/api/integrations.ts` | extends | `IntegrationDescriptor.status` |
-| `navigator-frontend-next/src/routes/profile/` | extends | Secrets section |
+| `navigator-frontend-next/src/routes/profile/` | extends | New `/profile/secrets` route + "Manage secrets" link on `/profile` |
 
 ### Data Models
 
@@ -320,7 +321,9 @@ class ProtectedTarget(Protocol):
     async def iter_batches(self, batch_size: int) -> AsyncIterator[list[TargetRow]]: ...
     async def write(self, row: TargetRow, blobs: dict[str, Optional[bytes]],
                     key_version: int) -> None: ...
-    async def quarantine(self, row: TargetRow, reason: str) -> None: ...
+    async def quarantine(self, row: TargetRow, reason: str, run_id: str) -> None: ...
+    async def export_raw(self, sink: "BackupSink") -> int: ...      # rows/documents exported as-is
+    async def restore_raw(self, source: "BackupSource") -> int: ...  # rollback from export
 
 def discover_targets(**resources: Any) -> list[ProtectedTarget]: ...  # entry points
 
@@ -330,12 +333,15 @@ async def rotate_master_key(targets: list[ProtectedTarget], old_key_id: int,
                             batch_size: int = 100) -> dict[str, dict]: ...
 
 # navigator_session/vault/migrate/  (CLI entry point: navigator-vault)
-#   navigator-vault migrate --dry-run | --run [--quarantine] [--batch-size N] [--target NAME ...]
+#   navigator-vault migrate --dry-run
+#   navigator-vault migrate --run --backup-dir DIR [--quarantine] [--batch-size N] [--target NAME ...]
 #   navigator-vault verify
+#   navigator-vault restore --backup-dir DIR [--target NAME ...]   (rollback)
 #   navigator-vault purge-redis [--sessions]            (SCAN-based, runbook step)
 async def migrate_v1_to_v2(targets: list[ProtectedTarget], keyring: KeyRing, *,
-                           dry_run: bool, quarantine: bool,
+                           dry_run: bool, quarantine: bool, backup_dir: Optional[Path],
                            batch_size: int = 100) -> MigrationReport: ...
+async def restore_backup(targets: list[ProtectedTarget], backup_dir: Path) -> MigrationReport: ...
 async def verify_v2(targets: list[ProtectedTarget], keyring: KeyRing) -> MigrationReport: ...
 
 # SessionVault (signatures unchanged except):
@@ -360,7 +366,7 @@ def decrypt_credential(encrypted: str, context: VaultContext, keyring: KeyRing) 
 |---|---|---|
 | `GET /api/v1/user/vault` | `{"secrets": [VaultSecretMetadata, ...]}` | `503 {"error": "vault_unavailable"}` |
 | `GET /api/v1/user/vault/{key}` | `VaultSecretMetadata` (**no `value`**) | `404`, `409 {"error": "vault_integrity_error"}`, `503` |
-| `POST /api/v1/user/vault` | `201 {"key", "message"}` (unchanged) | `400` validation, `503` |
+| `POST /api/v1/user/vault` | `201 {"key", "updated_at", "key_version", "message"}` (superset of current body) | `400` validation, `503` |
 | `DELETE /api/v1/user/vault/{key}` | `200` (unchanged) | `404`, `503` |
 
 **HTTP contract (ai-parrot):** `GET /api/v1/agents/integrations/{agentId}` descriptors gain
@@ -369,21 +375,34 @@ compatibility (`true` only when `status == "connected"`).
 
 ### Deployment Runbook (single maintenance window)
 
+The maintenance window date is scheduled by ops (out of scope). The spec requires full
+downtime of vault readers/writers; the expected duration is measured in the Module 14
+rehearsal and recorded in the runbook.
+
 1. Stop every writer/reader: navigator-auth apps, ai-parrot servers/workers, Telegram/CLI
    resolvers.
-2. Back up PostgreSQL (`auth.user_vault_secrets`, `auth.user_vault_audit`,
-   `auth.user_identities`, `{PARROT_SCHEMA}.users_bots`) and DocumentDB (`user_credentials`,
-   `user_llm_keys`).
-3. Install the new package versions in the migration environment (all targets discoverable).
-4. `navigator-vault migrate --dry-run` → review report (must show `failed == 0`, or failures
-   explicitly accepted).
-5. `navigator-vault migrate --run [--quarantine]` → `navigator-vault verify` (must be `verified`).
+2. Install the new package versions in the migration environment (all targets discoverable).
+3. `navigator-vault migrate --dry-run` → review report (must show `failed == 0`, or failures
+   explicitly accepted for quarantine).
+4. `navigator-vault migrate --run --backup-dir /secure/path [--quarantine]`. Before touching a
+   target, the CLI exports every row/document of that target **as stored** (v1 ciphertext,
+   never plaintext) to `backup-dir/<run_id>/<target>.jsonl` plus a manifest with counts and
+   SHA-256 per file; the run aborts if the export fails or the directory is not writable/empty.
+5. `navigator-vault verify` (must be `verified`).
 6. `navigator-vault purge-redis --sessions` (removes `vault:*` and `session:*` → forced re-login).
 7. Deploy navigator-session 1.0.0, navigator-auth 0.28.0, ai-parrot, frontend together.
-8. Start services; smoke test: login, vault CRUD via UI, one identity-backed call, one BYOK
-   call, one integration, one `VaultTokenSync` round trip.
-9. Rollback = restore backups from step 2 + redeploy previous versions (v2 data is unreadable
-   by old code by design).
+8. Start services; smoke test: login (notice shown), `/profile/secrets` CRUD, one
+   identity-backed call, one BYOK call, one integration, one `VaultTokenSync` round trip.
+9. Rollback = stop services → `navigator-vault restore --backup-dir /secure/path/<run_id>`
+   (restores v1 blobs, including quarantined items, and removes `*_quarantine` copies) →
+   redeploy previous versions (v2 data is unreadable by old code by design).
+
+**Quarantine semantics (`--quarantine`):**
+
+| Engine | Action | Visibility |
+|---|---|---|
+| PostgreSQL targets | `deleted_at = NOW()` (soft-delete) + audit row `operation='quarantine'` with reason and `run_id`; identity rows: `enabled = false` + token columns kept as-is | Row disappears from runtime reads; user re-creates / re-links |
+| DocumentDB targets | Copy to `<collection>_quarantine` (e.g. `user_credentials_quarantine`) with `quarantined_at`, `reason`, `run_id`, original `_id`; then delete from the original collection | Document disappears from runtime reads; recoverable by ops or `restore` |
 
 ---
 
@@ -434,9 +453,13 @@ compatibility (`true` only when `status == "connected"`).
 ### Module 6: Offline migrator CLI (NS)
 - **Path**: `navigator_session/vault/migrate/legacy_v1.py`, `migrate/runner.py`,
   `migrate/cli.py`, `pyproject.toml` (`navigator-vault` script)
-- **Responsibility**: v1 decrypt (isolated, not exported), dry-run/run/verify/quarantine,
-  resumable (rows already v2 are skipped), `MigrationReport` JSON output, SCAN-based
-  `purge-redis`. Targets may provide a `legacy_unwrap` hook (used by Module 11).
+- **Path (additional)**: `migrate/backup.py` (JSONL sink/source, manifest, SHA-256)
+- **Responsibility**: v1 decrypt (isolated, not exported), dry-run/run/verify/restore,
+  mandatory `--backup-dir` export before each target is migrated, quarantine delegated to each
+  target (§2 Quarantine semantics), resumable (rows already v2 are skipped; an existing
+  manifest for the same `run_id` is reused), `MigrationReport` JSON output, SCAN-based
+  `purge-redis`. Targets may provide a `legacy_unwrap` hook (used by Module 11). PostgreSQL
+  quarantine/export/restore implemented in the Module 3 target base.
 - **Depends on**: Modules 2, 3
 
 ### Module 7: Identity Vault contexts & targets (NA)
@@ -460,7 +483,8 @@ compatibility (`true` only when `status == "connected"`).
   `parrot/handlers/credentials_utils.py`, `parrot/handlers/studio/byok.py`,
   `parrot/handlers/agent.py`
 - **Responsibility**: Context-bound credential helpers; DocumentDB targets
-  `user_credentials` (`user_id`, `name`) and `user_llm_keys` (`user_id`, `provider`); all five
+  `user_credentials` (`user_id`, `name`) and `user_llm_keys` (`user_id`, `provider`) including
+  `export_raw`/`restore_raw` and quarantine by move to `<collection>_quarantine`; all five
   call sites pass contexts; renames of `name`/`provider` re-seal.
 - **Depends on**: Modules 2, 3
 
@@ -480,18 +504,24 @@ compatibility (`true` only when `status == "connected"`).
 - **Depends on**: Modules 2, 3, 6
 
 ### Module 12: Frontend vault API client & Secrets UI (FE)
-- **Path**: `src/lib/api/vault.ts`, `src/routes/profile/` (secrets section/components),
+- **Path**: `src/lib/api/vault.ts`, `src/routes/profile/secrets/+page.svelte`,
+  `src/lib/components/profile/UserSecrets*.svelte`, `src/routes/profile/+page.svelte` (link),
   tests alongside
-- **Responsibility**: Typed client for the §2 HTTP contract; list (name, updated, key
-  version), create/update with write-only masked value (never pre-filled), delete with
-  confirmation, inline validation, `vault_unavailable` / `vault_integrity_error` banners.
+- **Responsibility**: Typed client for the §2 HTTP contract; dedicated route
+  `/profile/secrets` under the same `AuthGuard` as `/profile`, reachable via a
+  "Manage secrets" link on the profile page (next to the tabs) and by direct URL; list (name,
+  updated, key version), create/update with write-only masked value (never pre-filled), row
+  refreshed from the POST metadata response, delete with confirmation, inline validation,
+  `vault_unavailable` / `vault_integrity_error` banners.
 - **Depends on**: HTTP contract (§2) — can start before Module 8 lands (mocked client)
 
 ### Module 13: Frontend forced re-login & integration status (FE)
 - **Path**: `src/lib/api/http.ts`, `src/routes/login/`, `src/lib/api/integrations.ts`,
   integrations panel components
 - **Responsibility**: 401 → single redirect to `/login?reason=session_expired` (no loop, notice
-  shown once); `IntegrationDescriptor.status` with a "Reconnect" action for `needs_reconnect`.
+  shown once). Notice text: *"Your session has ended because of a security update. Please
+  sign in again."* `IntegrationDescriptor.status` with a "Reconnect" action for
+  `needs_reconnect`.
 - **Depends on**: HTTP contracts (§2) — can start before Module 10 lands
 
 ### Module 14: Runbook, docs & cross-repo verification (NS + NA)
@@ -533,21 +563,30 @@ compatibility (`true` only when `status == "connected"`).
 | `test_migrate_dry_run_no_writes` | M6 | Report counts, zero writes |
 | `test_migrate_resumable` | M6 | Interrupted run resumes; v2 rows counted as `already_v2` |
 | `test_migrate_failure_blocks_without_quarantine` | M6 | Undecryptable row → non-zero exit, not verified |
-| `test_migrate_quarantine` | M6 | `--quarantine` soft-deletes / flags row and audits it |
+| `test_migrate_quarantine_postgres` | M3/M6 | `--quarantine` soft-deletes the row and writes `operation='quarantine'` audit with `run_id` |
+| `test_migrate_run_requires_backup_dir` | M6 | `--run` without `--backup-dir`, or with a non-writable/non-empty dir → exit non-zero, zero writes |
+| `test_backup_export_before_migration` | M6 | Each target's JSONL + manifest (counts, SHA-256) exists before its first write; export failure aborts that target |
+| `test_backup_contains_no_plaintext` | M6 | Exported records hold stored blobs only; known plaintext never appears in files |
+| `test_restore_roundtrip` | M6 | migrate → restore → all rows byte-identical to pre-migration, quarantined items back in place |
 | `test_legacy_v1_not_exported` | M6 | `legacy_v1` not importable from `navigator_session.vault` public API |
 | `test_identity_field_swap_detected` | M7 | access_token blob moved to refresh_token → integrity error |
 | `test_identity_relink_reseals` | M7 | `provider_user_id` change re-seals every token field |
 | `test_vault_view_get_key_returns_metadata_only` | M8 | Response has no `value` field |
 | `test_vault_view_integrity_error_409` / `_unavailable_503` | M8 | Typed error bodies |
+| `test_vault_view_post_returns_metadata` | M8 | `201` body has `key`, `updated_at`, `key_version`, `message`; no `value` |
 | `test_credentials_context_bound` | M9 | `user_credentials` doc moved to another user/name → decrypt fails |
 | `test_byok_context_bound` | M9 | `user_llm_keys` provider swap → decrypt fails |
+| `test_docdb_quarantine_moves_document` | M9 | Quarantined doc copied to `<collection>_quarantine` with `quarantined_at`, `reason`, `run_id`, original `_id`, then removed from source |
+| `test_docdb_restore_removes_quarantine_copy` | M9 | `restore_raw` puts the original back and deletes the quarantine copy |
 | `test_integrations_needs_reconnect` | M10 | Integrity error on stored token → `status == "needs_reconnect"`, `connected == false` |
 | `test_vault_token_sync_roundtrip` | M10 | Deterministic session scheme stores and reads `{provider}:{field}` (F4) |
 | `test_users_bots_field_swap_detected` | M11 | `mcp_config` ↔ `tools_config` swap → integrity error |
 | `test_users_bots_legacy_unwrap_checks_ctx` | M11 | v1 blob with mismatching `_ctx` → migration failure, not re-sealed |
 | `vault.test.ts` | M12 | Client parses metadata; never sends/reads `value` on GET |
-| `SecretsSection` component tests | M12 | Value input masked, never pre-filled; delete confirmation; error banners |
+| `UserSecrets` component tests | M12 | Value input masked, never pre-filled; row updated from POST metadata; delete confirmation; error banners |
+| `/profile/secrets` route tests | M12 | Route guarded by `AuthGuard` (unauthenticated → `/login`); "Manage secrets" link on `/profile` navigates to it |
 | `http.test.ts` (re-login) | M13 | Burst of 401s → one redirect with `reason=session_expired` |
+| login notice test | M13 | `reason=session_expired` renders the exact security-update notice once; absent otherwise |
 | `integrations` status tests | M13 | `needs_reconnect` renders Reconnect action |
 
 ### Integration Tests
@@ -608,13 +647,22 @@ def fake_redis():
 - [ ] Changing `VAULT_CIPHER_BACKEND` does not break reading existing v2 data.
 - [ ] Master key rotation re-seals all targets and does not change Redis naming (unless the
       naming key id is removed — documented).
-- [ ] `navigator-vault migrate --dry-run/--run/verify` works over all targets; migration
+- [ ] `navigator-vault migrate --dry-run/--run/verify/restore` works over all targets; migration
       rehearsal on seeded v1 data ends `verified: true`; runtime rejects v1 blobs.
-- [ ] `GET /api/v1/user/vault/{key}` responses never include `value`.
+- [ ] `migrate --run` refuses to start without a valid `--backup-dir`, exports every target
+      (stored blobs only, manifest with SHA-256) before writing, and `restore` returns all
+      targets to their exact pre-migration bytes.
+- [ ] Quarantine: PostgreSQL rows soft-deleted + audited; DocumentDB documents moved to
+      `<collection>_quarantine` with `quarantined_at`, `reason`, `run_id`.
+- [ ] Rehearsal (Module 14) records migration + verify duration in the runbook.
+- [ ] `GET /api/v1/user/vault/{key}` responses never include `value`; `POST` returns
+      `key`, `updated_at`, `key_version`, `message`.
 - [ ] `VaultTokenSync` persists and reads `{provider}:{field}` tokens (F4 fixed).
 - [ ] Vault failures still never block login (existing integration tests remain green).
-- [ ] Frontend: Secrets UI CRUD with write-only values; forced re-login shows the notice once
-      without redirect loops; integrations show `needs_reconnect` with a Reconnect action.
+- [ ] Frontend: `/profile/secrets` (linked from `/profile`) CRUD with write-only values; forced
+      re-login shows *"Your session has ended because of a security update. Please sign in
+      again."* once without redirect loops; integrations show `needs_reconnect` with a
+      Reconnect action.
 - [ ] Unit and integration tests pass in each repo:
       NS `pytest tests/ -v`, NA `pytest tests/ -v`, AP/APS `pytest` for touched packages,
       FE `pnpm test` (vitest).
@@ -662,8 +710,15 @@ def fake_redis():
   entries are also removed by `purge-redis` and repopulate from DB on next load.
 - **Format byte collision** — a v1 blob whose key id high byte is `0xA2` (key id ≥ 41472) would
   parse as v2 header; impossible in practice (ids are small) and still fails authentication.
-- **ai-parrot in-flight work** on `vault_token_sync.py` (FEAT-266/267 in ai-parrot's own SDD)
-  must be checked for merge state before Module 10 starts.
+- **Backup directory is sensitive** — it holds v1 ciphertext (not plaintext) that remains
+  decryptable with the current master keys. Mitigation: CLI creates files `0600` in a `0700`
+  directory, refuses world-readable targets, runbook requires secure storage and deletion after
+  the rollback period.
+- **Backup vs concurrent writers** — exports are only consistent because all services are
+  stopped (runbook step 1); the CLI warns if it detects vault writes (audit rows newer than the
+  export start) during the run.
+- **ai-parrot FEAT-266/267** (`vault_token_sync.py`) are done and merged into ai-parrot `dev`
+  (verified 2026-09-15); Module 10 builds on that code, which still exhibits F4.
 - **Frontend redirect storms** — many parallel requests may get 401 simultaneously; the
   redirect must be guarded (single flight).
 
@@ -695,18 +750,23 @@ Resolved while writing this spec (from brainstorm Open Questions):
       (PostgreSQL) (§1 inventory).
 - [x] SDD tracking → this spec and all tasks live in navigator-auth.
 
-Still open:
+Resolved in spec review (2026-09-15):
 
-- [ ] Quarantine semantics per engine: PostgreSQL rows get `deleted_at` + audit; DocumentDB
-      documents — delete, or move to a `*_quarantine` collection? — *Owner: Jesus Lara*
-- [ ] Frontend placement: tab inside existing `/profile` page vs dedicated
-      `/profile/secrets` route; notice wording for forced re-login. — *Owner: frontend team*
-- [ ] Should `POST /api/v1/user/vault` return `VaultSecretMetadata` (breaking but consistent)
-      or keep its current body? — *Owner: Jesus Lara*
-- [ ] Merge state of ai-parrot FEAT-266/267 (`vault_token_sync.py`) before Module 10. —
-      *Owner: ai-parrot maintainers*
-- [ ] Target maintenance window and whether DocumentDB backups are part of the existing ops
-      tooling. — *Owner: ops*
+- [x] Quarantine semantics → PostgreSQL: soft-delete + audit; DocumentDB: move to
+      `<collection>_quarantine` with metadata (§2 Quarantine semantics).
+- [x] Frontend placement → dedicated route `/profile/secrets`, linked from `/profile`
+      ("Manage secrets") and reachable by direct URL (Module 12).
+- [x] Forced re-login notice → *"Your session has ended because of a security update. Please
+      sign in again."* (Module 13).
+- [x] `POST /api/v1/user/vault` → `201 {key, updated_at, key_version, message}`, a superset of
+      the current body (§2 HTTP contract).
+- [x] ai-parrot FEAT-266/267 → done and merged into ai-parrot `dev`; not blocking (§6).
+- [x] Backups → the CLI performs a mandatory raw export (`--backup-dir`) and provides
+      `restore`; independent of ops tooling (§2 Runbook).
+- [x] Maintenance window → scheduled by ops, out of scope; duration measured in the Module 14
+      rehearsal.
+
+No open questions remain.
 
 ---
 
@@ -727,8 +787,8 @@ Still open:
 - **Parallel from the start (contract-first):** navigator-frontend-next worktree: M12, M13
   against the §2 HTTP contracts with mocked clients.
 - **Last, sequential:** M14 (needs everything; runs the cross-repo rehearsal).
-- **Cross-feature dependencies:** none blocking in navigator-auth (FEAT-092…098 all done and
-  merged into `dev`). Check ai-parrot FEAT-266/267 merge state before M10. The package
+- **Cross-feature dependencies:** none blocking. navigator-auth FEAT-092…098 are done and
+  merged into `dev`; ai-parrot FEAT-266/267 are done and merged into ai-parrot `dev`. The package
   dependency `navigator-auth → navigator-session>=1.0.0` requires the NS worktree to be
   installed editable (`[tool.uv.sources] navigator-session = { path = "../navigator-session" }`
   already present in navigator-auth) while developing.
@@ -740,3 +800,4 @@ Still open:
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-09-15 | Jesus Lara | Initial draft from `vault-crypto-hardening.brainstorm.md` (Option A) |
+| 0.2 | 2026-09-15 | Jesus Lara | Resolved all open questions: quarantine per engine, CLI backup/restore, `/profile/secrets` route + link, re-login notice, POST metadata body, FEAT-266/267 merged, window owned by ops |
