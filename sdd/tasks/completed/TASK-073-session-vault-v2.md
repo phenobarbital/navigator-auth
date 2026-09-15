@@ -138,8 +138,49 @@ async def test_cross_user_row_skipped(keyring, fake_pool_with_swapped_row, fake_
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-15
 **Notes**:
+- navigator-session worktree branch `feat-FEAT-099-vault-crypto-hardening`, commit `30e7341`.
+- `session_vault.py` rewritten on `KeyRing` + envelope v2:
+  - DB context `user-vault/db (user_id:int, key:str)` — identical to `UserVaultTarget.context_for`
+    (tested by opening SessionVault rows with the target context).
+  - Session context `user-vault/session (sid_hmac, user_id, key)` + `session_uuid`; session keys
+    memoized per `(key_id, alg_id)` by a private `_SessionKeyCache` KeyRing view (not
+    serializable, no key material in `repr`).
+  - Redis key `vault:v2:{naming_hmac(session_uuid)}:{naming_hmac(key)}`; audit `session_id` =
+    `naming_hmac(session_uuid)` (64 chars).
+  - Key validation: non-empty str, ≤ 255 chars, no `\x00-\x1f`/`\x7f`; `:` allowed (F4).
+  - `load_for_session` selects `updated_at`; entries failing `VaultIntegrityError` /
+    `UnknownKeyVersionError` / `UnsupportedFormatError` are skipped, logged (user, key, error
+    class) and audited `integrity_fail` in one connection after the loop; audit failures are
+    logged and never break loading.
+  - `set()` returns `VaultSecretMetadata`; `list_metadata()` added; constructor accepts
+    `keyring=`; `_master_keys` removed. Pool access via `acquire_connection`/`fetch_rows` from
+    `targets/postgres.py`.
+- `models.py`: frozen `VaultSecretMetadata(key, updated_at, key_version>=1)`, exported from
+  `navigator_session.vault`.
+- `_legacy_v1_shim` is no longer imported by `session_vault.py` (only `key_rotation.py` → TASK-074).
+- Tests `tests/vault/test_session_vault.py` (46): v1 behaviours ported (types, overwrite, cache →
+  Redis → default, delete/soft-delete/audit, keys/exists, max keys, no-Redis) plus v2 cases:
+  HMAC Redis names, audit HMAC, DB blob bound to user/key, tampered/swapped Redis entries,
+  other-session isolation, F1 (Redis dump + session id with v1 derivation or foreign master key
+  fails), deterministic `telegram-persistent:` scheme with `:` keys across instances, cross-user
+  row skipped + `integrity_fail` audit, v1 and unknown-key rows skipped, audit failure tolerated,
+  no secret/session id/blob in logs. The DB double enforces the post-migration-002 schema
+  (operation set incl. `quarantine`/`integrity_fail`, `session_id` ≤ 64).
+- Results: navigator-session `tests/` 259 passed; `ruff check` clean; navigator-auth
+  `tests/unit/vault/{test_integration,test_vault_view,test_migrations,test_config,test_package}.py`
+  against the worktree: 77 passed.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- `set()` now writes the database (upsert + audit) **before** updating the in-memory cache and
+  Redis, so a failed DB write leaves no phantom secret (v1 cached first).
+- `get()` re-raises integrity/format/key-version errors (for the 409 mapping in TASK-078) and
+  evicts the entry from the in-memory cache; it still has no DB fallback (spec non-goal).
+- `VaultSecretMetadata.updated_at` from `set()` is the application clock (UTC) rather than a
+  `RETURNING updated_at` round-trip, to stay driver-agnostic; `load_for_session` uses the DB value.
+- `user_id` is coerced with `int()` in the constructor (bool rejected); non-numeric ids raise
+  `ValueError` (navigator-auth's integration already skips them).
+- Production schema still needs navigator-auth migration 002 (TASK-078) before `integrity_fail`
+  audits and 64-char `session_id` values can be written.
