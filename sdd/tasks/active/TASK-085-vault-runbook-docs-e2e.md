@@ -34,6 +34,10 @@ bumps for a coordinated breaking release.
   errors), `targets.md` (registry, entry points, writing a target), `migration-runbook.md`
   (spec §2 runbook, quarantine semantics, backup handling/retention, rollback, `purge-redis`),
   threat model update. Link from navigator-auth `docs/` (vault/identity pages).
+- **Dependency pins** (deferred from TASK-077/079/080 so local editable installs keep resolving
+  until navigator-session is bumped): set `navigator-session>=1.0.0` in navigator-auth,
+  ai-parrot and ai-parrot-server `pyproject.toml` together with the navigator-session version
+  bump.
 - **Versions/CHANGELOG**: navigator-session `1.0.0`, navigator-auth `0.28.0`, ai-parrot and
   ai-parrot-server next minor; CHANGELOG entries flag BREAKING changes (crypto API, HTTP GET
   vault value removal, IdentityCipher signature, credential helper signatures).
