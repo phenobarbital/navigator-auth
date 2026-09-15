@@ -3,7 +3,7 @@
 **Feature ID**: FEAT-099
 **Date**: 2026-09-15
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: navigator-session 1.0.0 · navigator-auth 0.28.0 · ai-parrot next minor · navigator-frontend-next (no version)
 
 > **Inputs:** `sdd/proposals/vault-crypto-hardening.brainstorm.md` — Option A
