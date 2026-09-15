@@ -1506,8 +1506,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-auth",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "in-progress",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "M",
     "depends_on": [
@@ -1516,7 +1516,7 @@
     "parallel": true,
     "parallelism_notes": "Different repository (navigator-auth worktree); only needs the frozen kernel API from TASK-071/072.",
     "file": "sdd/tasks/active/TASK-077-identity-vault-contexts.md",
-    "started_at": null
+    "started_at": "2026-09-15T22:07:50Z"
   },
   {
     "id": "TASK-078",
