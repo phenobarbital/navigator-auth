@@ -60,6 +60,15 @@ be legitimised.
 
 ## Implementation Notes
 
+### Delivered by TASK-079
+- Context helpers and `get_vault_keyring()` in `parrot.security` (see TASK-080 notes).
+  `parrot.security.vault_utils.load_vault_keys()` exists only for `_encrypted_field`; **delete it**
+  once this task migrates that module.
+- `parrot/vault_targets.py` (ai-parrot package) already holds the DocumentDB targets; add the
+  PostgreSQL `users_bots` target in `ai-parrot-server` as planned.
+- Failing tests handed over: `packages/ai-parrot/tests/handlers/test_user_bots_security.py` (5,
+  still using the v1 `_ctx` envelope API).
+
 ### Key Constraints
 - The table is created by the model (`Meta.name = "users_bots"`, `schema = PARROT_SCHEMA`);
   read the schema from `parrot.conf.PARROT_SCHEMA` at factory time.

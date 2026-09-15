@@ -153,8 +153,45 @@ async def test_quarantine_moves_document(fake_docdb, keyring):
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-16
 **Notes**:
+- ai-parrot worktree `.claude/worktrees/feat-FEAT-099-vault-crypto-hardening` (branch from `dev`),
+  commit `4e56747`.
+- `security/credentials_utils.py`: rewritten on the v2 envelope —
+  `encrypt_credential(credential, context, keyring, *, key_id=None) -> str` (base64),
+  `decrypt_credential(encrypted, context, keyring) -> dict`, `reseal_credential`,
+  `credential_context(user_id, name)` (`parrot-credential`, field `credential`),
+  `llm_key_context(user_id, provider)` (`parrot-llm-key`, field `api_key`), `normalize_user_id`
+  (digit strings → int, shared by runtime and targets).
+- `security/vault_utils.py`: cached `get_vault_keyring()` + `reset_vault_keyring()`; store/retrieve
+  use contexts; `load_vault_keys()` kept **deprecated** (raw keys) only for
+  `handlers/models/_encrypted_field.py` until TASK-081.
+- `auth/broker.py` BYOK resolver: `get_vault_keyring()` + `llm_key_context`; still fails closed.
+- `handlers/credentials_utils.py` / `handlers/vault_utils.py` compat shims re-export the new names.
+- `vault_targets.py`: `DocumentDbTarget` base + `UserCredentialsTarget` (`user_credentials`,
+  `(user_id, name)`) and `UserLlmKeysTarget` (`user_llm_keys`, `(user_id, provider)`) implementing
+  `ProtectedTarget`; rows expose decoded blob bytes (writes re-encode base64), quarantine moves the
+  document to `<collection>_quarantine` with `quarantined_at`/`reason`/`run_id`, `restore_raw`
+  replaces documents and drops quarantine copies. Entry points `parrot_user_credentials` /
+  `parrot_user_llm_keys` registered in `packages/ai-parrot/pyproject.toml`.
+- Tests: rewrote `tests/handlers/test_credential_encryption.py` (round-trips, v2 envelope, context
+  binding across user/name/provider/purpose, wrong key, unknown key version, v1 rejection, reseal),
+  adapted `tests/unit/test_user_llm_key_resolver.py` to the keyring/context, added
+  `tests/security/test_vault_targets.py` (protocol conformance, entry points, deterministic
+  batches, context binding, write/validation/missing doc, quarantine move, export→migrate→
+  quarantine→restore byte-identical, backup free of plaintext).
+- Results: targeted suites — dev baseline 109 passed; worktree 109-equivalent with 16 failures, all
+  in files owned by later tasks (`test_credentials_handler.py` 5 and
+  `test_credentials_integration.py` 6 → TASK-080; `test_user_bots_security.py` 5 → TASK-081), which
+  still call the v1 signature. Files owned by this task all pass. `ruff check` clean.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- `load_vault_keys()` was kept (deprecated) instead of being replaced outright, so the repo stays
+  importable until TASK-080/081 migrate their call sites.
+- DocumentDB targets read each collection once and batch in memory (documents are few per user and
+  the driver strips `_id`, so rows are addressed by their natural key) instead of cursor paging.
+- Backup records carry the full document so quarantined (deleted) documents can be restored;
+  `restore_raw` replaces documents rather than `$set`-merging, so migration-added fields
+  (`updated_at`) do not survive a rollback.
+- `navigator-session>=1.0.0` pin deferred to TASK-085 (as in TASK-077).

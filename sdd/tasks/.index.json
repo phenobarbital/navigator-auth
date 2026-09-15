@@ -1549,7 +1549,7 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "ai-parrot",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
@@ -1558,8 +1558,9 @@
     ],
     "parallel": true,
     "parallelism_notes": "Different repository (ai-parrot worktree); only needs the frozen kernel API.",
-    "file": "sdd/tasks/active/TASK-079-parrot-credentials-docdb-targets.md",
-    "started_at": "2026-09-15T23:23:42Z"
+    "file": "sdd/tasks/completed/TASK-079-parrot-credentials-docdb-targets.md",
+    "started_at": "2026-09-15T23:23:42Z",
+    "completed_at": "2026-09-15T23:52:48Z"
   },
   {
     "id": "TASK-080",

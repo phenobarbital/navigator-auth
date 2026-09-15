@@ -59,6 +59,21 @@ This task migrates every server-side call site.
 
 ## Implementation Notes
 
+### Delivered by TASK-079 (use as-is)
+- `parrot.security.credentials_utils`: `encrypt_credential(credential, context, keyring, *, key_id=None)`,
+  `decrypt_credential(encrypted, context, keyring)`, `reseal_credential(encrypted, old_ctx, new_ctx,
+  keyring)`, `credential_context(user_id, name)`, `llm_key_context(user_id, provider)`,
+  `normalize_user_id`. Same base64 text representation.
+- `parrot.security.vault_utils.get_vault_keyring()` (cached `KeyRing`) / `reset_vault_keyring()`.
+  `load_vault_keys()` is **deprecated** and only kept for `_encrypted_field` (TASK-081); replace
+  `_load_vault_keys()` in `credentials.py` / `studio/byok.py` with `get_vault_keyring()`.
+- Failing tests handed over (they still use the v1 signature): `tests/handlers/
+  test_credentials_handler.py` (5) and `tests/handlers/test_credentials_integration.py` (6) in
+  `packages/ai-parrot/tests`.
+- Worktree test setup: `PYTHONPATH=<wt>/packages/ai-parrot/src:<wt>/packages/ai-parrot-server/src:
+  <navigator-session worktree>` and copy the `*.cpython-312-*.so` build artifacts into the worktree
+  (`parrot.utils.types`), as done in TASK-079.
+
 ### Key Constraints
 - Keep HTTP response shapes of the credentials and BYOK handlers unchanged.
 - A single `KeyRing` per process (reuse the cached one from `parrot.security.vault_utils`).
