@@ -130,8 +130,38 @@ describe("vault api", () => {
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-16
 **Notes**:
+- navigator-frontend-next worktree `.claude/worktrees/feat-FEAT-099-vault-crypto-hardening`
+  (branch from `dev`), commit `1d30a09`.
+- `src/lib/api/vault.ts`: `listSecrets`, `getSecret`, `saveSecret`, `deleteSecret`,
+  `validateSecretKey`, `VaultSecretMetadata`, `SaveSecretResponse`, `VaultError`
+  (`vault_unavailable` → 503, `vault_integrity_error` → 409; other errors keep their `ApiError`).
+  Keys are URL-encoded, so `jira:access_token` works; `{secrets: [...]}` is unwrapped and a
+  missing array degrades to `[]`.
+- `src/lib/components/profile/UserSecrets.svelte`: table with name / last updated / key version,
+  empty state, refresh, add + "Replace value" form (name read-only while replacing), masked
+  `type="password"` value input with `autocomplete="off"` that is never pre-filled and is cleared
+  after submit, row updated in place from the POST metadata, inline validation, delete with an
+  `alertdialog` confirmation and a `role="alert"` banner for `VaultError`.
+- `src/routes/profile/secrets/+page.svelte` under the same `AuthGuard`/`redirectTo="/login"`
+  pattern as `/profile`, plus a "Manage secrets" link on the profile page.
+- Tests: `src/lib/api/vault.test.ts` (9) and
+  `src/lib/components/profile/UserSecrets.test.ts` (7) — metadata-only responses, `:` encoding,
+  error mapping, write-only value, no pre-fill on replace, validation before the API call,
+  delete confirmation, unavailable banner.
+- Results: full suite dev 694 passed / 9 failed (3 files) → worktree 710 passed / **the same** 9
+  pre-existing failures, no new failing files. `svelte-check`: 0 errors, 168 pre-existing
+  warnings (none in the new files).
+- Environment: `pnpm install --frozen-lockfile --prefer-offline --ignore-scripts` + `svelte-kit
+  sync` inside the worktree. Symlinking `node_modules` from the main checkout does **not** work
+  (vite refuses files outside the project root).
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- The secrets table is plain markup rather than `SimpleTable`, which renders values as text and
+  has no per-row action slot.
+- "Replace value" keeps the name read-only instead of offering a rename: the backend has no
+  rename endpoint (see TASK-080), and renaming would require re-sealing server-side.
+- Banners use `notificationStore` toasts for successes and an inline `role="alert"` region for
+  vault errors, matching the existing profile components.

@@ -1635,15 +1635,16 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-frontend-next",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "L",
     "depends_on": [],
     "parallel": true,
     "parallelism_notes": "Different repository; contract-first against spec \u00a72 with mocked API; no shared files with TASK-084.",
-    "file": "sdd/tasks/active/TASK-083-frontend-profile-secrets.md",
-    "started_at": "2026-09-16T00:29:40Z"
+    "file": "sdd/tasks/completed/TASK-083-frontend-profile-secrets.md",
+    "started_at": "2026-09-16T00:29:40Z",
+    "completed_at": "2026-09-16T00:36:16Z"
   },
   {
     "id": "TASK-084",

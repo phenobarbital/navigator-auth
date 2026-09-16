@@ -57,6 +57,17 @@ whose stored tokens became unreadable must show a Reconnect action instead of lo
 
 ## Implementation Notes
 
+### Worktree setup (done in TASK-083)
+- Worktree: `navigator/navigator-frontend-next/.claude/worktrees/feat-FEAT-099-vault-crypto-hardening`
+  (branch from `dev`), with `pnpm install --frozen-lockfile --prefer-offline --ignore-scripts`
+  (~2 s, hardlinks from the pnpm store) and `npx svelte-kit sync`. Do **not** symlink
+  `node_modules` from the main checkout: vite blocks files outside the project root and
+  `@testing-library/svelte/vitest` fails to load.
+- Baseline (both on `dev` and in the worktree): 3 test files / 9 tests fail before any change;
+  `svelte-check` reports 0 errors and 168 pre-existing warnings.
+- `vi.mock` factories are hoisted: declare mock classes inside the factory and read them back
+  with `await import(...)`.
+
 ### Key Constraints
 - The notice text must match the spec exactly (tests assert it).
 - Guard must be module-level (shared by both client factories) and reset only on full page load.
