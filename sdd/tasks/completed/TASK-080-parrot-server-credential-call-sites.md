@@ -127,8 +127,35 @@ async def test_mcp_restore_skips_tampered_credential(agent_handler, fake_docdb_s
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-16
 **Notes**:
+- ai-parrot worktree `.claude/worktrees/feat-FEAT-099-vault-crypto-hardening`, commit `a31b9c1`.
+- `handlers/credentials.py`: `_load_vault_keys()` replaced by `_vault_keyring()` (thin seam over
+  `parrot.security.vault_utils.get_vault_keyring()`, kept so tests can patch one symbol); GET
+  single (`credential_context(user_id, name)`), GET list (per-document `cname`), POST
+  (`payload.name`) and PUT (URL `name`) all seal/open with contexts.
+- `handlers/studio/byok.py`: same `_vault_keyring()` seam; list masks keys with
+  `llm_key_context(user.user_id, doc["provider"])`, POST seals with
+  `llm_key_context(user.user_id, provider)`; `503 vault_unavailable` behaviour unchanged.
+- `handlers/agent.py` MCP restore: loads the key ring once, decrypts with
+  `credential_context(user_id, config.vault_credential_name)`; integrity failures keep logging
+  a warning and skipping that MCP server.
+- Tests: `tests/handlers/test_credentials_handler.py` and `test_credentials_integration.py`
+  patch `_vault_keyring` and build fixtures with contexts (new `keyring` fixture / `_keyring()`
+  helper, `_make_encrypted(cred, user_id, name)`); new
+  `packages/ai-parrot-server/tests/unit/test_byok_context.py` and
+  `test_mcp_restore_integrity.py` (context binding + the handlers' use of contexts and
+  skip-on-failure behaviour).
+- Results: targeted suites — dev baseline 109 passed; worktree 131 passed, 5 failed, all in
+  `tests/handlers/test_user_bots_security.py` (owned by TASK-081). `grep` for
+  `encrypt_for_db|decrypt_for_db|load_master_keys` in `ai-parrot-server/src` only matches a
+  docstring line in `models/_encrypted_field.py` (TASK-081's file). `ruff`: the same 3
+  pre-existing warnings as on `dev` (E401 in two test helpers, one in `agent.py`).
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- "Renaming a credential re-seals": there is no rename path in this handler — `PUT` takes the
+  name from the URL and ignores `payload.name`, so the context never changes. `reseal_credential`
+  from TASK-079 stays available if a rename endpoint is added.
+- Kept a `_vault_keyring()` indirection in both handlers instead of calling `get_vault_keyring()`
+  inline, to preserve a single patch point for the existing tests.

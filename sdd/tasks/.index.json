@@ -1570,7 +1570,7 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "ai-parrot",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "claude-session",
     "priority": "high",
     "effort": "M",
@@ -1579,8 +1579,9 @@
     ],
     "parallel": false,
     "parallelism_notes": "Consumes helper signatures changed in TASK-079.",
-    "file": "sdd/tasks/active/TASK-080-parrot-server-credential-call-sites.md",
-    "started_at": "2026-09-15T23:56:43Z"
+    "file": "sdd/tasks/completed/TASK-080-parrot-server-credential-call-sites.md",
+    "started_at": "2026-09-15T23:56:43Z",
+    "completed_at": "2026-09-16T00:01:01Z"
   },
   {
     "id": "TASK-081",
