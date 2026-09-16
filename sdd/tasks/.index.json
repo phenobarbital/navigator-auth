@@ -1673,8 +1673,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session + navigator-auth",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "in-progress",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -1689,6 +1689,6 @@
     "parallel": false,
     "parallelism_notes": "Closing task; requires every other task merged to rehearse the full migration.",
     "file": "sdd/tasks/active/TASK-085-vault-runbook-docs-e2e.md",
-    "started_at": null
+    "started_at": "2026-09-16T01:12:55Z"
   }
 ]
