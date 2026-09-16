@@ -122,8 +122,40 @@ async def test_tampered_tokens_need_reconnect(service_with_row, vault_with_swapp
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-16
 **Notes**:
+- ai-parrot worktree `.claude/worktrees/feat-FEAT-099-vault-crypto-hardening`, commit `ea23a57`.
+- `services/vault_token_sync.py`: new `VaultTokenRead` dataclass + `read_tokens_result()` with
+  status `ok` / `missing` / `unreadable` (VaultCryptoError, logged by class only) / `unavailable`;
+  `read_tokens()` keeps its old signature by delegating (`.tokens`), so the O365 device-code
+  provider, jira/fireflies/workiq callers are untouched. The loaded `SessionVault` is cached per
+  instance (one load per user per request) and invalidated after `store_tokens`/`delete_tokens`.
+  FEAT-267 write-first ordering and the partial-write warning are unchanged.
+- `auth/oauth2/models.py`: `IntegrationStatus = Literal["connected","disconnected",
+  "needs_reconnect"]`, new `status` field and a `model_validator` keeping `connected` in sync
+  (explicit `status` wins, otherwise it is derived from `connected`).
+- `auth/oauth2/service.py`: `IntegrationsService(vault_token_sync=None)` memoizes one
+  `VaultTokenSync` per instance; `list_for_user` probes the stored tokens of providers that have a
+  `users_integrations` row → `needs_reconnect` when they are missing/unreadable, `connected`
+  otherwise. Probe failures or a missing app/pool fall back to `connected`, so a vault outage never
+  hides working integrations. The handler already serializes with `model_dump(mode="json")`.
+- Tests: `packages/ai-parrot/tests/auth/test_integrations_status.py` (status matrix, no probe
+  without a row, outage/probe-failure fallbacks, descriptor contract) and
+  `packages/ai-parrot-server/tests/unit/test_vault_token_sync_f4_regression.py` (real
+  `SessionVault` over in-memory DB/Redis doubles: `{provider}:{field}` keys really persist and read
+  back, deterministic scheme across instances, delete, missing vs tampered, partial-write warning
+  without leaking tokens).
+- Results vs dev baseline — ai-parrot `tests/{unit/test_vault_token_sync,auth,handlers,security}`:
+  570 → 607 passed with the **same** 42 pre-existing failures (dataset/planogram/etc.);
+  ai-parrot-server `tests/{unit,integration}`: 205 → 227 passed with the same 3 pre-existing
+  failures (a2a vertical broker registration). `ruff`: only the pre-existing `F401` in
+  `service.py` (also present on `dev`).
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- `read_tokens()` was kept as the compatibility wrapper and the typed result exposed through a new
+  `read_tokens_result()`, instead of changing the existing method's return type (5 callers).
+- `missing` tokens also map to `needs_reconnect` (a credential row without usable tokens is not a
+  working integration).
+- The status probe needs `request.app` for the pools; without it the service reports `connected`
+  rather than guessing.
