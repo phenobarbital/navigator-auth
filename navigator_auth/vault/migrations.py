@@ -1,8 +1,13 @@
 """
 Vault Database Migrations — Create and maintain vault tables.
 
-Provides idempotent table creation for the Session Vault system.
-All tables are created in the ``auth`` schema using ``IF NOT EXISTS``.
+Provides idempotent DDL for the Session Vault system, applied in order at every
+startup:
+
+- ``001_create_vault_tables.sql`` — tables in the ``auth`` schema (``IF NOT EXISTS``).
+- ``002_vault_crypto_hardening.sql`` — envelope v2 schema changes (FEAT-099):
+  64-char HMAC ``session_id``, ``quarantine``/``integrity_fail`` audit operations
+  and INTEGER key versions. Each change is applied only when needed.
 """
 import logging
 from pathlib import Path
@@ -12,19 +17,14 @@ logger = logging.getLogger("navigator.vault")
 
 SQL_DIR = Path(__file__).parent / "sql"
 
+# Applied in order, at every startup. Each file is idempotent.
+MIGRATION_FILES = (
+    "001_create_vault_tables.sql",
+    "002_vault_crypto_hardening.sql",
+)
 
-async def ensure_vault_tables(db_pool: Any) -> None:
-    """Create vault tables if they don't already exist.
 
-    Reads the DDL from ``sql/001_create_vault_tables.sql`` and executes it.
-    Safe to call multiple times (idempotent).
-
-    Args:
-        db_pool: asyncpg-compatible connection pool with ``acquire()`` method.
-    """
-    sql_file = SQL_DIR / "001_create_vault_tables.sql"
-    sql = sql_file.read_text()
-
+async def _run_sql(db_pool: Any, sql: str) -> None:
     ctx = db_pool.acquire()
     if hasattr(ctx, "__aenter__"):
         async with ctx as conn:
@@ -40,5 +40,18 @@ async def ensure_vault_tables(db_pool: Any) -> None:
                 await conn.release()
             else:
                 await conn.close()
+
+
+async def ensure_vault_tables(db_pool: Any) -> None:
+    """Create vault tables and apply schema changes if needed.
+
+    Executes every file in ``MIGRATION_FILES`` in order. Safe to call
+    multiple times (idempotent).
+
+    Args:
+        db_pool: asyncpg-compatible connection pool with ``acquire()`` method.
+    """
+    for filename in MIGRATION_FILES:
+        await _run_sql(db_pool, (SQL_DIR / filename).read_text())
 
     logger.info("Vault tables ensured.")

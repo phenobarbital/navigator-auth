@@ -363,3 +363,56 @@ class TestLinkHandler:
         args = backend.authorize_identity.await_args.args
         assert args[1] == 7
         assert args[2] == "/done"
+
+
+class TestUnreadableCredential:
+    """FEAT-099: tampered/moved/legacy tokens surface as 409 (re-link), not 500."""
+
+    @pytest.mark.asyncio
+    async def test_put_with_unreadable_credential_is_409(self):
+        from navigator_auth.handlers.user_identities import UserIdentitiesHandler
+        from navigator_auth.identity.store import IdentityCredentialError
+
+        session = _session_with_user()
+        store = MagicMock()
+        store.get_one = AsyncMock(return_value=_identity())
+        store.decrypt_credential = MagicMock(
+            side_effect=IdentityCredentialError("github", "refresh_token", "VaultIntegrityError")
+        )
+        p1, p2 = _patch_session(session)
+        p3, p4 = _patch_store(store)
+        request = _request(
+            "PUT",
+            "/api/v1/user/identities/11111111-1111-1111-1111-111111111111",
+            match_info={"identity_id": "11111111-1111-1111-1111-111111111111"},
+        )
+        with p1, p2, p3, p4, pytest.raises(web.HTTPException) as exc:
+            await UserIdentitiesHandler(request).put()
+        assert exc.value.status == 409
+        assert "re-link" in exc.value.text
+
+    @pytest.mark.asyncio
+    async def test_credential_endpoint_with_unreadable_credential_is_409(self):
+        from navigator_auth.handlers.user_identities import IdentityCredentialHandler
+        from navigator_auth.identity.store import IdentityCredentialError
+
+        session = _session_with_user()
+        store = MagicMock()
+        store.get_by_provider = AsyncMock(return_value=_identity())
+        store.decrypt_credential = MagicMock(
+            side_effect=IdentityCredentialError("github", "access_token", "UnsupportedFormatError")
+        )
+        p1, p2 = _patch_session(session)
+        p3, p4 = _patch_store(store)
+        request = _request(
+            "GET",
+            "/api/v1/user/identities/github/credential",
+            match_info={"provider": "github"},
+        )
+        with p1, p2, p3, p4, patch(
+            "navigator_auth.handlers.user_identities.cached_credential",
+            new=AsyncMock(return_value=None),
+        ), pytest.raises(web.HTTPException) as exc:
+            await IdentityCredentialHandler(request).get()
+        assert exc.value.status == 409
+        assert "cannot be read" in exc.value.text

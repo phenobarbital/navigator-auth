@@ -671,6 +671,66 @@ mod tests {
         assert!(!matches_pattern("invalid(regex[", "anything", None));
     }
 
+    /// Pin the glob semantics of `glob-match` over URI paths. This decides the
+    /// shape of every `uri:` policy: a single `*` never crosses `/`, so
+    /// `/api/v2/groups*` does NOT cover sub-routes. Use `**` (glob) or an
+    /// anchored regex to cover a subtree.
+    #[test]
+    fn test_uri_glob_semantics() {
+        // `*` matches within one path segment only.
+        assert!(matches_pattern("/api/v2/groups*", "/api/v2/groups", None));
+        assert!(matches_pattern("/api/v2/groups*", "/api/v2/groups_admin", None));
+        assert!(matches_pattern("/api/v2/groups*", "/api/v2/groupsets", None));
+        assert!(!matches_pattern("/api/v2/groups*", "/api/v2/groups/", None));
+        assert!(!matches_pattern("/api/v2/groups*", "/api/v2/groups/123", None));
+        assert!(!matches_pattern("/api/v2/groups*", "/api/v2/groups/123/members", None));
+
+        // `/*` covers exactly one child segment, not the parent nor grandchildren.
+        assert!(!matches_pattern("/api/v2/groups/*", "/api/v2/groups", None));
+        assert!(matches_pattern("/api/v2/groups/*", "/api/v2/groups/", None));
+        assert!(matches_pattern("/api/v2/groups/*", "/api/v2/groups/123", None));
+        assert!(!matches_pattern("/api/v2/groups/*", "/api/v2/groups/123/members", None));
+
+        // `**` crosses `/`: prefix form also matches the bare resource.
+        assert!(matches_pattern("/api/v2/groups**", "/api/v2/groups", None));
+        assert!(matches_pattern("/api/v2/groups**", "/api/v2/groups/123", None));
+        assert!(matches_pattern("/api/v2/groups**", "/api/v2/groups/123/members", None));
+
+        // `/**` covers the whole subtree but not the parent itself.
+        assert!(!matches_pattern("/api/v2/groups/**", "/api/v2/groups", None));
+        assert!(matches_pattern("/api/v2/groups/**", "/api/v2/groups/", None));
+        assert!(matches_pattern("/api/v2/groups/**", "/api/v2/groups/123", None));
+        assert!(matches_pattern("/api/v2/groups/**", "/api/v2/groups/123/members", None));
+
+        // Trap: `.*` without regex metachars (^ $ ( ) + { [ ] |) is treated as a
+        // glob, so `.` is a literal dot and the pattern matches nothing useful.
+        assert!(!is_regex_pattern("/api/v2/groups.*"));
+        assert!(!matches_pattern("/api/v2/groups.*", "/api/v2/groups", None));
+        assert!(!matches_pattern("/api/v2/groups.*", "/api/v2/groups/123/members", None));
+
+        // Anchored regex is the reliable way to cover a subtree.
+        assert!(is_regex_pattern("^/api/v2/groups.*"));
+        assert!(matches_pattern("^/api/v2/groups.*", "/api/v2/groups", None));
+        assert!(matches_pattern("^/api/v2/groups.*", "/api/v2/groups/123/members", None));
+        assert!(!matches_pattern("^/api/v2/groups.*", "/x/api/v2/groups", None));
+
+        // Same semantics through the `uri:` type prefix at the policy level.
+        let policy = PolicyDef {
+            name: "groups_glob".into(),
+            effect: "allow".into(),
+            resources: vec!["uri:/api/v2/groups*".into()],
+            actions: vec![],
+            subjects: SubjectSpec::default(),
+            conditions: ConditionSpec::default(),
+            priority: 0,
+            enforcing: false,
+            org_id: 1,
+            client_id: 1,
+        };
+        assert!(policy_covers_resource(&policy, "uri:/api/v2/groups", None));
+        assert!(!policy_covers_resource(&policy, "uri:/api/v2/groups/123", None));
+    }
+
     #[test]
     fn test_policy_covers_resource() {
         let policy = PolicyDef {
