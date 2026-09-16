@@ -1613,8 +1613,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "ai-parrot",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "in-progress",
+    "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "M",
     "depends_on": [
@@ -1624,7 +1624,7 @@
     "parallel": false,
     "parallelism_notes": "Needs SessionVault v2 ':' keys (TASK-073) and the updated server call sites (TASK-080) in the same ai-parrot worktree.",
     "file": "sdd/tasks/active/TASK-082-integrations-needs-reconnect.md",
-    "started_at": null
+    "started_at": "2026-09-16T00:23:03Z"
   },
   {
     "id": "TASK-083",
