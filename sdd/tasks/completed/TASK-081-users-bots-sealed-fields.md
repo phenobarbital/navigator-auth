@@ -124,8 +124,36 @@ def test_legacy_unwrap_rejects_mismatching_ctx(v1_envelope_for_other_bot, row_bo
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-16
 **Notes**:
+- ai-parrot worktree `.claude/worktrees/feat-FEAT-099-vault-crypto-hardening`, commit `d3f4e72`.
+- `handlers/models/_encrypted_field.py`: `seal`/`unseal` keep their signatures but use envelope v2
+  with `user_bot_context(user_id, chatbot_id, field)` (`parrot-user-bot` purpose) as AAD; the
+  in-plaintext `_ctx` envelope is no longer written. `VaultCryptoError` is translated to the
+  `ValueError("… context mismatch …")` the callers/tests already expect. `unwrap_legacy_envelope()`
+  is kept **only** for the migrator hook.
+- `handlers/models/vault_target.py`: `UsersBotsTarget(PostgresTarget)` over
+  `<PARROT_SCHEMA>.users_bots` (pk `chatbot_id`, identity `(user_id, chatbot_id)`, fields
+  `mcp_config`/`tools_config`, state `enabled`, quarantine `enabled = false`, no key_version
+  column) + `factory` (`parrot_db_pool` or `db_pool`); `legacy_unwrap` verifies the old `_ctx`
+  before re-sealing. Entry point `parrot_users_bots` registered in the server `pyproject.toml`.
+- Removed the deprecated `load_vault_keys()` from `parrot.security.vault_utils` and its re-exports
+  (`parrot.security.__init__`, `parrot.handlers.vault_utils`) — no caller needs raw master keys now.
+- Tests: `tests/handlers/test_user_bots_security.py` patches `get_vault_keyring` and asserts v2
+  rejection semantics (foreign-context blob and raw v1 blob); new
+  `packages/ai-parrot-server/tests/unit/test_users_bots_target.py` (declaration/entry point,
+  target context equals model sealing, row/column swaps detected, legacy unwrap accepted and
+  rejected for substituted/missing envelopes).
+- Results: ai-parrot targeted suite 137 passed (was 131 passed / 5 failed);
+  `ai-parrot-server/tests/unit` 123 passed; `ruff check` clean on touched files.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- The target module lives at `parrot/handlers/models/vault_target.py`, not
+  `parrot/vault_targets.py`: the `parrot` namespace is shared via `pkgutil.extend_path`, so the
+  ai-parrot package already owns the `parrot.vault_targets` module name (DocumentDB targets) and a
+  second module with the same name would be shadowed.
+- `unseal()` raises `ValueError` (not `VaultIntegrityError`) so existing callers and tests keep
+  working; the underlying error class is named in the message.
+- `test_legacy_envelope_rejected` now uses a foreign-context v2 blob plus a new `test_v1_blob_rejected`,
+  since v1 blobs can no longer be produced with the current helpers.

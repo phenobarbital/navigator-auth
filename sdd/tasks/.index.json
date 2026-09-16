@@ -1591,7 +1591,7 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "ai-parrot",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "M",
@@ -1601,8 +1601,9 @@
     ],
     "parallel": false,
     "parallelism_notes": "Shares ai-parrot-server pyproject.toml with TASK-080; legacy_unwrap hook requires the TASK-075 runner.",
-    "file": "sdd/tasks/active/TASK-081-users-bots-sealed-fields.md",
-    "started_at": "2026-09-16T00:13:55Z"
+    "file": "sdd/tasks/completed/TASK-081-users-bots-sealed-fields.md",
+    "started_at": "2026-09-16T00:13:55Z",
+    "completed_at": "2026-09-16T00:17:47Z"
   },
   {
     "id": "TASK-082",
