@@ -1654,15 +1654,16 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-frontend-next",
-    "status": "in-progress",
+    "status": "done",
     "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "M",
     "depends_on": [],
     "parallel": true,
     "parallelism_notes": "Different repository; touches http.ts, login route and integrations only; no shared files with TASK-083.",
-    "file": "sdd/tasks/active/TASK-084-frontend-relogin-integration-status.md",
-    "started_at": "2026-09-16T01:06:35Z"
+    "file": "sdd/tasks/completed/TASK-084-frontend-relogin-integration-status.md",
+    "started_at": "2026-09-16T01:06:35Z",
+    "completed_at": "2026-09-16T01:12:14Z"
   },
   {
     "id": "TASK-085",

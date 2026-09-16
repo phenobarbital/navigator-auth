@@ -120,8 +120,39 @@ it("redirects once on a burst of 401s", async () => {
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Claude Opus 5)
+**Date**: 2026-09-16
 **Notes**:
+- navigator-frontend-next worktree `.claude/worktrees/feat-FEAT-099-vault-crypto-hardening`,
+  commit `dd97b4c`.
+- `src/lib/api/http.ts`: `SESSION_EXPIRED_REASON`, `SESSION_EXPIRED_MESSAGE`,
+  `redirectToLogin()` (module-level single-flight guard, clears the stored token inside
+  try/catch, skips navigation when already on `/login`, sends
+  `/login?reason=session_expired`) and `takeSessionExpiredNotice()` (returns the message once and
+  removes only the `reason` param via `history.replaceState`). The 401 branch now calls
+  `redirectToLogin()`; the policy-denial branch is untouched, and the token client
+  (`createApiClientWithToken`) still never redirects.
+- `src/routes/login/+page.svelte`: `takeSessionExpiredNotice()` in `onMount` renders a
+  `role="status"` notice above the error slot.
+- `src/lib/api/integrations.ts`: `IntegrationStatus` union, optional `status` on
+  `IntegrationDescriptor`, and `integrationStatus()` deriving it from `connected` for backends
+  that predate FEAT-099.
+- `IntegrationItem.svelte`: three states — Connected/Disconnect, "Needs reconnect" badge +
+  Reconnect (re-runs the existing connect flow), Not connected/Connect; the account name stays
+  visible while a reconnect is pending.
+- Tests: `src/lib/api/http.session.test.ts` (6: burst of 401s → one navigation, no redirect on
+  `/login`, token cleared, notice consumed once, other query params kept, no reason → null) and
+  `IntegrationItem.test.ts` (7: the three states, account visible, legacy fallback,
+  `integrationStatus` helper).
+- Results: full suite dev 694 passed / 9 failed (3 files) → worktree 723 passed with the **same**
+  9 pre-existing failures and no new failing files. `svelte-check`: 0 errors, the same 168
+  pre-existing warnings.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- The notice logic lives in `http.ts` as `takeSessionExpiredNotice()` (next to the redirect that
+  produces the query param) instead of inside the login page, so it is unit-testable without
+  rendering the whole login route.
+- Tests stub `window.location`/`history` rather than driving jsdom navigation: axios reads
+  `location.href` at import time and needs an absolute URL.
+- No dedicated login-route render test (the page pulls in auth, provider buttons and carousel
+  assets); the consumed-once behaviour is covered at the helper level.
