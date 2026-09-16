@@ -128,10 +128,53 @@ def test_full_rehearsal(seeded_v1_environment, tmp_path):
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
+**Completed by**: claude-session (Opus 5)
+**Date**: 2026-09-16
 **Notes**:
 
-**Deviations from spec**: none | describe if any
+Documentation, versions and the closing rehearsal. Commits:
+`ee1445c` + `491388e` (navigator-session), `44f1de2` (navigator-auth),
+`cd8690390` (ai-parrot), all on `feat-FEAT-099-vault-crypto-hardening`.
+
+- **Docs** — `navigator-session/docs/vault/`: `format.md` (envelope v2 layout,
+  AAD construction, HKDF key schedule, environment), `targets.md` (how to
+  register a protected store through the `navigator_session.vault_targets`
+  entry point, with the `PostgresTarget` contract), `migration-runbook.md`
+  (the window, step by step, plus rollback). navigator-auth gets `docs/vault.rst`
+  in the Sphinx toctree, covering its own side and linking to those three.
+- **Rehearsal** — `navigator-session/tests/integration/test_vault_migration_e2e.py`
+  drives the real CLI (`main([...])`) over three seeded v1 stores: a
+  single-field PostgreSQL table, a multi-field table using the legacy `_ctx`
+  envelope, and a document store. It walks `list-targets` → `migrate --dry-run`
+  → `migrate --run --backup-dir --quarantine` → `verify` → `restore`, and
+  asserts: dry-run writes nothing; backups hold v1 ciphertext only, with
+  `0700`/`0600` permissions; a v1 blob copied between rows is rejected and
+  quarantined rather than legitimised; without `--quarantine` the run exits `2`
+  and leaves the row untouched; a second run reports `migrated=0`,
+  `already_v2>0`; restore is byte-identical to the seed. A fourth test rotates
+  keys after the migration and checks every target re-seals while the Redis
+  naming key is unchanged.
+- **Durations** — the runbook table now carries the rehearsal (6 rows, 0.05 s)
+  and a 50 000-row crypto-only measurement (33 µs/row convert, 10 µs/row
+  verify, ~30k rows/s per core), with the conclusion that the window is sized
+  by database work, not by cryptography. A row is left for the operator's own
+  production-sized rehearsal.
+- **Versions** — navigator-session `1.0.0` (new `CHANGES.rst` BREAKING
+  section), navigator-auth `0.28.0` pinning `navigator-session>=1.0.0`;
+  same pin in `packages/ai-parrot/pyproject.toml`; `# Unreleased` /
+  `## [Unreleased]` entries in navigator-auth and both ai-parrot changelogs.
+- **Bug found by the rehearsal** — `--report` was only accepted before the
+  subcommand, contradicting how the runbook spells it. `cli.py` now accepts it
+  on the subcommands too.
+- **Evidence** — `artifacts/logs/feat-099-{navigator-session,navigator-auth,
+  ai-parrot,frontend}.log` and `feat-099-summary.md`. navigator-session 341
+  passed / 0 failed; navigator-auth 32 failed / 1342 passed; ai-parrot 42/3
+  failures on its two suites; frontend 9 failed / 723 passed — every failure
+  count equal to or better than the pre-feature baseline of the same repo, and
+  all remaining failures pre-existing and unrelated. The four spec §5 grep
+  checks are clean.
+
+**Deviations from spec**: the recorded rehearsal runs against in-process
+stand-in stores rather than a production-sized database copy, so the duration
+table gives a crypto throughput figure and an explicit instruction for ops to
+measure their own window. Scheduling that window was ruled out of spec.
