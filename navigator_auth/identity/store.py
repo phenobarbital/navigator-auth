@@ -21,6 +21,7 @@ IDENTITY_VAULT_KEY = "identity:{provider}"
 try:
     from navigator_session.vault import VaultCryptoError
 except ImportError:  # pragma: no cover - IdentityCipher raises ConfigError first
+
     class VaultCryptoError(Exception):  # type: ignore[no-redef]
         """Placeholder when navigator-session vault crypto is unavailable."""
 
@@ -57,12 +58,19 @@ class IdentityStore:
     # ------------------------------------------------------------------
 
     def _seal(
-        self, value: Any, user_id: Any, provider: str,
-        provider_user_id: Optional[str], field: str,
+        self,
+        value: Any,
+        user_id: Any,
+        provider: str,
+        provider_user_id: Optional[str],
+        field: str,
     ) -> bytes:
         return self._cipher.encrypt(
-            value, user_id=user_id, auth_provider=provider,
-            provider_user_id=provider_user_id, field=field,
+            value,
+            user_id=user_id,
+            auth_provider=provider,
+            provider_user_id=provider_user_id,
+            field=field,
         )
 
     def _open(self, identity: Any, field: str) -> Any:
@@ -77,16 +85,20 @@ class IdentityStore:
         except VaultCryptoError as err:
             logger.error(
                 "Identity credential integrity failure: user=%s provider=%s field=%s error=%s",
-                getattr(identity, "user_id", None), identity.auth_provider, field,
+                getattr(identity, "user_id", None),
+                identity.auth_provider,
+                field,
                 type(err).__name__,
             )
-            raise IdentityCredentialError(
-                identity.auth_provider, field, type(err).__name__
-            ) from None
+            raise IdentityCredentialError(identity.auth_provider, field, type(err).__name__) from None
 
     def _reseal_kept(
-        self, existing: Any, user_id: Any, provider: str,
-        new_provider_user_id: Optional[str], fields: tuple[str, ...],
+        self,
+        existing: Any,
+        user_id: Any,
+        provider: str,
+        new_provider_user_id: Optional[str],
+        fields: tuple[str, ...],
     ) -> dict[str, bytes]:
         """Re-seal kept token columns of ``existing`` for a new provider_user_id."""
         resealed: dict[str, bytes] = {}
@@ -123,11 +135,7 @@ class IdentityStore:
                 if token.refresh_token
                 else None
             ),
-            "id_token": (
-                self._seal(token.id_token, user_id, provider, puid, "id_token")
-                if token.id_token
-                else None
-            ),
+            "id_token": (self._seal(token.id_token, user_id, provider, puid, "id_token") if token.id_token else None),
             "token_type": token.token_type,
             "expires_at": token.expires_at,
             "refreshed_at": now,
@@ -157,9 +165,7 @@ class IdentityStore:
                     values.pop("id_token", None)
                     kept.append("id_token")
                 if kept and getattr(existing, "provider_user_id", None) != puid:
-                    values.update(
-                        self._reseal_kept(existing, user_id, provider, puid, tuple(kept))
-                    )
+                    values.update(self._reseal_kept(existing, user_id, provider, puid, tuple(kept)))
                 for key, value in values.items():
                     setattr(existing, key, value)
                 return await existing.update()
@@ -260,9 +266,7 @@ class IdentityStore:
         puid = identity.provider_user_id
         identity.access_token = self._seal(token.access_token, user_id, provider, puid, "access_token")
         if token.refresh_token:
-            identity.refresh_token = self._seal(
-                token.refresh_token, user_id, provider, puid, "refresh_token"
-            )
+            identity.refresh_token = self._seal(token.refresh_token, user_id, provider, puid, "refresh_token")
         identity.token_type = token.token_type
         identity.expires_at = token.expires_at
         identity.refreshed_at = datetime.now(timezone.utc)
@@ -282,12 +286,8 @@ class IdentityStore:
                 legacy format); the identity must be re-linked.
         """
         access_token = self._open(identity, "access_token")
-        refresh_token = (
-            self._open(identity, "refresh_token") if identity.refresh_token else None
-        )
-        id_token = (
-            self._open(identity, "id_token") if getattr(identity, "id_token", None) else None
-        )
+        refresh_token = self._open(identity, "refresh_token") if identity.refresh_token else None
+        id_token = self._open(identity, "id_token") if getattr(identity, "id_token", None) else None
         return TokenResponse(
             access_token=access_token,
             token_type=identity.token_type or "Bearer",

@@ -134,7 +134,10 @@ async def get_session_vault(
     if not db_pool or not user_id:
         return None
     vault = await load_vault_for_session(
-        session, user_id=user_id, db_pool=db_pool, redis=redis,
+        session,
+        user_id=user_id,
+        db_pool=db_pool,
+        redis=redis,
         keyring=request.app.get(VAULT_KEYRING_APP_KEY),
     )
     if vault is not None:

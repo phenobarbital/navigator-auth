@@ -102,15 +102,13 @@ class VaultView(web.View, CorsViewMixin):
             except VaultCryptoError as err:
                 logger.error(
                     "Vault secret integrity failure on read: key=%s error=%s",
-                    key, type(err).__name__,
+                    key,
+                    type(err).__name__,
                 )
                 _json_error(409, VAULT_INTEGRITY_ERROR)
             return JSONResponse(await self._metadata_for(vault, key))
 
-        secrets = [
-            _metadata_dict(metadata, getattr(metadata, "key", ""))
-            for metadata in await vault.list_metadata()
-        ]
+        secrets = [_metadata_dict(metadata, getattr(metadata, "key", "")) for metadata in await vault.list_metadata()]
         return JSONResponse({"secrets": secrets})
 
     async def post(self):

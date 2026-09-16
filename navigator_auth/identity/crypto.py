@@ -13,6 +13,7 @@ Every token is bound (AEAD associated data) to its identity row and column::
 so a token copied to another user, provider account or column
 (``access_token`` ↔ ``refresh_token`` ↔ ``id_token``) fails to decrypt.
 """
+
 import os
 from typing import Any, Optional
 
@@ -154,8 +155,10 @@ class IdentityCipher:
     ) -> bytes:
         """Serialize and seal *value* bound to its identity row and column."""
         context = identity_context(
-            user_id=user_id, auth_provider=auth_provider,
-            provider_user_id=provider_user_id, field=field,
+            user_id=user_id,
+            auth_provider=auth_provider,
+            provider_user_id=provider_user_id,
+            field=field,
         )
         return seal_value(value, context, self._keyring)
 
@@ -178,8 +181,10 @@ class IdentityCipher:
         if isinstance(ciphertext, memoryview):
             ciphertext = bytes(ciphertext)
         context = identity_context(
-            user_id=user_id, auth_provider=auth_provider,
-            provider_user_id=provider_user_id, field=field,
+            user_id=user_id,
+            auth_provider=auth_provider,
+            provider_user_id=provider_user_id,
+            field=field,
         )
         return open_value(ciphertext, context, self._keyring)
 

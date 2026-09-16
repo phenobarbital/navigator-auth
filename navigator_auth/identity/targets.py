@@ -8,6 +8,7 @@ provider_user_id, field)`` — the same values ``IdentityStore`` seals with.
 Quarantine disables the identity (``enabled = false``) and keeps its tokens so
 a restore can bring them back; the user must re-link the provider.
 """
+
 from typing import Any, Mapping, Optional
 from uuid import UUID
 

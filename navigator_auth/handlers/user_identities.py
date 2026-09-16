@@ -77,8 +77,7 @@ class BaseIdentityView(web.View, CorsViewMixin):
         except IdentityCredentialError as err:
             _json_error(
                 409,
-                f"{err.provider}: stored credential cannot be read; "
-                "re-link the identity.",
+                f"{err.provider}: stored credential cannot be read; " "re-link the identity.",
             )
 
     def _store(self) -> IdentityStore:
