@@ -76,6 +76,18 @@ def _store():
     return IdentityStore(_make_pool(), cipher=IdentityCipher(master_keys=MASTER_KEYS))
 
 
+def _enc(store, value, field, user_id=1, provider="azure", puid="u1"):
+    return store._cipher.encrypt(
+        value, user_id=user_id, auth_provider=provider, provider_user_id=puid, field=field
+    )
+
+
+def _dec(store, value, field, user_id=1, provider="azure", puid="u1"):
+    return store._cipher.decrypt(
+        value, user_id=user_id, auth_provider=provider, provider_user_id=puid, field=field
+    )
+
+
 class FakeMeta:
     connection = None
 
@@ -136,7 +148,7 @@ async def test_store_saves_and_decrypts_id_token():
     with patch("navigator_auth.identity.store.UserIdentity", FakeUserIdentity):
         row = await store.save_linked_identity(user_id=1, provider="azure", token=token)
     assert row.id_token is not None
-    decrypted = store._cipher.decrypt(row.id_token)
+    decrypted = _dec(store, row.id_token, "id_token")
     assert decrypted == "id-jwt"
     full = store.decrypt_credential(row)
     assert full.id_token == "id-jwt"
@@ -173,8 +185,8 @@ async def test_resave_without_refresh_keeps_existing_refresh():
         user_id=1,
         auth_provider="azure",
         provider_user_id="u1",
-        refresh_token=store._cipher.encrypt("old-rt"),
-        id_token=store._cipher.encrypt("old-id"),
+        refresh_token=_enc(store, "old-rt", "refresh_token"),
+        id_token=_enc(store, "old-id", "id_token"),
     )
     FakeUserIdentity._existing = existing
     token = TokenResponse(
@@ -185,10 +197,10 @@ async def test_resave_without_refresh_keeps_existing_refresh():
     )
     with patch("navigator_auth.identity.store.UserIdentity", FakeUserIdentity):
         row = await store.save_linked_identity(user_id=1, provider="azure", token=token)
-    assert store._cipher.decrypt(row.refresh_token) == "old-rt"
-    assert store._cipher.decrypt(row.id_token) == "old-id"
+    assert _dec(store, row.refresh_token, "refresh_token") == "old-rt"
+    assert _dec(store, row.id_token, "id_token") == "old-id"
     # access token is always refreshed
-    assert store._cipher.decrypt(row.access_token) == "new-at"
+    assert _dec(store, row.access_token, "access_token") == "new-at"
 
 
 @pytest.mark.asyncio
@@ -198,8 +210,8 @@ async def test_resave_with_new_refresh_overwrites_existing():
         user_id=1,
         auth_provider="azure",
         provider_user_id="u1",
-        refresh_token=store._cipher.encrypt("old-rt"),
-        id_token=store._cipher.encrypt("old-id"),
+        refresh_token=_enc(store, "old-rt", "refresh_token"),
+        id_token=_enc(store, "old-id", "id_token"),
     )
     FakeUserIdentity._existing = existing
     token = TokenResponse(
@@ -210,8 +222,8 @@ async def test_resave_with_new_refresh_overwrites_existing():
     )
     with patch("navigator_auth.identity.store.UserIdentity", FakeUserIdentity):
         row = await store.save_linked_identity(user_id=1, provider="azure", token=token)
-    assert store._cipher.decrypt(row.refresh_token) == "new-rt"
-    assert store._cipher.decrypt(row.id_token) == "new-id"
+    assert _dec(store, row.refresh_token, "refresh_token") == "new-rt"
+    assert _dec(store, row.id_token, "id_token") == "new-id"
 
 
 # ---------------------------------------------------------------------------
@@ -267,9 +279,10 @@ async def test_migration_runs_002_after_001():
             return FakeCtx()
 
     await migrations.ensure_identity_columns(FakePool())
-    assert len(executed_sql) == 2
+    assert len(executed_sql) == 3
     assert "provider_user_id" in executed_sql[0]
     assert "id_token" in executed_sql[1]
+    assert "key_version TYPE INTEGER" in executed_sql[2]
 
 
 @pytest.mark.asyncio
@@ -279,9 +292,11 @@ async def test_credential_endpoint_serializes_id_token_without_handler_changes()
     which now carries id_token automatically."""
     store = _store()
     identity = MagicMock()
-    identity.access_token = store._cipher.encrypt("at")
-    identity.refresh_token = store._cipher.encrypt("rt")
-    identity.id_token = store._cipher.encrypt("id-jwt")
+    identity.user_id = 1
+    identity.auth_provider = "azure"
+    identity.access_token = _enc(store, "at", "access_token")
+    identity.refresh_token = _enc(store, "rt", "refresh_token")
+    identity.id_token = _enc(store, "id-jwt", "id_token")
     identity.token_type = "Bearer"
     identity.expires_at = None
     identity.scopes = []

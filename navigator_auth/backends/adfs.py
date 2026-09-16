@@ -113,14 +113,14 @@ class ADFSAuth(ExternalAuth):
         await super(ADFSAuth, self).on_startup(app)
 
     def _validate_internal_redirect(self, uri: str) -> str:
-        """Only honor an absolute ``internal_redirect`` whose host is on
-        ALLOWED_HOSTS; otherwise drop it and fall back to the default
+        """Only honor an absolute ``internal_redirect`` whose host is under
+        AUTH_TRUSTED_DOMAINS; otherwise drop it and fall back to the default
         finish-redirect behavior in ``home_redirect``. Relative URIs are
         always safe (``home_redirect`` prepends the current request's own
         domain to them).
 
-        Delegates to ``BaseAuthBackend.validate_redirect_host`` (promoted,
-        behavior-preserving; FEAT-097 Module 1)."""
+        Delegates to ``BaseAuthBackend.validate_redirect_host``, which
+        checks the target against ``AUTH_TRUSTED_DOMAINS``."""
         return self.validate_redirect_host(uri)
 
     async def authenticate(self, request: web.Request):

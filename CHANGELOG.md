@@ -1,5 +1,47 @@
 # Unreleased
 
+- **BREAKING — Vault crypto hardening (FEAT-099, 0.28.0).** Requires
+  `navigator-session>=1.0.0` and an offline data migration
+  (`navigator-vault migrate`, see navigator-session `docs/vault/migration-runbook.md`).
+  All sessions are invalidated by the deploy.
+  - Identity credentials are sealed bound to
+    `(user_id, auth_provider, provider_user_id, column)`: a token copied to
+    another user, provider account or column no longer decrypts. `IdentityCipher`
+    takes keyword-only context arguments and `IdentityStore.decrypt_credential`
+    raises `IdentityCredentialError`, which the identity endpoints map to
+    `409` ("re-link the identity").
+  - `GET /api/v1/user/vault[/{key}]` returns **metadata only** (`key`,
+    `updated_at`, `key_version`) — secret values never reach the browser.
+    `POST` answers with that metadata plus its message; an unreadable secret
+    returns `409 vault_integrity_error` and an unavailable vault `503
+    vault_unavailable`.
+  - Migration `002_vault_crypto_hardening.sql` widens `user_vault_audit.session_id`
+    to 64 chars (it now stores an HMAC), allows the `quarantine` and
+    `integrity_fail` audit operations, and turns key-version columns into
+    `INTEGER`; identity migration `003` does the same for `user_identities`.
+    Every statement is conditional, so repeated startups take no locks.
+  - `auth.user_identities` is registered as a vault target, so rotation and
+    migration cover linked identities.
+
+
+- **Open-redirect protection — `AUTH_TRUSTED_DOMAINS`.** Every
+  frontend-supplied redirect target (`?redirect_uri=` on login routes, SAML
+  `RelayState`, Azure/ADFS `internal_redirect`, the identity-link
+  `finish_redirect`) now goes through a single gate,
+  `navigator_auth.libs.redirect.safe_redirect_url`, before a `302` is
+  issued. Relative paths are resolved on the current domain; absolute
+  `http(s)` targets are honoured only when their *hostname* is one of
+  `AUTH_TRUSTED_DOMAINS` (or a sub-domain of one, or the host serving the
+  request); mobile deep-link schemes are accepted (optionally restricted by
+  `AUTH_TRUSTED_REDIRECT_SCHEMES`), browser-executable schemes never are.
+  Protocol-relative (`//evil.com`), backslash and `user@host` netloc tricks
+  that bypassed the previous per-backend checks are rejected; a rejected
+  target logs a warning and falls back to `AUTH_REDIRECT_URI` instead of
+  breaking the login. Defaults to `localhost` plus `DOMAIN`/`DOMAIN_HOST`,
+  so single-domain deployments need no change; multi-app deployments should
+  set `AUTH_TRUSTED_DOMAINS` explicitly. `BaseAuthBackend.validate_redirect_host` (ADFS relay, SAML
+  RelayState / `redirect_uri`) now delegates to the same gate instead of
+  glob-matching the raw netloc against `ALLOWED_HOSTS`. See `documentation/trusted-redirects.md`.
 - **Abstract SAML 2.0 Backend — SP and IdP roles on `pysaml2` (0.26.0).**
   **Breaking:** `python3-saml`/`xmlsec` are replaced by `pysaml2>=7.5,<8`;
   the `xmlsec1` system binary is now required (was: the `xmlsec`

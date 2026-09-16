@@ -16,7 +16,7 @@ class _Stub(BaseAuthBackend):
 
 @pytest.fixture
 def backend(monkeypatch):
-    monkeypatch.setattr("navigator_auth.backends.abstract.ALLOWED_HOSTS", ["*.example.com"])
+    monkeypatch.setattr("navigator_auth.libs.redirect.AUTH_TRUSTED_DOMAINS", ["example.com"])
     return _Stub(user_model=None)
 
 

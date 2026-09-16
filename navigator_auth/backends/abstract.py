@@ -29,10 +29,10 @@ from ..conf import (
     AUTH_EXCLUDE_LIST_KEY,
     PREFERRED_AUTH_SCHEME,
     AUTH_REDIRECT_URI,
-    ALLOWED_HOSTS,
 )
 from ..libs.json import json_encoder
 from ..libs.sanitize import sanitize_request
+from ..libs.redirect import safe_redirect_url, is_safe_redirect
 
 # Authenticated Identity
 from ..identities import Identity, AuthBackend
@@ -404,37 +404,45 @@ class BaseAuthBackend(ABC):
         return domain_url
 
     def get_finish_redirect_url(self, request: web.Request) -> str:
+        """Resolve where to send the browser once authentication finishes.
+
+        ``?redirect_uri=`` is frontend-supplied and therefore untrusted: it
+        is passed through :func:`safe_redirect_url`, which only honours
+        relative paths, hosts under ``AUTH_TRUSTED_DOMAINS`` and mobile
+        deep-link schemes, falling back to ``AUTH_REDIRECT_URI`` otherwise.
+        """
         domain_url = self.get_domain(request)
         try:
             redirect_url = request.query["redirect_uri"]
         except (TypeError, KeyError):
             redirect_url = AUTH_REDIRECT_URI
-        if not bool(urlparse(redirect_url).netloc):
-            redirect_url = f"{domain_url}{redirect_url}"
-        self.finish_redirect_url = redirect_url
+        self.finish_redirect_url = safe_redirect_url(
+            request, redirect_url, fallback=AUTH_REDIRECT_URI, domain_url=domain_url
+        )
+        return self.finish_redirect_url
 
     def validate_redirect_host(
-        self, uri: Optional[str], extra_hosts: Iterable[str] = ()
+        self,
+        uri: Optional[str],
+        extra_hosts: Iterable[str] = (),
+        request: Optional[web.Request] = None,
     ) -> Optional[str]:
-        """Only honor an absolute redirect URI whose host is on
-        ALLOWED_HOSTS (or ``extra_hosts``); otherwise drop it and let the
-        caller fall back to a safe default. Relative URIs are always safe.
+        """Return ``uri`` when it is a safe redirect target, else ``None``.
 
-        Promoted from ``ADFSAuth._validate_internal_redirect``
-        (behavior-preserving); shared by every backend that needs to
-        validate a caller-supplied redirect target (ADFS relay, SAML
-        RelayState / redirect_uri).
+        Thin wrapper over :func:`navigator_auth.libs.redirect.is_safe_redirect`
+        for callers that need a *verdict* rather than a resolved URL (ADFS
+        relay, SAML RelayState / ``redirect_uri``): relative paths and mobile
+        deep links are accepted; absolute ``http(s)`` targets only when their
+        hostname is under ``AUTH_TRUSTED_DOMAINS``, the host serving
+        ``request``, or ``extra_hosts`` the caller vouches for (e.g. a SAML
+        SP's ACS host). The caller falls back to a safe default on ``None``.
         """
         if not uri:
             return None
-        netloc = urlparse(uri).netloc
-        if not netloc:
+        if is_safe_redirect(uri, request=request, extra_hosts=extra_hosts):
             return uri
-        for pattern in (*ALLOWED_HOSTS, *extra_hosts):
-            if fnmatch.fnmatch(netloc, pattern):
-                return uri
         self.logger.warning(
-            f"{self._service}: rejected redirect to disallowed host: {netloc!r}"
+            f"{self._service}: rejected redirect to untrusted target: {uri!r}"
         )
         return None
 
@@ -468,11 +476,12 @@ class BaseAuthBackend(ABC):
             headers["x-auth-token-type"] = token_type
             params = {"token": token, "type": token_type}
         if uri is not None:
-            if not bool(urlparse(uri).netloc):
-                domain_url = self.get_domain(request)
-                redirect_url = f"{domain_url}{uri}"
-            else:
-                redirect_url = uri
+            redirect_url = safe_redirect_url(
+                request,
+                uri,
+                fallback=self.finish_redirect_url,
+                domain_url=self.get_domain(request),
+            )
         else:
             redirect_url = self.finish_redirect_url
         url = self.prepare_url(redirect_url, params)
