@@ -24,6 +24,7 @@ from ..conf import (
     AZURE_ADFS_TENANT_ID,
     AZURE_SESSION_TIMEOUT,
     AZURE_MAPPING,
+    AZURE_TRUSTED_APPIDS,
 )
 from ..libs.json import json_encoder, json_decoder
 from ..responses import JSONResponse
@@ -39,6 +40,10 @@ _AZURE_GRAPH_AUDIENCES = frozenset(
         "00000003-0000-0000-c000-000000000000",
     }
 )
+#: Application ids whose access tokens we accept: our own client id plus
+#: any trusted caller declared through `AZURE_TRUSTED_APPIDS` (e.g. the
+#: Teams bridge app presenting Graph tokens on behalf of users).
+_AZURE_TRUSTED_APPIDS = frozenset({AZURE_ADFS_CLIENT_ID, *AZURE_TRUSTED_APPIDS})
 
 
 logging.getLogger("msal").setLevel(logging.INFO)
@@ -446,7 +451,8 @@ class AzureAuth(ExternalAuth):
         by third parties (the signing key set may differ from the one
         published for id_tokens). This path requires `aud` to be one of
         the Graph-ish audiences *and* `appid`/`azp` to be this
-        application's client id; a subsequent signature-verification
+        application's client id or one of the trusted application ids
+        declared in `AZURE_TRUSTED_APPIDS`; a subsequent signature-verification
         failure is tolerated (logged at warning) as long as those checks
         passed — the Graph `/me` call the caller makes right after this
         acts as the liveness check.
@@ -460,8 +466,8 @@ class AzureAuth(ExternalAuth):
         if aud not in _AZURE_GRAPH_AUDIENCES:
             self.logger.warning(f"azure: access-token wrong audience aud={aud!r}")
             raise InvalidAuth("wrong_audience")
-        if appid != AZURE_ADFS_CLIENT_ID:
-            self.logger.warning(f"azure: access-token appid/azp mismatch appid={appid!r}")
+        if appid not in _AZURE_TRUSTED_APPIDS:
+            self.logger.warning(f"azure: access-token appid/azp not trusted appid={appid!r}")
             raise InvalidAuth("wrong_audience")
         exp = unverified.get("exp")
         if exp is not None and exp < time.time():

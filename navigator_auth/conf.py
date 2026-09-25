@@ -404,6 +404,14 @@ default_scopes = "User.Read,User.Read.All,User.ReadBasic.All,openid"
 AZURE_ADFS_SCOPES = [
     e.strip() for e in list(config.get("AZURE_ADFS_SCOPES", fallback="").split(","))
 ]
+# Extra application (client) ids whose access tokens `_verify_access_token`
+# accepts besides our own AZURE_ADFS_CLIENT_ID — e.g. the Teams bridge app
+# that calls this backend on behalf of users. Comma-separated GUIDs.
+AZURE_TRUSTED_APPIDS = [
+    e.strip()
+    for e in config.get("AZURE_TRUSTED_APPIDS", fallback="").split(",")
+    if e.strip()
+]
 
 PREFERRED_AUTH_SCHEME = config.get("PREFERRED_AUTH_SCHEME", fallback="https")
 

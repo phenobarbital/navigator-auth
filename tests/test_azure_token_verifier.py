@@ -192,6 +192,34 @@ async def test_verify_access_token_ok_with_matching_appid(backend, rsa_keypair, 
     backend.get.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_verify_access_token_ok_with_trusted_appid(backend, rsa_keypair, monkeypatch):
+    """A token minted for a trusted third-party app (AZURE_TRUSTED_APPIDS)
+    is accepted; anything outside that allow-list is still rejected."""
+    from navigator_auth.backends import azure as azure_module
+
+    key, jwk = rsa_keypair
+    _mock_jwks(monkeypatch, jwk)
+    teams_bridge = "93c34821-c15f-4226-affd-995b488e8c11"
+    monkeypatch.setattr(
+        azure_module,
+        "_AZURE_TRUSTED_APPIDS",
+        frozenset({AZURE_ADFS_CLIENT_ID, teams_bridge}),
+    )
+    token = _make_token(key, KID, _access_token_claims(appid=teams_bridge))
+    userinfo, normalized = await backend.verify_external_token(token)
+    assert userinfo == GRAPH_PROFILE
+    assert normalized.provider_user_id == "azure-oid-2"
+    backend.get.assert_awaited_once()
+
+    backend.get.reset_mock()
+    other = _make_token(key, KID, _access_token_claims(appid="some-other-app-id"))
+    with pytest.raises(InvalidAuth) as exc:
+        await backend.verify_external_token(other)
+    assert "wrong_audience" in str(exc.value)
+    backend.get.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # Expiry
 # ---------------------------------------------------------------------------

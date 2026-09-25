@@ -1,5 +1,14 @@
 # Unreleased
 
+- **Azure access-token verifier — `AZURE_TRUSTED_APPIDS`.**
+  `AzureAuth._verify_access_token` (the access-token-only path of the
+  external token exchange / `check_credentials`) now accepts a token whose
+  `appid`/`azp` is either our own `AZURE_ADFS_CLIENT_ID` **or** one of the
+  application ids listed in the new comma-separated `AZURE_TRUSTED_APPIDS`
+  environment variable (e.g. a Teams bridge app calling the backend on
+  behalf of users). Empty by default, so existing deployments keep the
+  strict "our client id only" behaviour. Audience, expiry and issuer
+  checks are unchanged.
 - **Open-redirect protection — `AUTH_TRUSTED_DOMAINS`.** Every
   frontend-supplied redirect target (`?redirect_uri=` on login routes, SAML
   `RelayState`, Azure/ADFS `internal_redirect`, the identity-link
