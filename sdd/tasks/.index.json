@@ -1359,15 +1359,16 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "M",
     "depends_on": [],
     "parallel": false,
     "parallelism_notes": "Foundation of the kernel; every other task imports KeyRing.",
-    "file": "sdd/tasks/active/TASK-070-vault-keyring.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-070-vault-keyring.md",
+    "started_at": "2026-09-15T19:50:06Z",
+    "completed_at": "2026-09-15T19:53:51Z"
   },
   {
     "id": "TASK-071",
@@ -1377,8 +1378,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -1386,8 +1387,9 @@
     ],
     "parallel": false,
     "parallelism_notes": "Builds on KeyRing derivations; removes v1 public API that later tasks replace.",
-    "file": "sdd/tasks/active/TASK-071-vault-envelope-v2.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-071-vault-envelope-v2.md",
+    "started_at": "2026-09-15T20:47:17Z",
+    "completed_at": "2026-09-15T20:52:45Z"
   },
   {
     "id": "TASK-072",
@@ -1397,8 +1399,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -1406,8 +1408,9 @@
     ],
     "parallel": false,
     "parallelism_notes": "Defines ProtectedTarget protocols consumed by rotation, migration and all downstream targets.",
-    "file": "sdd/tasks/active/TASK-072-vault-registry-postgres-target.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-072-vault-registry-postgres-target.md",
+    "started_at": "2026-09-15T21:00:05Z",
+    "completed_at": "2026-09-15T21:05:30Z"
   },
   {
     "id": "TASK-073",
@@ -1417,8 +1420,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -1427,8 +1430,9 @@
     ],
     "parallel": true,
     "parallelism_notes": "Touches session_vault.py/models.py only; can run in a separate navigator-session worktree alongside TASK-074 and TASK-075 after TASK-072 (rebase on __init__.py export hunk).",
-    "file": "sdd/tasks/active/TASK-073-session-vault-v2.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-073-session-vault-v2.md",
+    "started_at": "2026-09-15T21:17:32Z",
+    "completed_at": "2026-09-15T21:21:25Z"
   },
   {
     "id": "TASK-074",
@@ -1438,8 +1442,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "M",
     "depends_on": [
@@ -1447,8 +1451,9 @@
     ],
     "parallel": true,
     "parallelism_notes": "Touches key_rotation.py (+ optional seal key_id kwarg in envelope.py); independent of TASK-073/075 files.",
-    "file": "sdd/tasks/active/TASK-074-registry-key-rotation.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-074-registry-key-rotation.md",
+    "started_at": "2026-09-15T21:26:15Z",
+    "completed_at": "2026-09-15T21:28:55Z"
   },
   {
     "id": "TASK-075",
@@ -1458,8 +1463,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -1467,8 +1472,9 @@
     ],
     "parallel": true,
     "parallelism_notes": "Creates the new migrate/ package only; no shared files with TASK-073/074.",
-    "file": "sdd/tasks/active/TASK-075-vault-migrator-runner.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-075-vault-migrator-runner.md",
+    "started_at": "2026-09-15T21:48:42Z",
+    "completed_at": "2026-09-15T21:53:45Z"
   },
   {
     "id": "TASK-076",
@@ -1478,8 +1484,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "M",
     "depends_on": [
@@ -1488,8 +1494,9 @@
     ],
     "parallel": false,
     "parallelism_notes": "Wires runner and SessionVault Redis layout; edits pyproject.toml shared with TASK-072.",
-    "file": "sdd/tasks/active/TASK-076-navigator-vault-cli.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-076-navigator-vault-cli.md",
+    "started_at": "2026-09-15T21:58:00Z",
+    "completed_at": "2026-09-15T22:01:16Z"
   },
   {
     "id": "TASK-077",
@@ -1499,8 +1506,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-auth",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "M",
     "depends_on": [
@@ -1508,8 +1515,9 @@
     ],
     "parallel": true,
     "parallelism_notes": "Different repository (navigator-auth worktree); only needs the frozen kernel API from TASK-071/072.",
-    "file": "sdd/tasks/active/TASK-077-identity-vault-contexts.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-077-identity-vault-contexts.md",
+    "started_at": "2026-09-15T22:07:50Z",
+    "completed_at": "2026-09-15T22:16:52Z"
   },
   {
     "id": "TASK-078",
@@ -1519,8 +1527,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-auth",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "M",
     "depends_on": [
@@ -1529,8 +1537,9 @@
     ],
     "parallel": false,
     "parallelism_notes": "Same navigator-auth worktree as TASK-077 (shared pyproject/tests/unit/vault); needs SessionVault.list_metadata from TASK-073.",
-    "file": "sdd/tasks/active/TASK-078-vault-http-api-v2.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-078-vault-http-api-v2.md",
+    "started_at": "2026-09-15T22:18:03Z",
+    "completed_at": "2026-09-15T22:23:47Z"
   },
   {
     "id": "TASK-079",
@@ -1540,8 +1549,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "ai-parrot",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -1549,8 +1558,9 @@
     ],
     "parallel": true,
     "parallelism_notes": "Different repository (ai-parrot worktree); only needs the frozen kernel API.",
-    "file": "sdd/tasks/active/TASK-079-parrot-credentials-docdb-targets.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-079-parrot-credentials-docdb-targets.md",
+    "started_at": "2026-09-15T23:23:42Z",
+    "completed_at": "2026-09-15T23:52:48Z"
   },
   {
     "id": "TASK-080",
@@ -1560,8 +1570,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "ai-parrot",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "M",
     "depends_on": [
@@ -1569,8 +1579,9 @@
     ],
     "parallel": false,
     "parallelism_notes": "Consumes helper signatures changed in TASK-079.",
-    "file": "sdd/tasks/active/TASK-080-parrot-server-credential-call-sites.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-080-parrot-server-credential-call-sites.md",
+    "started_at": "2026-09-15T23:56:43Z",
+    "completed_at": "2026-09-16T00:01:01Z"
   },
   {
     "id": "TASK-081",
@@ -1580,8 +1591,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "ai-parrot",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "M",
     "depends_on": [
@@ -1590,8 +1601,9 @@
     ],
     "parallel": false,
     "parallelism_notes": "Shares ai-parrot-server pyproject.toml with TASK-080; legacy_unwrap hook requires the TASK-075 runner.",
-    "file": "sdd/tasks/active/TASK-081-users-bots-sealed-fields.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-081-users-bots-sealed-fields.md",
+    "started_at": "2026-09-16T00:13:55Z",
+    "completed_at": "2026-09-16T00:17:47Z"
   },
   {
     "id": "TASK-082",
@@ -1601,8 +1613,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "ai-parrot",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "M",
     "depends_on": [
@@ -1611,8 +1623,9 @@
     ],
     "parallel": false,
     "parallelism_notes": "Needs SessionVault v2 ':' keys (TASK-073) and the updated server call sites (TASK-080) in the same ai-parrot worktree.",
-    "file": "sdd/tasks/active/TASK-082-integrations-needs-reconnect.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-082-integrations-needs-reconnect.md",
+    "started_at": "2026-09-16T00:23:03Z",
+    "completed_at": "2026-09-16T00:28:22Z"
   },
   {
     "id": "TASK-083",
@@ -1622,15 +1635,16 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-frontend-next",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "L",
     "depends_on": [],
     "parallel": true,
     "parallelism_notes": "Different repository; contract-first against spec \u00a72 with mocked API; no shared files with TASK-084.",
-    "file": "sdd/tasks/active/TASK-083-frontend-profile-secrets.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-083-frontend-profile-secrets.md",
+    "started_at": "2026-09-16T00:29:40Z",
+    "completed_at": "2026-09-16T00:36:16Z"
   },
   {
     "id": "TASK-084",
@@ -1640,15 +1654,16 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-frontend-next",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "medium",
     "effort": "M",
     "depends_on": [],
     "parallel": true,
     "parallelism_notes": "Different repository; touches http.ts, login route and integrations only; no shared files with TASK-083.",
-    "file": "sdd/tasks/active/TASK-084-frontend-relogin-integration-status.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-084-frontend-relogin-integration-status.md",
+    "started_at": "2026-09-16T01:06:35Z",
+    "completed_at": "2026-09-16T01:12:14Z"
   },
   {
     "id": "TASK-085",
@@ -1658,8 +1673,8 @@
     "feature": "vault-crypto-hardening",
     "spec": "sdd/specs/vault-crypto-hardening.spec.md",
     "repo": "navigator-session + navigator-auth",
-    "status": "pending",
-    "assigned_to": null,
+    "status": "done",
+    "assigned_to": "claude-session",
     "priority": "high",
     "effort": "L",
     "depends_on": [
@@ -1673,7 +1688,8 @@
     ],
     "parallel": false,
     "parallelism_notes": "Closing task; requires every other task merged to rehearse the full migration.",
-    "file": "sdd/tasks/active/TASK-085-vault-runbook-docs-e2e.md",
-    "started_at": null
+    "file": "sdd/tasks/completed/TASK-085-vault-runbook-docs-e2e.md",
+    "started_at": "2026-09-16T01:12:55Z",
+    "completed_at": "2026-09-16T03:45:00Z"
   }
 ]
