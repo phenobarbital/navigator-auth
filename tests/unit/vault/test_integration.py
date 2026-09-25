@@ -79,6 +79,7 @@ class TestLoadVaultForSession:
                 db_pool=mock_pool,
                 redis=mock_redis,
                 session_ttl=7200,
+                keyring=None,
             )
 
     @pytest.mark.asyncio
@@ -302,3 +303,36 @@ class TestUserSessionVaultWiring:
                 await handler(request)
                 assert received["session"] is mock_session
                 assert received["user"] is mock_user
+
+
+class TestVaultKeyringWiring:
+    """FEAT-099: one KeyRing per app, passed to every SessionVault load."""
+
+    def test_setup_vault_keyring_stores_on_app(self, monkeypatch):
+        import base64
+        import os
+        from navigator_auth.vault.integration import VAULT_KEYRING_APP_KEY, setup_vault_keyring
+
+        for name in [n for n in os.environ if n.startswith("VAULT_")]:
+            monkeypatch.delenv(name)
+        app = {}
+        assert setup_vault_keyring(app) is None and VAULT_KEYRING_APP_KEY not in app
+        monkeypatch.setenv("VAULT_MASTER_KEY_v1", base64.b64encode(b"\x07" * 32).decode())
+        monkeypatch.setenv("VAULT_ACTIVE_KEY_ID", "1")
+        ring = setup_vault_keyring(app)
+        assert ring is not None and app[VAULT_KEYRING_APP_KEY] is ring
+
+    @pytest.mark.asyncio
+    async def test_get_session_vault_passes_app_keyring(self):
+        from navigator_auth.vault.integration import VAULT_KEYRING_APP_KEY, get_session_vault
+
+        ring = object()
+        request = MagicMock()
+        request.app = {"authdb": MagicMock(), "redis": None, VAULT_KEYRING_APP_KEY: ring}
+        session = MagicMock()
+        session.get = MagicMock(return_value=None)
+        session.session_id = "sid"
+        with patch("navigator_auth.vault.integration.SessionVault") as MockVault:
+            MockVault.load_for_session = AsyncMock(return_value=MagicMock())
+            await get_session_vault(request, session, user_id=5)
+        assert MockVault.load_for_session.call_args.kwargs["keyring"] is ring

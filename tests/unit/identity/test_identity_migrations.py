@@ -51,18 +51,24 @@ class TestSQLFile:
         assert "DROP" not in sql.upper()
         assert "id_token" in sql
 
+    def test_key_version_integer_sql_is_conditional(self):
+        sql = (SQL_DIR / "003_identity_key_version_integer.sql").read_text()
+        assert "data_type = 'smallint'" in sql
+        assert "ALTER COLUMN key_version TYPE INTEGER" in sql
+        assert "DROP" not in sql.upper()
+
 
 class TestEnsureIdentityColumns:
     @pytest.mark.asyncio
     async def test_executes_ddl(self):
         pool, conn = _make_pool_async_cm()
         await ensure_identity_columns(pool)
-        # FEAT-096 TASK-047: 001 then 002, both idempotent/additive.
-        assert conn.execute.await_count == 2
-        first = conn.execute.await_args_list[0].args[0]
-        second = conn.execute.await_args_list[1].args[0]
+        # FEAT-096 TASK-047: 001 then 002; FEAT-099: 003 (INTEGER key_version).
+        assert conn.execute.await_count == 3
+        first, second, third = (c.args[0] for c in conn.execute.await_args_list)
         assert "auth.user_identities" in first
         assert "id_token" in second
+        assert "key_version TYPE INTEGER" in third
 
     @pytest.mark.asyncio
     async def test_awaitable_acquire_releases(self):
@@ -75,8 +81,8 @@ class TestEnsureIdentityColumns:
         pool.acquire = MagicMock(side_effect=lambda: _acquire())
         pool.release = AsyncMock()
         await ensure_identity_columns(pool)
-        assert conn.execute.await_count == 2
-        assert pool.release.await_count == 2
+        assert conn.execute.await_count == 3
+        assert pool.release.await_count == 3
         pool.release.assert_awaited_with(conn)
 
 
@@ -92,4 +98,4 @@ class TestSetupIdentityColumns:
     async def test_calls_through(self):
         pool, conn = _make_pool_async_cm()
         await setup_identity_columns(pool)
-        assert conn.execute.await_count == 2
+        assert conn.execute.await_count == 3

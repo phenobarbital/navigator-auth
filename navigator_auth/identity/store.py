@@ -18,6 +18,33 @@ logger = logging.getLogger("navigator.identity")
 # Session Vault key for the cached credential of a provider:
 IDENTITY_VAULT_KEY = "identity:{provider}"
 
+try:
+    from navigator_session.vault import VaultCryptoError
+except ImportError:  # pragma: no cover - IdentityCipher raises ConfigError first
+
+    class VaultCryptoError(Exception):  # type: ignore[no-redef]
+        """Placeholder when navigator-session vault crypto is unavailable."""
+
+
+class IdentityCredentialError(Exception):
+    """A stored identity token cannot be opened.
+
+    The ciphertext was tampered with, copied from another user/account/column,
+    sealed with a key version no longer configured, or is in a legacy format.
+    The identity must be re-linked.
+
+    Attributes:
+        provider: ``auth_provider`` of the identity.
+        field: Token column that failed.
+        reason: Error class name (never secret material).
+    """
+
+    def __init__(self, provider: str, field: str, reason: str) -> None:
+        super().__init__(f"{provider}: stored {field} cannot be decrypted ({reason})")
+        self.provider = provider
+        self.field = field
+        self.reason = reason
+
 
 class IdentityStore:
     """CRUD for ciphered identity credentials on auth.user_identities."""
@@ -26,6 +53,62 @@ class IdentityStore:
         self._pool = db_pool
         self._cipher = cipher if cipher is not None else IdentityCipher()
 
+    # ------------------------------------------------------------------
+    # Context-bound sealing helpers
+    # ------------------------------------------------------------------
+
+    def _seal(
+        self,
+        value: Any,
+        user_id: Any,
+        provider: str,
+        provider_user_id: Optional[str],
+        field: str,
+    ) -> bytes:
+        return self._cipher.encrypt(
+            value,
+            user_id=user_id,
+            auth_provider=provider,
+            provider_user_id=provider_user_id,
+            field=field,
+        )
+
+    def _open(self, identity: Any, field: str) -> Any:
+        try:
+            return self._cipher.decrypt(
+                getattr(identity, field),
+                user_id=identity.user_id,
+                auth_provider=identity.auth_provider,
+                provider_user_id=identity.provider_user_id,
+                field=field,
+            )
+        except VaultCryptoError as err:
+            logger.error(
+                "Identity credential integrity failure: user=%s provider=%s field=%s error=%s",
+                getattr(identity, "user_id", None),
+                identity.auth_provider,
+                field,
+                type(err).__name__,
+            )
+            raise IdentityCredentialError(identity.auth_provider, field, type(err).__name__) from None
+
+    def _reseal_kept(
+        self,
+        existing: Any,
+        user_id: Any,
+        provider: str,
+        new_provider_user_id: Optional[str],
+        fields: tuple[str, ...],
+    ) -> dict[str, bytes]:
+        """Re-seal kept token columns of ``existing`` for a new provider_user_id."""
+        resealed: dict[str, bytes] = {}
+        for field in fields:
+            if getattr(existing, field, None) is None:
+                continue
+            value = self._open(existing, field)
+            resealed[field] = self._seal(value, user_id, provider, new_provider_user_id, field)
+        return resealed
+
     async def save_linked_identity(
         self,
         user_id: Any,
@@ -33,21 +116,26 @@ class IdentityStore:
         token: TokenResponse,
         userinfo: Optional[dict] = None,
     ) -> UserIdentity:
-        """Upsert the linked identity for (user, provider, external account)."""
+        """Upsert the linked identity for (user, provider, external account).
+
+        Tokens are sealed bound to ``(user_id, provider, provider_user_id,
+        column)``. When an existing row is updated with a different
+        ``provider_user_id`` (e.g. a legacy row without one), token columns
+        that are kept from the old row are re-sealed for the new context.
+        """
         userinfo = userinfo or {}
         now = datetime.now(timezone.utc)
+        puid = token.provider_user_id
         values = {
-            "provider_user_id": token.provider_user_id,
+            "provider_user_id": puid,
             "scopes": list(token.scopes or []),
-            "access_token": self._cipher.encrypt(token.access_token),
+            "access_token": self._seal(token.access_token, user_id, provider, puid, "access_token"),
             "refresh_token": (
-                self._cipher.encrypt(token.refresh_token)
+                self._seal(token.refresh_token, user_id, provider, puid, "refresh_token")
                 if token.refresh_token
                 else None
             ),
-            "id_token": (
-                self._cipher.encrypt(token.id_token) if token.id_token else None
-            ),
+            "id_token": (self._seal(token.id_token, user_id, provider, puid, "id_token") if token.id_token else None),
             "token_type": token.token_type,
             "expires_at": token.expires_at,
             "refreshed_at": now,
@@ -69,10 +157,15 @@ class IdentityStore:
             if existing:
                 # D10: a re-save without a new refresh/id token keeps the
                 # previously vaulted one instead of clobbering it with None.
+                kept: list[str] = []
                 if token.refresh_token is None:
                     values.pop("refresh_token", None)
+                    kept.append("refresh_token")
                 if token.id_token is None:
                     values.pop("id_token", None)
+                    kept.append("id_token")
+                if kept and getattr(existing, "provider_user_id", None) != puid:
+                    values.update(self._reseal_kept(existing, user_id, provider, puid, tuple(kept)))
                 for key, value in values.items():
                     setattr(existing, key, value)
                 return await existing.update()
@@ -168,10 +261,12 @@ class IdentityStore:
     async def update_tokens(
         self, identity: UserIdentity, token: TokenResponse
     ) -> UserIdentity:
-        """Persist refreshed tokens on an existing identity row."""
-        identity.access_token = self._cipher.encrypt(token.access_token)
+        """Persist refreshed tokens on an existing identity row (same context)."""
+        user_id, provider = identity.user_id, identity.auth_provider
+        puid = identity.provider_user_id
+        identity.access_token = self._seal(token.access_token, user_id, provider, puid, "access_token")
         if token.refresh_token:
-            identity.refresh_token = self._cipher.encrypt(token.refresh_token)
+            identity.refresh_token = self._seal(token.refresh_token, user_id, provider, puid, "refresh_token")
         identity.token_type = token.token_type
         identity.expires_at = token.expires_at
         identity.refreshed_at = datetime.now(timezone.utc)
@@ -183,18 +278,16 @@ class IdentityStore:
             return await identity.update()
 
     def decrypt_credential(self, identity: UserIdentity) -> TokenResponse:
-        """Decrypt a stored identity row into a TokenResponse."""
-        access_token = self._cipher.decrypt(identity.access_token)
-        refresh_token = (
-            self._cipher.decrypt(identity.refresh_token)
-            if identity.refresh_token
-            else None
-        )
-        id_token = (
-            self._cipher.decrypt(identity.id_token)
-            if getattr(identity, "id_token", None)
-            else None
-        )
+        """Decrypt a stored identity row into a TokenResponse.
+
+        Raises:
+            IdentityCredentialError: If any stored token fails to open
+                (tampered, moved between rows/columns, unknown key version,
+                legacy format); the identity must be re-linked.
+        """
+        access_token = self._open(identity, "access_token")
+        refresh_token = self._open(identity, "refresh_token") if identity.refresh_token else None
+        id_token = self._open(identity, "id_token") if getattr(identity, "id_token", None) else None
         return TokenResponse(
             access_token=access_token,
             token_type=identity.token_type or "Bearer",

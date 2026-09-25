@@ -28,7 +28,13 @@ from .authorizations import (
     authz_useragent,
 )
 from .authorizations._client_ip import get_client_ip
-from .vault.integration import load_vault_for_session, setup_vault_tables, VAULT_SESSION_KEY
+from .vault.integration import (
+    load_vault_for_session,
+    setup_vault_keyring,
+    setup_vault_tables,
+    VAULT_KEYRING_APP_KEY,
+    VAULT_SESSION_KEY,
+)
 from .identity.migrations import setup_identity_columns
 from .backends.idp import IdentityProvider
 from .conf import (
@@ -170,6 +176,7 @@ class AuthHandler:
                 logging.exception(f"Error on Startup Auth Backend {name} init: {err.message}")
                 raise AuthException(f"Error on Startup Auth Backend {name} init: {err.message}") from err
         # Create vault tables if they don't exist (non-blocking)
+        setup_vault_keyring(app)
         if "authdb" in app:
             await setup_vault_tables(app["authdb"])
             await setup_identity_columns(app["authdb"])
@@ -526,6 +533,7 @@ class AuthHandler:
                             user_id=user_id,
                             db_pool=db_pool,
                             redis=redis,
+                            keyring=request.app.get(VAULT_KEYRING_APP_KEY),
                         )
                         if vault:
                             session[VAULT_SESSION_KEY] = vault

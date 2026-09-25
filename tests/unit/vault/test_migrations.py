@@ -127,14 +127,48 @@ class TestEnsureVaultTables:
 
         await ensure_vault_tables(pool)
 
-        conn.execute.assert_called_once()
-        sql_arg = conn.execute.call_args.args[0]
-        assert "user_vault_secrets" in sql_arg
-        assert "user_vault_audit" in sql_arg
-        assert "vault_key_registry" in sql_arg
+        assert conn.execute.await_count == 2
+        first, second = (c.args[0] for c in conn.execute.await_args_list)
+        assert "user_vault_secrets" in first
+        assert "user_vault_audit" in first
+        assert "vault_key_registry" in first
+        assert "integrity_fail" in second
 
     @pytest.mark.asyncio
     async def test_callable(self):
         """ensure_vault_tables is an async callable."""
         import asyncio
         assert asyncio.iscoroutinefunction(ensure_vault_tables)
+
+
+class TestCryptoHardeningMigration:
+    """FEAT-099: 002 schema changes for envelope v2 (conditional, lock-free when applied)."""
+
+    @pytest.fixture
+    def sql(self):
+        from navigator_auth.vault.migrations import SQL_DIR
+        return (SQL_DIR / "002_vault_crypto_hardening.sql").read_text()
+
+    def test_registered_after_001(self):
+        from navigator_auth.vault.migrations import MIGRATION_FILES
+        assert MIGRATION_FILES == ("001_create_vault_tables.sql", "002_vault_crypto_hardening.sql")
+
+    def test_widens_session_id_to_64(self, sql):
+        assert "ALTER COLUMN session_id TYPE VARCHAR(64)" in sql
+        assert "character_maximum_length < 64" in sql
+
+    def test_operation_check_allows_new_operations(self, sql):
+        assert "'quarantine'" in sql and "'integrity_fail'" in sql
+        assert "NOT LIKE '%integrity_fail%'" in sql  # only replaced when outdated
+
+    def test_key_versions_become_integer_only_when_smallint(self, sql):
+        assert "data_type = 'smallint'" in sql
+        for pair in ("('user_vault_secrets', 'key_version')", "('user_vault_audit', 'key_version')",
+                     "('vault_key_registry', 'key_id')"):
+            assert pair in sql
+
+    def test_every_change_is_guarded(self, sql):
+        """Unconditional ALTERs would lock tables on every startup."""
+        body = sql.split("DO $$")[1:]
+        assert len(body) == 4
+        assert all("IF " in block or "FOR target IN" in block for block in body)
