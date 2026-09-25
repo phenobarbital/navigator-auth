@@ -71,6 +71,7 @@ from .storages.postgres import PostgresStorage
 from .storages.redis import RedisStorage
 from .templates import TemplateParser
 from .middlewares.security import security_middleware
+from .middlewares.csrf import csrf_middleware
 from .middlewares.version import version_middleware
 
 url = logging.getLogger("urllib3.connectionpool")
@@ -153,7 +154,11 @@ class AuthHandler:
             AUTHORIZATION_BACKENDS if authz_backends is None else authz_backends
         )
         # TODO: Session Support with parametrization (other backends):
-        self._session = SessionHandler(storage="redis", use_cookies=self.secure_cookies)  # pylint: disable=E1123
+        # `secure_cookies` also drives the session cookie's `Secure` attribute
+        # (previously dropped silently — see CHANGELOG).
+        self._session = SessionHandler(
+            storage="redis", use_cookies=self.secure_cookies, secure=self.secure_cookies
+        )  # pylint: disable=E1123
         ### JSON encoder
         self._json = JSONContent()
         # Logger Backend
@@ -729,6 +734,9 @@ class AuthHandler:
                 raise ConfigError(f"Auth: Error on Backend {name} init: {err!s}") from err
         # last: add the basic jwt middleware (used by basic auth and others)
         mdl.append(self.auth_middleware)
+        # CSRF protection: must run after auth_middleware so `authenticated`
+        # and the session id are already resolved.
+        mdl.append(csrf_middleware)
         # and the security headers on responses.
         mdl.append(security_middleware)
         # version / deployment metadata headers on responses.
