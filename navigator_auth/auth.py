@@ -73,6 +73,7 @@ from .templates import TemplateParser
 from .middlewares.security import security_middleware
 from .middlewares.csrf import csrf_middleware
 from .middlewares.version import version_middleware
+from .abac.middleware import abac_middleware
 
 url = logging.getLogger("urllib3.connectionpool")
 url.setLevel(logging.WARNING)
@@ -741,6 +742,13 @@ class AuthHandler:
         mdl.append(security_middleware)
         # version / deployment metadata headers on responses.
         mdl.append(version_middleware)
+        # ABAC needs request["authenticated"], so it must run inside the
+        # authentication middlewares. If PDP.setup() ran before this handler,
+        # abac_middleware is already registered in front of them (outermost):
+        # move it after, so the setup call order does not matter.
+        if abac_middleware in mdl:
+            mdl.remove(abac_middleware)
+            mdl.append(abac_middleware)
         return self.app
 
     async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:
