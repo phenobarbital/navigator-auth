@@ -96,6 +96,14 @@ ENABLE_XSS_PROTECTION = config.getboolean('ENABLE_XSS_PROTECTION', fallback=True
 XSS_PROTECTION = config.get('XSS_PROTECTION', fallback='1; mode=block')
 XCONTENT_TYPE_OPTIONS = config.get('XCONTENT_TYPE_OPTIONS', fallback='nosniff')
 
+# CSRF Protection (signed double-submit cookie, navigator_auth/libs/csrf.py):
+# only requests authenticated purely via the ambient session cookie (no
+# Authorization header) are checked - see middlewares/csrf.py.
+ENABLE_CSRF_PROTECTION = config.getboolean('ENABLE_CSRF_PROTECTION', fallback=True)
+CSRF_COOKIE_NAME = config.get('CSRF_COOKIE_NAME', fallback='csrf_token')
+CSRF_HEADER_NAME = config.get('CSRF_HEADER_NAME', fallback='X-CSRF-Token')
+CSRF_COOKIE_MAX_AGE = config.getint('CSRF_COOKIE_MAX_AGE', fallback=SESSION_TIMEOUT)
+
 # Version / Deployment Headers:
 import platform  # noqa: E402
 from .version import __version__ as _PKG_VERSION  # noqa: E402

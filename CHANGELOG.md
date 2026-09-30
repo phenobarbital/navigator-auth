@@ -1,5 +1,24 @@
 # Unreleased
 
+- **Session cookie `Secure` flag fix and CSRF protection (0.28.2).**
+  Requires `navigator-session>=1.1.0`.
+  - The Redis session cookie was silently missing the `Secure` attribute
+    (it showed up as `Secure=False` in the browser regardless of HTTPS) and
+    was named `csrf_secure` — a leftover naming bug in `navigator-session`,
+    unrelated to CSRF. `AuthHandler.__init__`'s `secure_cookies` flag now
+    also drives the cookie's `Secure` attribute; the cookie name comes from
+    `navigator-session`'s `SESSION_NAME` setting instead. Deployments
+    running without HTTPS should set `secure_cookies=False` explicitly (the
+    cookie is silently dropped by browsers otherwise); anything depending
+    on the `csrf_secure` cookie name must update to the new name.
+  - New CSRF protection: `navigator_auth.middlewares.csrf_middleware`
+    (signed double-submit cookie, see `navigator_auth/libs/csrf.py`). Only
+    unsafe-method requests (`POST`/`PUT`/`PATCH`/`DELETE`) authenticated
+    purely by the session cookie (no `Authorization` header) require a
+    matching `X-CSRF-Token` header; bearer/API-key requests are exempt, as
+    they can't be forged cross-site. Controlled by `ENABLE_CSRF_PROTECTION`
+    (default `True`), `CSRF_COOKIE_NAME` (default `csrf_token`) and
+    `CSRF_HEADER_NAME` (default `X-CSRF-Token`).
 - **Azure access-token verifier — `AZURE_TRUSTED_APPIDS` (0.28.1).**
   `AzureAuth._verify_access_token` (the access-token-only path of the
   external token exchange / `check_credentials`) now accepts a token whose

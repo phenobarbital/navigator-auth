@@ -7,6 +7,7 @@ from .token import token_middleware
 from .apikey import apikey_middleware
 from .unified import UnifiedAuthMiddleware
 from .strategies import TokenStrategy
+from .csrf import csrf_middleware
 
 __all__ = [
     "jwt_middleware",
@@ -14,4 +15,5 @@ __all__ = [
     "apikey_middleware",
     "UnifiedAuthMiddleware",
     "TokenStrategy",
+    "csrf_middleware",
 ]
