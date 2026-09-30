@@ -357,7 +357,9 @@ class PDP:
 
         # the backend add a middleware to the app
         mdl = self.app.middlewares
-        # add the middleware for this backend Authentication
+        # add the ABAC middleware. It must run after the authentication
+        # middlewares: appended here it already does when AuthHandler.setup()
+        # ran first; otherwise AuthHandler.setup() moves it behind them.
         mdl.append(abac_middleware)
         ### create the API endpoint for this ABAC
         pep = PEP()
