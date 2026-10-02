@@ -32,7 +32,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -42,8 +42,8 @@
       "parallelism_notes": "S0: creates the package and frozen Pydantic types used by 88/89/93+.",
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-87-passkey-types-migration.md"
+      "completed_at": "2026-10-02T21:30:31+00:00",
+      "file": "sdd/tasks/completed/TASK-87-passkey-types-migration.md"
     },
     {
       "id": "TASK-88",
