@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 8, §2 Overview item 10, §7 R5, AC13)
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-95
@@ -207,8 +207,7 @@ See above (spec §4: `test_oauth2_login_page_passkey`, plus the R5 test).
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
-**R5 outcome**: compatible as is | shim added in <file>
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: R5: compatible as is (test_passkey_session_decodes_for_oauth2 passes; no OAuth2 code changed). Template adds autocomplete=username webauthn, #passkey-signin and inline script (explicit click aborts pending conditional request). Static template tests + JS syntax check run; Playwright e2e skipped (playwright not installed) so the browser flow was NOT exercised.
 **Deviations from spec**: none

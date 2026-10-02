@@ -234,7 +234,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -244,8 +244,8 @@
       "parallelism_notes": "Touches templates/oauth/login.html (+ an R5 shim only if needed); disjoint from TASK-96's passkey.py edits.",
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-97-oauth-login-page-passkey.md"
+      "completed_at": "2026-10-02T21:47:09+00:00",
+      "file": "sdd/tasks/completed/TASK-97-oauth-login-page-passkey.md"
     },
     {
       "id": "TASK-98",
