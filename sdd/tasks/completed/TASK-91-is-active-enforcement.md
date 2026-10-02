@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 4, §2.6, §2.8, §7 R2/R3, AC9, Q-F1)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -277,7 +277,7 @@ See above (spec §4, Module 4 rows).
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: user_is_active helper; checks in BasicAuth.open_session and Oauth2 auth_login; mfa/amr JWT extras; FailedAuth propagation. 60 passed, 3 skipped (pre-existing env skips). Ruff findings in oauth2/backend.py are pre-existing.
 **Deviations from spec**: none

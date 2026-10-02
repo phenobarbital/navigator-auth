@@ -112,7 +112,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
@@ -120,8 +120,8 @@
       "parallelism_notes": "Touches abstract.py/basic.py/oauth2/backend.py only; disjoint from TASK-92 and from the passkey package.",
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-91-is-active-enforcement.md"
+      "completed_at": "2026-10-02T21:32:49+00:00",
+      "file": "sdd/tasks/completed/TASK-91-is-active-enforcement.md"
     },
     {
       "id": "TASK-92",
