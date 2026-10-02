@@ -14,14 +14,14 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
       "parallel": false,
       "parallelism_notes": "S0 serial head: every later task reads PASSKEY_* and the verified py_webauthn API.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-86-passkey-config-packaging.md"
     },
@@ -32,7 +32,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -41,7 +41,7 @@
       "parallel": false,
       "parallelism_notes": "S0: creates the package and frozen Pydantic types used by 88/89/93+.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-87-passkey-types-migration.md"
     },
@@ -52,7 +52,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -61,7 +61,7 @@
       "parallel": true,
       "parallelism_notes": "Touches only passkey/store.py (+ one export line); disjoint from TASK-89's rp.py, both only need TASK-87's types.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-88-passkey-store.md"
     },
@@ -72,7 +72,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "S",
       "depends_on": [
@@ -81,7 +81,7 @@
       "parallel": true,
       "parallelism_notes": "Touches only passkey/rp.py (+ one export line); disjoint from TASK-88.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-89-passkey-rp-resolver.md"
     },
@@ -92,7 +92,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -101,7 +101,7 @@
       "parallel": true,
       "parallelism_notes": "Tests-only (tests/fixtures/passkey.py); needs only webauthn installed by TASK-86; runs beside 87-89.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-90-passkey-test-fixtures.md"
     },
@@ -112,14 +112,14 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
       "parallel": true,
       "parallelism_notes": "Touches abstract.py/basic.py/oauth2/backend.py only; disjoint from TASK-92 and from the passkey package.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-91-is-active-enforcement.md"
     },
@@ -130,14 +130,14 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "medium",
       "effort": "S",
       "depends_on": [],
       "parallel": true,
       "parallelism_notes": "Touches abac/context.py only; disjoint from everything else.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-92-evalcontext-auth-method-mfa.md"
     },
@@ -148,7 +148,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -160,7 +160,7 @@
       "parallel": false,
       "parallelism_notes": "Creates backends/passkey.py, which 94-96 extend sequentially.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-93-passkey-backend-core.md"
     },
@@ -171,7 +171,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -181,7 +181,7 @@
       "parallel": false,
       "parallelism_notes": "Edits backends/passkey.py (shared with 93/95/96) — sequential.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-94-passkey-enrollment.md"
     },
@@ -192,7 +192,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -203,7 +203,7 @@
       "parallel": false,
       "parallelism_notes": "Edits backends/passkey.py; needs TASK-91's open_session changes for E9 and the mfa/amr JWT keys.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-95-passkey-signin.md"
     },
@@ -214,7 +214,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -223,7 +223,7 @@
       "parallel": false,
       "parallelism_notes": "Edits backends/passkey.py after TASK-95 — sequential.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-96-passkey-credential-management.md"
     },
@@ -234,7 +234,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -243,7 +243,7 @@
       "parallel": true,
       "parallelism_notes": "Touches templates/oauth/login.html (+ an R5 shim only if needed); disjoint from TASK-96's passkey.py edits.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-97-oauth-login-page-passkey.md"
     },
@@ -254,7 +254,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "medium",
       "effort": "S",
       "depends_on": [
@@ -264,7 +264,7 @@
       "parallel": false,
       "parallelism_notes": "Closing task; documents the implemented behaviour.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-98-passkey-docs-changelog.md"
     }
