@@ -1,5 +1,6 @@
 # ruff: noqa: F811
 """FEAT-101 TASK-90 — the software authenticator passes py_webauthn's real verifiers."""
+
 import os
 
 import pytest
@@ -16,8 +17,10 @@ ORIGIN, RP_ID = "https://a.test", "a.test"
 def _register(auth, challenge):
     cred = auth.make_attestation(RP_ID, ORIGIN, challenge, user_handle=os.urandom(32))
     return webauthn.verify_registration_response(
-        credential=cred, expected_challenge=challenge,
-        expected_rp_id=RP_ID, expected_origin=ORIGIN,
+        credential=cred,
+        expected_challenge=challenge,
+        expected_rp_id=RP_ID,
+        expected_origin=ORIGIN,
     )
 
 
@@ -34,9 +37,13 @@ def test_assertion_roundtrip(soft_authenticator):
     challenge = os.urandom(32)
     cred = soft_authenticator.make_assertion(RP_ID, ORIGIN, challenge, sign_count=1)
     out = webauthn.verify_authentication_response(
-        credential=cred, expected_challenge=challenge, expected_rp_id=RP_ID,
-        expected_origin=ORIGIN, credential_public_key=verified.credential_public_key,
-        credential_current_sign_count=0, require_user_verification=True,
+        credential=cred,
+        expected_challenge=challenge,
+        expected_rp_id=RP_ID,
+        expected_origin=ORIGIN,
+        credential_public_key=verified.credential_public_key,
+        credential_current_sign_count=0,
+        require_user_verification=True,
     )
     assert out.new_sign_count == 1 and out.user_verified is True
 
@@ -48,9 +55,13 @@ def test_assertion_without_uv_rejected_when_required(soft_authenticator):
     cred = soft_authenticator.make_assertion(RP_ID, ORIGIN, challenge, sign_count=1, uv=False)
     with pytest.raises(InvalidAuthenticationResponse):
         webauthn.verify_authentication_response(
-            credential=cred, expected_challenge=challenge, expected_rp_id=RP_ID,
-            expected_origin=ORIGIN, credential_public_key=verified.credential_public_key,
-            credential_current_sign_count=0, require_user_verification=True,
+            credential=cred,
+            expected_challenge=challenge,
+            expected_rp_id=RP_ID,
+            expected_origin=ORIGIN,
+            credential_public_key=verified.credential_public_key,
+            credential_current_sign_count=0,
+            require_user_verification=True,
         )
 
 

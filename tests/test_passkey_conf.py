@@ -1,4 +1,5 @@
 """FEAT-101 TASK-86 — PASSKEY_* settings defaults and parsing."""
+
 import importlib
 import logging
 
@@ -20,6 +21,7 @@ def _reload_conf(monkeypatch, **env):
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     import navigator_auth.conf as conf
+
     return importlib.reload(conf)
 
 
@@ -30,6 +32,7 @@ def _restore_conf(monkeypatch):
     for key in _KEYS:
         monkeypatch.delenv(key, raising=False)
     import navigator_auth.conf as conf
+
     importlib.reload(conf)
 
 

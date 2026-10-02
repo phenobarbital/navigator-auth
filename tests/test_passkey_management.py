@@ -1,5 +1,6 @@
 # ruff: noqa: F811
 """FEAT-101 TASK-96 — passkey credential management, live (Postgres + Redis)."""
+
 import pytest
 
 from tests.fixtures.passkey import (
@@ -111,7 +112,8 @@ async def test_cannot_delete_last_login_method(passkey_app):
             "'No', 'Pass', true, false, false, false)"
         )
     resp = await app.client.post(
-        "/api/v1/login", json={"username": name, "password": PASSKEY_TEST_PASSWORD},
+        "/api/v1/login",
+        json={"username": name, "password": PASSKEY_TEST_PASSWORD},
         headers={"X-Auth-Method": "BasicAuth"},
     )
     data = await resp.json()

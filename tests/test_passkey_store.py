@@ -1,4 +1,5 @@
 """FEAT-101 TASK-88 — PasskeyStore against live Postgres (skipped when unavailable)."""
+
 import secrets
 
 import pytest
@@ -40,9 +41,7 @@ async def users(pool):
                 f"is_active, is_superuser, is_new, is_staff) VALUES ('{name}', 'x', "
                 f"'{name}@example.com', 'T', 'T', true, false, false, false)"
             )
-            ids.append(await conn.fetchval(
-                f"SELECT user_id FROM {USERS} WHERE username = '{name}'"
-            ))
+            ids.append(await conn.fetchval(f"SELECT user_id FROM {USERS} WHERE username = '{name}'"))
     yield ids
     async with await pool.acquire() as conn:
         for name in ("pk_store_a", "pk_store_b"):
@@ -51,10 +50,16 @@ async def users(pool):
 
 def _cred(user_id, rp_id="a.com", **kw):
     data = dict(
-        credential_id=secrets.token_bytes(16), user_id=user_id, rp_id=rp_id,
-        public_key=b"pk", sign_count=1, transports=["internal"],
-        aaguid="00000000-0000-0000-0000-000000000001", device_type="multi_device",
-        backed_up=True, label="Laptop",
+        credential_id=secrets.token_bytes(16),
+        user_id=user_id,
+        rp_id=rp_id,
+        public_key=b"pk",
+        sign_count=1,
+        transports=["internal"],
+        aaguid="00000000-0000-0000-0000-000000000001",
+        device_type="multi_device",
+        backed_up=True,
+        label="Laptop",
     )
     data.update(kw)
     return StoredCredential(**data)

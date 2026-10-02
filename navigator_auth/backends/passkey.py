@@ -3,6 +3,7 @@
 `webauthn` (optional extra ``navigator-auth[passkey]``) is imported lazily in
 ``on_startup``; importing this module never requires it.
 """
+
 import functools
 import hashlib
 import hmac
@@ -69,18 +70,20 @@ class PasskeyAuth(BasicAuth):
         """Register ceremony routes and build the RP resolver (ConfigError if the map is empty)."""
         self._resolver = RelyingPartyResolver(auth_conf.PASSKEY_RELYING_PARTIES)
         router = app.router
-        router.add_route("POST", f"{PASSKEY_PREFIX}/register/options", self.register_options,
-                         name="passkey_register_options")
-        router.add_route("POST", f"{PASSKEY_PREFIX}/register/verify", self.register_verify,
-                         name="passkey_register_verify")
-        router.add_route("POST", f"{PASSKEY_PREFIX}/login/options", self.login_options,
-                         name="passkey_login_options")
-        router.add_route("GET", f"{PASSKEY_PREFIX}/credentials", self.list_credentials,
-                         name="passkey_credentials")
-        router.add_route("PATCH", f"{PASSKEY_PREFIX}/credentials/{{id}}", self.rename_credential,
-                         name="passkey_credential_rename")
-        router.add_route("DELETE", f"{PASSKEY_PREFIX}/credentials/{{id}}", self.delete_credential,
-                         name="passkey_credential_delete")
+        router.add_route(
+            "POST", f"{PASSKEY_PREFIX}/register/options", self.register_options, name="passkey_register_options"
+        )
+        router.add_route(
+            "POST", f"{PASSKEY_PREFIX}/register/verify", self.register_verify, name="passkey_register_verify"
+        )
+        router.add_route("POST", f"{PASSKEY_PREFIX}/login/options", self.login_options, name="passkey_login_options")
+        router.add_route("GET", f"{PASSKEY_PREFIX}/credentials", self.list_credentials, name="passkey_credentials")
+        router.add_route(
+            "PATCH", f"{PASSKEY_PREFIX}/credentials/{{id}}", self.rename_credential, name="passkey_credential_rename"
+        )
+        router.add_route(
+            "DELETE", f"{PASSKEY_PREFIX}/credentials/{{id}}", self.delete_credential, name="passkey_credential_delete"
+        )
         app[AUTH_EXCLUDE_LIST_KEY].append(f"{PASSKEY_PREFIX}/login/options")
         super().configure(app)
 
@@ -90,13 +93,9 @@ class PasskeyAuth(BasicAuth):
         try:
             import webauthn  # pylint: disable=C0415
         except ImportError as err:
-            raise ConfigError(
-                "PasskeyAuth requires the optional extra: pip install navigator-auth[passkey]"
-            ) from err
+            raise ConfigError("PasskeyAuth requires the optional extra: pip install navigator-auth[passkey]") from err
         self._webauthn = webauthn
-        self._pool = aioredis.ConnectionPool.from_url(
-            auth_conf.REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
-        )
+        self._pool = aioredis.ConnectionPool.from_url(auth_conf.REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
         self._store = PasskeyStore(app["authdb"])
         await setup_passkey_tables(app["authdb"])
 
@@ -174,12 +173,7 @@ class PasskeyAuth(BasicAuth):
             raise missing
         challenge_id = body.get("challenge_id")
         credential = body.get("credential")
-        if (
-            not isinstance(challenge_id, str)
-            or not challenge_id
-            or not isinstance(credential, dict)
-            or not credential
-        ):
+        if not isinstance(challenge_id, str) or not challenge_id or not isinstance(credential, dict) or not credential:
             raise missing
         return challenge_id, credential
 
@@ -211,14 +205,9 @@ class PasskeyAuth(BasicAuth):
             attestation=AttestationConveyancePreference.NONE,
             authenticator_selection=AuthenticatorSelectionCriteria(
                 resident_key=ResidentKeyRequirement.REQUIRED,
-                user_verification=UserVerificationRequirement(
-                    auth_conf.PASSKEY_USER_VERIFICATION
-                ),
+                user_verification=UserVerificationRequirement(auth_conf.PASSKEY_USER_VERIFICATION),
             ),
-            exclude_credentials=[
-                PublicKeyCredentialDescriptor(id=c.credential_id)
-                for c in existing
-            ],
+            exclude_credentials=[PublicKeyCredentialDescriptor(id=c.credential_id) for c in existing],
         )
         await self._save_challenge(
             "register",
@@ -266,16 +255,13 @@ class PasskeyAuth(BasicAuth):
             )
         except (InvalidRegistrationResponse, ValueError, KeyError, TypeError) as err:
             self.logger.warning(
-                f"Passkey: registration verification failed for user {user.user_id}: "
-                f"{type(err).__name__}"
+                f"Passkey: registration verification failed for user {user.user_id}: " f"{type(err).__name__}"
             )
             raise web.HTTPBadRequest(reason="Passkey: registration failed") from err
         transports = (credential.get("response") or {}).get("transports")
         if not isinstance(transports, list):
             transports = None
-        device_type = getattr(verified.credential_device_type, "value", None) or str(
-            verified.credential_device_type
-        )
+        device_type = getattr(verified.credential_device_type, "value", None) or str(verified.credential_device_type)
         stored = StoredCredential(
             credential_id=verified.credential_id,
             user_id=user.user_id,
@@ -340,19 +326,12 @@ class PasskeyAuth(BasicAuth):
             except Exception as err:  # pylint: disable=W0703
                 raise AuthException(f"Passkey: user lookup error: {err}", status=500) from err
             # Always hit the store, known or not, to keep timing comparable (R4).
-            creds = await self._store.list_credentials(
-                user_id if user_id is not None else -1, rp.rp_id
-            )
+            creds = await self._store.list_credentials(user_id if user_id is not None else -1, rp.rp_id)
             if user_id is not None and creds:
-                allow = [
-                    PublicKeyCredentialDescriptor(id=c.credential_id) for c in creds
-                ]
+                allow = [PublicKeyCredentialDescriptor(id=c.credential_id) for c in creds]
                 expected_user_id = user_id
             else:
-                allow = [
-                    PublicKeyCredentialDescriptor(id=i)
-                    for i in self._decoy_ids(rp, username)
-                ]
+                allow = [PublicKeyCredentialDescriptor(id=i) for i in self._decoy_ids(rp, username)]
                 decoy = True
         options = self._webauthn.generate_authentication_options(
             rp_id=rp.rp_id,
@@ -383,22 +362,22 @@ class PasskeyAuth(BasicAuth):
         from webauthn.helpers import base64url_to_bytes, bytes_to_base64url  # pylint: disable=C0415
         from webauthn.helpers.exceptions import InvalidAuthenticationResponse  # pylint: disable=C0415
 
-        challenge_id, credential = await self.get_payload(request)          # 1 (no I/O)
-        state = await self._pop_challenge("login", challenge_id)            # 2
+        challenge_id, credential = await self.get_payload(request)  # 1 (no I/O)
+        state = await self._pop_challenge("login", challenge_id)  # 2
         try:
             raw_id = base64url_to_bytes(str(credential.get("rawId") or credential.get("id")))
         except Exception as err:  # pylint: disable=W0703
             raise self._fail("malformed credential id") from err
         try:
-            cred = await self._store.get_credential(raw_id)                 # 3
+            cred = await self._store.get_credential(raw_id)  # 3
             if cred is None or state.decoy:
                 raise self._fail("unknown credential or decoy ceremony")
             if cred.rp_id != state.rp_id:
                 raise self._fail(f"credential rp_id {cred.rp_id!r} != challenge rp_id")
             if state.expected_user_id is not None and cred.user_id != state.expected_user_id:
-                raise self._fail("credential belongs to another user")      # 4
+                raise self._fail("credential belongs to another user")  # 4
             handle_b64 = (credential.get("response") or {}).get("userHandle")
-            if handle_b64:                                                  # 5
+            if handle_b64:  # 5
                 try:
                     given = base64url_to_bytes(str(handle_b64))
                 except Exception as err:  # pylint: disable=W0703
@@ -409,7 +388,7 @@ class PasskeyAuth(BasicAuth):
             raise
         except Exception as err:  # pylint: disable=W0703
             raise AuthException(f"Passkey: store error: {err}", status=500) from err
-        try:                                                                # 6
+        try:  # 6
             verified = self._webauthn.verify_authentication_response(
                 credential=credential,
                 expected_challenge=base64url_to_bytes(state.challenge),
@@ -430,18 +409,18 @@ class PasskeyAuth(BasicAuth):
         except (ValueError, KeyError, TypeError) as err:
             raise self._fail(f"malformed assertion: {type(err).__name__}") from err
         try:
-            await self._store.update_usage(                                 # 7
+            await self._store.update_usage(  # 7
                 cred.credential_id,
                 sign_count=verified.new_sign_count,
                 backed_up=bool(verified.credential_backed_up),
             )
         except Exception as err:  # pylint: disable=W0703
             raise AuthException(f"Passkey: store error: {err}", status=500) from err
-        try:                                                                # 8
+        try:  # 8
             user = await self._idp.user_from_id(cred.user_id)
         except UserNotFound as err:
             raise self._fail(f"user {cred.user_id} no longer exists") from err
-        rp = self._resolver.by_rp_id(state.rp_id)                           # 9
+        rp = self._resolver.by_rp_id(state.rp_id)  # 9
         if rp is None:
             raise self._fail(f"relying party {state.rp_id!r} no longer configured")
         self._check_tenant(user, rp)
@@ -454,7 +433,7 @@ class PasskeyAuth(BasicAuth):
             "client_id": rp.client_id,
             "passkey_rp_id": rp.rp_id,
         }
-        return await self.open_session(request, user, extra=extra)          # 10 (E9 propagates)
+        return await self.open_session(request, user, extra=extra)  # 10 (E9 propagates)
 
     def _check_tenant(self, user: Any, rp: RelyingParty) -> None:
         """When PASSKEY_TENANT_ATTRIBUTE is set and present on user, require == rp.org_id (Q-T)."""
@@ -544,9 +523,7 @@ class PasskeyAuth(BasicAuth):
         """True when the user has a password or at least one linked external identity."""
         user = await self._idp.user_from_id(user_id)
         password = (
-            user.get(self.pwd_atrribute)
-            if isinstance(user, Mapping)
-            else getattr(user, self.pwd_atrribute, None)
+            user.get(self.pwd_atrribute) if isinstance(user, Mapping) else getattr(user, self.pwd_atrribute, None)
         )
         if password:
             return True

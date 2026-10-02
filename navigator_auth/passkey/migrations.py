@@ -3,6 +3,7 @@
 Mirrors ``navigator_auth/identity/migrations.py``. Run by
 ``PasskeyAuth.on_startup`` so the tables only exist when the backend is enabled.
 """
+
 import logging
 from pathlib import Path
 from typing import Any

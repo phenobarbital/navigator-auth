@@ -1,4 +1,5 @@
 """Persistence for WebAuthn credentials and per-(user, RP) user handles (FEAT-101)."""
+
 import secrets
 from typing import Any, Optional
 
@@ -46,21 +47,17 @@ class PasskeyStore:
             )
         return self._row_to_credential(row) if row else None
 
-    async def list_credentials(
-        self, user_id: int, rp_id: Optional[str] = None
-    ) -> list[StoredCredential]:
+    async def list_credentials(self, user_id: int, rp_id: Optional[str] = None) -> list[StoredCredential]:
         """All credentials of a user, optionally limited to one RP, oldest first."""
         async with await self._pool.acquire() as conn:
             if rp_id is None:
                 rows = await conn.fetch_all(
-                    f"SELECT * FROM {_CREDENTIALS} WHERE user_id = $1 "
-                    "ORDER BY created_at",
+                    f"SELECT * FROM {_CREDENTIALS} WHERE user_id = $1 " "ORDER BY created_at",
                     user_id,
                 )
             else:
                 rows = await conn.fetch_all(
-                    f"SELECT * FROM {_CREDENTIALS} WHERE user_id = $1 AND rp_id = $2 "
-                    "ORDER BY created_at",
+                    f"SELECT * FROM {_CREDENTIALS} WHERE user_id = $1 AND rp_id = $2 " "ORDER BY created_at",
                     user_id,
                     rp_id,
                 )
@@ -86,9 +83,7 @@ class PasskeyStore:
                 credential.label,
             )
 
-    async def update_usage(
-        self, credential_id: bytes, *, sign_count: int, backed_up: bool
-    ) -> None:
+    async def update_usage(self, credential_id: bytes, *, sign_count: int, backed_up: bool) -> None:
         """Set ``sign_count``, ``backed_up`` and ``last_used_at = now()``."""
         async with await self._pool.acquire() as conn:
             await conn.execute(

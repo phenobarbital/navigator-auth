@@ -1,5 +1,6 @@
 # ruff: noqa: F811
 """FEAT-101 TASK-95 — passkey sign-in, live (Postgres + Redis)."""
+
 import logging
 from types import SimpleNamespace
 
@@ -56,11 +57,26 @@ async def _options(app, origin="https://a.test", username=None):
     return await resp.json()
 
 
-async def _login(app, auth, opts, *, origin="https://a.test", rp_id="a.test", sign_count=1,
-                 uv=True, user_handle=None, cdj_origin=None, client=None):
+async def _login(
+    app,
+    auth,
+    opts,
+    *,
+    origin="https://a.test",
+    rp_id="a.test",
+    sign_count=1,
+    uv=True,
+    user_handle=None,
+    cdj_origin=None,
+    client=None,
+):
     cred = auth.make_assertion(
-        rp_id, cdj_origin or origin, _b2b(opts["publicKey"]["challenge"]),
-        sign_count=sign_count, uv=uv, user_handle=user_handle,
+        rp_id,
+        cdj_origin or origin,
+        _b2b(opts["publicKey"]["challenge"]),
+        sign_count=sign_count,
+        uv=uv,
+        user_handle=user_handle,
     )
     return await (client or app.client).post(
         LOGIN,
@@ -73,9 +89,7 @@ async def _login(app, auth, opts, *, origin="https://a.test", rp_id="a.test", si
 async def _clean(passkey_app):
     yield
     async with await passkey_app.db_pool.acquire() as conn:
-        await conn.execute(
-            f"DELETE FROM auth.user_credentials WHERE user_id = {passkey_app.user_id}"
-        )
+        await conn.execute(f"DELETE FROM auth.user_credentials WHERE user_id = {passkey_app.user_id}")
 
 
 async def _second_user(app):
@@ -89,7 +103,8 @@ async def _second_user(app):
             "'Two', 'Key', true, false, false, false)"
         )
     resp = await app.client.post(
-        LOGIN, json={"username": name, "password": PASSKEY_TEST_PASSWORD},
+        LOGIN,
+        json={"username": name, "password": PASSKEY_TEST_PASSWORD},
         headers={"X-Auth-Method": "BasicAuth"},
     )
     data = await resp.json()
@@ -120,7 +135,8 @@ async def test_login_usernameless_success(passkey_app, soft_authenticator):
     assert claims["amr"] == ["hwk", "user"] and claims.get("jti")
     # Cookie parity with BasicAuth (the session is created by the shared open_session)
     basic = await passkey_app.client.post(
-        LOGIN, json={"username": passkey_app.username, "password": PASSKEY_TEST_PASSWORD},
+        LOGIN,
+        json={"username": passkey_app.username, "password": PASSKEY_TEST_PASSWORD},
         headers={"X-Auth-Method": "BasicAuth"},
     )
     assert set(resp.cookies) == set(basic.cookies)
@@ -199,14 +215,10 @@ async def test_origin_mismatch(passkey_app, soft_authenticator):
     assert resp.status == 401
     # credential enrolled for a.test cannot be used in a ceremony started on b.test (AC4)
     opts_b = await _options(passkey_app, origin="https://b.test")
-    resp = await _login(
-        passkey_app, soft_authenticator, opts_b, origin="https://b.test", rp_id="b.test"
-    )
+    resp = await _login(passkey_app, soft_authenticator, opts_b, origin="https://b.test", rp_id="b.test")
     assert resp.status == 401
     # origin not on the allow-list
-    resp = await passkey_app.client.post(
-        LOGIN_OPTS, json={}, headers={"Origin": "https://evil.test"}
-    )
+    resp = await passkey_app.client.post(LOGIN_OPTS, json={}, headers={"Origin": "https://evil.test"})
     assert resp.status == 401
 
 
@@ -286,13 +298,13 @@ async def test_tenant_attribute_check(passkey_app, soft_authenticator, monkeypat
     backend = passkey_app.backend
     rp = backend._resolver.by_rp_id("a.test")
     monkeypatch.setattr(conf, "PASSKEY_TENANT_ATTRIBUTE", "org_id", raising=False)
-    backend._check_tenant(SimpleNamespace(org_id=5), rp)          # match
-    backend._check_tenant(SimpleNamespace(org_id="5"), rp)        # str/int tolerant
-    backend._check_tenant(SimpleNamespace(), rp)                  # attribute absent → skip
+    backend._check_tenant(SimpleNamespace(org_id=5), rp)  # match
+    backend._check_tenant(SimpleNamespace(org_id="5"), rp)  # str/int tolerant
+    backend._check_tenant(SimpleNamespace(), rp)  # attribute absent → skip
     with pytest.raises(InvalidAuth):
         backend._check_tenant(SimpleNamespace(org_id=7), rp)
     monkeypatch.setattr(conf, "PASSKEY_TENANT_ATTRIBUTE", None, raising=False)
-    backend._check_tenant(SimpleNamespace(org_id=7), rp)          # disabled
+    backend._check_tenant(SimpleNamespace(org_id=7), rp)  # disabled
     # end-to-end: user.first_name ("Pass") != rp.org_id → 401
     await _enroll(passkey_app, soft_authenticator)
     monkeypatch.setattr(conf, "PASSKEY_TENANT_ATTRIBUTE", "first_name", raising=False)
@@ -304,9 +316,7 @@ async def test_session_carries_tenant(passkey_app, soft_authenticator):
     """AC10: the session/body carry the RP's org_id/client_id (and EvalContext resolves them)."""
     await _enroll(passkey_app, soft_authenticator, origin="https://b.test", rp_id="b.test")
     opts = await _options(passkey_app, origin="https://b.test")
-    resp = await _login(
-        passkey_app, soft_authenticator, opts, origin="https://b.test", rp_id="b.test"
-    )
+    resp = await _login(passkey_app, soft_authenticator, opts, origin="https://b.test", rp_id="b.test")
     assert resp.status == 200, await resp.text()
     data = await resp.json()
     assert data["org_id"] == 7 and data["client_id"] == 2 and data["passkey_rp_id"] == "b.test"
@@ -330,7 +340,5 @@ async def test_fallback_loop_unaffected(passkey_app):
             json={"username": passkey_app.username, "password": PASSKEY_TEST_PASSWORD},
         )
         assert resp.status == 200, await resp.text()
-        resp = await s.post(
-            base + LOGIN, json={"username": passkey_app.username, "password": "wrong-password"}
-        )
+        resp = await s.post(base + LOGIN, json={"username": passkey_app.username, "password": "wrong-password"})
         assert 400 <= resp.status < 500, resp.status

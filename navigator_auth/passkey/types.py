@@ -1,4 +1,5 @@
 """Pydantic data models for the passkey (WebAuthn) backend (FEAT-101)."""
+
 from datetime import datetime
 from typing import Optional
 

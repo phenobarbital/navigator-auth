@@ -1,5 +1,6 @@
 # ruff: noqa: F811
 """FEAT-101 TASK-97 — R5: a BasicAuth.open_session session is readable by the OAuth2 provider."""
+
 import logging
 
 import jsonpickle

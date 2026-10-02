@@ -1,4 +1,5 @@
 """FEAT-101 TASK-87 — passkey migration rendering and idempotency."""
+
 import pytest
 
 from navigator_auth.conf import default_dsn
@@ -57,6 +58,7 @@ async def test_ensure_passkey_tables_uses_pool():
 @pytest.mark.asyncio
 async def test_setup_passkey_tables_never_raises():
     """The startup wrapper swallows pool errors."""
+
     class _Boom:
         def acquire(self):
             raise RuntimeError("db down")

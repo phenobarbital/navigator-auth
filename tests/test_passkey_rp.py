@@ -1,4 +1,5 @@
 """FEAT-101 TASK-89 — RelyingPartyResolver."""
+
 import pytest
 from aiohttp.test_utils import make_mocked_request
 
@@ -22,8 +23,14 @@ def test_rp_resolver_exact_origin():
     assert r.resolve(_req(Origin="https://B.TEST")).org_id == 7
     assert r.resolve(_req(Origin="https://a.test/")).rp_id == "a.test"
     for bad in (
-        "https://a.test.evil.com", "https://evil.a.test", "http://a.test",
-        "https://a.test:8443", "null", "https://a.test/../", "https://u@a.test", "",
+        "https://a.test.evil.com",
+        "https://evil.a.test",
+        "http://a.test",
+        "https://a.test:8443",
+        "null",
+        "https://a.test/../",
+        "https://u@a.test",
+        "",
     ):
         with pytest.raises(InvalidAuth):
             r.resolve(_req(Origin=bad))

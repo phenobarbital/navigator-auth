@@ -1,5 +1,6 @@
 # ruff: noqa: F811
 """FEAT-101 TASK-93 — PasskeyAuth core (no Redis/DB)."""
+
 import os
 import subprocess
 import sys
@@ -34,15 +35,10 @@ def _json_request(body: bytes, content_type="application/json"):
 
 def test_backends_import_without_webauthn():
     """AC2/R9: importing navigator_auth.backends works when webauthn is unimportable."""
-    code = (
-        "import sys; sys.modules['webauthn'] = None; "
-        "import navigator_auth.backends as b; assert b.PasskeyAuth"
-    )
+    code = "import sys; sys.modules['webauthn'] = None; " "import navigator_auth.backends as b; assert b.PasskeyAuth"
     root = str(Path(__file__).resolve().parent.parent)
     env = {**os.environ, "PYTHONPATH": root}
-    res = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, cwd=root, env=env
-    )
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=root, env=env)
     assert res.returncode == 0, res.stderr[-500:]
 
 
@@ -72,9 +68,7 @@ async def test_get_payload_fast_fail(backend, body, ctype):
 
 @pytest.mark.asyncio
 async def test_get_payload_ok(backend):
-    cid, cred = await backend.get_payload(
-        _json_request(b'{"challenge_id": "abc", "credential": {"id": "x"}}')
-    )
+    cid, cred = await backend.get_payload(_json_request(b'{"challenge_id": "abc", "credential": {"id": "x"}}'))
     assert cid == "abc" and cred == {"id": "x"}
 
 

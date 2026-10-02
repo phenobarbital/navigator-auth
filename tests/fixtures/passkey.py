@@ -1,4 +1,5 @@
 """Software WebAuthn authenticator for FEAT-101 passkey tests (no browser)."""
+
 import hashlib
 import json
 import os
@@ -28,9 +29,7 @@ def _b64(data: bytes) -> str:
 class SoftAuthenticator:
     """ES256 software authenticator producing py_webauthn-compatible JSON."""
 
-    private_key: ec.EllipticCurvePrivateKey = field(
-        default_factory=lambda: ec.generate_private_key(ec.SECP256R1())
-    )
+    private_key: ec.EllipticCurvePrivateKey = field(default_factory=lambda: ec.generate_private_key(ec.SECP256R1()))
     credential_id: bytes = field(default_factory=lambda: os.urandom(32))
 
     def cose_public_key(self) -> bytes:
@@ -38,40 +37,35 @@ class SoftAuthenticator:
         import cbor2  # py_webauthn dependency; lazy so the module imports without it
 
         nums = self.private_key.public_key().public_numbers()
-        return cbor2.dumps({
-            1: 2, 3: -7, -1: 1,
-            -2: nums.x.to_bytes(32, "big"),
-            -3: nums.y.to_bytes(32, "big"),
-        })
+        return cbor2.dumps(
+            {
+                1: 2,
+                3: -7,
+                -1: 1,
+                -2: nums.x.to_bytes(32, "big"),
+                -3: nums.y.to_bytes(32, "big"),
+            }
+        )
 
     def _auth_data(self, rp_id: str, sign_count: int, uv: bool, attested: bool) -> bytes:
         flags = FLAG_UP | (FLAG_UV if uv else 0) | (FLAG_AT if attested else 0)
-        data = (
-            hashlib.sha256(rp_id.encode()).digest()
-            + bytes([flags])
-            + struct.pack(">I", sign_count)
-        )
+        data = hashlib.sha256(rp_id.encode()).digest() + bytes([flags]) + struct.pack(">I", sign_count)
         if attested:
-            data += (
-                bytes(16)
-                + struct.pack(">H", len(self.credential_id))
-                + self.credential_id
-                + self.cose_public_key()
-            )
+            data += bytes(16) + struct.pack(">H", len(self.credential_id)) + self.credential_id + self.cose_public_key()
         return data
 
     @staticmethod
     def _client_data(kind: str, origin: str, challenge: bytes) -> bytes:
-        return json.dumps({
-            "type": kind,
-            "challenge": _b64(challenge),
-            "origin": origin,
-            "crossOrigin": False,
-        }).encode()
+        return json.dumps(
+            {
+                "type": kind,
+                "challenge": _b64(challenge),
+                "origin": origin,
+                "crossOrigin": False,
+            }
+        ).encode()
 
-    def make_attestation(
-        self, rp_id: str, origin: str, challenge: bytes, user_handle: bytes, uv: bool = True
-    ) -> dict:
+    def make_attestation(self, rp_id: str, origin: str, challenge: bytes, user_handle: bytes, uv: bool = True) -> dict:
         """RegistrationCredential JSON for register/verify (fmt "none")."""
         import cbor2
 
@@ -101,9 +95,7 @@ class SoftAuthenticator:
         """AuthenticationCredential JSON for POST /api/v1/login (X-Auth-Method: PasskeyAuth)."""
         auth_data = self._auth_data(rp_id, sign_count, uv, attested=False)
         client_data = self._client_data("webauthn.get", origin, challenge)
-        signature = self.private_key.sign(
-            auth_data + hashlib.sha256(client_data).digest(), ec.ECDSA(hashes.SHA256())
-        )
+        signature = self.private_key.sign(auth_data + hashlib.sha256(client_data).digest(), ec.ECDSA(hashes.SHA256()))
         response = {
             "clientDataJSON": _b64(client_data),
             "authenticatorData": _b64(auth_data),
@@ -200,9 +192,7 @@ def _build_passkey_app_fixture():
             await client.start_server()
         db_pool = app.get("authdb")
         assert db_pool is not None, "authdb pool missing"
-        await db_pool.execute(
-            f"DELETE FROM auth.users WHERE username = '{PASSKEY_TEST_USERNAME}'"
-        )
+        await db_pool.execute(f"DELETE FROM auth.users WHERE username = '{PASSKEY_TEST_USERNAME}'")
         await db_pool.execute(
             "INSERT INTO auth.users (username, password, email, first_name, last_name, "
             "is_active, is_superuser, is_new, is_staff) VALUES "
@@ -227,9 +217,7 @@ def _build_passkey_app_fixture():
             headers={"Authorization": f"Bearer {data['token']}"},
         )
         try:
-            await db_pool.execute(
-                f"DELETE FROM auth.users WHERE username = '{PASSKEY_TEST_USERNAME}'"
-            )
+            await db_pool.execute(f"DELETE FROM auth.users WHERE username = '{PASSKEY_TEST_USERNAME}'")
         except Exception:  # pylint: disable=W0703
             pass
         with warnings.catch_warnings():

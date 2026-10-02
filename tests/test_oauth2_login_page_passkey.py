@@ -3,6 +3,7 @@
 Static template checks always run. The browser test needs Playwright (not a project
 dependency) and is skipped when it is not importable.
 """
+
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,7 @@ def test_login_page_has_passkey_ui_and_keeps_password_form():
     assert 'id="passkey-signin"' in html
     assert "/api/v1/auth/passkey/login/options" in html
     assert '"X-Auth-Method": "PasskeyAuth"' in html
-    assert 'mediation' in html and "isConditionalMediationAvailable" in html
+    assert "mediation" in html and "isConditionalMediationAvailable" in html
     # pre-session public calls: no CSRF header is sent
     assert "X-CSRF" not in html
     # authorize parameters (incl. PKCE) are carried through
@@ -43,7 +44,7 @@ def test_login_page_script_is_valid_javascript(tmp_path):
         pytest.skip("node not available")
     html = _render()
     start = html.index("<script>", html.index("passkey-signin"))
-    js = html[start + len("<script>"):html.index("</script>", start)]
+    js = html[start + len("<script>") : html.index("</script>", start)]
     path = tmp_path / "login.js"
     path.write_text(js)
     assert subprocess.run([node, "--check", str(path)], capture_output=True).returncode == 0
@@ -61,10 +62,18 @@ def test_oauth2_login_page_passkey():
             page = browser.new_page()
             cdp = page.context.new_cdp_session(page)
             cdp.send("WebAuthn.enable")
-            cdp.send("WebAuthn.addVirtualAuthenticator", {"options": {
-                "protocol": "ctap2", "transport": "internal",
-                "hasResidentKey": True, "hasUserVerification": True, "isUserVerified": True,
-            }})
+            cdp.send(
+                "WebAuthn.addVirtualAuthenticator",
+                {
+                    "options": {
+                        "protocol": "ctap2",
+                        "transport": "internal",
+                        "hasResidentKey": True,
+                        "hasUserVerification": True,
+                        "isUserVerified": True,
+                    }
+                },
+            )
             page.set_content(_render())
             assert page.is_visible("#passkey-signin")
         finally:

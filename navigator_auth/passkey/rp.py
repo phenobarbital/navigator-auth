@@ -1,4 +1,5 @@
 """Origin → relying-party resolution for passkey ceremonies (FEAT-101)."""
+
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -57,20 +58,14 @@ class RelyingPartyResolver:
             try:
                 party = RelyingParty.model_validate(entry)
             except ValidationError as err:
-                raise ConfigError(
-                    f"PasskeyAuth: invalid PASSKEY_RELYING_PARTIES[{idx}]: {err}"
-                ) from err
+                raise ConfigError(f"PasskeyAuth: invalid PASSKEY_RELYING_PARTIES[{idx}]: {err}") from err
             origin = _normalise_origin(party.origin)
             if origin is None:
                 raise ConfigError(
-                    f"PasskeyAuth: invalid origin in PASSKEY_RELYING_PARTIES[{idx}]: "
-                    f"{party.origin!r}"
+                    f"PasskeyAuth: invalid origin in PASSKEY_RELYING_PARTIES[{idx}]: " f"{party.origin!r}"
                 )
             if origin in self._by_origin:
-                raise ConfigError(
-                    f"PasskeyAuth: duplicate origin in PASSKEY_RELYING_PARTIES[{idx}]: "
-                    f"{origin!r}"
-                )
+                raise ConfigError(f"PasskeyAuth: duplicate origin in PASSKEY_RELYING_PARTIES[{idx}]: " f"{origin!r}")
             party = party.model_copy(update={"origin": origin})
             self._by_origin[origin] = party
             self._by_rp_id.setdefault(party.rp_id, party)

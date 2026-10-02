@@ -1,4 +1,5 @@
 """FEAT-101 TASK-92 — EvalContext exposes auth_method and mfa."""
+
 from types import SimpleNamespace
 
 from navigator_auth.abac.context import EvalContext

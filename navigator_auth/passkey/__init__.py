@@ -2,6 +2,7 @@
 
 Importing this package never imports ``webauthn`` (optional extra ``passkey``).
 """
+
 from .rp import RelyingPartyResolver
 from .store import PasskeyStore
 from .types import ChallengeState, RelyingParty, StoredCredential
