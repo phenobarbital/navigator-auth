@@ -1,5 +1,13 @@
 # Unreleased
 
+- **Passkey (WebAuthn) authentication backend (FEAT-101).** New
+  `navigator_auth.backends.PasskeyAuth` (optional extra
+  `navigator-auth[passkey]`, Redis >= 6.2): per-tenant relying parties
+  (`PASSKEY_RELYING_PARTIES`), passwordless sign-in through
+  `POST /api/v1/login` with `X-Auth-Method: PasskeyAuth`, enrollment and
+  credential-management endpoints under `/api/v1/auth/passkey/`, passkey
+  sign-in on the OAuth2 login page, and `auth_method` / `mfa` keys in the ABAC
+  evaluation context. See `docs/passkey.rst`.
 - **Disabled accounts are now rejected at login (FEAT-101, behaviour change).**
   `BasicAuth.open_session` (so Basic, TokenExchange and Passkey) and the
   OAuth2 login page password POST now return 403 when the user record has
