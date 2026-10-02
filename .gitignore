@@ -151,3 +151,5 @@ navigator_auth/rs_pep/target/
 # Git worktrees
 .claude/worktrees/
 .worktrees/
+# parrot LLM-wiki state (local retrieval plane)
+.parrot/
