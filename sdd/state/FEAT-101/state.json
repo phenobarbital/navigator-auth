@@ -1,6 +1,6 @@
 {
   "feature_id": "FEAT-101",
-  "phase": "proposal_drafted",
+  "phase": "committed",
   "started_at": "2026-10-02T00:00:00Z",
   "updated_at": "2026-10-02T00:00:00Z",
   "mode": "enrichment",
@@ -14,7 +14,7 @@
     "research": {"status": "complete", "findings": 15},
     "synthesis": {"status": "complete", "overall_confidence": "medium", "lint": "pass"},
     "qa": {"status": "complete", "questions_total": 4, "questions_answered": 4},
-    "output": {"proposal_path": "sdd/proposals/passkey-support-backend.proposal.md", "commit_sha": null}
+    "output": {"proposal_path": "sdd/proposals/passkey-support-backend.proposal.md", "commit_sha": "6589cc3"}
   },
   "resume_hint": {"next_phase": "committed", "next_action": "/sdd-spec FEAT-101"}
 }
