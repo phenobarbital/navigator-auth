@@ -6,6 +6,9 @@
 import functools
 import hashlib
 import hmac
+import json
+import secrets
+from collections.abc import Mapping
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -13,7 +16,7 @@ from aiohttp import web
 
 from .. import conf as auth_conf
 from ..conf import AUTH_EXCLUDE_LIST_KEY
-from ..exceptions import AuthException, ConfigError, InvalidAuth
+from ..exceptions import AuthException, ConfigError, InvalidAuth, UserNotFound
 from ..identities import AuthUser
 from ..passkey import (
     ChallengeState,
@@ -294,10 +297,169 @@ class PasskeyAuth(BasicAuth):
             status=201,
         )
 
+    def _fail(self, log_reason: str, *, warning: bool = False) -> InvalidAuth:
+        """Log the specific reason, return the uniform 401 (E4)."""
+        (self.logger.warning if warning else self.logger.info)(f"Passkey: {log_reason}")
+        return InvalidAuth("Passkey: invalid credential", status=401)
+
+    @_json_errors
     async def login_options(self, request: web.Request) -> web.Response:
-        raise web.HTTPNotImplemented(reason="TASK-95")
+        """Start a sign-in ceremony: username-first (default) or usernameless (C4, E5)."""
+        rp = self._resolver.resolve(request)
+        from webauthn.helpers import bytes_to_base64url  # pylint: disable=C0415
+        from webauthn.helpers.structs import (  # pylint: disable=C0415
+            PublicKeyCredentialDescriptor,
+            UserVerificationRequirement,
+        )
+
+        username = ""
+        if request.can_read_body:
+            try:
+                body = await request.json()
+            except ValueError as err:
+                raise InvalidAuth("Passkey: invalid request body", status=400) from err
+            if isinstance(body, dict) and isinstance(body.get("username"), str):
+                username = body["username"].strip()
+        allow: list = []
+        expected_user_id = None
+        decoy = False
+        if username:
+            user_id = None
+            try:
+                user = await self._idp.get_user(username)
+                user_id = user.user_id if hasattr(user, "user_id") else user["user_id"]
+            except UserNotFound:
+                user_id = None
+            except Exception as err:  # pylint: disable=W0703
+                raise AuthException(f"Passkey: user lookup error: {err}", status=500) from err
+            # Always hit the store, known or not, to keep timing comparable (R4).
+            creds = await self._store.list_credentials(
+                user_id if user_id is not None else -1, rp.rp_id
+            )
+            if user_id is not None and creds:
+                allow = [
+                    PublicKeyCredentialDescriptor(id=c.credential_id) for c in creds
+                ]
+                expected_user_id = user_id
+            else:
+                allow = [
+                    PublicKeyCredentialDescriptor(id=i)
+                    for i in self._decoy_ids(rp, username)
+                ]
+                decoy = True
+        options = self._webauthn.generate_authentication_options(
+            rp_id=rp.rp_id,
+            allow_credentials=allow,
+            user_verification=UserVerificationRequirement(auth_conf.PASSKEY_USER_VERIFICATION),
+        )
+        challenge_id = secrets.token_urlsafe(32)
+        await self._save_challenge(
+            "login",
+            challenge_id,
+            ChallengeState(
+                challenge=bytes_to_base64url(options.challenge),
+                rp_id=rp.rp_id,
+                origin=rp.origin,
+                expected_user_id=expected_user_id,
+                decoy=decoy,
+            ),
+        )
+        return JSONResponse(
+            {
+                "challenge_id": challenge_id,
+                "publicKey": json.loads(self._webauthn.options_to_json(options)),
+            }
+        )
 
     async def authenticate(self, request: web.Request) -> dict:
-        """Sign-in (TASK-95). Until then: fail fast so the api_login fallback loop continues."""
-        await self.get_payload(request)
-        raise InvalidAuth("Passkey: not implemented", status=401)
+        """Verify a WebAuthn assertion, then open a Basic-style session (spec §2.5 steps 1–10)."""
+        from webauthn.helpers import base64url_to_bytes, bytes_to_base64url  # pylint: disable=C0415
+        from webauthn.helpers.exceptions import InvalidAuthenticationResponse  # pylint: disable=C0415
+
+        challenge_id, credential = await self.get_payload(request)          # 1 (no I/O)
+        state = await self._pop_challenge("login", challenge_id)            # 2
+        try:
+            raw_id = base64url_to_bytes(str(credential.get("rawId") or credential.get("id")))
+        except Exception as err:  # pylint: disable=W0703
+            raise self._fail("malformed credential id") from err
+        try:
+            cred = await self._store.get_credential(raw_id)                 # 3
+            if cred is None or state.decoy:
+                raise self._fail("unknown credential or decoy ceremony")
+            if cred.rp_id != state.rp_id:
+                raise self._fail(f"credential rp_id {cred.rp_id!r} != challenge rp_id")
+            if state.expected_user_id is not None and cred.user_id != state.expected_user_id:
+                raise self._fail("credential belongs to another user")      # 4
+            handle_b64 = (credential.get("response") or {}).get("userHandle")
+            if handle_b64:                                                  # 5
+                try:
+                    given = base64url_to_bytes(str(handle_b64))
+                except Exception as err:  # pylint: disable=W0703
+                    raise self._fail("malformed userHandle") from err
+                if given != await self._store.get_handle(cred.user_id, cred.rp_id):
+                    raise self._fail("userHandle mismatch")
+        except InvalidAuth:
+            raise
+        except Exception as err:  # pylint: disable=W0703
+            raise AuthException(f"Passkey: store error: {err}", status=500) from err
+        try:                                                                # 6
+            verified = self._webauthn.verify_authentication_response(
+                credential=credential,
+                expected_challenge=base64url_to_bytes(state.challenge),
+                expected_rp_id=state.rp_id,
+                expected_origin=state.origin,
+                credential_public_key=cred.public_key,
+                credential_current_sign_count=cred.sign_count,
+                require_user_verification=(auth_conf.PASSKEY_USER_VERIFICATION == "required"),
+            )
+        except InvalidAuthenticationResponse as err:
+            if "sign count" in str(err).lower():
+                raise self._fail(
+                    "sign-count regression (possible cloned authenticator) for credential "
+                    f"{bytes_to_base64url(cred.credential_id)} user {cred.user_id}",
+                    warning=True,
+                ) from err
+            raise self._fail(f"assertion verification failed: {err}") from err
+        except (ValueError, KeyError, TypeError) as err:
+            raise self._fail(f"malformed assertion: {type(err).__name__}") from err
+        try:
+            await self._store.update_usage(                                 # 7
+                cred.credential_id,
+                sign_count=verified.new_sign_count,
+                backed_up=bool(verified.credential_backed_up),
+            )
+        except Exception as err:  # pylint: disable=W0703
+            raise AuthException(f"Passkey: store error: {err}", status=500) from err
+        try:                                                                # 8
+            user = await self._idp.user_from_id(cred.user_id)
+        except UserNotFound as err:
+            raise self._fail(f"user {cred.user_id} no longer exists") from err
+        rp = self._resolver.by_rp_id(state.rp_id)                           # 9
+        if rp is None:
+            raise self._fail(f"relying party {state.rp_id!r} no longer configured")
+        self._check_tenant(user, rp)
+        uv = bool(verified.user_verified)
+        extra = {
+            "auth_method": "passkey",
+            "mfa": uv,
+            "amr": ["hwk", "user"] if uv else ["hwk"],
+            "org_id": rp.org_id,
+            "client_id": rp.client_id,
+            "passkey_rp_id": rp.rp_id,
+        }
+        return await self.open_session(request, user, extra=extra)          # 10 (E9 propagates)
+
+    def _check_tenant(self, user: Any, rp: RelyingParty) -> None:
+        """When PASSKEY_TENANT_ATTRIBUTE is set and present on user, require == rp.org_id (Q-T)."""
+        attr = auth_conf.PASSKEY_TENANT_ATTRIBUTE
+        if not attr:
+            return
+        if isinstance(user, Mapping):
+            value = user.get(attr)
+        else:
+            value = getattr(user, attr, None)
+        if value is None:
+            return
+        if str(value) != str(rp.org_id):
+            uid = user.get("user_id") if isinstance(user, Mapping) else getattr(user, "user_id", None)
+            raise self._fail(f"tenant mismatch for user {uid}")
