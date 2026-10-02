@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 7, §2 Overview item 9, §2 New Public Interfaces, AC12)
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-95
@@ -192,7 +192,7 @@ See the blueprint above (spec §4: `test_manage_list_rename_delete`).
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: list/rename/delete routes and _has_other_login_method (E13). 3 live tests pass; foreign credential returns 404; last-credential no-password returns 409.
 **Deviations from spec**: none

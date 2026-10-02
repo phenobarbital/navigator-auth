@@ -214,7 +214,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -224,8 +224,8 @@
       "parallelism_notes": "Edits backends/passkey.py after TASK-95 — sequential.",
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-96-passkey-credential-management.md"
+      "completed_at": "2026-10-02T21:46:03+00:00",
+      "file": "sdd/tasks/completed/TASK-96-passkey-credential-management.md"
     },
     {
       "id": "TASK-97",
