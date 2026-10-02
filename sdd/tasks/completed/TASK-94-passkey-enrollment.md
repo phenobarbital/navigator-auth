@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 5, §2 Overview item 4, §2 New Public Interfaces, AC5)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-93, TASK-90
@@ -219,7 +219,7 @@ See the blueprint above (spec §4: `test_register_requires_session`, `test_regis
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: register/options + register/verify implemented; added _json_errors decorator so AuthException from route handlers maps to JSON 4xx (handlers sit outside AuthHandler error mapping); shared passkey_app fixture in tests/fixtures/passkey.py (uses AuthHandler(backends=...)). Cookie-session CSRF check is tested at middleware level because cookie sessions need secure_cookies=True. 4 live tests pass.
 **Deviations from spec**: none
