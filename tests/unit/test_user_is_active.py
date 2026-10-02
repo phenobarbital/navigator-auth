@@ -1,5 +1,4 @@
 """FEAT-101 TASK-91 — user_is_active helper."""
-
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +11,7 @@ from navigator_auth.backends.abstract import user_is_active
     [
         ({"is_active": True}, True),
         ({"is_active": False}, False),
-        ({"enabled": True}, True),  # field missing → active
+        ({"enabled": True}, True),          # field missing → active
         ({"is_active": None}, True),
         (SimpleNamespace(is_active=False), False),
         (SimpleNamespace(), True),

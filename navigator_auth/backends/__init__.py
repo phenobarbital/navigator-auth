@@ -2,7 +2,6 @@
 
 Authentication Backends.
 """
-
 from .noauth import NoAuth
 from .basic import BasicAuth
 from .django import DjangoAuth
@@ -24,6 +23,7 @@ from .saml import (
     SAMLAuth,
     SAMLIdentityProvider,
 )
+
 
 __all__ = (
     "NoAuth",
