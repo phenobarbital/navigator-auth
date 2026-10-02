@@ -89,9 +89,7 @@ async def open_session_app():
         user = _fake_user()
         user.update(payload.get("user_overrides") or {})
         try:
-            result = await backend.open_session(
-                request, user, extra=extra, expiration=expiration
-            )
+            result = await backend.open_session(request, user, extra=extra, expiration=expiration)
         except FailedAuth as err:
             return JSONResponse({"error": str(err)}, status=err.status)
         session = request.get(SESSION_OBJECT)
@@ -217,9 +215,7 @@ async def test_open_session_callbacks_invoked(open_session_app):
 async def test_open_session_rejects_inactive(open_session_app):
     """is_active=False -> 403 and no session cookie (FEAT-101 AC9)."""
     client, _secret, _alg = open_session_app
-    resp = await client.post(
-        "/_test/open_session", json={"user_overrides": {"is_active": False}}
-    )
+    resp = await client.post("/_test/open_session", json={"user_overrides": {"is_active": False}})
     assert resp.status == 403, await resp.text()
     assert "disabled" in (await resp.json())["error"]
     assert not resp.cookies

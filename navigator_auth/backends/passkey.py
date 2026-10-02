@@ -69,9 +69,7 @@ class PasskeyAuth(BasicAuth):
     def configure(self, app: web.Application) -> None:
         """Register ceremony routes and build the RP resolver (ConfigError if the map is empty)."""
         if auth_conf.PASSKEY_USER_VERIFICATION not in ("required", "preferred", "discouraged"):
-            raise ConfigError(
-                "PasskeyAuth: PASSKEY_USER_VERIFICATION must be required, preferred or discouraged."
-            )
+            raise ConfigError("PasskeyAuth: PASSKEY_USER_VERIFICATION must be required, preferred or discouraged.")
         self._resolver = RelyingPartyResolver(auth_conf.PASSKEY_RELYING_PARTIES)
         router = app.router
         router.add_route(
