@@ -58,7 +58,8 @@ Setting                         Default                   Description
 ``PASSKEY_CHALLENGE_TTL``       ``300``                   Seconds a challenge stays valid
 ``PASSKEY_USER_VERIFICATION``   ``"required"``            ``"required"`` or ``"preferred"``
 ``PASSKEY_TENANT_ATTRIBUTE``    ``None``                  Optional user attribute compared to ``org_id``
-``PASSKEY_DECOY_CREDENTIALS``   ``1``                     Decoy credential ids for unknown usernames
+``PASSKEY_DECOY_CREDENTIALS``   ``1``                     Max decoy credential ids for unknown usernames
+``PASSKEY_LOGIN_OPTIONS_RATE``  ``0``                     Max ``login/options`` calls per address per minute (0 = off)
 =============================== ========================= ==========================================
 
 With ``PASSKEY_USER_VERIFICATION="required"`` an assertion without user
@@ -194,7 +195,12 @@ Limitations
 - Related Origin Requests are not supported: each site needs its own entry.
 - A sign-count regression is rejected and logged at warning level (with the
   credential id), but the credential is **not** disabled automatically.
-- Decoy credential ids are deterministic per ``(RP, username)``. An attacker
-  who can compare the count returned for known and unknown users may infer
-  account existence if ``PASSKEY_DECOY_CREDENTIALS`` differs from the typical
-  number of enrolled passkeys; keep it at the common value.
+- Decoy credential ids are deterministic per ``(RP, username)``; their count
+  (1 to ``PASSKEY_DECOY_CREDENTIALS``) and length vary per username. Set
+  ``PASSKEY_DECOY_CREDENTIALS`` to the largest number of passkeys a user
+  typically has, otherwise an attacker may infer account existence from the
+  size of ``allowCredentials``.
+- ``PASSKEY_LOGIN_OPTIONS_RATE`` keys on the socket address only. Behind a
+  proxy leave it at 0 and rate-limit ``login/options`` at the proxy.
+- ``rp_id`` must equal the origin's host or a parent domain of it; anything
+  else stops startup with ``ConfigError``.

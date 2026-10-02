@@ -580,6 +580,8 @@ PASSKEY_USER_VERIFICATION = config.get("PASSKEY_USER_VERIFICATION", fallback="re
 PASSKEY_TENANT_ATTRIBUTE = config.get("PASSKEY_TENANT_ATTRIBUTE", fallback=None)
 # Number of decoy credential ids returned for unknown users (username-first, E5).
 PASSKEY_DECOY_CREDENTIALS = config.getint("PASSKEY_DECOY_CREDENTIALS", fallback=1)
+# Max POST /login/options calls per remote address per minute; 0 disables (limit at the proxy).
+PASSKEY_LOGIN_OPTIONS_RATE = config.getint("PASSKEY_LOGIN_OPTIONS_RATE", fallback=0)
 
 ## Backend-Based Password Recovery (FEAT-098) — 3-step signed flow.
 # HMAC key for signing both the recovery and confirmation tokens (D12).

@@ -70,9 +70,18 @@ def test_rp_resolver_by_rp_id():
 def test_rp_resolver_by_origin_distinguishes_shared_rp_id():
     r = RelyingPartyResolver(
         [
-            {"origin": "https://a.test", "rp_id": "shared.test", "org_id": 1},
-            {"origin": "https://b.test", "rp_id": "shared.test", "org_id": 2},
+            {"origin": "https://a.shared.test", "rp_id": "shared.test", "org_id": 1},
+            {"origin": "https://b.shared.test", "rp_id": "shared.test", "org_id": 2},
         ]
     )
-    assert r.by_origin("https://B.test").org_id == 2
+    assert r.by_origin("https://B.shared.test").org_id == 2
     assert r.by_origin("https://c.test") is None
+
+
+def test_rp_resolver_rejects_rp_id_not_matching_origin_host():
+    with pytest.raises(ConfigError, match="rp_id"):
+        RelyingPartyResolver([{"origin": "https://a.test", "rp_id": "other.test"}])
+    # parent domain is valid; a mere suffix string is not
+    RelyingPartyResolver([{"origin": "https://app.a.test", "rp_id": "a.test"}])
+    with pytest.raises(ConfigError):
+        RelyingPartyResolver([{"origin": "https://evila.test", "rp_id": "a.test"}])

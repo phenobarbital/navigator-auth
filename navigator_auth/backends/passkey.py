@@ -17,7 +17,7 @@ from aiohttp import web
 
 from .. import conf as auth_conf
 from ..conf import AUTH_EXCLUDE_LIST_KEY
-from ..exceptions import AuthException, ConfigError, InvalidAuth, UserNotFound
+from ..exceptions import AuthException, ConfigError, FailedAuth, InvalidAuth, UserNotFound
 from ..identities import AuthUser
 from ..identity.store import IdentityStore
 from ..passkey import (
@@ -27,8 +27,9 @@ from ..passkey import (
     RelyingPartyResolver,
     StoredCredential,
 )
-from ..passkey.migrations import setup_passkey_tables
+from ..passkey.migrations import ensure_passkey_tables
 from ..responses import JSONResponse
+from .abstract import user_is_active
 from .basic import BasicAuth
 
 PASSKEY_PREFIX = "/api/v1/auth/passkey"
@@ -99,7 +100,10 @@ class PasskeyAuth(BasicAuth):
         self._webauthn = webauthn
         self._pool = aioredis.ConnectionPool.from_url(auth_conf.REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
         self._store = PasskeyStore(app["authdb"])
-        await setup_passkey_tables(app["authdb"])
+        try:
+            await ensure_passkey_tables(app["authdb"])
+        except Exception as err:  # pylint: disable=W0703
+            raise ConfigError(f"PasskeyAuth: could not create passkey tables: {err}") from err
 
     async def on_cleanup(self, app: web.Application) -> None:
         """Disconnect the Redis pool, then BasicAuth cleanup."""
@@ -144,17 +148,44 @@ class PasskeyAuth(BasicAuth):
             raise InvalidAuth("Passkey: ceremony expired", status=401) from err
 
     def _decoy_ids(self, rp: RelyingParty, username: str) -> list[bytes]:
-        """Deterministic fake credential ids for unknown users (E5)."""
+        """Deterministic fake credential ids for unknown users (E5).
+
+        The count (1..``PASSKEY_DECOY_CREDENTIALS``) and each id's length (16, 32 or 64
+        bytes, like real authenticators) are derived from the HMAC, so they are stable
+        per ``(RP, username)`` yet vary between usernames — a fixed shape would
+        distinguish decoys from real credential lists.
+        """
         secret = auth_conf.SECRET_KEY
         key = secret if isinstance(secret, bytes) else str(secret).encode()
-        return [
-            hmac.new(
-                key,
-                f"{rp.rp_id}\x00{username.casefold()}\x00{i}".encode(),
-                hashlib.sha256,
-            ).digest()
-            for i in range(auth_conf.PASSKEY_DECOY_CREDENTIALS)
-        ]
+        base = f"{rp.rp_id}\x00{username.casefold()}\x00"
+        maximum = max(1, auth_conf.PASSKEY_DECOY_CREDENTIALS)
+        count = 1 + hmac.new(key, f"{base}count".encode(), hashlib.sha256).digest()[0] % maximum
+        ids: list[bytes] = []
+        for i in range(count):
+            digest = hmac.new(key, f"{base}{i}".encode(), hashlib.sha256).digest()
+            length = (16, 32, 64)[digest[0] % 3]
+            ids.append((digest + hmac.new(key, digest, hashlib.sha256).digest())[:length])
+        return ids
+
+    async def _rate_limit(self, request: web.Request) -> None:
+        """Per-remote-address cap on ``login/options`` (``PASSKEY_LOGIN_OPTIONS_RATE`` per minute).
+
+        Disabled when the setting is 0. Uses ``request.remote`` only: behind a proxy
+        enforce the limit there (``X-Forwarded-*`` is never trusted).
+        """
+        limit = auth_conf.PASSKEY_LOGIN_OPTIONS_RATE
+        if not limit:
+            return
+        key = f"passkey_rl_{request.remote}"
+        try:
+            async with aioredis.Redis(connection_pool=self._pool) as redis:
+                count = await redis.incr(key)
+                if count == 1:
+                    await redis.expire(key, 60)
+        except Exception as err:  # pylint: disable=W0703
+            raise AuthException(f"Passkey: rate-limit store error: {err}", status=500) from err
+        if count > limit:
+            raise AuthException("Passkey: too many requests", status=429)
 
     def _session_user(self, request: web.Request) -> Any:
         """Return ``request.user`` for a live session, else raise 401 (E12)."""
@@ -283,7 +314,7 @@ class PasskeyAuth(BasicAuth):
         except web.HTTPException:
             raise
         except Exception as err:  # pylint: disable=W0703
-            if "duplicate key" in str(err).lower() or "unique" in str(err).lower():
+            if "unique" in type(err).__name__.lower() or "duplicate key" in str(err).lower():
                 raise web.HTTPConflict(reason="Passkey: credential already registered") from err
             raise AuthException(f"Passkey: could not store credential: {err}", status=500) from err
         self.logger.info(f"Passkey: registered credential for user {user.user_id} on {rp.rp_id}")
@@ -294,13 +325,17 @@ class PasskeyAuth(BasicAuth):
 
     def _fail(self, log_reason: str, *, warning: bool = False) -> InvalidAuth:
         """Log the specific reason, return the uniform 401 (E4)."""
-        (self.logger.warning if warning else self.logger.info)(f"Passkey: {log_reason}")
+        if warning:
+            self.logger.warning(f"Passkey: {log_reason}")
+        else:
+            self.logger.info(f"Passkey: {log_reason}")
         return InvalidAuth("Passkey: invalid credential", status=401)
 
     @_json_errors
     async def login_options(self, request: web.Request) -> web.Response:
         """Start a sign-in ceremony: username-first (default) or usernameless (C4, E5)."""
         rp = self._resolver.resolve(request)
+        await self._rate_limit(request)
         from webauthn.helpers import bytes_to_base64url  # pylint: disable=C0415
         from webauthn.helpers.structs import (  # pylint: disable=C0415
             PublicKeyCredentialDescriptor,
@@ -410,14 +445,6 @@ class PasskeyAuth(BasicAuth):
             raise self._fail(f"assertion verification failed: {err}") from err
         except (ValueError, KeyError, TypeError) as err:
             raise self._fail(f"malformed assertion: {type(err).__name__}") from err
-        try:
-            await self._store.update_usage(  # 7
-                cred.credential_id,
-                sign_count=verified.new_sign_count,
-                backed_up=bool(verified.credential_backed_up),
-            )
-        except Exception as err:  # pylint: disable=W0703
-            raise AuthException(f"Passkey: store error: {err}", status=500) from err
         try:  # 8
             user = await self._idp.user_from_id(cred.user_id)
         except UserNotFound as err:
@@ -426,6 +453,17 @@ class PasskeyAuth(BasicAuth):
         if rp is None:
             raise self._fail(f"relying party {state.rp_id!r} no longer configured")
         self._check_tenant(user, rp)
+        if not user_is_active(user):
+            # Reject before touching the credential (no usage update for a disabled account).
+            raise FailedAuth("User account is disabled", status=403)
+        try:
+            await self._store.update_usage(
+                cred.credential_id,
+                sign_count=verified.new_sign_count,
+                backed_up=bool(verified.credential_backed_up),
+            )
+        except Exception as err:  # pylint: disable=W0703
+            raise AuthException(f"Passkey: store error: {err}", status=500) from err
         uv = bool(verified.user_verified)
         extra = {
             "auth_method": "passkey",
@@ -526,7 +564,10 @@ class PasskeyAuth(BasicAuth):
 
     async def _has_other_login_method(self, user_id: int) -> bool:
         """True when the user has a password or at least one linked external identity."""
-        user = await self._idp.user_from_id(user_id)
+        try:
+            user = await self._idp.user_from_id(user_id)
+        except UserNotFound:
+            return False
         password = (
             user.get(self.pwd_atrribute) if isinstance(user, Mapping) else getattr(user, self.pwd_atrribute, None)
         )

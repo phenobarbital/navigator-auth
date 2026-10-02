@@ -176,7 +176,7 @@ async def test_login_username_first_unknown_shape(passkey_app, soft_authenticato
     again = await _options(passkey_app, username="NOBODY_such_user")
     assert set(known) == set(unknown)
     assert set(known["publicKey"]) == set(unknown["publicKey"])
-    assert len(unknown["publicKey"]["allowCredentials"]) == conf.PASSKEY_DECOY_CREDENTIALS
+    assert 1 <= len(unknown["publicKey"]["allowCredentials"]) <= conf.PASSKEY_DECOY_CREDENTIALS
     assert unknown["publicKey"]["allowCredentials"] == again["publicKey"]["allowCredentials"]
     resp = await _login(passkey_app, soft_authenticator, unknown)
     assert resp.status == 401
@@ -277,6 +277,9 @@ async def test_inactive_user_rejected(passkey_app, soft_authenticator):
         resp = await _login(passkey_app, soft_authenticator, await _options(passkey_app))
         assert resp.status == 403, await resp.text()
         assert "token" not in (await resp.text())
+        # a rejected (disabled) account must not touch the credential
+        stored = await passkey_app.backend._store.get_credential(soft_authenticator.credential_id)
+        assert stored.sign_count == 0 and stored.last_used_at is None
     finally:
         async with await passkey_app.db_pool.acquire() as conn:
             await conn.execute(f"UPDATE auth.users SET is_active = true WHERE user_id = {passkey_app.user_id}")

@@ -79,12 +79,16 @@ def test_decoy_ids_deterministic(backend, passkey_rp_config, monkeypatch):
 
     a, b = (RelyingParty(**p) for p in passkey_rp_config)
     ids = backend._decoy_ids(a, "Bob")
-    assert len(ids) == conf.PASSKEY_DECOY_CREDENTIALS
+    assert 1 <= len(ids) <= conf.PASSKEY_DECOY_CREDENTIALS
     assert ids == backend._decoy_ids(a, "bOB")
     assert ids != backend._decoy_ids(b, "Bob")
     assert ids != backend._decoy_ids(a, "alice")
-    monkeypatch.setattr(conf, "PASSKEY_DECOY_CREDENTIALS", 3, raising=False)
-    assert len(backend._decoy_ids(a, "Bob")) == 3
+    monkeypatch.setattr(conf, "PASSKEY_DECOY_CREDENTIALS", 4, raising=False)
+    counts = {len(backend._decoy_ids(a, f"user{i}")) for i in range(40)}
+    lengths = {len(x) for i in range(40) for x in backend._decoy_ids(a, f"user{i}")}
+    assert counts <= {1, 2, 3, 4} and len(counts) > 1  # count varies per username
+    assert lengths <= {16, 32, 64} and len(lengths) > 1  # id length varies like real ones
+    assert backend._decoy_ids(a, "user7") == backend._decoy_ids(a, "USER7")  # still deterministic
 
 
 def test_configure_registers_routes_and_exclude(backend):
@@ -140,3 +144,63 @@ def test_configure_invalid_user_verification_raises(monkeypatch, passkey_rp_conf
     be = PasskeyAuth(user_model=MagicMock(), identity=MagicMock())
     with pytest.raises(ConfigError):
         be.configure(web.Application())
+
+
+def test_sign_count_regression_message_pinned():
+    """authenticate() classifies regressions by py_webauthn's message; pin it to the library."""
+    import os
+
+    import webauthn
+    from webauthn.helpers.exceptions import InvalidAuthenticationResponse
+
+    from tests.fixtures.passkey import SoftAuthenticator
+
+    auth = SoftAuthenticator()
+    challenge = os.urandom(32)
+    reg = webauthn.verify_registration_response(
+        credential=auth.make_attestation("a.test", "https://a.test", challenge, b"h" * 32),
+        expected_challenge=challenge, expected_rp_id="a.test", expected_origin="https://a.test",
+    )
+    challenge = os.urandom(32)
+    with pytest.raises(InvalidAuthenticationResponse) as exc:
+        webauthn.verify_authentication_response(
+            credential=auth.make_assertion("a.test", "https://a.test", challenge, sign_count=3),
+            expected_challenge=challenge, expected_rp_id="a.test", expected_origin="https://a.test",
+            credential_public_key=reg.credential_public_key, credential_current_sign_count=5,
+        )
+    assert "sign count" in str(exc.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_disabled_and_enforced(backend, monkeypatch):
+    import navigator_auth.conf as conf
+
+    req = make_mocked_request("POST", "/")
+    await backend._rate_limit(req)  # default 0 → no Redis access (pool unset)
+
+    class _Redis:
+        n = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def incr(self, key):
+            _Redis.n += 1
+            return _Redis.n
+
+        async def expire(self, key, ttl):
+            return True
+
+    monkeypatch.setattr(conf, "PASSKEY_LOGIN_OPTIONS_RATE", 2, raising=False)
+    monkeypatch.setattr("navigator_auth.backends.passkey.aioredis.Redis", lambda **kw: _Redis())
+    backend._pool = object()
+    await backend._rate_limit(req)
+    await backend._rate_limit(req)
+    from navigator_auth.exceptions import AuthException
+
+    with pytest.raises(AuthException) as exc:
+        await backend._rate_limit(req)
+    assert exc.value.status == 429

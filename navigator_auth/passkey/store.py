@@ -84,10 +84,10 @@ class PasskeyStore:
             )
 
     async def update_usage(self, credential_id: bytes, *, sign_count: int, backed_up: bool) -> None:
-        """Set ``sign_count``, ``backed_up`` and ``last_used_at = now()``."""
+        """Raise ``sign_count`` (never lower it), set ``backed_up`` and ``last_used_at = now()``."""
         async with await self._pool.acquire() as conn:
             await conn.execute(
-                f"UPDATE {_CREDENTIALS} SET sign_count = $2, backed_up = $3, "
+                f"UPDATE {_CREDENTIALS} SET sign_count = GREATEST(sign_count, $2), backed_up = $3, "
                 "last_used_at = now() WHERE credential_id = $1",
                 credential_id,
                 sign_count,

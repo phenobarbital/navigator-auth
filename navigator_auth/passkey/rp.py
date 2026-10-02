@@ -64,6 +64,12 @@ class RelyingPartyResolver:
                 raise ConfigError(
                     f"PasskeyAuth: invalid origin in PASSKEY_RELYING_PARTIES[{idx}]: " f"{party.origin!r}"
                 )
+            host = urlsplit(origin).hostname or ""
+            if host != party.rp_id.lower() and not host.endswith("." + party.rp_id.lower()):
+                raise ConfigError(
+                    f"PasskeyAuth: rp_id {party.rp_id!r} is not the host or a parent domain of "
+                    f"origin {origin!r} (PASSKEY_RELYING_PARTIES[{idx}])"
+                )
             if origin in self._by_origin:
                 raise ConfigError(f"PasskeyAuth: duplicate origin in PASSKEY_RELYING_PARTIES[{idx}]: " f"{origin!r}")
             party = party.model_copy(update={"origin": origin})

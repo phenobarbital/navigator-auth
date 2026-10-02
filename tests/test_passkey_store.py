@@ -107,3 +107,22 @@ async def test_handles_stable_and_unique(pool, users):
     assert await store.get_handle(ua, "a.com") == h1
     assert await store.get_or_create_handle(ua, "b.com") != h1
     assert await store.get_or_create_handle(ub, "a.com") != h1
+
+
+async def test_update_usage_never_lowers_sign_count(pool, users):
+    store = PasskeyStore(pool)
+    c = _cred(users[0], sign_count=0)
+    await store.save_credential(c)
+    await store.update_usage(c.credential_id, sign_count=7, backed_up=False)
+    await store.update_usage(c.credential_id, sign_count=3, backed_up=False)
+    assert (await store.get_credential(c.credential_id)).sign_count == 7
+
+
+async def test_delete_keep_last_is_atomic(pool, users):
+    store = PasskeyStore(pool)
+    c1, c2 = _cred(users[0]), _cred(users[0])
+    await store.save_credential(c1)
+    await store.save_credential(c2)
+    assert await store.delete_credential(users[0], c1.credential_id, keep_last=True) is True
+    assert await store.delete_credential(users[0], c2.credential_id, keep_last=True) is False
+    assert await store.count_credentials(users[0]) == 1

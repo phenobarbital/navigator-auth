@@ -67,3 +67,8 @@ def test_conf_passkey_valid_json(monkeypatch):
         PASSKEY_RELYING_PARTIES='[{"origin": "https://a.com", "rp_id": "a.com"}]',
     )
     assert conf.PASSKEY_RELYING_PARTIES[0]["rp_id"] == "a.com"
+
+
+def test_conf_passkey_rate_limit_default_off(monkeypatch):
+    conf = _reload_conf(monkeypatch)
+    assert conf.PASSKEY_LOGIN_OPTIONS_RATE == 0
