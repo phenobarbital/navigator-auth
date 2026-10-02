@@ -130,6 +130,13 @@ class EvalContext(dict, MutableMapping):
             except AttributeError:
                 self.store['userinfo_keys'] = []
         self.store['session'] = session
+        # FEAT-101 (Q5): first-class login-method keys for policies.
+        if isinstance(userinfo, dict):
+            self.store['auth_method'] = userinfo.get('auth_method')
+            self.store['mfa'] = bool(userinfo.get('mfa', False))
+        else:
+            self.store['auth_method'] = getattr(userinfo, 'auth_method', None)
+            self.store['mfa'] = bool(getattr(userinfo, 'mfa', False))
 
         # Resolve tenant pair (FEAT-092)
         resolved_org, resolved_client = _resolve_tenant(request, userinfo, org_id, client_id)
