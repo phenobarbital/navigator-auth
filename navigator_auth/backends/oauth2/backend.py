@@ -143,7 +143,6 @@ from .dcr import (
     validate_registration,
 )
 
-
 #: Upper bound on the discovery-document memo.  The cache key is the issuer,
 #: which is derived from request headers when AUTH_ISSUER_URL is unset, so it
 #: must never be allowed to grow without limit (FEAT-095 review finding).
@@ -194,7 +193,7 @@ def _is_localhost(host: str) -> bool:
     if not host:
         return False
     hostname = host.split(",")[0].strip()
-    if hostname.startswith("["):          # IPv6 literal, e.g. [::1]:8080
+    if hostname.startswith("["):  # IPv6 literal, e.g. [::1]:8080
         hostname = hostname.split("]")[0] + "]"
     else:
         hostname = hostname.split(":")[0]
@@ -234,9 +233,7 @@ def issuer_url(request: Optional[web.Request] = None) -> str:
     if AUTH_ISSUER_URL:
         return AUTH_ISSUER_URL.rstrip("/")
     if request is None:
-        raise RuntimeError(
-            "Oauth2: cannot derive the issuer URL — set AUTH_ISSUER_URL."
-        )
+        raise RuntimeError("Oauth2: cannot derive the issuer URL — set AUTH_ISSUER_URL.")
     headers = request.headers
     forwarded_proto = headers.get("X-Forwarded-Proto", "")
     scheme = forwarded_proto.split(",")[0].strip().lower() if forwarded_proto else ""
@@ -250,10 +247,7 @@ def issuer_url(request: Optional[web.Request] = None) -> str:
     )
     host = host.split(",")[0].strip()
     if not host:
-        raise RuntimeError(
-            "Oauth2: cannot derive the issuer URL — no Host header; "
-            "set AUTH_ISSUER_URL."
-        )
+        raise RuntimeError("Oauth2: cannot derive the issuer URL — no Host header; " "set AUTH_ISSUER_URL.")
     # https enforcement: http is only tolerated for loopback development.
     if scheme != "https" and not _is_localhost(host):
         scheme = "https"
@@ -325,35 +319,21 @@ class Oauth2Provider(BaseAuthBackend):
 
     def configure(self, app):
         router = app.router
-        router.add_route(
-            "*", self.authorize_uri, self.authorize, name="nav_oauth2_authorize"
-        )
-        router.add_route(
-            "*", "/oauth2/authorize/", self.authorize, name="nav_oauth2_authorize_alt"
-        )
+        router.add_route("*", self.authorize_uri, self.authorize, name="nav_oauth2_authorize")
+        router.add_route("*", "/oauth2/authorize/", self.authorize, name="nav_oauth2_authorize_alt")
         app[AUTH_EXCLUDE_LIST_KEY].append(self.authorize_uri)
         app[AUTH_EXCLUDE_LIST_KEY].append("/oauth2/authorize/")
 
-        router.add_route(
-            "*", self.login_uri, self.auth_login, name="nav_oauth2_login"
-        )
+        router.add_route("*", self.login_uri, self.auth_login, name="nav_oauth2_login")
         app[AUTH_EXCLUDE_LIST_KEY].append(self.login_uri)
 
-        router.add_route(
-            "*", self.consent_uri, self.consent, name="nav_oauth2_consent"
-        )
+        router.add_route("*", self.consent_uri, self.consent, name="nav_oauth2_consent")
 
-        router.add_route(
-            "*", self.token_uri, self.token_request, name="nav_oauth2_token_request"
-        )
+        router.add_route("*", self.token_uri, self.token_request, name="nav_oauth2_token_request")
         app[AUTH_EXCLUDE_LIST_KEY].append(self.token_uri)
 
-        router.add_route(
-            "GET", self.userinfo_uri, self.userinfo, name="nav_oauth2_userinfo"
-        )
-        router.add_route(
-            "GET", self.logout_uri, self.logout, name="nav_oauth2_api_logout"
-        )
+        router.add_route("GET", self.userinfo_uri, self.userinfo, name="nav_oauth2_userinfo")
+        router.add_route("GET", self.logout_uri, self.logout, name="nav_oauth2_api_logout")
         router.add_route(
             "GET",
             self.logout_redirect_uri,
@@ -363,15 +343,11 @@ class Oauth2Provider(BaseAuthBackend):
         app[AUTH_EXCLUDE_LIST_KEY].append(self.logout_redirect_uri)
 
         # RFC 7009 revocation
-        router.add_route(
-            "POST", self.revoke_uri, self.revoke, name="nav_oauth2_revoke"
-        )
+        router.add_route("POST", self.revoke_uri, self.revoke, name="nav_oauth2_revoke")
         app[AUTH_EXCLUDE_LIST_KEY].append(self.revoke_uri)
 
         # Grants API
-        router.add_route(
-            "GET", self.grants_uri, self.list_grants, name="nav_oauth2_grants_list"
-        )
+        router.add_route("GET", self.grants_uri, self.list_grants, name="nav_oauth2_grants_list")
         router.add_route(
             "DELETE",
             f"{self.grants_uri}/{{client_id}}",
@@ -380,9 +356,7 @@ class Oauth2Provider(BaseAuthBackend):
         )
 
         # FEAT-094: Token Introspection (RFC 7662) — TASK-033
-        router.add_route(
-            "POST", self.introspect_uri, self.introspect, name="nav_oauth2_introspect"
-        )
+        router.add_route("POST", self.introspect_uri, self.introspect, name="nav_oauth2_introspect")
         app[AUTH_EXCLUDE_LIST_KEY].append(self.introspect_uri)
 
         # FEAT-094: Device Authorization Grant (RFC 8628) — TASK-034/035
@@ -394,9 +368,7 @@ class Oauth2Provider(BaseAuthBackend):
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(self.device_authorization_uri)
 
-        router.add_route(
-            "*", self.device_uri, self.device_verification, name="nav_oauth2_device"
-        )
+        router.add_route("*", self.device_uri, self.device_verification, name="nav_oauth2_device")
         app[AUTH_EXCLUDE_LIST_KEY].append(self.device_uri)
 
         # FEAT-095 TASK-039: discovery documents (RFC 8414 + RFC 9728).
@@ -404,21 +376,16 @@ class Oauth2Provider(BaseAuthBackend):
         # under the AS path exist for deployments mounted behind a prefix.
         for path, handler, name in (
             (self.as_metadata_uri, self.as_metadata, "nav_oauth2_as_metadata"),
-            (self.prm_metadata_uri, self.protected_resource_metadata,
-             "nav_oauth2_prm_metadata"),
-            (f"/oauth2{self.as_metadata_uri}", self.as_metadata,
-             "nav_oauth2_as_metadata_alias"),
-            (f"/oauth2{self.prm_metadata_uri}", self.protected_resource_metadata,
-             "nav_oauth2_prm_metadata_alias"),
+            (self.prm_metadata_uri, self.protected_resource_metadata, "nav_oauth2_prm_metadata"),
+            (f"/oauth2{self.as_metadata_uri}", self.as_metadata, "nav_oauth2_as_metadata_alias"),
+            (f"/oauth2{self.prm_metadata_uri}", self.protected_resource_metadata, "nav_oauth2_prm_metadata_alias"),
         ):
             router.add_route("GET", path, handler, name=name)
             app[AUTH_EXCLUDE_LIST_KEY].append(path)
 
         # FEAT-095 TASK-040: Dynamic Client Registration (RFC 7591).
         # Anonymous by design (D1) — the endpoint must bypass auth entirely.
-        router.add_route(
-            "POST", self.register_uri, self.register, name="nav_oauth2_register"
-        )
+        router.add_route("POST", self.register_uri, self.register, name="nav_oauth2_register")
         app[AUTH_EXCLUDE_LIST_KEY].append(self.register_uri)
 
         # FEAT-095 TASK-043: JWK Set — public verification keys, unauthenticated
@@ -453,9 +420,7 @@ class Oauth2Provider(BaseAuthBackend):
         # FEAT-094: device code storage
         self.device_code_storage = get_device_code_storage(storage_type, REDIS_URL)
         # FEAT-095 TASK-042: per-client access gate storage.
-        self.client_access_storage = get_client_access_storage(
-            storage_type, REDIS_URL
-        )
+        self.client_access_storage = get_client_access_storage(storage_type, REDIS_URL)
         app["oauth2_client_access_storage"] = self.client_access_storage
 
     async def on_cleanup(self, app: web.Application):
@@ -485,9 +450,7 @@ class Oauth2Provider(BaseAuthBackend):
             try:
                 await redis_conn.aclose()
             except Exception as ex:  # pylint: disable=W0703
-                self.logger.warning(
-                    f"Oauth2Provider: error closing {attr} Redis connection: {ex}"
-                )
+                self.logger.warning(f"Oauth2Provider: error closing {attr} Redis connection: {ex}")
 
     def get_successful_callbacks(self) -> list[Awaitable]:
         fns = []
@@ -498,9 +461,7 @@ class Oauth2Provider(BaseAuthBackend):
                 obj = getattr(mod, module)
                 fns.append(obj)
             except ImportError as e:
-                raise RuntimeError(
-                    f"Auth Callback: Error getting Callback Function: {fn}, {e!s}"
-                ) from e
+                raise RuntimeError(f"Auth Callback: Error getting Callback Function: {fn}, {e!s}") from e
         self._callbacks = fns
 
     def issuer_url(self, request: web.Request = None) -> str:
@@ -735,9 +696,7 @@ class Oauth2Provider(BaseAuthBackend):
         try:
             user = await self._idp.user_from_id(user_id)
         except Exception as exc:  # pylint: disable=W0703
-            self.logger.warning(
-                f"Oauth2: cannot bind a session to the token for user_id={user_id}: {exc}"
-            )
+            self.logger.warning(f"Oauth2: cannot bind a session to the token for user_id={user_id}: {exc}")
             return {}
         session = await self._create_user_session(request, user)
         if not session:
@@ -969,19 +928,12 @@ class Oauth2Provider(BaseAuthBackend):
         if not self._gate_applies(client):
             return True
         if not self.client_access_storage:
-            self.logger.error(
-                "OAuth2 gate: enforced but no ClientAccessStorage is configured; "
-                "denying access."
-            )
+            self.logger.error("OAuth2 gate: enforced but no ClientAccessStorage is configured; " "denying access.")
             return False
         if user_id is None:
             return False
         try:
-            return bool(
-                await self.client_access_storage.check(
-                    user_id, client.client_id, request=request
-                )
-            )
+            return bool(await self.client_access_storage.check(user_id, client.client_id, request=request))
         except Exception as e:  # pylint: disable=W0703
             self.logger.error(f"OAuth2 gate: check failed, denying: {e}")
             return False
@@ -1021,10 +973,7 @@ class Oauth2Provider(BaseAuthBackend):
             except Exception as e:  # pylint: disable=W0703
                 self.logger.warning(f"OAuth2 gate: could not queue request: {e}")
 
-        self.logger.warning(
-            f"OAuth2 gate: user {user_id} is not activated for client "
-            f"{client_uid}; access_denied."
-        )
+        self.logger.warning(f"OAuth2 gate: user {user_id} is not activated for client " f"{client_uid}; access_denied.")
         return self._access_denied(request, redirect_uri, state)
 
     def _access_denied(self, request: web.Request, redirect_uri: str, state: str):
@@ -1038,24 +987,20 @@ class Oauth2Provider(BaseAuthBackend):
         if not redirect_uri:
             return self._error_response(
                 "access_denied",
-                "You are not authorized to use this application. "
-                "An administrator must approve your access.",
+                "You are not authorized to use this application. " "An administrator must approve your access.",
                 status=403,
             )
         params = {
             "error": "access_denied",
             "error_description": (
-                "You are not authorized to use this application. "
-                "An administrator must approve your access."
+                "You are not authorized to use this application. " "An administrator must approve your access."
             ),
         }
         if state:
             params["state"] = state
         return web.HTTPFound(self.prepare_url(redirect_uri, params))
 
-    async def cascade_access_revocation(
-        self, user_id: int, client_uid: str, request: web.Request = None
-    ) -> dict:
+    async def cascade_access_revocation(self, user_id: int, client_uid: str, request: web.Request = None) -> dict:
         """Revoke everything a (user, client) pair currently holds.
 
         Deactivation must take effect within one access-token TTL (the
@@ -1081,22 +1026,15 @@ class Oauth2Provider(BaseAuthBackend):
                 for rt in tokens:
                     rt_client = getattr(getattr(rt, "client", None), "client_id", None)
                     if rt_client == client_uid and not rt.revoked:
-                        await self.refresh_token_storage.revoke_chain(
-                            rt.refresh_token
-                        )
+                        await self.refresh_token_storage.revoke_chain(rt.refresh_token)
                         result["refresh_chains"] += 1
             except Exception as e:  # pylint: disable=W0703
                 self.logger.warning(f"Gate cascade: refresh revoke failed: {e}")
 
         # 3. Live access-token jtis for this pair.
-        result["access_tokens"] = await self._revoke_client_jtis(
-            user_id, client_uid
-        )
+        result["access_tokens"] = await self._revoke_client_jtis(user_id, client_uid)
 
-        self.logger.info(
-            f"OAuth2 gate: revoked access for user {user_id} on {client_uid}: "
-            f"{result}"
-        )
+        self.logger.info(f"OAuth2 gate: revoked access for user {user_id} on {client_uid}: " f"{result}")
         return result
 
     async def _revoke_client_jtis(self, user_id: int, client_uid: str) -> int:
@@ -1170,15 +1108,11 @@ class Oauth2Provider(BaseAuthBackend):
         process-wide singletons.
         """
         if self._flow_store is None:
-            pool = aioredis.ConnectionPool.from_url(
-                REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
-            )
+            pool = aioredis.ConnectionPool.from_url(REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
             self._flow_store = IdentityFlowStore(pool)
         return self._flow_store
 
-    async def _start_upstream_login(
-        self, request: web.Request, provider: str, data: dict
-    ):
+    async def _start_upstream_login(self, request: web.Request, provider: str, data: dict):
         """Park the pending authorize request and detour to an upstream IdP."""
         if provider not in self._upstream_providers():
             return self._error_response(
@@ -1187,11 +1121,7 @@ class Oauth2Provider(BaseAuthBackend):
                 status=400,
             )
 
-        pending = {
-            key: data[key]
-            for key in self.PENDING_AUTHORIZE_FIELDS
-            if data.get(key) is not None
-        }
+        pending = {key: data[key] for key in self.PENDING_AUTHORIZE_FIELDS if data.get(key) is not None}
         if not pending.get("client_id"):
             return self._error_response(
                 "invalid_request",
@@ -1225,9 +1155,7 @@ class Oauth2Provider(BaseAuthBackend):
             secure=(PREFERRED_AUTH_SCHEME == "https"),
             path="/",
         )
-        self.logger.notice(
-            f"OAuth2: parked authorize flow {flow_id}, delegating to '{provider}'"
-        )
+        self.logger.notice(f"OAuth2: parked authorize flow {flow_id}, delegating to '{provider}'")
         return response
 
     async def _resume_pending_authorize(self, data: dict) -> Optional[dict]:
@@ -1241,16 +1169,12 @@ class Oauth2Provider(BaseAuthBackend):
         if not flow_id:
             return None
         try:
-            pending = await self.flow_store.getdel(
-                OAUTH2_PENDING_FLOW_KEY.format(flow_id=flow_id)
-            )
+            pending = await self.flow_store.getdel(OAUTH2_PENDING_FLOW_KEY.format(flow_id=flow_id))
         except Exception as e:
             self.logger.error(f"OAuth2: cannot read parked authorize flow: {e}")
             return None
         if not pending:
-            self.logger.warning(
-                f"OAuth2: authorize flow {flow_id} is missing or expired."
-            )
+            self.logger.warning(f"OAuth2: authorize flow {flow_id} is missing or expired.")
             return None
         # Anything explicitly present on the resume URL wins over the
         # parked copy, but the parked copy is the source of truth for the
@@ -1329,10 +1253,7 @@ class Oauth2Provider(BaseAuthBackend):
             return JSONResponse(
                 {
                     "error": "too_many_requests",
-                    "error_description": (
-                        "Too many client registrations from this source. "
-                        "Please retry later."
-                    ),
+                    "error_description": ("Too many client registrations from this source. " "Please retry later."),
                 },
                 status=429,
                 headers={"Retry-After": str(window)},
@@ -1349,9 +1270,7 @@ class Oauth2Provider(BaseAuthBackend):
             )
 
         try:
-            reg = validate_registration(
-                body, OAUTH_DCR_POLICY, OAUTH_DCR_REDIRECT_ALLOWLIST
-            )
+            reg = validate_registration(body, OAUTH_DCR_POLICY, OAUTH_DCR_REDIRECT_ALLOWLIST)
         except DCRError as exc:
             return self._error_response(exc.error, exc.description, status=exc.status)
 
@@ -1363,9 +1282,7 @@ class Oauth2Provider(BaseAuthBackend):
 
         saved = await self.client_storage.save_client(client, request)
         if not saved:
-            self.logger.error(
-                f"OAuth2 DCR: failed to persist client {client.client_id}"
-            )
+            self.logger.error(f"OAuth2 DCR: failed to persist client {client.client_id}")
             return self._error_response(
                 "server_error",
                 "The client could not be registered; please retry.",
@@ -1397,6 +1314,7 @@ class Oauth2Provider(BaseAuthBackend):
         deleted.  Those tiers are ephemeral anyway; a process restart is their
         reaper.
         """
+
         async def _is_used(client_uid: str) -> bool:
             storage = self.access_token_storage
             lister = getattr(storage, "list_by_client", None)
@@ -1456,8 +1374,7 @@ class Oauth2Provider(BaseAuthBackend):
         if resource and not validate_resource_uri(resource):
             return self._error_response(
                 "invalid_target",
-                "The 'resource' parameter must be an absolute URI "
-                "without a fragment.",
+                "The 'resource' parameter must be an absolute URI " "without a fragment.",
             )
 
         client_id = data.get("client_id")
@@ -1528,17 +1445,19 @@ class Oauth2Provider(BaseAuthBackend):
         if prompt != "consent" and self.grant_storage:
             user_obj = self._decode_session_user(session)
             if user_obj:
-                existing_grant = await self.grant_storage.get_grant(
-                    user_obj.user_id, client_id
-                )
+                existing_grant = await self.grant_storage.get_grant(user_obj.user_id, client_id)
                 if existing_grant and not existing_grant.revoked:
                     granted = set(existing_grant.scopes)
                     requested = set(scopes)
                     if requested.issubset(granted):
                         # Skip consent — issue code directly.
                         return await self._issue_code(
-                            request, client, user_obj, redirect_uri,
-                            requested_scope, data.get("state", ""),
+                            request,
+                            client,
+                            user_obj,
+                            redirect_uri,
+                            requested_scope,
+                            data.get("state", ""),
                             data.get("code_challenge"),
                             data.get("code_challenge_method"),
                             resource=resource,
@@ -1612,21 +1531,16 @@ class Oauth2Provider(BaseAuthBackend):
                 if resource and not validate_resource_uri(resource):
                     return self._error_response(
                         "invalid_target",
-                        "The 'resource' parameter must be an absolute URI "
-                        "without a fragment.",
+                        "The 'resource' parameter must be an absolute URI " "without a fragment.",
                     )
 
                 # Resolve authenticated user from session — NEVER from client.user.
                 session_user = await self.check_session(request)
                 if not session_user:
-                    return self._error_response(
-                        "access_denied", "User not authenticated.", status=401
-                    )
+                    return self._error_response("access_denied", "User not authenticated.", status=401)
                 user_obj = self._decode_session_user(session_user)
                 if not user_obj:
-                    return self._error_response(
-                        "access_denied", "Cannot resolve user from session.", status=401
-                    )
+                    return self._error_response("access_denied", "Cannot resolve user from session.", status=401)
 
                 client = await self.client_storage.get_client(client_id, request=request)
                 if not client:
@@ -1637,9 +1551,7 @@ class Oauth2Provider(BaseAuthBackend):
                 # non-activated user could otherwise POST straight to
                 # /oauth2/consent and skip the gate entirely.  Every path that
                 # reaches _issue_code must be gated (cf. the device flow).
-                gate_denied = await self._enforce_access_gate(
-                    request, client, user_obj.user_id, redirect_uri, state
-                )
+                gate_denied = await self._enforce_access_gate(request, client, user_obj.user_id, redirect_uri, state)
                 if gate_denied is not None:
                     return gate_denied
 
@@ -1653,8 +1565,14 @@ class Oauth2Provider(BaseAuthBackend):
                     await self.grant_storage.save_grant(grant)
 
                 return await self._issue_code(
-                    request, client, user_obj, redirect_uri, scope, state,
-                    code_challenge, code_challenge_method,
+                    request,
+                    client,
+                    user_obj,
+                    redirect_uri,
+                    scope,
+                    state,
+                    code_challenge,
+                    code_challenge_method,
                     resource=resource,
                 )
 
@@ -1754,20 +1672,14 @@ class Oauth2Provider(BaseAuthBackend):
             # session cookie is written on this redirect, and /oauth2/authorize
             # reads it back on the next hop (see check_session).
             try:
-                session = await self._create_user_session(
-                    request, user, response=response
-                )
+                session = await self._create_user_session(request, user, response=response)
                 if not session:
-                    raise web.HTTPBadRequest(
-                        reason="Auth: unable to create the User session."
-                    )
+                    raise web.HTTPBadRequest(reason="Auth: unable to create the User session.")
             except web.HTTPException:
                 raise
             except Exception as e:  # pylint: disable=W0703
                 self.logger.error(f"Error creating session: {e}")
-                raise web.HTTPBadRequest(
-                    reason=f"Auth: unable to create the User session: {e}"
-                ) from e
+                raise web.HTTPBadRequest(reason=f"Auth: unable to create the User session: {e}") from e
 
             return response
         else:
@@ -1869,9 +1781,7 @@ class Oauth2Provider(BaseAuthBackend):
         # _handle_device_code which injects _device_origin=True into the payload).
         is_device_origin = payload.get("_device_origin", False)
         if redirect_uri and auth_code.redirect_uri != redirect_uri and not is_device_origin:
-            return self._error_response(
-                "invalid_grant", "redirect_uri does not match the authorization request."
-            )
+            return self._error_response("invalid_grant", "redirect_uri does not match the authorization request.")
 
         # Fetch the live client.
         client = await self.client_storage.get_client(client_id, request=request)
@@ -1888,17 +1798,13 @@ class Oauth2Provider(BaseAuthBackend):
         if auth_code.code_challenge:
             code_verifier = payload.get("code_verifier", "")
             if not code_verifier:
-                return self._error_response(
-                    "invalid_grant", "code_verifier required."
-                )
+                return self._error_response("invalid_grant", "code_verifier required.")
             method = auth_code.code_challenge_method or "S256"
             if not pkce_verify(code_verifier, auth_code.code_challenge, method):
                 return self._error_response("invalid_grant", "PKCE verification failed.")
         elif client.client_type == "public" and OAUTH_REQUIRE_PKCE_PUBLIC:
             # Public client must have used PKCE — reject if no challenge stored.
-            return self._error_response(
-                "invalid_grant", "PKCE required for public clients."
-            )
+            return self._error_response("invalid_grant", "PKCE required for public clients.")
 
         # B5: mark code as used + delete from storage.
         await self.code_storage.mark_used(code)
@@ -1913,7 +1819,7 @@ class Oauth2Provider(BaseAuthBackend):
 
         token_data = {
             "user_id": user_id,
-            "client_id": client.client_id,   # public uid in JWT claim
+            "client_id": client.client_id,  # public uid in JWT claim
             "scope": scope,
             "jti": jti,
             # Bind the token to a session so the auth middleware,
@@ -1930,8 +1836,7 @@ class Oauth2Provider(BaseAuthBackend):
             if not validate_resource_uri(requested_resource):
                 return self._error_response(
                     "invalid_target",
-                    "The 'resource' parameter must be an absolute URI "
-                    "without a fragment.",
+                    "The 'resource' parameter must be an absolute URI " "without a fragment.",
                 )
             code_resource = getattr(auth_code, "resource", None)
             if code_resource and requested_resource != code_resource:
@@ -2014,9 +1919,9 @@ class Oauth2Provider(BaseAuthBackend):
         if not self._secret_matches(stored_secret, payload):
             return self._error_response("invalid_client", "Invalid client_secret.")
 
-        scope = payload.get("scope", " ".join(
-            client.default_scopes if isinstance(client.default_scopes, list) else ["default"]
-        ))
+        scope = payload.get(
+            "scope", " ".join(client.default_scopes if isinstance(client.default_scopes, list) else ["default"])
+        )
 
         jti = str(uuid4())
         token_data = {
@@ -2031,8 +1936,7 @@ class Oauth2Provider(BaseAuthBackend):
         if cc_resource and not validate_resource_uri(cc_resource):
             return self._error_response(
                 "invalid_target",
-                "The 'resource' parameter must be an absolute URI "
-                "without a fragment.",
+                "The 'resource' parameter must be an absolute URI " "without a fragment.",
             )
 
         # TASK-029: audience = 'app' for 2LO tokens; TASK-044 appends the
@@ -2181,7 +2085,7 @@ class Oauth2Provider(BaseAuthBackend):
                 parent_token=refresh_token,
                 issued_at=now,
                 expires_at=now + sliding_ttl,
-                absolute_expires_at=rt.absolute_expires_at,   # copy from chain root
+                absolute_expires_at=rt.absolute_expires_at,  # copy from chain root
             )
             await self.refresh_token_storage.save_token(new_rt)
             # Mark old token as rotated.
@@ -2217,21 +2121,15 @@ class Oauth2Provider(BaseAuthBackend):
         device_code_str = payload.get("device_code", "")
         client_id = payload.get("client_id", "")
         if not device_code_str:
-            return self._error_response(
-                "invalid_request", "Missing device_code.", status=400
-            )
+            return self._error_response("invalid_request", "Missing device_code.", status=400)
 
         dc = await self.device_code_storage.get_by_device_code(device_code_str)
         if not dc:
-            return self._error_response(
-                "expired_token", "Unknown or expired device_code.", status=400
-            )
+            return self._error_response("expired_token", "Unknown or expired device_code.", status=400)
 
         # Client match.
         if client_id and not hmac.compare_digest(str(dc.client_id), str(client_id)):
-            return self._error_response(
-                "invalid_client", "device_code does not belong to this client.", status=400
-            )
+            return self._error_response("invalid_client", "device_code does not belong to this client.", status=400)
 
         now = _now()
         decision = _poll_decision(dc, now)
@@ -2241,9 +2139,7 @@ class Oauth2Provider(BaseAuthBackend):
             dc.interval = dc.interval + OAUTH_DEVICE_SLOW_DOWN_INCREMENT
             dc.last_polled_at = now
             await self.device_code_storage.update(dc)
-            return JSONResponse(
-                {"error": "slow_down", "interval": dc.interval}, status=400
-            )
+            return JSONResponse({"error": "slow_down", "interval": dc.interval}, status=400)
 
         if decision == "authorization_pending":
             dc.last_polled_at = now
@@ -2268,14 +2164,9 @@ class Oauth2Provider(BaseAuthBackend):
         if dc.code_challenge:
             code_verifier = payload.get("code_verifier", "")
             if not code_verifier:
-                return self._error_response(
-                    "invalid_grant", "code_verifier required (PKCE).", status=400
-                )
-            if not pkce_verify(code_verifier, dc.code_challenge,
-                               dc.code_challenge_method or "S256"):
-                return self._error_response(
-                    "invalid_grant", "PKCE verification failed.", status=400
-                )
+                return self._error_response("invalid_grant", "code_verifier required (PKCE).", status=400)
+            if not pkce_verify(code_verifier, dc.code_challenge, dc.code_challenge_method or "S256"):
+                return self._error_response("invalid_grant", "PKCE verification failed.", status=400)
 
         # Mark device_code consumed before delegating (single-use guard).
         dc.status = DeviceCodeStatus.CONSUMED
@@ -2504,9 +2395,7 @@ class Oauth2Provider(BaseAuthBackend):
         # --- Validate token parameter ---
         token = payload.get("token", "")
         if not token:
-            return self._error_response(
-                "invalid_request", "Missing token parameter.", status=400
-            )
+            return self._error_response("invalid_request", "Missing token parameter.", status=400)
 
         # Multiple token params is also invalid_request.
         # (aiohttp returns the last value; we rely on the caller sending one.)
@@ -2577,7 +2466,7 @@ class Oauth2Provider(BaseAuthBackend):
         claims: dict = {
             "active": True,
             "scope": scope,
-            "client_id": caller.client_id,       # wire value = client_uid
+            "client_id": caller.client_id,  # wire value = client_uid
             "token_type": "Bearer",
             "sub": sub,
         }
@@ -2737,9 +2626,7 @@ class Oauth2Provider(BaseAuthBackend):
                     "<button name='action' value='deny' type='submit'>Deny</button>"
                     "</form></body></html>"
                 )
-                return web.Response(
-                    status=200, content_type="text/html", text=html
-                )
+                return web.Response(status=200, content_type="text/html", text=html)
 
         # POST: process user_code entry.
         data = await self.get_payload(request)
@@ -2761,7 +2648,7 @@ class Oauth2Provider(BaseAuthBackend):
 
         # Check if locked out (Redis only when RedisDeviceCodeStorage is active).
         locked_out = False
-        if hasattr(self.device_code_storage, 'redis'):
+        if hasattr(self.device_code_storage, "redis"):
             try:
                 locked_out = bool(await self.device_code_storage.redis.exists(lockout_key))
             except Exception:
@@ -2786,7 +2673,7 @@ class Oauth2Provider(BaseAuthBackend):
             )
 
         # Reset attempt counter on valid code.
-        if hasattr(self.device_code_storage, 'redis'):
+        if hasattr(self.device_code_storage, "redis"):
             try:
                 await self.device_code_storage.redis.delete(attempt_key)
             except Exception:
@@ -2811,9 +2698,7 @@ class Oauth2Provider(BaseAuthBackend):
             dc.status = DeviceCodeStatus.DENIED
             await self.device_code_storage.update(dc)
             try:
-                return await self._parser.view(
-                    filename="oauth/device_denied.html", params={}
-                )
+                return await self._parser.view(filename="oauth/device_denied.html", params={})
             except Exception:
                 return web.Response(status=200, text="Authorization denied.")
 
@@ -2826,9 +2711,7 @@ class Oauth2Provider(BaseAuthBackend):
         # requirement: without this check the device grant is a way around
         # the gate entirely (spec §6 risk).  There is no redirect_uri in the
         # device flow, so denial renders instead of redirecting.
-        gate_denied = await self._enforce_access_gate(
-            request, client, user_obj.user_id, redirect_uri=None, state=""
-        )
+        gate_denied = await self._enforce_access_gate(request, client, user_obj.user_id, redirect_uri=None, state="")
         if gate_denied is not None:
             return gate_denied
 
@@ -2840,9 +2723,7 @@ class Oauth2Provider(BaseAuthBackend):
                 requested = set(scopes)
                 if requested.issubset(granted):
                     # Consent already granted — proceed to approval.
-                    return await self._approve_device_code(
-                        dc, user_obj, scopes, client, request
-                    )
+                    return await self._approve_device_code(dc, user_obj, scopes, client, request)
 
         # Show consent page.
         try:
@@ -2861,17 +2742,13 @@ class Oauth2Provider(BaseAuthBackend):
 
     async def _record_device_attempt(self, attempt_key: str, lockout_key: str) -> None:
         """Increment the bad-attempt counter; lock out if threshold exceeded."""
-        if not hasattr(self.device_code_storage, 'redis'):
+        if not hasattr(self.device_code_storage, "redis"):
             return
         try:
             count = await self.device_code_storage.redis.incr(attempt_key)
-            await self.device_code_storage.redis.expire(
-                attempt_key, OAUTH_DEVICE_LOCKOUT_TTL
-            )
+            await self.device_code_storage.redis.expire(attempt_key, OAUTH_DEVICE_LOCKOUT_TTL)
             if int(count) >= OAUTH_DEVICE_MAX_USER_CODE_ATTEMPTS:
-                await self.device_code_storage.redis.set(
-                    lockout_key, "1", ex=OAUTH_DEVICE_LOCKOUT_TTL
-                )
+                await self.device_code_storage.redis.set(lockout_key, "1", ex=OAUTH_DEVICE_LOCKOUT_TTL)
         except Exception:
             pass
 
@@ -2895,12 +2772,12 @@ class Oauth2Provider(BaseAuthBackend):
         now = _now()
         carrier = OauthAuthorizationCode(
             client=client,
-            user_id=user_obj.user_id,          # owner-binding: from session
+            user_id=user_obj.user_id,  # owner-binding: from session
             code=auth_code_str,
-            redirect_uri="",                    # no redirect_uri for device flow
+            redirect_uri="",  # no redirect_uri for device flow
             scope=" ".join(scopes),
             state="",
-            response_type="device_code",        # marker so exchange allows it
+            response_type="device_code",  # marker so exchange allows it
             code_challenge=dc.code_challenge,
             code_challenge_method=dc.code_challenge_method,
             expires_at=now + timedelta(seconds=OAUTH_DEVICE_CODE_TTL),
@@ -2909,15 +2786,13 @@ class Oauth2Provider(BaseAuthBackend):
 
         # Stamp device record.
         dc.status = DeviceCodeStatus.APPROVED
-        dc.user_id = user_obj.user_id           # owner-binding invariant
+        dc.user_id = user_obj.user_id  # owner-binding invariant
         dc.granted_scopes = scopes
         dc.auth_code = auth_code_str
         await self.device_code_storage.update(dc)
 
         try:
-            return await self._parser.view(
-                filename="oauth/device_approved.html", params={}
-            )
+            return await self._parser.view(filename="oauth/device_approved.html", params={})
         except Exception:
             return web.Response(status=200, text="Authorization approved. You may close this window.")
 
@@ -2980,9 +2855,7 @@ class Oauth2Provider(BaseAuthBackend):
         if jti and self.access_token_storage:
             try:
                 if await self.access_token_storage.is_revoked(jti):
-                    raise InvalidAuth(
-                        "Oauth2: access token has been revoked.", status=401
-                    )
+                    raise InvalidAuth("Oauth2: access token has been revoked.", status=401)
             except InvalidAuth:
                 raise
             except Exception as exc:  # pylint: disable=W0703
@@ -3000,9 +2873,7 @@ class Oauth2Provider(BaseAuthBackend):
             )
         user = await self.get_session_user(session)
         if not user:
-            raise InvalidAuth(
-                "Oauth2: cannot resolve the user of this access token.", status=401
-            )
+            raise InvalidAuth("Oauth2: cannot resolve the user of this access token.", status=401)
         request["userdata"] = payload
         request["authenticated"] = True
         self._set_user_request(request, user)

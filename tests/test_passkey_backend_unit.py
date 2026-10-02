@@ -159,14 +159,19 @@ def test_sign_count_regression_message_pinned():
     challenge = os.urandom(32)
     reg = webauthn.verify_registration_response(
         credential=auth.make_attestation("a.test", "https://a.test", challenge, b"h" * 32),
-        expected_challenge=challenge, expected_rp_id="a.test", expected_origin="https://a.test",
+        expected_challenge=challenge,
+        expected_rp_id="a.test",
+        expected_origin="https://a.test",
     )
     challenge = os.urandom(32)
     with pytest.raises(InvalidAuthenticationResponse) as exc:
         webauthn.verify_authentication_response(
             credential=auth.make_assertion("a.test", "https://a.test", challenge, sign_count=3),
-            expected_challenge=challenge, expected_rp_id="a.test", expected_origin="https://a.test",
-            credential_public_key=reg.credential_public_key, credential_current_sign_count=5,
+            expected_challenge=challenge,
+            expected_rp_id="a.test",
+            expected_origin="https://a.test",
+            credential_public_key=reg.credential_public_key,
+            credential_current_sign_count=5,
         )
     assert "sign count" in str(exc.value).lower()
 

@@ -19,6 +19,7 @@ def _load_tenant_conf() -> tuple[bool, str, str]:
             ABAC_TENANT_HEADER_ORG,
             ABAC_TENANT_HEADER_CLIENT,
         )
+
         _ABAC_TENANT_TRUST_HEADERS = ABAC_TENANT_TRUST_HEADERS
         _ABAC_TENANT_HEADER_ORG = ABAC_TENANT_HEADER_ORG
         _ABAC_TENANT_HEADER_CLIENT = ABAC_TENANT_HEADER_CLIENT
@@ -58,8 +59,8 @@ def _resolve_tenant(
 
     # 2. Headers (gated by ABAC_TENANT_TRUST_HEADERS; both required)
     if trust_headers:
-        h_org = request.headers.get(header_org) if request and hasattr(request, 'headers') else None
-        h_cli = request.headers.get(header_client) if request and hasattr(request, 'headers') else None
+        h_org = request.headers.get(header_org) if request and hasattr(request, "headers") else None
+        h_cli = request.headers.get(header_client) if request and hasattr(request, "headers") else None
         if h_org is not None and h_cli is not None:
             o, c = _coerce(h_org), _coerce(h_cli)
             if o is not None and c is not None:
@@ -84,6 +85,7 @@ class EvalContext(dict, MutableMapping):
     Build The Evaluation Context from Request and User Data.
     Resolves and stores the tenant pair (org_id, client_id) for ABAC scoping.
     """
+
     def __init__(
         self,
         request: web.Request,
@@ -93,55 +95,55 @@ class EvalContext(dict, MutableMapping):
         *args,
         org_id: Any = None,
         client_id: Any = None,
-        **kwargs
+        **kwargs,
     ):
         ## initialize the mutable mapping:
         self.store = {}
-        self.store['request'] = request
-        self.store['ip_addr'] = request.remote
-        self.store['method'] = request.method
-        self.store['referer'] = request.headers.get('referer', None)
-        self.store['path_qs'] = request.path_qs
-        self.store['path'] = request.path
-        self.store['headers'] = request.headers
-        self.store['url'] = request.rel_url
+        self.store["request"] = request
+        self.store["ip_addr"] = request.remote
+        self.store["method"] = request.method
+        self.store["referer"] = request.headers.get("referer", None)
+        self.store["path_qs"] = request.path_qs
+        self.store["path"] = request.path
+        self.store["headers"] = request.headers
+        self.store["url"] = request.rel_url
         try:
-            self.store['is_authenticated'] = request.is_authenticated
+            self.store["is_authenticated"] = request.is_authenticated
         except AttributeError:
             if user is not None:
-                self.store['is_authenticated'] = True
+                self.store["is_authenticated"] = True
             else:
-                self.store['is_authenticated'] = False
-        self.store['user'] = user
+                self.store["is_authenticated"] = False
+        self.store["user"] = user
         if user is None:
-            self.store['user_keys'] = []
+            self.store["user_keys"] = []
         elif isinstance(user, BaseModel):
-            self.store['user_keys'] = user.get_fields()
+            self.store["user_keys"] = user.get_fields()
         elif isinstance(user, dict):
-            self.store['user_keys'] = list(user.keys())
+            self.store["user_keys"] = list(user.keys())
         else:
-            self.store['user_keys'] = user.__dict__.keys()
-        self.store['userinfo'] = userinfo
+            self.store["user_keys"] = user.__dict__.keys()
+        self.store["userinfo"] = userinfo
         if isinstance(userinfo, dict):
-            self.store['userinfo_keys'] = list(userinfo.keys())
+            self.store["userinfo_keys"] = list(userinfo.keys())
         else:
             try:
-                self.store['userinfo_keys'] = userinfo.__dict__.keys()
+                self.store["userinfo_keys"] = userinfo.__dict__.keys()
             except AttributeError:
-                self.store['userinfo_keys'] = []
-        self.store['session'] = session
+                self.store["userinfo_keys"] = []
+        self.store["session"] = session
         # FEAT-101 (Q5): first-class login-method keys for policies.
         if isinstance(userinfo, dict):
-            self.store['auth_method'] = userinfo.get('auth_method')
-            self.store['mfa'] = bool(userinfo.get('mfa', False))
+            self.store["auth_method"] = userinfo.get("auth_method")
+            self.store["mfa"] = bool(userinfo.get("mfa", False))
         else:
-            self.store['auth_method'] = getattr(userinfo, 'auth_method', None)
-            self.store['mfa'] = bool(getattr(userinfo, 'mfa', False))
+            self.store["auth_method"] = getattr(userinfo, "auth_method", None)
+            self.store["mfa"] = bool(getattr(userinfo, "mfa", False))
 
         # Resolve tenant pair (FEAT-092)
         resolved_org, resolved_client = _resolve_tenant(request, userinfo, org_id, client_id)
-        self.store['org_id'] = resolved_org
-        self.store['client_id'] = resolved_client
+        self.store["org_id"] = resolved_org
+        self.store["client_id"] = resolved_client
 
         self.update(*args, **kwargs)
         self._columns = list(self.store.keys())
@@ -189,12 +191,12 @@ class EvalContext(dict, MutableMapping):
 
     def __getattr__(self, key):
         try:
-            return super().__getattribute__('store')[key]
+            return super().__getattribute__("store")[key]
         except KeyError as ex:
             raise AttributeError(key) from ex
 
     def __setattr__(self, key, value):
-        if key == 'store':
+        if key == "store":
             super().__setattr__(key, value)
         else:
             self.store[key] = value

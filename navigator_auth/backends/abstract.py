@@ -462,9 +462,7 @@ class BaseAuthBackend(ABC):
             return None
         if is_safe_redirect(uri, request=request, extra_hosts=extra_hosts):
             return uri
-        self.logger.warning(
-            f"{self._service}: rejected redirect to untrusted target: {uri!r}"
-        )
+        self.logger.warning(f"{self._service}: rejected redirect to untrusted target: {uri!r}")
         return None
 
     def prepare_url(self, url: str, params: dict = None):
