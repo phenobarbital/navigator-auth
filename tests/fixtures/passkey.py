@@ -135,3 +135,109 @@ def passkey_rp_config(monkeypatch) -> list[dict]:
     # PasskeyAuth (TASK-93) reads every PASSKEY_* setting as `auth_conf.<NAME>` at call time
     # (`from .. import conf as auth_conf`), so patching navigator_auth.conf is enough.
     return RP_CONFIG
+
+
+# ---------------------------------------------------------------------------
+# Live app fixture (Postgres + Redis) — shared by TASK-94/95/96 tests
+# ---------------------------------------------------------------------------
+PASSKEY_TEST_USERNAME = "test_passkey_user"
+PASSKEY_TEST_PASSWORD = "TestP@ss1234"
+
+
+@dataclass
+class PasskeyApp:
+    """Handle on the live passkey test app."""
+
+    client: object
+    backend: object
+    auth: object
+    db_pool: object
+    user_id: int
+    headers: dict
+    username: str = PASSKEY_TEST_USERNAME
+
+
+def _make_password(password: str) -> str:
+    import base64
+    import secrets
+
+    salt = secrets.token_hex(6)
+    key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 80000, dklen=32)
+    return f"pbkdf2_sha256$80000${salt}${base64.b64encode(key).decode().strip()}"
+
+
+def _build_passkey_app_fixture():
+    import pytest_asyncio
+
+    @pytest_asyncio.fixture(scope="module", loop_scope="module")
+    async def passkey_app():
+        """Real AuthHandler (Basic + Passkey) on live Postgres/Redis with a seeded user."""
+        import warnings
+
+        from aiohttp import web
+        from aiohttp.test_utils import TestClient, TestServer
+
+        import navigator_auth.conf as conf
+
+        saved = conf.PASSKEY_RELYING_PARTIES
+        conf.PASSKEY_RELYING_PARTIES = RP_CONFIG
+        from navigator_auth import AuthHandler
+
+        app = web.Application()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            auth = AuthHandler(
+                secure_cookies=False,
+                backends=(
+                    "navigator_auth.backends.BasicAuth",
+                    "navigator_auth.backends.PasskeyAuth",
+                ),
+            )
+            auth.setup(app)
+        client = TestClient(TestServer(app))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            await client.start_server()
+        db_pool = app.get("authdb")
+        assert db_pool is not None, "authdb pool missing"
+        await db_pool.execute(
+            f"DELETE FROM auth.users WHERE username = '{PASSKEY_TEST_USERNAME}'"
+        )
+        await db_pool.execute(
+            "INSERT INTO auth.users (username, password, email, first_name, last_name, "
+            "is_active, is_superuser, is_new, is_staff) VALUES "
+            f"('{PASSKEY_TEST_USERNAME}', '{_make_password(PASSKEY_TEST_PASSWORD)}', "
+            "'passkey@example.com', 'Pass', 'Key', true, false, false, false)"
+        )
+        for name in ("BasicAuth", "PasskeyAuth"):
+            auth.backends[name]._callbacks = None
+        resp = await client.post(
+            "/api/v1/login",
+            json={"username": PASSKEY_TEST_USERNAME, "password": PASSKEY_TEST_PASSWORD},
+            headers={"X-Auth-Method": "BasicAuth"},
+        )
+        assert resp.status == 200, await resp.text()
+        data = await resp.json()
+        yield PasskeyApp(
+            client=client,
+            backend=auth.backends["PasskeyAuth"],
+            auth=auth,
+            db_pool=db_pool,
+            user_id=data["user_id"],
+            headers={"Authorization": f"Bearer {data['token']}"},
+        )
+        try:
+            await db_pool.execute(
+                f"DELETE FROM auth.users WHERE username = '{PASSKEY_TEST_USERNAME}'"
+            )
+        except Exception:  # pylint: disable=W0703
+            pass
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            await client.close()
+        conf.PASSKEY_RELYING_PARTIES = saved
+
+    return passkey_app
+
+
+passkey_app = _build_passkey_app_fixture()
