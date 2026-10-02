@@ -516,9 +516,7 @@ class PasskeyAuth(BasicAuth):
         guard_last = not await self._has_other_login_method(user.user_id)
         # With no other login method the store deletes only if another passkey remains,
         # atomically (two concurrent deletes cannot both succeed).
-        if not await self._store.delete_credential(
-            user.user_id, credential_id, keep_last=guard_last
-        ):
+        if not await self._store.delete_credential(user.user_id, credential_id, keep_last=guard_last):
             if guard_last:
                 raise web.HTTPConflict(reason="Passkey: cannot delete the last login method")
             raise web.HTTPNotFound(reason="Passkey: credential not found")

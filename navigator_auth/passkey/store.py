@@ -107,9 +107,7 @@ class PasskeyStore:
             )
         return bool(changed)
 
-    async def delete_credential(
-        self, user_id: int, credential_id: bytes, *, keep_last: bool = False
-    ) -> bool:
+    async def delete_credential(self, user_id: int, credential_id: bytes, *, keep_last: bool = False) -> bool:
         """Delete a credential owned by ``user_id``; True when a row was removed.
 
         Args:
@@ -119,11 +117,7 @@ class PasskeyStore:
                 credential, checked atomically in the same statement (no
                 check-then-act race).
         """
-        guard = (
-            f" AND (SELECT count(*) FROM {_CREDENTIALS} WHERE user_id = $1) > 1"
-            if keep_last
-            else ""
-        )
+        guard = f" AND (SELECT count(*) FROM {_CREDENTIALS} WHERE user_id = $1) > 1" if keep_last else ""
         async with await self._pool.acquire() as conn:
             removed = await conn.fetchval(
                 f"WITH d AS (DELETE FROM {_CREDENTIALS} "
