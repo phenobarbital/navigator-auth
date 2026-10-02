@@ -65,3 +65,12 @@ def test_rp_resolver_by_rp_id():
     r = RelyingPartyResolver(PARTIES)
     assert r.by_rp_id("b.test").org_id == 7
     assert r.by_rp_id("zzz") is None
+
+
+def test_rp_resolver_by_origin_distinguishes_shared_rp_id():
+    r = RelyingPartyResolver([
+        {"origin": "https://a.test", "rp_id": "shared.test", "org_id": 1},
+        {"origin": "https://b.test", "rp_id": "shared.test", "org_id": 2},
+    ])
+    assert r.by_origin("https://B.test").org_id == 2
+    assert r.by_origin("https://c.test") is None

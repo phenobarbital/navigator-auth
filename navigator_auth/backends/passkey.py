@@ -68,6 +68,10 @@ class PasskeyAuth(BasicAuth):
 
     def configure(self, app: web.Application) -> None:
         """Register ceremony routes and build the RP resolver (ConfigError if the map is empty)."""
+        if auth_conf.PASSKEY_USER_VERIFICATION not in ("required", "preferred", "discouraged"):
+            raise ConfigError(
+                "PasskeyAuth: PASSKEY_USER_VERIFICATION must be required, preferred or discouraged."
+            )
         self._resolver = RelyingPartyResolver(auth_conf.PASSKEY_RELYING_PARTIES)
         router = app.router
         router.add_route(
@@ -420,7 +424,7 @@ class PasskeyAuth(BasicAuth):
             user = await self._idp.user_from_id(cred.user_id)
         except UserNotFound as err:
             raise self._fail(f"user {cred.user_id} no longer exists") from err
-        rp = self._resolver.by_rp_id(state.rp_id)  # 9
+        rp = self._resolver.by_origin(state.origin)  # 9 (several origins may share an rp_id)
         if rp is None:
             raise self._fail(f"relying party {state.rp_id!r} no longer configured")
         self._check_tenant(user, rp)

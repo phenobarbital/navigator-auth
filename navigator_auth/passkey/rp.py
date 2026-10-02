@@ -86,6 +86,11 @@ class RelyingPartyResolver:
             raise InvalidAuth("Passkey: origin not allowed", status=401)
         return party
 
+    def by_origin(self, origin: str) -> Optional[RelyingParty]:
+        """Return the RP configured for an exact (normalised) origin, or ``None``."""
+        normalised = _normalise_origin(origin)
+        return self._by_origin.get(normalised) if normalised else None
+
     def by_rp_id(self, rp_id: str) -> Optional[RelyingParty]:
         """Return the RP configured for ``rp_id``, or ``None``."""
         return self._by_rp_id.get(rp_id)

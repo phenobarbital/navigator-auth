@@ -130,3 +130,13 @@ def test_session_user_requires_auth(backend):
     exc = backend._session_user  # raises an aiohttp HTTP error (Unauthorized RETURNS it)
     with pytest.raises(web.HTTPError):
         exc(req)
+
+
+def test_configure_invalid_user_verification_raises(monkeypatch, passkey_rp_config):
+    import navigator_auth.conf as conf
+    from navigator_auth.backends.passkey import PasskeyAuth
+
+    monkeypatch.setattr(conf, "PASSKEY_USER_VERIFICATION", "requierd", raising=False)
+    be = PasskeyAuth(user_model=MagicMock(), identity=MagicMock())
+    with pytest.raises(ConfigError):
+        be.configure(web.Application())
