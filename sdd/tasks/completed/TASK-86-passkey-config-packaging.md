@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 1, §6 External library, AC1, AC2)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -219,8 +219,7 @@ See the `tests/test_passkey_conf.py` blueprint above (spec §4: `test_conf_passk
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
-**py_webauthn version / API differences**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: Added 5 PASSKEY_* settings, passkey extra, installed webauthn 2.8.0 and recorded verified API in spec §6 (no name differences). Copied compiled .so files from main checkout into the worktree to import.
 **Deviations from spec**: none

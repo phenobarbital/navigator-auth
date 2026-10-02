@@ -14,7 +14,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -22,8 +22,8 @@
       "parallelism_notes": "S0 serial head: every later task reads PASSKEY_* and the verified py_webauthn API.",
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-86-passkey-config-packaging.md"
+      "completed_at": "2026-10-02T21:30:02+00:00",
+      "file": "sdd/tasks/completed/TASK-86-passkey-config-packaging.md"
     },
     {
       "id": "TASK-87",
