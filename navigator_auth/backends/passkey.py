@@ -18,6 +18,7 @@ from .. import conf as auth_conf
 from ..conf import AUTH_EXCLUDE_LIST_KEY
 from ..exceptions import AuthException, ConfigError, InvalidAuth, UserNotFound
 from ..identities import AuthUser
+from ..identity.store import IdentityStore
 from ..passkey import (
     ChallengeState,
     PasskeyStore,
@@ -74,6 +75,12 @@ class PasskeyAuth(BasicAuth):
                          name="passkey_register_verify")
         router.add_route("POST", f"{PASSKEY_PREFIX}/login/options", self.login_options,
                          name="passkey_login_options")
+        router.add_route("GET", f"{PASSKEY_PREFIX}/credentials", self.list_credentials,
+                         name="passkey_credentials")
+        router.add_route("PATCH", f"{PASSKEY_PREFIX}/credentials/{{id}}", self.rename_credential,
+                         name="passkey_credential_rename")
+        router.add_route("DELETE", f"{PASSKEY_PREFIX}/credentials/{{id}}", self.delete_credential,
+                         name="passkey_credential_delete")
         app[AUTH_EXCLUDE_LIST_KEY].append(f"{PASSKEY_PREFIX}/login/options")
         super().configure(app)
 
@@ -463,3 +470,89 @@ class PasskeyAuth(BasicAuth):
         if str(value) != str(rp.org_id):
             uid = user.get("user_id") if isinstance(user, Mapping) else getattr(user, "user_id", None)
             raise self._fail(f"tenant mismatch for user {uid}")
+
+    # ------------------------------------------------------------------
+    # Credential management (TASK-96)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _credential_id(request: web.Request) -> bytes:
+        """Decode the ``{id}`` path segment; anything not base64url ⇒ 404."""
+        from webauthn.helpers import base64url_to_bytes  # pylint: disable=C0415
+
+        try:
+            raw = base64url_to_bytes(request.match_info["id"])
+        except Exception as err:  # pylint: disable=W0703
+            raise web.HTTPNotFound(reason="Passkey: credential not found") from err
+        if not raw:
+            raise web.HTTPNotFound(reason="Passkey: credential not found")
+        return raw
+
+    @_json_errors
+    async def list_credentials(self, request: web.Request) -> web.Response:
+        """The caller's passkeys across all RPs (no key material)."""
+        from webauthn.helpers import bytes_to_base64url  # pylint: disable=C0415
+
+        user = self._session_user(request)
+        creds = await self._store.list_credentials(user.user_id)
+        return JSONResponse(
+            [
+                {
+                    "id": bytes_to_base64url(c.credential_id),
+                    "label": c.label,
+                    "created_at": c.created_at.isoformat() if c.created_at else None,
+                    "last_used_at": c.last_used_at.isoformat() if c.last_used_at else None,
+                    "device_type": c.device_type,
+                    "backed_up": c.backed_up,
+                    "rp_id": c.rp_id,
+                }
+                for c in creds
+            ]
+        )
+
+    @_json_errors
+    async def rename_credential(self, request: web.Request) -> web.Response:
+        """Rename one of the caller's passkeys."""
+        user = self._session_user(request)
+        credential_id = self._credential_id(request)
+        try:
+            body = await request.json()
+        except ValueError as err:
+            raise web.HTTPBadRequest(reason="Passkey: invalid request body") from err
+        label = body.get("label") if isinstance(body, dict) else None
+        label = label.strip() if isinstance(label, str) else ""
+        if not 1 <= len(label) <= 128:
+            raise web.HTTPBadRequest(reason="Passkey: label must be 1 to 128 characters")
+        if not await self._store.rename_credential(user.user_id, credential_id, label):
+            raise web.HTTPNotFound(reason="Passkey: credential not found")
+        return JSONResponse({"status": "renamed"})
+
+    @_json_errors
+    async def delete_credential(self, request: web.Request) -> web.Response:
+        """Delete one of the caller's passkeys; 409 when it would lock the user out (E13)."""
+        user = self._session_user(request)
+        credential_id = self._credential_id(request)
+        owned = await self._store.list_credentials(user.user_id)
+        if credential_id not in {c.credential_id for c in owned}:
+            raise web.HTTPNotFound(reason="Passkey: credential not found")
+        if len(owned) == 1 and not await self._has_other_login_method(user.user_id):
+            raise web.HTTPConflict(reason="Passkey: cannot delete the last login method")
+        if not await self._store.delete_credential(user.user_id, credential_id):
+            raise web.HTTPNotFound(reason="Passkey: credential not found")
+        return web.Response(status=204)
+
+    async def _has_other_login_method(self, user_id: int) -> bool:
+        """True when the user has a password or at least one linked external identity."""
+        user = await self._idp.user_from_id(user_id)
+        password = (
+            user.get(self.pwd_atrribute)
+            if isinstance(user, Mapping)
+            else getattr(user, self.pwd_atrribute, None)
+        )
+        if password:
+            return True
+        try:
+            identities = await IdentityStore(self._app["authdb"]).list_for_user(user_id)
+        except ConfigError as err:
+            self.logger.warning(f"Passkey: cannot check linked identities: {err}")
+            return False
+        return bool(identities)
