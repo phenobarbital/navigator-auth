@@ -52,7 +52,7 @@ The research **confirms the brainstorm's architecture**:
 
 It found **six contract errors** in the skeleton (§2.2). It found **existing
 precedents** for storage and migrations (F008) and for reusing the session tail
-(F002). It added two decisions that widen the scope:
+(F002). The follow-up decisions widen the scope (§3.2, §3.4, §3.9–§3.13), chiefly:
 
 - **per-tenant RP IDs** (U1);
 - **`is_active` enforcement in the shared `open_session`** (U2).
