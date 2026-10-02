@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 5, §2 Overview items 5–6, §7 R1/R4/R8, AC4, AC6, AC7, AC8, AC10)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-93, TASK-90, TASK-91
@@ -262,7 +262,7 @@ See above (spec §4 Integration Tests).
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: login_options, authenticate (spec §2.5 steps 1-10), _check_tenant, _fail uniform 401. 15 live tests pass (+ enrollment/basic suites: 27 pass). Sign-count regression detected via py_webauthn's 'sign count' message. Cookie assertion is parity with BasicAuth (neither sets a cookie in this test setup). _check_tenant match case unit-tested since the user model has no org attribute.
 **Deviations from spec**: none

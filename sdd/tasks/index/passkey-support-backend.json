@@ -192,7 +192,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -204,8 +204,8 @@
       "parallelism_notes": "Edits backends/passkey.py; needs TASK-91's open_session changes for E9 and the mfa/amr JWT keys.",
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-95-passkey-signin.md"
+      "completed_at": "2026-10-02T21:45:19+00:00",
+      "file": "sdd/tasks/completed/TASK-95-passkey-signin.md"
     },
     {
       "id": "TASK-96",
