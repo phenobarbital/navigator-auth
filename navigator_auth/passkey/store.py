@@ -107,12 +107,27 @@ class PasskeyStore:
             )
         return bool(changed)
 
-    async def delete_credential(self, user_id: int, credential_id: bytes) -> bool:
-        """Delete a credential owned by ``user_id``; True when a row was removed."""
+    async def delete_credential(
+        self, user_id: int, credential_id: bytes, *, keep_last: bool = False
+    ) -> bool:
+        """Delete a credential owned by ``user_id``; True when a row was removed.
+
+        Args:
+            user_id: Owner of the credential.
+            credential_id: Credential to delete.
+            keep_last: When True the row is only deleted if the user has another
+                credential, checked atomically in the same statement (no
+                check-then-act race).
+        """
+        guard = (
+            f" AND (SELECT count(*) FROM {_CREDENTIALS} WHERE user_id = $1) > 1"
+            if keep_last
+            else ""
+        )
         async with await self._pool.acquire() as conn:
             removed = await conn.fetchval(
                 f"WITH d AS (DELETE FROM {_CREDENTIALS} "
-                "WHERE user_id = $1 AND credential_id = $2 RETURNING 1) "
+                f"WHERE user_id = $1 AND credential_id = $2{guard} RETURNING 1) "
                 "SELECT count(*) FROM d",
                 user_id,
                 credential_id,

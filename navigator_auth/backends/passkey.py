@@ -513,9 +513,14 @@ class PasskeyAuth(BasicAuth):
         owned = await self._store.list_credentials(user.user_id)
         if credential_id not in {c.credential_id for c in owned}:
             raise web.HTTPNotFound(reason="Passkey: credential not found")
-        if len(owned) == 1 and not await self._has_other_login_method(user.user_id):
-            raise web.HTTPConflict(reason="Passkey: cannot delete the last login method")
-        if not await self._store.delete_credential(user.user_id, credential_id):
+        guard_last = not await self._has_other_login_method(user.user_id)
+        # With no other login method the store deletes only if another passkey remains,
+        # atomically (two concurrent deletes cannot both succeed).
+        if not await self._store.delete_credential(
+            user.user_id, credential_id, keep_last=guard_last
+        ):
+            if guard_last:
+                raise web.HTTPConflict(reason="Passkey: cannot delete the last login method")
             raise web.HTTPNotFound(reason="Passkey: credential not found")
         return web.Response(status=204)
 
