@@ -130,7 +130,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [],
@@ -138,8 +138,8 @@
       "parallelism_notes": "Touches abac/context.py only; disjoint from everything else.",
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-92-evalcontext-auth-method-mfa.md"
+      "completed_at": "2026-10-02T21:33:10+00:00",
+      "file": "sdd/tasks/completed/TASK-92-evalcontext-auth-method-mfa.md"
     },
     {
       "id": "TASK-93",

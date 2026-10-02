@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 6, §2.7, AC11, Q5)
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -138,7 +138,7 @@ See the blueprint above (spec §4: `test_eval_context_auth_method_mfa`).
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: Keys added to EvalContext.store; test reads via ctx.store (dict __getitem__ is not store-backed). 31 ABAC tests pass.
 **Deviations from spec**: none
