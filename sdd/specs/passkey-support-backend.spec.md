@@ -10,7 +10,7 @@ tags: [passkey, webauthn, fido2, passwordless, basic-auth, multi-tenant, abac]
 **Feature ID**: FEAT-101
 **Date**: 2026-10-02
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 0.29.0
 **Source**: `sdd/proposals/passkey-support-backend.proposal.md` (research state `sdd/state/FEAT-101/`), built on the brainstorm `sdd/proposals/Passkey (WebAuthn) Authentication Backend.md`.
 
@@ -34,7 +34,7 @@ No first-party credential resists phishing. A user who is already authenticated 
 - **G3. Username-first login is the default.** The response for an unknown user does not reveal that it is unknown (E5). Usernameless login with conditional UI stays supported.
 - **G4. Opaque user handle.** Each user gets a random handle per `(user, RP)`; the WebAuthn `user.id` never contains PII or the internal user id (E15).
 - **G5. Passkey counts as MFA.** A passkey login with user verification satisfies MFA. It adds `mfa` and `amr` to the session and JWT, and ABAC sees `auth_method` and `mfa` as first-class `EvalContext` keys.
-- **G6. Disabled accounts are rejected.** `BasicAuth.open_session` rejects users whose `is_active` is false. This applies to every login built on `open_session`: Basic, TokenExchange and Passkey.
+- **G6. Disabled accounts are rejected.** `BasicAuth.open_session` rejects users whose `is_active` is false. This applies to every login built on `open_session`: Basic, TokenExchange and Passkey. The OAuth2 login page's password POST (`Oauth2Provider.auth_login`) applies the same check (Q-F1).
 - **G7. Phased delivery.** P0 covers config, storage and the RP resolver. P1 covers enrollment and sign-in. P2 covers credential management and the OAuth2 login-page integration.
 
 ### Non-Goals (explicitly out of scope)
@@ -46,7 +46,6 @@ No first-party credential resists phishing. A user who is already authenticated 
 - Changes to `AuthHandler.api_login`, `navigator_session`, or the OAuth2 token, authorize and consent endpoints.
 - Related Origin Requests (one passkey usable across several registrable domains). Each RP entry stands alone (E14).
 - Disabling a credential or notifying the user when its sign counter goes backwards (Q4: reject and log only).
-- `is_active` enforcement in `Oauth2Provider.auth_login`. That path uses `IdentityProvider.authenticate_credentials`, not `open_session`; see §8 Q-F1.
 
 ---
 
@@ -89,6 +88,8 @@ No first-party credential resists phishing. A user who is already authenticated 
    - **Field missing.** When the field is absent (custom `AUTH_USER_VIEW`), the user is treated as active.
    - **Field false.** It raises `FailedAuth("User account is disabled", status=403)`.
    - **Propagation.** `BasicAuth.authenticate` must let `FailedAuth` and `InvalidAuth` propagate from `open_session` instead of turning them into `False`.
+   - **Shared helper.** The rule lives in one module-level function, `user_is_active(user)` in `backends/abstract.py`. It accepts a dict or a model object, so both `open_session` (user data dict) and `auth_login` (IdP model) use it.
+   - **OAuth2 page (Q-F1).** `Oauth2Provider.auth_login`'s password POST calls `user_is_active` right after `authenticate_credentials` succeeds, before `_create_user_session`. An inactive user gets `web.HTTPForbidden(reason="Auth: User account is disabled.")` and no session is created.
 9. **Credential management (C5, P2).**
    - `GET /api/v1/auth/passkey/credentials` lists the caller's credentials.
    - `PATCH .../credentials/{id}` renames the label.
@@ -96,7 +97,7 @@ No first-party credential resists phishing. A user who is already authenticated 
 10. **OAuth2 login page (C6, P2).**
     - **Template.** `templates/oauth/login.html` asks for the username first, then offers "Sign in with a passkey". It also offers conditional UI (`autocomplete="username webauthn"`).
     - **Flow.** The inline script calls `login/options` and then `navigator.credentials.get`. It posts to `/api/v1/login` with `X-Auth-Method: PasskeyAuth`; the session cookie is set on that response. It then navigates to `/oauth2/authorize`, carrying the hidden authorize parameters already on the page.
-    - **What stays the same.** No new server route is needed, and `auth_login`'s password POST is unchanged.
+    - **What stays the same.** No new server route is needed. Module 8 does not touch `auth_login`; its only change, the `is_active` check, belongs to Module 4.
     - **Risk.** It is not yet verified that the session `"user"` blob written by `remember()` decodes through `Oauth2Provider._decode_session_user` (§7 R5).
 
 ### Component Diagram
@@ -127,6 +128,8 @@ ABAC request ─▶ EvalContext(userinfo) ─▶ store["auth_method"], store["mf
 | `BasicAuth` (`backends/basic.py:43`) | extends | `PasskeyAuth(BasicAuth)`. Reuses `open_session`, `on_startup` (`access_token_storage`) and `configure`. |
 | `BasicAuth.open_session` (`basic.py:171`) | modifies | Adds the `is_active` check. `_JWT_EXTRA_KEYS` (`:154`) gains `mfa` and `amr`. |
 | `BasicAuth.authenticate` (`basic.py:292`) | modifies | Lets `FailedAuth`/`InvalidAuth` raised by `open_session` propagate. |
+| `backends/abstract.py` | modifies | New module-level `user_is_active(user) -> bool`, shared by `open_session` and `auth_login`. |
+| `Oauth2Provider.auth_login` (`oauth2/backend.py:1696`) | modifies | Q-F1: rejects inactive users with 403 after `authenticate_credentials` (`:1716`), before the session is created. |
 | `IdentityProvider.user_from_id` (`idp/__init__.py:124`) | uses | Loads the user after verification. |
 | `AuthHandler.api_login` / `get_auth_backend` (`auth.py:470`, `:343`) | uses (unchanged) | Header-selected backend. The fallback loop requires a fast `InvalidAuth`. |
 | `AuthHandler.auth_startup` (`auth.py:174`) | uses (unchanged) | Calls `backend.on_startup(app)`, where the passkey migration runs. |
@@ -309,24 +312,29 @@ class RelyingPartyResolver:
     def by_rp_id(self, rp_id: str) -> Optional[RelyingParty]: ...
 ```
 
-### Module 4: `BasicAuth.open_session` hardening (G5, G6) — P1, serial before Module 5
-- **Path**: `navigator_auth/backends/basic.py`
-- **Responsibility**: Rejects inactive users, adds `mfa` and `amr` to `_JWT_EXTRA_KEYS`, and lets `FailedAuth`/`InvalidAuth` propagate out of `authenticate`.
+### Module 4: `is_active` enforcement and `open_session` hardening (G5, G6, Q-F1) — P1, serial before Module 5
+- **Paths**: `navigator_auth/backends/abstract.py`, `navigator_auth/backends/basic.py`, `navigator_auth/backends/oauth2/backend.py`
+- **Responsibility**: Adds the shared `user_is_active` helper. In `BasicAuth`, rejects inactive users, adds `mfa` and `amr` to `_JWT_EXTRA_KEYS`, and lets `FailedAuth`/`InvalidAuth` propagate out of `authenticate`. In `Oauth2Provider.auth_login`, rejects inactive users on the password POST (Q-F1).
 - **Depends on**: —
 - **Interface Skeleton**:
 ```python
+# backends/abstract.py — module level, next to BaseAuthBackend         verified: abstract.py:42
+def user_is_active(user) -> bool:
+    """True unless the user (dict or model) carries is_active == False (missing field ⇒ active)."""
+
 class BasicAuth(BaseAuthBackend):                                   # verified: basic.py:43
     _JWT_EXTRA_KEYS = ("auth_method", "auth_origin", "external_expires_at",
                        "mfa", "amr")                                 # verified: basic.py:154 (extended)
-
-    def _is_active(self, user) -> bool:
-        """True unless the user record carries is_active == False (missing field ⇒ active)."""
 
     async def open_session(self, request, user, extra=None, expiration=None) -> dict:  # verified: basic.py:171
         """...existing docstring... Raises FailedAuth(status=403) when the user is inactive (before remember())."""
 
     async def authenticate(self, request):                           # verified: basic.py:292
         """...; FailedAuth/InvalidAuth from open_session now propagate (were swallowed into False)."""
+
+class Oauth2Provider(BaseAuthBackend):                               # backends/oauth2/backend.py
+    async def auth_login(self, request: web.Request):                # verified: oauth2/backend.py:1696
+        """...; POST: after authenticate_credentials (:1716), raise web.HTTPForbidden when not user_is_active(user)."""
 ```
 
 ### Module 5: `PasskeyAuth` backend — enrollment & sign-in (C3, C4) — P1
@@ -452,6 +460,8 @@ class EvalContext(dict, MutableMapping):                             # verified:
 | `test_open_session_missing_is_active_is_active` | 4 | A user record without the field logs in. |
 | `test_open_session_jwt_mfa_amr` | 4 | `extra` with `mfa` and `amr` lands in the JWT payload. |
 | `test_basic_authenticate_propagates_failedauth` | 4 | `BasicAuth.authenticate` re-raises the inactive-user `FailedAuth` instead of returning `False`. |
+| `test_user_is_active_dict_and_model` | 4 | `user_is_active` is `False` only for an explicit `is_active=False`, for both a dict and an object; a missing field or `None` user field counts as active. |
+| `test_oauth2_auth_login_rejects_inactive` | 4 | The `auth_login` password POST returns 403 for an inactive user and creates no session; an active user still gets the 302 to `/oauth2/authorize`. |
 | `test_eval_context_auth_method_mfa` | 6 | The keys are present, with defaults `None` and `False`. |
 | `test_get_payload_fast_fail` | 5 | A body without an assertion raises `InvalidAuth` with no Redis or DB access (E11). |
 | `test_decoy_ids_deterministic` | 5 | The same RP and username give the same ids, and different RPs give different ids. |
@@ -511,7 +521,7 @@ This feature is complete when **all** of the following hold:
 - [ ] **AC6 (C4).** A passkey login through `POST /api/v1/login` + `X-Auth-Method: PasskeyAuth` returns the `BasicAuth` body (including `refresh_token`) plus `auth_method="passkey"`, `mfa` and `amr`, and sets the session cookie. The JWT carries `auth_method`, `mfa`, `amr` and a `jti` recorded in `access_token_storage`.
 - [ ] **AC7 (G3/E5).** Username-first is the default client flow. Unknown users and known users without credentials receive same-shaped options with deterministic decoys; usernameless (empty body) works.
 - [ ] **AC8 (edge cases).** E1, E2, E4, E6, E7 (reject, log, credential stays usable), E8, E9 and E11 each have a passing test.
-- [ ] **AC9 (G6).** `BasicAuth.open_session` rejects `is_active=False` with 403, and users without the field are unaffected. The existing `tests/test_basic_auth.py`, `tests/test_basic_open_session.py` and token-exchange tests still pass.
+- [ ] **AC9 (G6).** `BasicAuth.open_session` rejects `is_active=False` with 403, and users without the field are unaffected. `Oauth2Provider.auth_login`'s password POST rejects inactive users with 403 before creating a session (Q-F1). The existing `tests/test_basic_auth.py`, `tests/test_basic_open_session.py`, token-exchange and OAuth2 login tests still pass.
 - [ ] **AC10 (tenant).** The session carries the RP's `org_id`/`client_id`. With `PASSKEY_TENANT_ATTRIBUTE` set, a mismatched user is rejected with 401.
 - [ ] **AC11 (Q5).** `EvalContext` exposes `auth_method` and `mfa`.
 - [ ] **AC12 (C5, P2).** The list, rename and delete endpoints work, and E13 returns 409.
@@ -650,6 +660,7 @@ The first task that adds the dependency must confirm these names, especially `Ve
 - `navigator_auth/templates/`. Templates live at the repo root `templates/oauth/`.
 - A 3-tuple return from `create_token`. It returns 4 values.
 - Any `is_active` check in the login paths today (Basic, Exchange, Abstract, IdP lookups, OAuth2 `auth_login`).
+- A `user_is_active` helper or `BasicAuth._is_active` method. Module 4 adds `user_is_active` in `backends/abstract.py`.
 
 ### Edit Sites (Blueprint Anchors)
 
@@ -657,7 +668,9 @@ The first task that adds the dependency must confirm these names, especially `Ve
 |---|---|---|
 | `navigator_auth/conf.py` | after the backend settings (~`:333` REDIS block) | Add the `PASSKEY_*` settings. |
 | `pyproject.toml` | `:60` `[project.optional-dependencies]` | Add the `passkey` extra. |
+| `navigator_auth/backends/abstract.py` | before `class BaseAuthBackend` (`:42`) | Add `user_is_active`. |
 | `navigator_auth/backends/basic.py` | `:154` `_JWT_EXTRA_KEYS`; `:171-204` `open_session` before `remember()` (`:213`); `:310-314` `authenticate` | Add `mfa`/`amr`, the `is_active` check and exception propagation. |
+| `navigator_auth/backends/oauth2/backend.py` | `auth_login` POST, after the `authenticate_credentials` try block (`:1716-1722`) | Q-F1: 403 for inactive users. |
 | `navigator_auth/backends/__init__.py` | imports `:5-23`, `__all__` `:26-45` | Export `PasskeyAuth` (lazy webauthn import inside the module). |
 | `navigator_auth/abac/context.py` | after `:124` | Add the `auth_method` and `mfa` keys. |
 | `templates/oauth/login.html` | form `:22-38`; hidden params `:29-37` | Passkey UI and script. |
@@ -717,9 +730,10 @@ Resolved during proposal research and Q&A (`sdd/proposals/passkey-support-backen
 - [x] RP map and `org_id` — *Resolved in proposal*: **Each RP entry carries `(org_id, client_id)`**, which goes into the session for ABAC (§2.6).
 - [x] Q-T — Tenant membership check (default `User` has no `org_id`) — *Resolved in spec Q&A*: **The per-site credential binding does the isolation; a membership check runs only when `PASSKEY_TENANT_ATTRIBUTE` is set and present on the user** (§2.5, AC10).
 
+- [x] Q-F1 — `Oauth2Provider.auth_login` (password POST on the OAuth2 page) uses `IdentityProvider.authenticate_credentials` and does not check `is_active` either. Should it be fixed as a follow-up hotfix, or folded into Module 4? *Owner: Jesus Lara*: folded into module 4 (§2.8, Module 4, AC9).
+
 Unresolved:
 
-- [ ] Q-F1 — `Oauth2Provider.auth_login` (password POST on the OAuth2 page) uses `IdentityProvider.authenticate_credentials` and does not check `is_active` either. Should it be fixed as a follow-up hotfix, or folded into Module 4? *Owner: Jesus Lara*
 - [ ] Q-F2 — `PASSKEY_DECOY_CREDENTIALS`: is the default of 1 enough, or should the count be randomized from 1 to 3 per username (still deterministic) to blur R4? This can be decided during implementation. *Owner: implementer*
 
 ---
@@ -738,7 +752,7 @@ Status: skipped (exploration document status is `review`, not `accepted` — pre
 - **Isolation unit:** per-spec, with a mixed task graph, in one worktree `feat-FEAT-101-passkey-support-backend` based on `origin/dev`.
 - **Serial S0 (P0) — freezes the contracts:** Module 1 (config and packaging), Module 2 (storage and migration), Module 3 (RP resolver), plus the software-authenticator fixture from Module 9.
 - **After S0, these can run in parallel:**
-  - Module 4 (`basic.py`) and Module 6 (`abac/context.py`) touch disjoint files.
+  - Module 4 (`abstract.py`, `basic.py`, `oauth2/backend.py`) and Module 6 (`abac/context.py`) touch disjoint files.
   - Module 5 (`passkey.py`) depends on Module 4 only for the `_JWT_EXTRA_KEYS` and `is_active` behaviour. It can develop in parallel against the frozen signatures, and its integration tests run after Module 4 merges.
 - **Serial last (P2):** Module 7 and then Module 8 (both depend on Module 5), and finally the docs.
 - **Conflict note:** Modules 5 and 7 both edit `backends/passkey.py`, so they must be sequential. No module edits `auth.py`.
@@ -751,3 +765,4 @@ Status: skipped (exploration document status is `review`, not `accepted` — pre
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-10-02 | Jesus Lara (with Claude) | Initial draft from the FEAT-101 proposal; adds the Q-T resolution and the C6 / OAuth2 session-blob risk. |
+| 0.2 | 2026-10-02 | Jesus Lara (with Claude) | Approved. Q-F1 resolved: the OAuth2 `auth_login` `is_active` check is folded into Module 4 through a shared `user_is_active` helper. |
