@@ -200,6 +200,24 @@ class TestEvaluatorTenantSerialization:
         )
         assert k1 != k2, "Different client_id must produce different cache keys"
 
+    def test_cache_key_no_delimiter_collision(self):
+        """Group names containing the old ',' / '|' delimiters must not collide."""
+        ev = PolicyEvaluator()
+        k1 = ev._make_cache_key("u", {"a,b"}, ResourceType.TOOL, "jira", "tool:execute")
+        k2 = ev._make_cache_key("u", {"a", "b"}, ResourceType.TOOL, "jira", "tool:execute")
+        assert k1 != k2
+
+    def test_invalidate_cache_only_drops_given_user(self):
+        """invalidate_cache(user_id) removes that user's entries and keeps others."""
+        ev = PolicyEvaluator()
+        k_u = ev._make_cache_key("u", {"eng"}, ResourceType.TOOL, "jira", "tool:execute")
+        k_v = ev._make_cache_key("v", {"eng"}, ResourceType.TOOL, "jira", "tool:execute")
+        ev._update_cache(k_u, object())
+        ev._update_cache(k_v, object())
+        ev.invalidate_cache("u")
+        assert k_u not in ev._cache
+        assert k_v in ev._cache
+
 
 # ===========================================================================
 # Unit tests — EvalContext resolution (Module 4)
