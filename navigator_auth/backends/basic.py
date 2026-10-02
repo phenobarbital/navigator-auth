@@ -14,7 +14,7 @@ from datamodel.exceptions import ValidationError
 
 # Authenticated Entity
 from ..conf import AUTH_EXCLUDE_LIST_KEY, BASIC_USER_MAPPING
-from .abstract import BaseAuthBackend
+from .abstract import BaseAuthBackend, user_is_active
 from .oauth2.code_backend import AccessTokenStorage
 from .oauth2.models import OauthAccessTokenRecord
 from ..exceptions import (
@@ -151,7 +151,7 @@ class BasicAuth(BaseAuthBackend):
     # Extra keys (when present in `extra`) that are also mirrored into the
     # JWT payload by `open_session`. Any other key in `extra` is only merged
     # into `userdata` / `AUTH_SESSION_OBJECT`.
-    _JWT_EXTRA_KEYS = ("auth_method", "auth_origin", "external_expires_at")
+    _JWT_EXTRA_KEYS = ("auth_method", "auth_origin", "external_expires_at", "mfa", "amr")
 
     async def _index_user_jti(self, user_id, jti: str, ttl: int) -> None:
         """SADD ``jti`` onto ``auth:user:jti:{user_id}`` and refresh the
@@ -185,7 +185,7 @@ class BasicAuth(BaseAuthBackend):
         ``extra`` (dict) is merged into ``userdata`` and into
         ``userdata[AUTH_SESSION_OBJECT]`` before ``remember()``. Keys present
         in ``extra`` that are also in ``_JWT_EXTRA_KEYS`` (``auth_method``,
-        ``auth_origin``, ``external_expires_at``) are additionally added to
+        ``auth_origin``, ``external_expires_at``, ``mfa``, ``amr``) are additionally added to
         the JWT payload.
 
         ``expiration`` (int seconds), when given, is forwarded to
@@ -195,7 +195,16 @@ class BasicAuth(BaseAuthBackend):
 
         Raises on failure so the caller decides how to handle it (unlike
         ``authenticate()``, which logs and returns ``False``).
+
+        Raises:
+            FailedAuth: (403) when the user record has a false ``is_active``;
+                no session is created and no callbacks fire.
         """
+        if not user_is_active(user):
+            self.logger.warning(
+                f"BasicAuth: rejected login for disabled user {user[self.userid_attribute]}"
+            )
+            raise FailedAuth("User account is disabled", status=403)
         userdata = self.get_userdata(user=user)
         username = user[self.username_attribute]
         uid = user[self.userid_attribute]
@@ -309,6 +318,8 @@ class BasicAuth(BaseAuthBackend):
                 raise AuthException(str(err), status=500) from err
             try:
                 return await self.open_session(request, user)
+            except (FailedAuth, InvalidAuth):
+                raise
             except Exception as err:  # pylint: disable=W0703
                 self.logger.exception(f"BasicAuth: Authentication Error: {err}")
                 return False

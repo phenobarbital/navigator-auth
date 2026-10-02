@@ -1,5 +1,10 @@
 # Unreleased
 
+- **Disabled accounts are now rejected at login (FEAT-101, behaviour change).**
+  `BasicAuth.open_session` (so Basic, TokenExchange and Passkey) and the
+  OAuth2 login page password POST now return 403 when the user record has
+  `is_active` false, and create no session. Records without an `is_active`
+  field are unaffected. `mfa` and `amr` extras are now mirrored into the JWT.
 - **Session cookie `Secure` flag fix and CSRF protection (0.28.2).**
   Requires `navigator-session>=1.1.0`.
   - The Redis session cookie was silently missing the `Secure` attribute

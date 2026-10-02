@@ -104,7 +104,7 @@ from ...exceptions import (
     InvalidAuth,
 )
 from ...responses import JSONResponse
-from ..abstract import BaseAuthBackend
+from ..abstract import BaseAuthBackend, user_is_active
 from .models import (
     OauthUser,
     OauthRefreshToken,
@@ -1720,6 +1720,10 @@ class Oauth2Provider(BaseAuthBackend):
                 raise web.HTTPBadRequest(reason=f"Auth: User Invalid {exc}")
             except Exception as exc:
                 raise web.HTTPBadRequest(reason=f"Auth: Exception {exc}")
+
+            if not user_is_active(user):
+                self.logger.warning("Oauth2: rejected login for a disabled user")
+                raise web.HTTPForbidden(reason="Auth: User account is disabled.")
 
             location = request.app.router["nav_oauth2_authorize"].url_for()
             payload = {
