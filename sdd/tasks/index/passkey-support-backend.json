@@ -5,7 +5,7 @@
   "type": "feature",
   "base_branch": "dev",
   "created_at": "2026-10-02T19:14:12+00:00",
-  "completed_at": null,
+  "completed_at": "2026-10-02T22:07:23+00:00",
   "tasks": [
     {
       "id": "TASK-86",
@@ -23,7 +23,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:30:02+00:00",
-      "file": "sdd/tasks/completed/TASK-86-passkey-config-packaging.md"
+      "file": "sdd/tasks/completed/TASK-86-passkey-config-packaging.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-87",
@@ -43,7 +44,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:30:31+00:00",
-      "file": "sdd/tasks/completed/TASK-87-passkey-types-migration.md"
+      "file": "sdd/tasks/completed/TASK-87-passkey-types-migration.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-88",
@@ -63,7 +65,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:31:15+00:00",
-      "file": "sdd/tasks/completed/TASK-88-passkey-store.md"
+      "file": "sdd/tasks/completed/TASK-88-passkey-store.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-89",
@@ -83,7 +86,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:31:39+00:00",
-      "file": "sdd/tasks/completed/TASK-89-passkey-rp-resolver.md"
+      "file": "sdd/tasks/completed/TASK-89-passkey-rp-resolver.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-90",
@@ -103,7 +107,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:32:07+00:00",
-      "file": "sdd/tasks/completed/TASK-90-passkey-test-fixtures.md"
+      "file": "sdd/tasks/completed/TASK-90-passkey-test-fixtures.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-91",
@@ -121,7 +126,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:32:49+00:00",
-      "file": "sdd/tasks/completed/TASK-91-is-active-enforcement.md"
+      "file": "sdd/tasks/completed/TASK-91-is-active-enforcement.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-92",
@@ -139,7 +145,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:33:10+00:00",
-      "file": "sdd/tasks/completed/TASK-92-evalcontext-auth-method-mfa.md"
+      "file": "sdd/tasks/completed/TASK-92-evalcontext-auth-method-mfa.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-93",
@@ -162,7 +169,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:34:19+00:00",
-      "file": "sdd/tasks/completed/TASK-93-passkey-backend-core.md"
+      "file": "sdd/tasks/completed/TASK-93-passkey-backend-core.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-94",
@@ -183,7 +191,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:43:44+00:00",
-      "file": "sdd/tasks/completed/TASK-94-passkey-enrollment.md"
+      "file": "sdd/tasks/completed/TASK-94-passkey-enrollment.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-95",
@@ -205,7 +214,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:45:19+00:00",
-      "file": "sdd/tasks/completed/TASK-95-passkey-signin.md"
+      "file": "sdd/tasks/completed/TASK-95-passkey-signin.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-96",
@@ -225,7 +235,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:46:03+00:00",
-      "file": "sdd/tasks/completed/TASK-96-passkey-credential-management.md"
+      "file": "sdd/tasks/completed/TASK-96-passkey-credential-management.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-97",
@@ -245,7 +256,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:47:09+00:00",
-      "file": "sdd/tasks/completed/TASK-97-oauth-login-page-passkey.md"
+      "file": "sdd/tasks/completed/TASK-97-oauth-login-page-passkey.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-98",
@@ -266,7 +278,8 @@
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
       "completed_at": "2026-10-02T21:47:54+00:00",
-      "file": "sdd/tasks/completed/TASK-98-passkey-docs-changelog.md"
+      "file": "sdd/tasks/completed/TASK-98-passkey-docs-changelog.md",
+      "verification": "verified"
     }
   ]
 }
