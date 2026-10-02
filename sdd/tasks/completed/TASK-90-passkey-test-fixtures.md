@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 9, §4 Test Data / Fixtures)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-86
@@ -235,7 +235,7 @@ See the blueprint above (spec §4 Test Data / Fixtures).
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: Fixtures in tests/fixtures/passkey.py (cbor2 imported lazily); consumers import them explicitly. 4 round-trip tests pass against py_webauthn 2.8.0.
 **Deviations from spec**: none

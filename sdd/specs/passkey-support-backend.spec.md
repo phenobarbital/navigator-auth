@@ -649,6 +649,17 @@ The py_webauthn 2.x API is listed here as **unverified — check before use**:
 
 The first task that adds the dependency must confirm these names, especially `VerifiedAuthentication.user_verified`.
 
+### External library — verified
+
+Verified against `webauthn==2.8.0` (TASK-86, 2026-10-02). All calls are **keyword-only**.
+
+- `generate_registration_options(*, rp_id, rp_name, user_name, user_id: bytes|None=None, user_display_name=None, challenge=None, timeout=60000, attestation=NONE, authenticator_selection=None, exclude_credentials=None, supported_pub_key_algs=None, hints=None) -> PublicKeyCredentialCreationOptions`
+- `verify_registration_response(*, credential: str|dict|RegistrationCredential, expected_challenge: bytes, expected_rp_id, expected_origin: str|list[str], require_user_presence=True, require_user_verification=False, ...) -> VerifiedRegistration` with fields `credential_id, credential_public_key, sign_count, aaguid (str), fmt, credential_type, user_verified, attestation_object, credential_device_type, credential_backed_up`.
+- `generate_authentication_options(*, rp_id, challenge=None, timeout=60000, allow_credentials=None, user_verification=PREFERRED) -> PublicKeyCredentialRequestOptions`
+- `verify_authentication_response(*, credential, expected_challenge: bytes, expected_rp_id, expected_origin, credential_public_key: bytes, credential_current_sign_count: int, require_user_verification=False) -> VerifiedAuthentication` with fields `credential_id, new_sign_count, credential_device_type, credential_backed_up, user_verified`.
+- `options_to_json(options) -> str`; `webauthn.helpers.base64url_to_bytes` / `bytes_to_base64url`; `webauthn.helpers.exceptions.InvalidAuthenticationResponse` / `InvalidRegistrationResponse`.
+- Differences from the unverified list: none in names; `VerifiedRegistration` also exposes `user_verified`, and `verify_registration_response` also has `require_user_presence`. `user_id` is optional in registration options.
+
 ### Does NOT Exist (Anti-Hallucination)
 
 - No WebAuthn, FIDO, passkey or TOTP code anywhere in `navigator_auth/`.

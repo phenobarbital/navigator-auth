@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 2, §2.3, AC3)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-87
@@ -225,7 +225,7 @@ See the blueprint above (spec §4: `test_store_crud`).
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: Raw-SQL store over asyncdb pool; live tests (2) pass. Pool usage: async with await pool.acquire() as conn; fetch_all returns None on no rows.
 **Deviations from spec**: none

@@ -21,7 +21,7 @@
     <br /><br />
     <form name="authForm" action="{{ action_url }}" onsubmit="return validateForm()" method="post">
         Username:<br>
-        <input type="text" name="username">
+        <input type="text" name="username" id="username" autocomplete="username webauthn">
         <br>
         Password:<br>
         <input type="password" name="password">
@@ -36,6 +36,8 @@
         <input type="hidden" name="nonce" value="{{ nonce }}">
         <input type="hidden" name="prompt" value="{{ prompt }}">
         <input type="submit" value="Submit">
+        <button type="button" id="passkey-signin" hidden>Sign in with a passkey</button>
+        <div id="passkey-error" role="alert" hidden></div>
     </form>
   </div>
   {% if upstream_providers %}
@@ -53,5 +55,132 @@
     {% endfor %}
   </div>
   {% endif %}
+  <script>
+  (function () {
+    var OPTIONS_URL = "/api/v1/auth/passkey/login/options";
+    var LOGIN_URL = "/api/v1/login";
+    var AUTHORIZE_URL = "/oauth2/authorize";
+    var PARAMS = ["response_type", "client_id", "redirect_uri", "scope", "state",
+                  "code_challenge", "code_challenge_method", "nonce", "prompt"];
+
+    if (!window.PublicKeyCredential || !navigator.credentials) { return; }
+
+    var button = document.getElementById("passkey-signin");
+    var errorBox = document.getElementById("passkey-error");
+    var conditionalAbort = null;
+
+    function b64urlToBuffer(value) {
+      var b64 = value.replace(/-/g, "+").replace(/_/g, "/");
+      while (b64.length % 4) { b64 += "="; }
+      var raw = atob(b64);
+      var out = new Uint8Array(raw.length);
+      for (var i = 0; i < raw.length; i++) { out[i] = raw.charCodeAt(i); }
+      return out.buffer;
+    }
+    function bufferToB64url(buffer) {
+      var bytes = new Uint8Array(buffer);
+      var str = "";
+      for (var i = 0; i < bytes.length; i++) { str += String.fromCharCode(bytes[i]); }
+      return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    }
+
+    function authorizeUrl() {
+      var form = document.forms.authForm;
+      var query = new URLSearchParams();
+      PARAMS.forEach(function (name) {
+        var field = form.elements[name];
+        if (field && field.value) { query.set(name, field.value); }
+      });
+      return AUTHORIZE_URL + "?" + query.toString();
+    }
+
+    function toRequestOptions(publicKey) {
+      if (PublicKeyCredential.parseRequestOptionsFromJSON) {
+        return PublicKeyCredential.parseRequestOptionsFromJSON(publicKey);
+      }
+      var options = Object.assign({}, publicKey);
+      options.challenge = b64urlToBuffer(publicKey.challenge);
+      options.allowCredentials = (publicKey.allowCredentials || []).map(function (c) {
+        return Object.assign({}, c, { id: b64urlToBuffer(c.id) });
+      });
+      return options;
+    }
+
+    function credentialToJSON(cred) {
+      if (typeof cred.toJSON === "function") { return cred.toJSON(); }
+      var r = cred.response;
+      return {
+        id: cred.id,
+        rawId: bufferToB64url(cred.rawId),
+        type: cred.type,
+        authenticatorAttachment: cred.authenticatorAttachment || undefined,
+        clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {},
+        response: {
+          clientDataJSON: bufferToB64url(r.clientDataJSON),
+          authenticatorData: bufferToB64url(r.authenticatorData),
+          signature: bufferToB64url(r.signature),
+          userHandle: r.userHandle ? bufferToB64url(r.userHandle) : undefined
+        }
+      };
+    }
+
+    function showError(message) {
+      errorBox.textContent = message;
+      errorBox.hidden = false;
+    }
+
+    async function passkeySignIn(username, mediation) {
+      errorBox.hidden = true;
+      var controller = new AbortController();
+      if (mediation === "conditional") {
+        conditionalAbort = controller;
+      } else if (conditionalAbort) {
+        // An explicit click supersedes the pending conditional-UI request.
+        conditionalAbort.abort();
+        conditionalAbort = null;
+      }
+      try {
+        var optionsResponse = await fetch(OPTIONS_URL, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(username ? { username: username } : {})
+        });
+        if (!optionsResponse.ok) { throw new Error("options"); }
+        var started = await optionsResponse.json();
+        var request = { publicKey: toRequestOptions(started.publicKey) };
+        request.signal = controller.signal;
+        if (mediation) { request.mediation = mediation; }
+        var cred = await navigator.credentials.get(request);
+        if (!cred) { return; }
+        var loginResponse = await fetch(LOGIN_URL, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "X-Auth-Method": "PasskeyAuth" },
+          body: JSON.stringify({ challenge_id: started.challenge_id, credential: credentialToJSON(cred) })
+        });
+        if (!loginResponse.ok) { throw new Error("login"); }
+        window.location.assign(authorizeUrl());
+      } catch (err) {
+        // A dismissed prompt is not an error worth showing.
+        if (!(err && (err.name === "NotAllowedError" || err.name === "AbortError"))) {
+          showError("Passkey sign-in failed. Use your password instead.");
+        }
+      }
+    }
+
+    button.hidden = false;
+    button.addEventListener("click", function () {
+      var typed = document.getElementById("username").value.trim();
+      passkeySignIn(typed || undefined);
+    });
+
+    if (PublicKeyCredential.isConditionalMediationAvailable) {
+      PublicKeyCredential.isConditionalMediationAvailable().then(function (available) {
+        if (available) { passkeySignIn(undefined, "conditional"); }
+      });
+    }
+  })();
+  </script>
 </body>
 </html>

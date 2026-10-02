@@ -2,6 +2,7 @@
 
 Authentication Backends.
 """
+
 from .noauth import NoAuth
 from .basic import BasicAuth
 from .django import DjangoAuth
@@ -16,13 +17,13 @@ from .github import GithubAuth
 from .odoo import OdooAuth
 from .oauth2 import Oauth2Provider
 from .exchange import TokenExchangeAuth
+from .passkey import PasskeyAuth
 from .saml import (
     AbstractSAMLBackend,
     AbstractSAMLIdentityProvider,
     SAMLAuth,
     SAMLIdentityProvider,
 )
-
 
 __all__ = (
     "NoAuth",
@@ -43,4 +44,5 @@ __all__ = (
     "AbstractSAMLIdentityProvider",
     "SAMLIdentityProvider",
     "TokenExchangeAuth",
+    "PasskeyAuth",
 )

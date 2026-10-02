@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 5, §2 Overview items 1–2, §7 R1/R9, AC1, AC2, AC14)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-86, TASK-87, TASK-88, TASK-89
@@ -350,7 +350,7 @@ See the blueprint above (spec §4: `test_get_payload_fast_fail`, `test_decoy_ids
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: Backend core with lifecycle, routes, challenge store, decoys, get_payload; handler stubs for 94/95. 16 unit tests pass; auth.py untouched. Note: pre-existing auth_error passes deprecated body= to aiohttp (test ignores that warning).
 **Deviations from spec**: none

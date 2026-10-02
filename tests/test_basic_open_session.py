@@ -71,6 +71,7 @@ async def open_session_app():
     from navigator_auth import AuthHandler
     from navigator_auth.conf import SECRET_KEY, AUTH_JWT_ALGORITHM
     from navigator_auth.responses import JSONResponse
+    from navigator_auth.exceptions import FailedAuth
 
     app = web.Application()
     with warnings.catch_warnings():
@@ -86,9 +87,11 @@ async def open_session_app():
         extra = payload.get("extra")
         expiration = payload.get("expiration")
         user = _fake_user()
-        result = await backend.open_session(
-            request, user, extra=extra, expiration=expiration
-        )
+        user.update(payload.get("user_overrides") or {})
+        try:
+            result = await backend.open_session(request, user, extra=extra, expiration=expiration)
+        except FailedAuth as err:
+            return JSONResponse({"error": str(err)}, status=err.status)
         session = request.get(SESSION_OBJECT)
         out = {
             "result": {k: v for k, v in result.items() if k != AUTH_SESSION_OBJECT},
@@ -207,3 +210,46 @@ async def test_open_session_callbacks_invoked(open_session_app):
         assert called_userdata is not None
     finally:
         backend._callbacks = None
+
+
+async def test_open_session_rejects_inactive(open_session_app):
+    """is_active=False -> 403 and no session cookie (FEAT-101 AC9)."""
+    client, _secret, _alg = open_session_app
+    resp = await client.post("/_test/open_session", json={"user_overrides": {"is_active": False}})
+    assert resp.status == 403, await resp.text()
+    assert "disabled" in (await resp.json())["error"]
+    assert not resp.cookies
+
+
+async def test_open_session_missing_is_active_is_active(open_session_app):
+    """A user record without is_active (custom view) still logs in."""
+    client, _secret, _alg = open_session_app
+    resp = await client.post("/_test/open_session", json={})
+    assert resp.status == 200, await resp.text()
+
+
+async def test_open_session_jwt_mfa_amr(open_session_app):
+    """mfa/amr extras are mirrored into the JWT."""
+    client, secret, algorithm = open_session_app
+    extra = {"mfa": True, "amr": ["hwk", "user"]}
+    resp = await client.post("/_test/open_session", json={"extra": extra})
+    assert resp.status == 200, await resp.text()
+    claims = _decode((await resp.json())["result"]["token"], secret, algorithm)
+    assert claims["mfa"] is True and claims["amr"] == ["hwk", "user"]
+
+
+async def test_basic_authenticate_propagates_failedauth(open_session_app):
+    """authenticate() lets the 403 from open_session propagate (R3)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from navigator_auth.exceptions import FailedAuth
+
+    client, _secret, _alg = open_session_app
+    backend = client.app["open_session_backend"]
+    user = _fake_user()
+    user["is_active"] = False
+    backend.get_payload = AsyncMock(return_value=("u", "p"))
+    backend.validate_user = AsyncMock(return_value=user)
+    with pytest.raises(FailedAuth) as exc:
+        await backend.authenticate(MagicMock())
+    assert exc.value.status == 403

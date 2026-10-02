@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 2, §2 Data Models, AC3)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-86
@@ -305,7 +305,7 @@ See the `tests/test_passkey_migrations.py` blueprint above (spec §4: `test_migr
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: Created passkey package (types, migrations, SQL). 4 tests pass incl. live idempotency.
 **Deviations from spec**: none

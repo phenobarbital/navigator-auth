@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 9 docs, §7 R2, AC15, AC16)
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-96, TASK-97
@@ -164,8 +164,7 @@ No new tests. This task runs the full feature verification above.
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
-**Verification output**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: docs/passkey.rst, toctree entry and changelog written from the implemented code. Verification (AC15 command): 120 passed, 4 skipped. ruff: only 4 pre-existing F401 in basic.py (same on origin/dev). auth.py diff vs origin/dev empty (AC14). Sphinx not installed so the docs build was not run.
 **Deviations from spec**: none
