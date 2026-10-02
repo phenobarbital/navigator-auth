@@ -136,7 +136,8 @@ Together they deliver C1–C6.
    - **Storage.** Save the resolved RP in the challenge state, and store `rp_id` on each credential row.
    - **Scoping.** Filter `excludeCredentials` and the credential list by RP.
    - **Startup.** Startup fails with `ConfigError` when the backend is enabled and the map is empty.
-   - **ABAC.** `_resolve_tenant` does not apply before authentication (F015). Whether the map is also keyed by `org_id` for ABAC belongs in the spec.
+   - **ABAC tenant binding.** Each map entry also carries the tenant `(org_id, client_id)`. This replaces `_resolve_tenant` before authentication, where that function cannot run (F015). After a passkey login, the RP's `org_id`/`client_id` go into `extra`, and so into the session, where `EvalContext` (`_resolve_tenant` step 3, `userinfo`) picks them up.
+   - **Tenant mismatch.** If the user's own `org_id` differs from the RP's tenant, the login is rejected with a 401. A passkey enrolled on tenant A's origin can only open tenant A sessions.
 3. **Credential store (answers Q3 from precedent).** A `CredentialStore`-style class, modeled on `IdentityStore`, over `app["authdb"]`.
    - **Methods.** `get(credential_id)`, `list_by_user(user_id, rp_id=None)`, `save(...)`, `update_usage(...)`, `delete(...)`, `rename(...)`.
    - **Data.** A `UserCredential` model in `models.py`, and the table `{AUTH_DB_SCHEMA}.user_credentials` with `user_id integer` as a foreign key to `users.user_id` plus an `rp_id` column.
@@ -167,13 +168,27 @@ Together they deliver C1–C6.
     - **Credential state.** Not changed: no `disabled_at` column and no notification. Both counts at 0 is still accepted (E6).
     - **Mechanism.** py_webauthn raises `InvalidAuthenticationResponse` on regression. The backend tells it apart from other failures only for logging, not in the response.
 
+11. **ABAC exposure (Q5).** `EvalContext.__init__` (`abac/context.py:81`) gains `store["auth_method"]` and `store["mfa"]`, read from `userinfo` (default `None` / `False`). Policies can then require `auth_method == "passkey"` or `mfa` for sensitive resources.
+    - **Expected wiring.** `open_session` already merges `extra` into `AUTH_SESSION_OBJECT` and mirrors `auth_method` into the JWT (F002), so the value is very likely already in `userinfo`. The spec must check this before adding any plumbing.
+    - **Policy syntax.** The spec must also check how policy conditions reference `EvalContext` keys.
+12. **Passkey as MFA (Q6).** A passkey login satisfies MFA when the authenticator reported user verification (the UV flag, enforced when `PASSKEY_USER_VERIFICATION=required`).
+    - **Session data.** `extra` gains `mfa: True` and `amr: ["hwk", "user"]` (RFC 8176), and both are added to `BasicAuth._JWT_EXTRA_KEYS` so they reach the JWT. That is an additive edit to `basic.py:154`.
+    - **When UV is not required.** If the deployment sets `PASSKEY_USER_VERIFICATION` to `preferred`, `mfa` follows the assertion's actual UV flag.
+    - **Other backends.** Every other backend leaves `mfa` unset, which reads as `False`.
+13. **Username-first login (Q9), the default flow.**
+    - **Request.** `POST login/options` accepts `{"username": "..."}`.
+    - **Known user.** The response lists the user's credentials for the resolved RP in `allowCredentials`. The challenge state stores the expected `user_id`, and `authenticate` rejects a credential owned by anyone else.
+    - **Unknown user (E5).** The response must look the same as for a known user. `allowCredentials` holds 1–2 decoy ids derived from `HMAC(SECRET_KEY, rp_id + username)`, so repeated requests return the same ids, and the response timing should be comparable.
+    - **Usernameless.** An empty body still gives the usernameless flow with conditional UI (`allowCredentials` empty).
+    - **UI.** `templates/oauth/login.html` asks for the username first, then offers the passkey. Conditional-UI autofill stays available.
+    - **Tests.** E5 needs a dedicated test: compare the response shape for a known and an unknown user.
+
 **Out of scope.** These stay as the brainstorm set them:
 
 - attestation and AAGUID policy;
 - MFA step-up;
 - account recovery;
-- passkey sign-up;
-- ABAC `auth_method` exposure (Q5).
+- passkey sign-up.
 
 `api_login`, `navigator_session` and the OAuth2 token endpoint are unchanged.
 
@@ -182,10 +197,12 @@ Together they deliver C1–C6.
 - `passkey-auth`: C1–C6 as defined in the source, corrected per §2.2.
 - `passkey-rp-resolver`: per-origin relying-party resolution.
 - `passkey-user-handle`: random per-(user, RP) WebAuthn user handle.
+- `passkey-username-first`: username-first options with an enumeration-safe decoy response.
 
 ### Modified capabilities
 
-- `basic-open-session`: rejects inactive users (U2).
+- `basic-open-session`: rejects inactive users (U2); `_JWT_EXTRA_KEYS` gains `mfa` and `amr` (Q6).
+- `abac-eval-context`: exposes `auth_method` and `mfa` (Q5).
 
 ## §4 Confidence Map
 
@@ -212,12 +229,12 @@ Together they deliver C1–C6.
 - [x] **Q2 — User handle.** **A random per-user handle**, never `str(user_id)` (§3.9).
 - [x] **Q4 — Counter regression (E7).** **Reject and log only.** The credential stays usable; no disable flag or notification in v1 (§3.10).
 
-### Still open (for the spec)
+- [x] **Q5 — ABAC exposure.** **Yes.** `auth_method` becomes a first-class `EvalContext` key (§3.11).
+- [x] **Q6 — Passkey as MFA.** **Yes.** A passkey login with user verification counts as multi-factor on its own (§3.12).
+- [x] **Q9 — Username-first mode.** **Username-first is the preferred, default flow.** Usernameless with conditional UI stays supported (§3.13).
+- [x] **RP map and `org_id`.** **Yes.** Each relying-party entry is tied to an `(org_id, client_id)` tenant (§3.2).
 
-- [ ] **Q5.** Expose `auth_method` to ABAC `EvalContext`.
-- [ ] **Q6.** Does a passkey satisfy future MFA requirements?
-- [ ] **Q9.** Is a username-first mode needed at all?
-- [ ] **New.** Is the RP map keyed only by origin, or also tied to `org_id` for ABAC alignment?
+No open questions remain. The proposal is ready for `/sdd-spec`.
 
 ## §6 Recommended Next Step
 

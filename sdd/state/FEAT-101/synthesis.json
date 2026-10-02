@@ -185,6 +185,26 @@
    "id": "U6",
    "question": "Q4 counter regression",
    "user_answer": "Reject + log only; credential stays usable"
+  },
+  {
+   "id": "U7",
+   "question": "Q5 ABAC exposure",
+   "user_answer": "yes"
+  },
+  {
+   "id": "U8",
+   "question": "Q6 passkey satisfies MFA",
+   "user_answer": "yes"
+  },
+  {
+   "id": "U9",
+   "question": "Q9 username-first",
+   "user_answer": "username-first preferred (default); usernameless kept"
+  },
+  {
+   "id": "U10",
+   "question": "RP map tied to org_id",
+   "user_answer": "yes"
   }
  ],
  "recommended_next_command": {
