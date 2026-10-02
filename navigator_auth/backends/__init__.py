@@ -16,6 +16,7 @@ from .github import GithubAuth
 from .odoo import OdooAuth
 from .oauth2 import Oauth2Provider
 from .exchange import TokenExchangeAuth
+from .passkey import PasskeyAuth
 from .saml import (
     AbstractSAMLBackend,
     AbstractSAMLIdentityProvider,
@@ -43,4 +44,5 @@ __all__ = (
     "AbstractSAMLIdentityProvider",
     "SAMLIdentityProvider",
     "TokenExchangeAuth",
+    "PasskeyAuth",
 )
