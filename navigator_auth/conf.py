@@ -676,6 +676,34 @@ TOKEN_EXCHANGE_PROVIDERS = [
     if s.strip()
 ]
 
+## Passkey (WebAuthn) authentication (FEAT-101) — PasskeyAuth backend.
+# Exact-origin allow-list of relying parties (one per tenant site), JSON list:
+#   [{"origin": "https://app.a.com", "rp_id": "a.com", "rp_name": "A",
+#     "org_id": 5, "client_id": 1}]
+# Empty when unset or invalid; PasskeyAuth refuses to start with an empty map.
+PASSKEY_RELYING_PARTIES: list = []
+_passkey_rps = config.get("PASSKEY_RELYING_PARTIES")
+if _passkey_rps:
+    try:
+        PASSKEY_RELYING_PARTIES = orjson.loads(_passkey_rps)
+    except orjson.JSONDecodeError:
+        logging.exception(
+            "Auth: Invalid JSON on *PASSKEY_RELYING_PARTIES*"
+        )
+    if not isinstance(PASSKEY_RELYING_PARTIES, list):
+        logging.error(
+            "Auth: *PASSKEY_RELYING_PARTIES* must be a JSON list"
+        )
+        PASSKEY_RELYING_PARTIES = []
+# Seconds a registration/login challenge stays valid in Redis (single use).
+PASSKEY_CHALLENGE_TTL = config.getint("PASSKEY_CHALLENGE_TTL", fallback=300)
+# "required" (default) or "preferred". With "required", assertions without UV are rejected.
+PASSKEY_USER_VERIFICATION = config.get("PASSKEY_USER_VERIFICATION", fallback="required")
+# Optional user attribute compared to the RP's org_id (e.g. "org_id"); unset disables the check.
+PASSKEY_TENANT_ATTRIBUTE = config.get("PASSKEY_TENANT_ATTRIBUTE", fallback=None)
+# Number of decoy credential ids returned for unknown users (username-first, E5).
+PASSKEY_DECOY_CREDENTIALS = config.getint("PASSKEY_DECOY_CREDENTIALS", fallback=1)
+
 ## Backend-Based Password Recovery (FEAT-098) — 3-step signed flow.
 # HMAC key for signing both the recovery and confirmation tokens (D12).
 # Falls back to SECRET_KEY when unset, and is always coerced to bytes so it
