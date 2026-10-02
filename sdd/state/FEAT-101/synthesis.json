@@ -1,33 +1,195 @@
 {
- "mode":"enrichment",
- "overall_confidence":"medium",
- "summary":"The brainstorm's architecture (BaseAuthBackend subclass, py_webauthn, Redis single-use challenges, verification through POST /api/v1/login with X-Auth-Method) is confirmed by the code. Six contract errors in the skeleton were found and corrected; credential storage and migration follow the existing IdentityStore precedent. Per-tenant RP ID (user decision) introduces a new pre-auth RP resolver, which keeps overall confidence at medium.",
- "localization":[
-  {"path":"navigator_auth/backends/basic.py","symbol":"BasicAuth.open_session","lines":"171-290","role":"session/token tail to reuse; site of is_active enforcement","evidence":["F002","F005"],"confidence":"high"},
-  {"path":"navigator_auth/backends/exchange.py","symbol":"TokenExchangeAuth","lines":"31-216","role":"subclass-and-open_session precedent","evidence":["F002"],"confidence":"high"},
-  {"path":"navigator_auth/backends/idp/__init__.py","symbol":"IdentityProvider.create_token / user_from_id","lines":"124-144,379","role":"4-tuple token; user lookup by id","evidence":["F001","F006"],"confidence":"high"},
-  {"path":"navigator_auth/auth.py","symbol":"AuthHandler.api_login / _backend_auth / get_auth_backend","lines":"343-549","role":"verification entrypoint, error mapping, fallback loop","evidence":["F009"],"confidence":"high"},
-  {"path":"navigator_auth/identity/store.py","symbol":"IdentityStore","role":"storage-class precedent","evidence":["F008"],"confidence":"high"},
-  {"path":"navigator_auth/identity/migrations.py","symbol":"setup_identity_columns","role":"startup idempotent SQL migration precedent","evidence":["F008"],"confidence":"high"},
-  {"path":"navigator_auth/middlewares/csrf.py","symbol":"csrf_middleware","role":"applies to enrollment POSTs","evidence":["F011"],"confidence":"high"},
-  {"path":"templates/oauth/login.html","symbol":null,"role":"OAuth2 login page for C6","evidence":["F012"],"confidence":"high"},
-  {"path":"navigator_auth/abac/context.py","symbol":"_resolve_tenant","role":"existing tenant resolver (not usable pre-auth)","evidence":["F015"],"confidence":"high"}
+ "mode": "enrichment",
+ "overall_confidence": "medium",
+ "summary": "The brainstorm's architecture (BaseAuthBackend subclass, py_webauthn, Redis single-use challenges, verification through POST /api/v1/login with X-Auth-Method) is confirmed by the code. Six contract errors in the skeleton were found and corrected; credential storage and migration follow the existing IdentityStore precedent. Per-tenant RP ID (user decision) introduces a new pre-auth RP resolver, which keeps overall confidence at medium.",
+ "localization": [
+  {
+   "path": "navigator_auth/backends/basic.py",
+   "symbol": "BasicAuth.open_session",
+   "lines": "171-290",
+   "role": "session/token tail to reuse; site of is_active enforcement",
+   "evidence": [
+    "F002",
+    "F005"
+   ],
+   "confidence": "high"
+  },
+  {
+   "path": "navigator_auth/backends/exchange.py",
+   "symbol": "TokenExchangeAuth",
+   "lines": "31-216",
+   "role": "subclass-and-open_session precedent",
+   "evidence": [
+    "F002"
+   ],
+   "confidence": "high"
+  },
+  {
+   "path": "navigator_auth/backends/idp/__init__.py",
+   "symbol": "IdentityProvider.create_token / user_from_id",
+   "lines": "124-144,379",
+   "role": "4-tuple token; user lookup by id",
+   "evidence": [
+    "F001",
+    "F006"
+   ],
+   "confidence": "high"
+  },
+  {
+   "path": "navigator_auth/auth.py",
+   "symbol": "AuthHandler.api_login / _backend_auth / get_auth_backend",
+   "lines": "343-549",
+   "role": "verification entrypoint, error mapping, fallback loop",
+   "evidence": [
+    "F009"
+   ],
+   "confidence": "high"
+  },
+  {
+   "path": "navigator_auth/identity/store.py",
+   "symbol": "IdentityStore",
+   "role": "storage-class precedent",
+   "evidence": [
+    "F008"
+   ],
+   "confidence": "high"
+  },
+  {
+   "path": "navigator_auth/identity/migrations.py",
+   "symbol": "setup_identity_columns",
+   "role": "startup idempotent SQL migration precedent",
+   "evidence": [
+    "F008"
+   ],
+   "confidence": "high"
+  },
+  {
+   "path": "navigator_auth/middlewares/csrf.py",
+   "symbol": "csrf_middleware",
+   "role": "applies to enrollment POSTs",
+   "evidence": [
+    "F011"
+   ],
+   "confidence": "high"
+  },
+  {
+   "path": "templates/oauth/login.html",
+   "symbol": null,
+   "role": "OAuth2 login page for C6",
+   "evidence": [
+    "F012"
+   ],
+   "confidence": "high"
+  },
+  {
+   "path": "navigator_auth/abac/context.py",
+   "symbol": "_resolve_tenant",
+   "role": "existing tenant resolver (not usable pre-auth)",
+   "evidence": [
+    "F015"
+   ],
+   "confidence": "high"
+  }
  ],
- "constraints":[
-  {"text":"create_token returns (token, refresh_token, exp, scheme)","evidence":["F001"],"confidence":"high"},
-  {"text":"Public routes append to app[AUTH_EXCLUDE_LIST_KEY]","evidence":["F004"],"confidence":"high"},
-  {"text":"BasicAuth subclasses must call super().on_startup to keep access_token_storage (jti revocation)","evidence":["F003"],"confidence":"high"},
-  {"text":"Fallback login loop aborts on non-Auth exceptions; get_payload must fail fast with InvalidAuth","evidence":["F009"],"confidence":"high"},
-  {"text":"Cookie-only POSTs require CSRF header","evidence":["F011"],"confidence":"high"},
-  {"text":"Protected handlers gate on request.get('authenticated') and use request.user.user_id","evidence":["F010"],"confidence":"medium"},
-  {"text":"User PK is int user_id in AUTH_DB_SCHEMA","evidence":["F007"],"confidence":"high"}
+ "constraints": [
+  {
+   "text": "create_token returns (token, refresh_token, exp, scheme)",
+   "evidence": [
+    "F001"
+   ],
+   "confidence": "high"
+  },
+  {
+   "text": "Public routes append to app[AUTH_EXCLUDE_LIST_KEY]",
+   "evidence": [
+    "F004"
+   ],
+   "confidence": "high"
+  },
+  {
+   "text": "BasicAuth subclasses must call super().on_startup to keep access_token_storage (jti revocation)",
+   "evidence": [
+    "F003"
+   ],
+   "confidence": "high"
+  },
+  {
+   "text": "Fallback login loop aborts on non-Auth exceptions; get_payload must fail fast with InvalidAuth",
+   "evidence": [
+    "F009"
+   ],
+   "confidence": "high"
+  },
+  {
+   "text": "Cookie-only POSTs require CSRF header",
+   "evidence": [
+    "F011"
+   ],
+   "confidence": "high"
+  },
+  {
+   "text": "Protected handlers gate on request.get('authenticated') and use request.user.user_id",
+   "evidence": [
+    "F010"
+   ],
+   "confidence": "medium"
+  },
+  {
+   "text": "User PK is int user_id in AUTH_DB_SCHEMA",
+   "evidence": [
+    "F007"
+   ],
+   "confidence": "high"
+  }
  ],
- "hypotheses":[{"id":"H1","statement":"PasskeyAuth(BasicAuth) + CredentialStore + per-origin RP resolver + is_active check in open_session delivers C1-C6 with no change to api_login","confidence":"medium","evidence":["F002","F008","F009","F015"]}],
- "unknowns":[
-  {"id":"U1","question":"RP ID scope","user_answer":"Per-tenant RP ID"},
-  {"id":"U2","question":"is_active enforcement scope","user_answer":"Fix in BasicAuth.open_session (all Basic-derived logins)"},
-  {"id":"U3","question":"Production Redis version","user_answer":">= 6.2 (GETDEL)"},
-  {"id":"U4","question":"Recent re-auth for enrollment","user_answer":"Any live session for v1"}
+ "hypotheses": [
+  {
+   "id": "H1",
+   "statement": "PasskeyAuth(BasicAuth) + CredentialStore + per-origin RP resolver + is_active check in open_session delivers C1-C6 with no change to api_login",
+   "confidence": "medium",
+   "evidence": [
+    "F002",
+    "F008",
+    "F009",
+    "F015"
+   ]
+  }
  ],
- "recommended_next_command":{"command":"sdd-spec","target":"FEAT-101","rationale":"Localization is high-confidence and all material unknowns are answered; the per-tenant RP resolver is new design that belongs in spec §2."}
+ "unknowns": [
+  {
+   "id": "U1",
+   "question": "RP ID scope",
+   "user_answer": "Per-tenant RP ID"
+  },
+  {
+   "id": "U2",
+   "question": "is_active enforcement scope",
+   "user_answer": "Fix in BasicAuth.open_session (all Basic-derived logins)"
+  },
+  {
+   "id": "U3",
+   "question": "Production Redis version",
+   "user_answer": ">= 6.2 (GETDEL)"
+  },
+  {
+   "id": "U4",
+   "question": "Recent re-auth for enrollment",
+   "user_answer": "Any live session for v1"
+  },
+  {
+   "id": "U5",
+   "question": "Q2 user handle",
+   "user_answer": "Random per-user handle (stored per user_id+rp_id)"
+  },
+  {
+   "id": "U6",
+   "question": "Q4 counter regression",
+   "user_answer": "Reject + log only; credential stays usable"
+  }
+ ],
+ "recommended_next_command": {
+  "command": "sdd-spec",
+  "target": "FEAT-101",
+  "rationale": "Localization is high-confidence and all material unknowns are answered; the per-tenant RP resolver is new design that belongs in spec \u00a72."
+ }
 }

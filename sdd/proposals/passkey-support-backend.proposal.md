@@ -156,6 +156,17 @@ Together they deliver C1–C6.
 7. **Packaging (Q7).** Add the extra `passkey = ["webauthn>=2.0"]` to `pyproject.toml`, and import it lazily. Startup raises `ConfigError` when the backend is enabled and the extra is missing.
 8. **P2.** Credential management covers list, delete with the E13 rule, and rename. It also covers the `templates/oauth/login.html` button and conditional UI with the CSRF-aware JS (C6).
 
+9. **User handle (Q2).** Each user gets a random handle (32 bytes from `secrets.token_bytes`) per relying party, stored in a small table `{AUTH_DB_SCHEMA}.user_passkey_handles (user_id, rp_id, user_handle UNIQUE)` in the same migration file.
+   - **Why per relying party.** WebAuthn requires the same `user.id` for all of a user's credentials on one RP. Keying it by `(user_id, rp_id)` keeps tenants unlinkable (U1).
+   - **Enrollment.** `register/options` gets or creates the handle and sends it as `user.id`. It never sends the email, the username or `str(user_id)` (E15).
+   - **Login.** The user is still resolved through the credential row's `user_id`. When the assertion carries `userHandle`, it must match the stored handle for that user and RP; a mismatch returns the same 401 as a bad signature (E4).
+   - **Store.** Add `get_or_create_handle(user_id, rp_id)` and `get_handle(user_id, rp_id)` to the credential store.
+10. **Counter regression (Q4 / E7).** When the stored `sign_count` is above 0 and the new count is not higher, the login is rejected.
+    - **Response.** The same 401 as an invalid credential (E4).
+    - **Logging.** A warning with `user_id`, `credential_id` (base64url) and `rp_id`.
+    - **Credential state.** Not changed: no `disabled_at` column and no notification. Both counts at 0 is still accepted (E6).
+    - **Mechanism.** py_webauthn raises `InvalidAuthenticationResponse` on regression. The backend tells it apart from other failures only for logging, not in the response.
+
 **Out of scope.** These stay as the brainstorm set them:
 
 - attestation and AAGUID policy;
@@ -170,6 +181,7 @@ Together they deliver C1–C6.
 
 - `passkey-auth`: C1–C6 as defined in the source, corrected per §2.2.
 - `passkey-rp-resolver`: per-origin relying-party resolution.
+- `passkey-user-handle`: random per-(user, RP) WebAuthn user handle.
 
 ### Modified capabilities
 
@@ -197,11 +209,11 @@ Together they deliver C1–C6.
 - [x] **U4 / Q10 — Enrollment re-auth.** **Any live session** (plus CSRF) in v1. Recent re-auth is deferred to the MFA work.
 - [x] **Q3 — Where the helpers live.** **A dedicated store class**, following the `IdentityStore` precedent (F008).
 - [x] **Q7 — Packaging.** **An optional extra `navigator-auth[passkey]`**, following the existing extras precedent (F013).
+- [x] **Q2 — User handle.** **A random per-user handle**, never `str(user_id)` (§3.9).
+- [x] **Q4 — Counter regression (E7).** **Reject and log only.** The credential stays usable; no disable flag or notification in v1 (§3.10).
 
 ### Still open (for the spec)
 
-- [ ] **Q2.** User handle: `str(user_id)` versus a random per-user handle column.
-- [ ] **Q4.** Counter regression: reject only, or also disable and notify.
 - [ ] **Q5.** Expose `auth_method` to ABAC `EvalContext`.
 - [ ] **Q6.** Does a passkey satisfy future MFA requirements?
 - [ ] **Q9.** Is a username-first mode needed at all?
