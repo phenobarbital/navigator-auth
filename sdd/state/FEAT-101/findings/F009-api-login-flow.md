@@ -1,0 +1,4 @@
+# F009 — AuthHandler login flow
+- citations: auth.py:343 `get_auth_backend` (header X-Auth-Method → self.backends[method], else Unauthorized); auth.py:386 `_backend_auth` maps UserNotFound→401, InvalidAuth/Forbidden/FailedAuth→ForbiddenAccess with err.status, falsy userdata→403; auth.py:470 `api_login` fallback loop catches (AuthException, UserNotFound, InvalidAuth, FailedAuth) and continues; any other exception aborts the whole login with auth_error; auth.py:503 `load_session`; then refresh_token saved to redis and vault loaded.
+- digest: Confirms brainstorm. E11 critical: in the no-header fallback loop a non-Auth exception from PasskeyAuth (e.g. Redis error) aborts login for ALL backends; get_payload must fail fast with InvalidAuth. Also BasicAuth.get_payload on a passkey JSON body returns [None,None] → InvalidAuth, so loop is safe in the other direction.
+- confidence: high

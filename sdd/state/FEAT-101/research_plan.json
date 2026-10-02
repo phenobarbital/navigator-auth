@@ -1,0 +1,16 @@
+{"feature_id":"FEAT-101","mode":"enrichment","wiki_available":false,"budget_profile":"default",
+"queries":[
+{"id":"Q001","type":"read","target":"navigator_auth/backends/idp/__init__.py","intent":"verify IdP API, user_from_id, create_token","priority":1},
+{"id":"Q002","type":"grep","pattern":"is_active","target":"navigator_auth/backends","intent":"E9: is inactive user rejected?","priority":1},
+{"id":"Q003","type":"read","target":"navigator_auth/models.py","intent":"User PK type, sibling models","priority":1},
+{"id":"Q004","type":"read","target":"navigator_auth/auth.py:343-560","intent":"get_auth_backend, _backend_auth, api_login","priority":1},
+{"id":"Q005","type":"grep","pattern":"request.user =|is_authenticated","target":"navigator_auth","intent":"how request.user is populated","priority":2},
+{"id":"Q006","type":"read","target":"navigator_auth/backends/basic.py","intent":"reference authenticate tail","priority":1},
+{"id":"Q007","type":"read","target":"navigator_auth/backends/exchange.py","intent":"open_session reuse precedent","priority":2,"parent_id":"F002"},
+{"id":"Q008","type":"read","target":"navigator_auth/identity/{store,migrations}.py","intent":"storage + migration precedent (Q3)","priority":2},
+{"id":"Q009","type":"grep","pattern":"\\.html","target":"navigator_auth/backends/oauth2/backend.py","intent":"OAuth2 login template","priority":2},
+{"id":"Q010","type":"read","target":"pyproject.toml","intent":"extras precedent (Q7)","priority":3},
+{"id":"Q011","type":"read","target":"navigator_auth/middlewares/csrf.py","intent":"CSRF effect on enrollment POSTs","priority":2},
+{"id":"Q012","type":"grep","pattern":"AUTH_EXCLUDE_LIST_KEY","target":"navigator_auth","intent":"public route registration","priority":2},
+{"id":"Q013","type":"git_log","target":"navigator_auth/backends/basic.py navigator_auth/identity navigator_auth/auth.py","intent":"recent activity","priority":3},
+{"id":"Q014","type":"read","target":"navigator_auth/abac/context.py","intent":"tenant resolution (after U1 answer)","priority":2,"parent_id":"U1"}]}

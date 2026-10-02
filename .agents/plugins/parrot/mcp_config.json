@@ -1,0 +1,44 @@
+{
+  "mcpServers": {
+    "parrot-bounded-source": {
+      "command": "/home/jesuslara/proyectos/navigator-auth/.venv/bin/parrot",
+      "args": [
+        "mcp-local",
+        "bounded-source",
+        "--config",
+        "/home/jesuslara/proyectos/navigator-auth/.parrot/mcp-toolkits.yaml"
+      ],
+      "cwd": "/home/jesuslara/proyectos/navigator-auth"
+    },
+    "parrot-browsing": {
+      "command": "/home/jesuslara/proyectos/navigator-auth/.venv/bin/parrot",
+      "args": [
+        "mcp-local",
+        "browsing",
+        "--config",
+        "/home/jesuslara/proyectos/navigator-auth/.parrot/mcp-toolkits.yaml"
+      ],
+      "cwd": "/home/jesuslara/proyectos/navigator-auth"
+    },
+    "parrot-scraping": {
+      "command": "/home/jesuslara/proyectos/navigator-auth/.venv/bin/parrot",
+      "args": [
+        "mcp-local",
+        "scraping",
+        "--config",
+        "/home/jesuslara/proyectos/navigator-auth/.parrot/mcp-toolkits.yaml"
+      ],
+      "cwd": "/home/jesuslara/proyectos/navigator-auth"
+    },
+    "parrot-sdd-coder": {
+      "command": "/home/jesuslara/proyectos/navigator-auth/.venv/bin/parrot",
+      "args": [
+        "mcp-local",
+        "sdd-coder",
+        "--config",
+        "/home/jesuslara/proyectos/navigator-auth/.parrot/mcp-toolkits.yaml"
+      ],
+      "cwd": "/home/jesuslara/proyectos/navigator-auth"
+    }
+  }
+}

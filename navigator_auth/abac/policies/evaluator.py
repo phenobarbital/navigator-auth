@@ -12,7 +12,6 @@ from typing import Optional, List, Dict, Set, Tuple, Any
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections import defaultdict
-import hashlib
 import time
 import json
 import yaml
@@ -33,6 +32,10 @@ from navigator_auth.abac.policies.resources import ResourceType
 from navigator_auth.abac.policies.resource_policy import ResourcePolicy
 
 logger = logging.getLogger(__name__)
+
+# (user_id, groups, resource_type, resource_name, action, env, org_id,
+#  client_id, scopes, client_uid) — see PolicyEvaluator._make_cache_key.
+CacheKey = Tuple[str, frozenset, str, str, str, str, int, int, frozenset, str]
 
 
 def _coerce_default_effect(value: Any) -> str:
@@ -226,7 +229,7 @@ class PolicyEvaluator:
         self._default_effect = _coerce_default_effect(ABAC_DEFAULT_EFFECT)
         self._cache_size = cache_size
         self._cache_ttl = cache_ttl_seconds
-        self._cache: Dict[str, Tuple[EvaluationResult, float]] = {}
+        self._cache: Dict[CacheKey, Tuple[EvaluationResult, float]] = {}
         self._policies_json: str = "[]"
         self._stats = {
             'evaluations': 0,
@@ -336,7 +339,7 @@ class PolicyEvaluator:
         client_id: int = 1,
         scope_key: "frozenset[str]" = frozenset(),
         client_uid: str = None,
-    ) -> str:
+    ) -> CacheKey:
         """Generate cache key for evaluation.
 
         Tenant (org_id/client_id) is part of the key — two tenants must never
@@ -347,21 +350,25 @@ class PolicyEvaluator:
         tenant ``org_id``/``client_id`` integers.  Same user with different token scopes
         must produce distinct cache keys (regression: §11.4).
         """
-        groups_str = ','.join(sorted(user_groups))
         rtype_val = resource_type.value if hasattr(resource_type, 'value') else resource_type
         env_str = json.dumps(env_dict, sort_keys=True) if env_dict else ""
-        scopes_str = ','.join(sorted(scope_key)) if scope_key else ""
-        uid_str = client_uid or ""
-        key_data = (
-            f"{user_id}|{groups_str}|{rtype_val}|{resource_name}|{action}"
-            f"|{env_str}|{org_id}|{client_id}|{scopes_str}|{uid_str}"
+        # A structured tuple, not a digest: dict lookups compare it exactly, so
+        # two different requests can never collide (no hash collisions and no
+        # delimiter ambiguity), and no identity data is fed through a hash.
+        return (
+            str(user_id),
+            frozenset(user_groups or ()),
+            str(rtype_val),
+            resource_name,
+            action,
+            env_str,
+            org_id,
+            client_id,
+            frozenset(scope_key or ()),
+            client_uid or "",
         )
-        # SHA-256, not MD5: a collision between two different ``key_data``
-        # strings would hand one tenant/user a decision cached for another,
-        # so this key is security-relevant and needs collision resistance.
-        return hashlib.sha256(key_data.encode()).hexdigest()
 
-    def _check_cache(self, cache_key: str) -> Optional[EvaluationResult]:
+    def _check_cache(self, cache_key: CacheKey) -> Optional[EvaluationResult]:
         """Check cache for previous evaluation result."""
         if cache_key in self._cache:
             result, timestamp = self._cache[cache_key]
@@ -375,7 +382,7 @@ class PolicyEvaluator:
         self._stats['cache_misses'] += 1
         return None
 
-    def _update_cache(self, cache_key: str, result: EvaluationResult) -> None:
+    def _update_cache(self, cache_key: CacheKey, result: EvaluationResult) -> None:
         """Update cache with evaluation result."""
         # Simple LRU: remove oldest if at capacity
         if len(self._cache) >= self._cache_size:
@@ -389,16 +396,14 @@ class PolicyEvaluator:
     def invalidate_cache(self, user_id: str = None) -> None:
         """Invalidate cache entries, optionally for specific user.
 
-        Note: user-specific invalidation rebuilds the cache key for each
-        entry to check the user_id component, since keys are opaque digests.
-        For full invalidation, simply clears the entire cache.
+        Note: user-specific invalidation drops every entry whose key's
+        user_id component matches; full invalidation clears the whole cache.
         """
         if user_id:
-            # Cache keys are opaque digests, so we cannot filter by prefix.
-            # For user-specific invalidation, clear the entire cache to be safe.
-            # A more efficient approach would require a secondary index.
-            self._cache.clear()
-            logger.debug("Cache cleared for user %s (full invalidation)", user_id)
+            uid = str(user_id)
+            for key in [k for k in self._cache if k[0] == uid]:
+                del self._cache[key]
+            logger.debug("Cache invalidated for user %s", user_id)
         else:
             self._cache.clear()
 

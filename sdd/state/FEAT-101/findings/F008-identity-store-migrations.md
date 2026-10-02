@@ -1,0 +1,4 @@
+# F008 — Separate store + idempotent SQL migration precedent
+- citations: navigator_auth/identity/store.py `class IdentityStore` ("CRUD for ciphered identity credentials on auth.user_identities", ctor `(db_pool, cipher=None)`); idp/__init__.py:84 `get_user_identity_credential` builds `IdentityStore(self.app["authdb"], ...)`; navigator_auth/identity/migrations.py `_MIGRATION_FILES`, `ensure_identity_columns(db_pool)`, `setup_identity_columns` (non-raising); auth.py:38 import and auth.py:188 `await setup_identity_columns(app["authdb"])`; identity/sql/001..003 *.sql; backends/oauth2/ddl.sql.
+- digest: Answers brainstorm Q3 with codebase precedent: a dedicated `CredentialStore`-style class (like IdentityStore) with startup-run idempotent SQL files, rather than growing IdentityProvider. Also defines the migration mechanism the brainstorm left as "DDL / migrations".
+- confidence: high

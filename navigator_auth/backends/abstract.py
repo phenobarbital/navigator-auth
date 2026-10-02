@@ -1,5 +1,5 @@
 from typing import Union, Optional, Set
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from abc import ABC, abstractmethod
 import asyncio
 import fnmatch
@@ -37,6 +37,27 @@ from ..libs.redirect import safe_redirect_url, is_safe_redirect
 # Authenticated Identity
 from ..identities import Identity, AuthBackend
 from .idp import IdentityProvider
+
+
+def user_is_active(user) -> bool:
+    """Return whether a user record may log in.
+
+    ``False`` only when the record explicitly carries a false ``is_active``;
+    a missing field (custom ``AUTH_USER_VIEW``) or ``None`` counts as active.
+
+    Args:
+        user: User record — a mapping or a model/object.
+
+    Returns:
+        bool: ``True`` unless ``is_active`` is present and false.
+    """
+    if isinstance(user, Mapping):
+        value = user.get("is_active", None)
+    else:
+        value = getattr(user, "is_active", None)
+    if value is None:
+        return True
+    return bool(value)
 
 
 class BaseAuthBackend(ABC):
@@ -441,9 +462,7 @@ class BaseAuthBackend(ABC):
             return None
         if is_safe_redirect(uri, request=request, extra_hosts=extra_hosts):
             return uri
-        self.logger.warning(
-            f"{self._service}: rejected redirect to untrusted target: {uri!r}"
-        )
+        self.logger.warning(f"{self._service}: rejected redirect to untrusted target: {uri!r}")
         return None
 
     def prepare_url(self, url: str, params: dict = None):

@@ -1,0 +1,20 @@
+{
+  "feature_id": "FEAT-101",
+  "phase": "committed",
+  "started_at": "2026-10-02T00:00:00Z",
+  "updated_at": "2026-10-02T00:00:00Z",
+  "mode": "enrichment",
+  "wiki_available": false,
+  "source": {"kind": "file", "path": "sdd/proposals/Passkey (WebAuthn) Authentication Backend.md", "jira_key": null},
+  "budget": {"profile": "default", "files_read": 40, "grep_calls": 25, "git_calls": 10, "depth": 2, "wall_seconds": 300},
+  "consumed": {"files_read": 20, "grep_calls": 14, "git_calls": 1, "depth_reached": 2},
+  "truncated": false,
+  "phases": {
+    "plan": {"approved_by_user": false, "note": "auto mode; plan executed directly"},
+    "research": {"status": "complete", "findings": 15},
+    "synthesis": {"status": "complete", "overall_confidence": "medium", "lint": "pass"},
+    "qa": {"status": "complete", "questions_total": 4, "questions_answered": 4},
+    "output": {"proposal_path": "sdd/proposals/passkey-support-backend.proposal.md", "commit_sha": "6589cc3"}
+  },
+  "resume_hint": {"next_phase": "committed", "next_action": "/sdd-spec FEAT-101"}
+}
