@@ -35,8 +35,8 @@ def test_parse_proxies_does_not_log_rejected_entry_verbatim(caplog):
     """A rejected entry is never echoed in full (GHAS py/clear-text-logging).
 
     Trusted proxies come from configuration, so a mis-pasted credential must
-    not survive into the logs — but the operator still needs to find the bad
-    entry, so its position and length are reported.
+    not survive into the logs, not even partially — only its position is
+    reported so the operator can still find the bad entry.
     """
     secret = "super-secret-api-key-abcdef123456"
     with caplog.at_level(logging.WARNING):
@@ -45,8 +45,8 @@ def test_parse_proxies_does_not_log_rejected_entry_verbatim(caplog):
     assert proxies == {ipaddress.ip_address("127.0.0.1")}
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert secret not in logged, "rejected config entry leaked into the logs"
+    assert secret[:4] not in logged, "rejected config entry partially leaked"
     assert "position 2" in logged
-    assert f"({len(secret)} chars)" in logged
 
 
 def test_get_client_ip_uses_xff_behind_trusted_proxy():
