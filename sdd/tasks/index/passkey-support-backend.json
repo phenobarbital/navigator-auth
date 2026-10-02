@@ -72,7 +72,7 @@
       "feature_id": "FEAT-101",
       "feature": "passkey-support-backend",
       "spec": "sdd/specs/passkey-support-backend.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [
@@ -82,8 +82,8 @@
       "parallelism_notes": "Touches only passkey/rp.py (+ one export line); disjoint from TASK-88.",
       "assigned_to": null,
       "started_at": "2026-10-02T21:29:16+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-89-passkey-rp-resolver.md"
+      "completed_at": "2026-10-02T21:31:39+00:00",
+      "file": "sdd/tasks/completed/TASK-89-passkey-rp-resolver.md"
     },
     {
       "id": "TASK-90",

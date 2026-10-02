@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-101 — Passkey (WebAuthn) Authentication Backend
 **Spec**: `sdd/specs/passkey-support-backend.spec.md` (Module 3, §2.1, §7 R6/R7, AC4)
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-87
@@ -212,7 +212,7 @@ See the blueprint above (spec §4: `test_rp_resolver_exact_origin`, `test_rp_res
 
 ## Completion Note
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sdd-worker (Sonnet 5.5, sequential fallback)
+**Date**: 2026-10-02
+**Notes**: Exact-origin resolver with Referer fallback; 4 tests pass.
 **Deviations from spec**: none
