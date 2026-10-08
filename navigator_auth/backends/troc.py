@@ -19,6 +19,8 @@ from ..exceptions import (
     UserNotFound,
 )
 from ..conf import (
+    AUTH_MECHANISM_KEY,
+    AUTH_MECHANISM_PARTNER,
     PARTNER_KEY,
     CYPHER_TYPE,
     AUTH_SUCCESSFUL_CALLBACKS,
@@ -219,7 +221,7 @@ class TrocToken(BaseAuthBackend):
                     usr = await self.create_user(userdata[AUTH_SESSION_OBJECT])
                     usr.id = username
                     usr.set(self.username_attribute, username)
-                    self._set_user_request(request, usr)
+                    self._set_user_request(request, usr, mechanism=AUTH_MECHANISM_PARTNER)
                     return await handler(self.sanitize(request))
             except InvalidAuth:
                 _, payload = self._idp.decode_token(code=token)
@@ -239,6 +241,7 @@ class TrocToken(BaseAuthBackend):
             try:
                 request.user = await self.get_session_user(session)
                 request["authenticated"] = True
+                request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_PARTNER
             except UnboundLocalError:
                 pass
             except Exception as ex:  # pylint: disable=W0703

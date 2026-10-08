@@ -23,6 +23,8 @@ from ..exceptions import (
 )
 from ..identities import AuthUser, Column
 from ..conf import (
+    AUTH_MECHANISM_KEY,
+    AUTH_MECHANISM_DJANGO,
     DJANGO_USER_MAPPING,
     DJANGO_SESSION_URL,
     DJANGO_SESSION_PREFIX
@@ -235,6 +237,7 @@ class DjangoAuth(BaseAuthBackend):
                 try:
                     request.user = await self.get_session_user(session)
                     request["authenticated"] = True
+                    request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_DJANGO
                 except Exception as ex:  # pylint: disable=W0703
                     self.logger.error(f"Missing User Object from Session: {ex}")
             else:

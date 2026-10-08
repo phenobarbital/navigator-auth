@@ -1,13 +1,18 @@
 """CSRF protection middleware — signed double-submit cookie.
 
 Scope: only requests whose *sole* credential is the ambient session cookie
-are checked. A request carrying an ``Authorization`` header (Bearer token,
-API key, ...) cannot be forged cross-site — an attacker's page has no way
-to set that header with a valid credential it doesn't possess — so it is
-exempt. This mirrors how ``_auth_middleware`` (navigator_auth/auth.py)
-itself distinguishes the two paths: the bearer path always requires
-``Authorization``; the cookie-only fallback (``elif self.secure_cookies``)
-never does.
+are checked. Every auth middleware records the credential that actually
+authenticated the request under ``request[AUTH_MECHANISM_KEY]`` (see
+``AUTH_MECHANISM_*`` in conf.py); only ``AUTH_MECHANISM_COOKIE`` - the
+``elif self.secure_cookies`` fallback of ``_auth_middleware``
+(navigator_auth/auth.py) - is checked. A bearer token, API key
+(``X-API-KEY`` / ``?apikey=``) or partner token (``?auth=``) cannot be
+forged cross-site: an attacker's page has no way to supply a valid
+credential it doesn't possess, and a custom header never travels without
+a CORS preflight. Keying the exemption on the *validated* mechanism rather
+than on the mere presence of ``?apikey=`` means a cookie session cannot opt
+out by appending a junk key. A backend that records no mechanism falls
+back to the ``Authorization``-header heuristic, which fails closed.
 
 Must run *after* ``AuthHandler.auth_middleware`` in the middleware chain,
 so ``request['authenticated']`` and the session id are already resolved
@@ -25,6 +30,8 @@ from ..conf import (
     CSRF_COOKIE_MAX_AGE,
     SECRET_KEY,
     PREFERRED_AUTH_SCHEME,
+    AUTH_MECHANISM_KEY,
+    AUTH_MECHANISM_COOKIE,
 )
 from ..libs.csrf import generate_csrf_token, verify_csrf_token
 
@@ -32,8 +39,17 @@ UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 def _is_cookie_only_session(request: web.Request) -> bool:
-    """True when the request was authenticated purely by the session cookie."""
-    return bool(request.get("authenticated")) and hdrs.AUTHORIZATION not in request.headers
+    """True when the request was authenticated purely by the session cookie.
+
+    Decided by the mechanism the auth middleware recorded; only when a backend
+    recorded none does the absence of an ``Authorization`` header stand in.
+    """
+    if not request.get("authenticated"):
+        return False
+    mechanism = request.get(AUTH_MECHANISM_KEY)
+    if mechanism is not None:
+        return mechanism == AUTH_MECHANISM_COOKIE
+    return hdrs.AUTHORIZATION not in request.headers
 
 
 def _valid_csrf_request(request: web.Request, session_id: Optional[str]) -> bool:

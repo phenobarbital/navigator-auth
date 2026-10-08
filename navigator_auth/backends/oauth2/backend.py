@@ -45,6 +45,7 @@ import redis.asyncio as aioredis
 
 from ...identities import AuthUser
 from ...conf import (
+    AUTH_MECHANISM_BEARER,
     AUTH_LOGIN_FAILED_URI,
     AUTH_LOGOUT_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
@@ -2876,7 +2877,7 @@ class Oauth2Provider(BaseAuthBackend):
             raise InvalidAuth("Oauth2: cannot resolve the user of this access token.", status=401)
         request["userdata"] = payload
         request["authenticated"] = True
-        self._set_user_request(request, user)
+        self._set_user_request(request, user, mechanism=AUTH_MECHANISM_BEARER)
         return payload
 
     async def check_credentials(self, request):

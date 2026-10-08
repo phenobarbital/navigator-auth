@@ -38,6 +38,9 @@ from .vault.integration import (
 from .identity.migrations import setup_identity_columns
 from .backends.idp import IdentityProvider
 from .conf import (
+    AUTH_MECHANISM_KEY,
+    AUTH_MECHANISM_BEARER,
+    AUTH_MECHANISM_COOKIE,
     AUTH_EXCLUDE_LIST_KEY,
     AUTHORIZED_KEY,
     AUTHZ_BACKEND_KEY,
@@ -1082,6 +1085,7 @@ class AuthHandler:
                             if user:
                                 request.user = user
                                 request["authenticated"] = True
+                                request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
                 except Exception:
                     pass  # Best-effort: if token is invalid, proceed unauthenticated
             return await handler(request)
@@ -1149,6 +1153,7 @@ class AuthHandler:
                         request.user = user
                         request["userdata"] = payload
                         request["authenticated"] = True
+                        request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
 
                     except web.HTTPException:
                         raise
@@ -1186,6 +1191,7 @@ class AuthHandler:
                         request.user = user
                         request["userdata"] = payload
                         request["authenticated"] = True
+                        request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
                     except web.HTTPException:
                         raise
                     except Exception as ex:  # pylint: disable=W0703
@@ -1208,6 +1214,7 @@ class AuthHandler:
                     if user:
                         request.user = user
                         request["authenticated"] = True
+                        request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_COOKIE
                     else:
                         raise self.Unauthorized(
                             reason="There is no Session or Authentication is missing",
