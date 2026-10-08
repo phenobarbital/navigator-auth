@@ -471,9 +471,7 @@ class BaseAuthBackend(ABC):
         req.prepare_url(url, params)
         return req.url
 
-    def _set_user_request(
-        self, request: web.Request, user: Identity, mechanism: Optional[str] = None
-    ):
+    def _set_user_request(self, request: web.Request, user: Identity, mechanism: Optional[str] = None):
         """Mark ``request`` as authenticated as ``user``.
 
         ``mechanism`` (an ``AUTH_MECHANISM_*`` value) records which credential
