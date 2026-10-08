@@ -1323,7 +1323,8 @@ class Oauth2Provider(BaseAuthBackend):
                 # Cannot prove the client is unused ⇒ never delete it.
                 return True
             try:
-                return bool(await lister(client_uid))
+                # pylint infers the getattr() default and reports not-callable.
+                return bool(await lister(client_uid))  # pylint: disable=not-callable
             except Exception:
                 return True
 
