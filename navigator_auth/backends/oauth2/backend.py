@@ -1319,7 +1319,7 @@ class Oauth2Provider(BaseAuthBackend):
         async def _is_used(client_uid: str) -> bool:
             storage = self.access_token_storage
             lister = getattr(storage, "list_by_client", None)
-            if lister is None:
+            if not callable(lister):
                 # Cannot prove the client is unused ⇒ never delete it.
                 return True
             try:
