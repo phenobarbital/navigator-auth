@@ -1,5 +1,25 @@
 # Unreleased
 
+- **CSRF: `str` `SECRET_KEY` crash and API-key / partner-token scoping
+  (0.28.5).**
+  - With `AUTH_SECRET_KEY` set (a `str`; `SECRET_KEY` is `bytes` only for
+    the generated fallback) every authenticated request without an
+    `Authorization` header — `?apikey=` / `X-API-KEY`, partner tokens,
+    cookie sessions — answered 500 once `csrf_middleware` issued the CSRF
+    cookie (`hmac.new` requires bytes). `generate_csrf_token` /
+    `verify_csrf_token` now accept `bytes | str`; tokens are identical for
+    the equivalent bytes key and `conf.SECRET_KEY` is unchanged.
+  - The CSRF check is now scoped by the credential that actually
+    authenticated the request instead of by the absence of an
+    `Authorization` header. Every auth middleware records it under
+    `request[AUTH_MECHANISM_KEY]` (`"auth_mechanism"`: `cookie`, `bearer`,
+    `apikey`, `partner`, `token`, `django`) and only `cookie` is checked.
+    Unsafe requests (`POST`/`PUT`/`PATCH`/`DELETE`) authenticated by API
+    key or partner token were answered 403 since 0.28.2 and no longer are,
+    and such responses no longer carry a `csrf_token` cookie. A cookie
+    session cannot opt out by appending a junk `?apikey=`: the mechanism is
+    recorded only when the credential validates. Third-party backends that
+    record no mechanism keep the previous header heuristic.
 - **Passkey (WebAuthn) authentication backend (FEAT-101).** New
   `navigator_auth.backends.PasskeyAuth` (optional extra
   `navigator-auth[passkey]`, Redis >= 6.2): per-tenant relying parties

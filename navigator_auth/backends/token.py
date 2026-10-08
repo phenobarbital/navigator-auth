@@ -11,6 +11,8 @@ from aiohttp import web
 from navigator_session import get_session
 from ..exceptions import AuthException, InvalidAuth
 from ..conf import (
+    AUTH_MECHANISM_KEY,
+    AUTH_MECHANISM_TOKEN,
     AUTH_JWT_ALGORITHM,
     AUTH_TOKEN_ISSUER,
     AUTH_TOKEN_SECRET,
@@ -182,6 +184,7 @@ class TokenAuth(BaseAuthBackend):
                 result = await self.check_token_info(request, tenant, payload)
                 if result:
                     request["authenticated"] = True
+                    request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_TOKEN
                     try:
                         request[self.session_key_property] = payload["name"]
                         # TRUE because if data doesnt exists, returned

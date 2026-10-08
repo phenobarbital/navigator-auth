@@ -12,17 +12,23 @@ import base64
 import hashlib
 import hmac
 import secrets
+from typing import Union
 
 __all__ = ("generate_csrf_token", "verify_csrf_token")
 
 
-def _sign(secret: bytes, session_id: str, nonce: str) -> str:
+def _key(secret: Union[bytes, str]) -> bytes:
+    """``hmac`` needs bytes; ``SECRET_KEY`` is a ``str`` when ``AUTH_SECRET_KEY`` is set."""
+    return secret.encode("utf-8") if isinstance(secret, str) else secret
+
+
+def _sign(secret: Union[bytes, str], session_id: str, nonce: str) -> str:
     msg = f"{session_id}.{nonce}".encode("utf-8")
-    digest = hmac.new(secret, msg, hashlib.sha256).digest()
+    digest = hmac.new(_key(secret), msg, hashlib.sha256).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
-def generate_csrf_token(secret: bytes, session_id: str) -> str:
+def generate_csrf_token(secret: Union[bytes, str], session_id: str) -> str:
     """Generate a signed CSRF token bound to ``session_id``.
 
     Format: ``"<nonce>.<signature>"`` (both base64url, no padding).
@@ -32,7 +38,7 @@ def generate_csrf_token(secret: bytes, session_id: str) -> str:
     return f"{nonce}.{signature}"
 
 
-def verify_csrf_token(secret: bytes, session_id: str, token: str) -> bool:
+def verify_csrf_token(secret: Union[bytes, str], session_id: str, token: str) -> bool:
     """Verify a token produced by :func:`generate_csrf_token` for the same session_id."""
     if not token or not session_id:
         return False

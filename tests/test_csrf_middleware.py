@@ -9,6 +9,18 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
+from types import SimpleNamespace
+
+from navigator_auth.backends.abstract import BaseAuthBackend
+from navigator_auth.conf import (
+    AUTH_MECHANISM_KEY,
+    AUTH_MECHANISM_COOKIE,
+    AUTH_MECHANISM_BEARER,
+    AUTH_MECHANISM_APIKEY,
+    AUTH_MECHANISM_PARTNER,
+    AUTH_MECHANISM_TOKEN,
+    AUTH_MECHANISM_DJANGO,
+)
 from navigator_auth.libs.csrf import generate_csrf_token, verify_csrf_token
 from navigator_auth.middlewares import csrf as csrf_module
 from navigator_auth.middlewares.csrf import (
@@ -46,6 +58,16 @@ def test_verify_rejects_malformed_token():
     assert verify_csrf_token(SECRET, SESSION_ID, "not-a-valid-token") is False
     assert verify_csrf_token(SECRET, SESSION_ID, "") is False
     assert verify_csrf_token(SECRET, "", "whatever.sig") is False
+
+
+def test_str_secret_is_accepted_and_matches_bytes_secret():
+    """``AUTH_SECRET_KEY`` from the environment is a ``str`` (bytes only for the
+    generated fallback): signing must not raise TypeError, and the token must
+    verify with the equivalent bytes key."""
+    str_secret = SECRET.decode("utf-8")
+    token = generate_csrf_token(str_secret, SESSION_ID)
+    assert verify_csrf_token(str_secret, SESSION_ID, token) is True
+    assert verify_csrf_token(SECRET, SESSION_ID, token) is True
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +201,23 @@ async def test_middleware_issues_cookie_when_missing_on_authenticated_response()
 
 
 @pytest.mark.asyncio
+async def test_middleware_issues_cookie_with_str_secret_key(monkeypatch):
+    """Regression: with ``AUTH_SECRET_KEY`` set, every authenticated request
+    without an Authorization header (API key via ``?apikey=`` / ``X-API-KEY``,
+    cookie sessions) answered 500 ``key: expected bytes or bytearray``."""
+    monkeypatch.setattr(csrf_module, "SECRET_KEY", SECRET.decode("utf-8"))
+    request = make_mocked_request("GET", "/?apikey=whatever")
+    request["authenticated"] = True
+    request[csrf_module.SESSION_ID] = SESSION_ID
+
+    response = await csrf_middleware(request, _ok_handler)
+    assert response.status == 200
+    set_cookie = response.cookies.get(csrf_module.CSRF_COOKIE_NAME)
+    assert set_cookie is not None
+    assert verify_csrf_token(SECRET, SESSION_ID, set_cookie.value) is True
+
+
+@pytest.mark.asyncio
 async def test_middleware_does_not_reissue_a_still_valid_cookie():
     token = generate_csrf_token(SECRET, SESSION_ID)
     request = make_mocked_request(
@@ -200,3 +239,100 @@ async def test_middleware_noop_when_disabled(monkeypatch):
 
     response = await csrf_middleware(request, _ok_handler)
     assert response.status == 200
+
+
+# ---------------------------------------------------------------------------
+# Scope by authentication mechanism: API key / partner token are not CSRF
+# ---------------------------------------------------------------------------
+
+def _authenticated(method, path, mechanism=None, **kwargs):
+    request = make_mocked_request(method, path, **kwargs)
+    request["authenticated"] = True
+    request[csrf_module.SESSION_ID] = SESSION_ID
+    if mechanism is not None:
+        request[AUTH_MECHANISM_KEY] = mechanism
+    return request
+
+
+@pytest.mark.parametrize(
+    "mechanism",
+    [
+        AUTH_MECHANISM_APIKEY,
+        AUTH_MECHANISM_PARTNER,
+        AUTH_MECHANISM_TOKEN,
+        AUTH_MECHANISM_DJANGO,
+        AUTH_MECHANISM_BEARER,
+    ],
+)
+def test_cookie_only_session_false_for_non_cookie_mechanisms(mechanism):
+    # No Authorization header: the header heuristic alone would call this
+    # cookie-only. The recorded mechanism must win.
+    request = _authenticated("POST", "/?apikey=whatever", mechanism)
+    assert _is_cookie_only_session(request) is False
+
+
+def test_cookie_only_session_true_for_cookie_mechanism():
+    request = _authenticated("POST", "/", AUTH_MECHANISM_COOKIE)
+    assert _is_cookie_only_session(request) is True
+
+
+def test_cookie_only_session_falls_back_to_header_heuristic_when_unmarked():
+    # A backend that records no mechanism keeps the pre-0.28.5 behaviour.
+    assert _is_cookie_only_session(_authenticated("POST", "/")) is True
+    with_bearer = _authenticated("POST", "/", headers={"Authorization": "Bearer x"})
+    assert _is_cookie_only_session(with_bearer) is False
+
+
+@pytest.mark.asyncio
+async def test_middleware_exempts_api_key_unsafe_requests():
+    """Regression: since 0.28.2 a POST authenticated by ``?apikey=`` or
+    ``X-API-KEY`` (no Authorization header, no CSRF cookie/header) was 403."""
+    for request in (
+        _authenticated("POST", "/?apikey=whatever", AUTH_MECHANISM_APIKEY),
+        _authenticated("POST", "/", AUTH_MECHANISM_APIKEY, headers={"X-API-KEY": "whatever"}),
+    ):
+        response = await csrf_middleware(request, _ok_handler)
+        assert response.status == 200
+        # and no pointless CSRF cookie on an API-key response
+        assert csrf_module.CSRF_COOKIE_NAME not in response.cookies
+
+
+@pytest.mark.asyncio
+async def test_middleware_exempts_partner_token_unsafe_request():
+    # Partner-token auth leaves no session id on the request at all.
+    request = make_mocked_request("POST", "/?auth=partner-token")
+    request["authenticated"] = True
+    request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_PARTNER
+
+    response = await csrf_middleware(request, _ok_handler)
+    assert response.status == 200
+
+
+@pytest.mark.asyncio
+async def test_middleware_still_rejects_cookie_session_with_junk_apikey_param():
+    # The exemption keys on the validated mechanism, not on the query string.
+    request = _authenticated("POST", "/?apikey=junk", AUTH_MECHANISM_COOKIE)
+    with pytest.raises(web.HTTPForbidden):
+        await csrf_middleware(request, _ok_handler)
+
+
+def test_set_user_request_records_mechanism():
+    class _Backend:
+        user_property = "user"
+
+    request = make_mocked_request("GET", "/")
+    user = SimpleNamespace()
+    BaseAuthBackend._set_user_request(_Backend(), request, user, mechanism=AUTH_MECHANISM_PARTNER)
+    assert request["authenticated"] is True
+    assert request[AUTH_MECHANISM_KEY] == AUTH_MECHANISM_PARTNER
+    assert user.is_authenticated is True
+
+
+def test_set_user_request_without_mechanism_records_nothing():
+    class _Backend:
+        user_property = "user"
+
+    request = make_mocked_request("GET", "/")
+    BaseAuthBackend._set_user_request(_Backend(), request, SimpleNamespace())
+    assert request["authenticated"] is True
+    assert AUTH_MECHANISM_KEY not in request

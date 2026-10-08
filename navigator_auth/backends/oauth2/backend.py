@@ -45,6 +45,7 @@ import redis.asyncio as aioredis
 
 from ...identities import AuthUser
 from ...conf import (
+    AUTH_MECHANISM_BEARER,
     AUTH_LOGIN_FAILED_URI,
     AUTH_LOGOUT_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
@@ -1318,11 +1319,12 @@ class Oauth2Provider(BaseAuthBackend):
         async def _is_used(client_uid: str) -> bool:
             storage = self.access_token_storage
             lister = getattr(storage, "list_by_client", None)
-            if lister is None:
+            if not callable(lister):
                 # Cannot prove the client is unused ⇒ never delete it.
                 return True
             try:
-                return bool(await lister(client_uid))
+                # pylint infers the getattr() default and reports not-callable.
+                return bool(await lister(client_uid))  # pylint: disable=not-callable
             except Exception:
                 return True
 
@@ -2876,7 +2878,7 @@ class Oauth2Provider(BaseAuthBackend):
             raise InvalidAuth("Oauth2: cannot resolve the user of this access token.", status=401)
         request["userdata"] = payload
         request["authenticated"] = True
-        self._set_user_request(request, user)
+        self._set_user_request(request, user, mechanism=AUTH_MECHANISM_BEARER)
         return payload
 
     async def check_credentials(self, request):

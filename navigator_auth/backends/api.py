@@ -12,6 +12,8 @@ from navigator_session import get_session
 from ..libs.cipher import Cipher
 from ..exceptions import AuthException, InvalidAuth, FailedAuth, AuthExpired, UserNotFound
 from ..conf import (
+    AUTH_MECHANISM_KEY,
+    AUTH_MECHANISM_APIKEY,
     AUTH_USERID_ATTRIBUTE,
     AUTH_TOKEN_SECRET,
     AUTH_SESSION_OBJECT,
@@ -264,6 +266,7 @@ class APIKeyAuth(BaseAuthBackend):
                     session = await get_session(request, userdata, new=True, ignore_cookie=True)
                     request.user = await self.get_session_user(session)
                     request["authenticated"] = True
+                    request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_APIKEY
                 except Exception as ex:  # pylint: disable=W0703
                     self.logger.error(f"Missing User Object from Session: {ex}")
         except web.HTTPError:
