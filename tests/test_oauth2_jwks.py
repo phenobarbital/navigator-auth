@@ -172,6 +172,17 @@ class TestRegistryLoading:
         )
         assert len(registry) == 0
 
+    def test_unreadable_key_file_does_not_log_path(self, rsa_pair, caplog):
+        """Inline PEM misplaced in ``*_file`` must not reach the log."""
+        private_pem, _ = rsa_pair
+        with caplog.at_level("ERROR", logger="navigator.auth.keys"):
+            registry = load_registry(
+                [{"kid": "misplaced", "private_key_file": private_pem}]
+            )
+        assert len(registry) == 0
+        assert "misplaced" in caplog.text
+        assert "PRIVATE KEY" not in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # JWK Set
