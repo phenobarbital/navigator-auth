@@ -144,10 +144,10 @@ def _read_material(entry: dict, inline_field: str, file_field: str) -> Optional[
     try:
         return Path(path).read_text(encoding="utf-8")
     except OSError as err:
-        # Log only the errno text: str(err) embeds the configured path, which
-        # is the PEM itself when inline material lands in a *_file field.
+        # Log only non-sensitive diagnostics. Do not include values from
+        # OAUTH_JWT_KEYS (for example kid/path/inline material).
         reason = err.strerror or type(err).__name__
-        logger.error(f"Cannot read key file for '{entry.get('kid')}': {reason}")
+        logger.error(f"Cannot read key file configured via '{file_field}': {reason}")
         return None
 
 
