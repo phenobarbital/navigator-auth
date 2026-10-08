@@ -48,6 +48,16 @@ def test_verify_rejects_malformed_token():
     assert verify_csrf_token(SECRET, "", "whatever.sig") is False
 
 
+def test_str_secret_is_accepted_and_matches_bytes_secret():
+    """``AUTH_SECRET_KEY`` from the environment is a ``str`` (bytes only for the
+    generated fallback): signing must not raise TypeError, and the token must
+    verify with the equivalent bytes key."""
+    str_secret = SECRET.decode("utf-8")
+    token = generate_csrf_token(str_secret, SESSION_ID)
+    assert verify_csrf_token(str_secret, SESSION_ID, token) is True
+    assert verify_csrf_token(SECRET, SESSION_ID, token) is True
+
+
 # ---------------------------------------------------------------------------
 # Cookie-only-session detection
 # ---------------------------------------------------------------------------
@@ -173,6 +183,23 @@ async def test_middleware_issues_cookie_when_missing_on_authenticated_response()
     request[csrf_module.SESSION_ID] = SESSION_ID
 
     response = await csrf_middleware(request, _ok_handler)
+    set_cookie = response.cookies.get(csrf_module.CSRF_COOKIE_NAME)
+    assert set_cookie is not None
+    assert verify_csrf_token(SECRET, SESSION_ID, set_cookie.value) is True
+
+
+@pytest.mark.asyncio
+async def test_middleware_issues_cookie_with_str_secret_key(monkeypatch):
+    """Regression: with ``AUTH_SECRET_KEY`` set, every authenticated request
+    without an Authorization header (API key via ``?apikey=`` / ``X-API-KEY``,
+    cookie sessions) answered 500 ``key: expected bytes or bytearray``."""
+    monkeypatch.setattr(csrf_module, "SECRET_KEY", SECRET.decode("utf-8"))
+    request = make_mocked_request("GET", "/?apikey=whatever")
+    request["authenticated"] = True
+    request[csrf_module.SESSION_ID] = SESSION_ID
+
+    response = await csrf_middleware(request, _ok_handler)
+    assert response.status == 200
     set_cookie = response.cookies.get(csrf_module.CSRF_COOKIE_NAME)
     assert set_cookie is not None
     assert verify_csrf_token(SECRET, SESSION_ID, set_cookie.value) is True
