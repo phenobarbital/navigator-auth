@@ -14,14 +14,14 @@
       "feature_id": "FEAT-102",
       "feature": "fix-organizations-orgid",
       "spec": "sdd/specs/fix-organizations-orgid.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
       "parallel": false,
       "parallelism_notes": "First task; defines _coerce_organization / normalize_memberships that TASK-100 and TASK-101 build on.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-12T23:08:24+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-99-organizations-normalization.md"
     },
@@ -32,14 +32,16 @@
       "feature_id": "FEAT-102",
       "feature": "fix-organizations-orgid",
       "spec": "sdd/specs/fix-organizations-orgid.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "M",
-      "depends_on": ["TASK-99"],
+      "depends_on": [
+        "TASK-99"
+      ],
       "parallel": false,
       "parallelism_notes": "Calls normalize_memberships() from TASK-99. Shares no files with TASK-101, but both extend TASK-99's code, so they run sequentially in the single feature worktree.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-12T23:08:24+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-100-session-rehydration-hooks.md"
     },
@@ -50,14 +52,16 @@
       "feature_id": "FEAT-102",
       "feature": "fix-organizations-orgid",
       "spec": "sdd/specs/fix-organizations-orgid.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "medium",
       "effort": "M",
-      "depends_on": ["TASK-99"],
+      "depends_on": [
+        "TASK-99"
+      ],
       "parallel": false,
       "parallelism_notes": "Extends identities.py written by TASK-99 (normalize_memberships body). Independent of TASK-100's files but relies on TASK-100's hooks calling normalize_memberships for legacy groups/programs.",
       "assigned_to": null,
-      "started_at": null,
+      "started_at": "2026-10-12T23:08:24+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-101-groups-programs-normalization.md"
     }
