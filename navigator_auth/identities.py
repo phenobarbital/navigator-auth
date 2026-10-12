@@ -79,17 +79,9 @@ def _coerce_organization(org: Any) -> Organization:
         except (ValueError, TypeError, ValidationError) as err:
             raise ValueError(f"Invalid organization entry {org!r}: {err}") from err
     else:
-        raise TypeError(
-            "organization must be an Organization or a mapping, "
-            f"got {type(org).__name__}"
-        )
-    if (
-        str(result.org_id).strip() == ""
-        or str(result.organization).strip() == ""
-    ):
-        raise ValueError(
-            f"Invalid organization entry {org!r}: empty org_id/organization"
-        )
+        raise TypeError("organization must be an Organization or a mapping, " f"got {type(org).__name__}")
+    if str(result.org_id).strip() == "" or str(result.organization).strip() == "":
+        raise ValueError(f"Invalid organization entry {org!r}: empty org_id/organization")
     return result
 
 
@@ -115,9 +107,7 @@ def _coerce_group(group: Any) -> Group:
         except (ValueError, TypeError, ValidationError) as err:
             raise ValueError(f"Invalid group entry {group!r}: {err}") from err
     else:
-        raise TypeError(
-            f"group must be a Group, str or mapping, got {type(group).__name__}"
-        )
+        raise TypeError(f"group must be a Group, str or mapping, got {type(group).__name__}")
     if str(result.group).strip() == "":
         raise ValueError(f"Invalid group entry {group!r}: empty group")
     return result
@@ -142,10 +132,7 @@ def _coerce_program(program: Any) -> "Program":
         except (ValueError, TypeError, ValidationError) as err:
             raise ValueError(f"Invalid program entry {program!r}: {err}") from err
     else:
-        raise TypeError(
-            "program must be a Program or a mapping, "
-            f"got {type(program).__name__}"
-        )
+        raise TypeError("program must be a Program or a mapping, " f"got {type(program).__name__}")
     if str(result.program_name).strip() == "":
         raise ValueError(f"Invalid program entry {program!r}: empty program_name")
     return result

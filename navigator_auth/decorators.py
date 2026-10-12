@@ -31,6 +31,7 @@ def _is_path_excluded(request: web.Request) -> bool:
 
 F = TypeVar("F", bound=Callable[..., Any])
 
+
 def get_auth(app) -> Awaitable:
     try:
         return app["auth"]
@@ -38,10 +39,11 @@ def get_auth(app) -> Awaitable:
         raise web.HTTPBadRequest(
             reason="Authentication Backend is not enabled.",
             headers={
-                hdrs.CONTENT_TYPE: 'application/json',
+                hdrs.CONTENT_TYPE: "application/json",
                 hdrs.CONNECTION: "keep-alive",
             },
         ) from ex
+
 
 def _apply_decorator(handler, func_wrapper, method_wrapper):
     """
@@ -57,6 +59,7 @@ def _apply_decorator(handler, func_wrapper, method_wrapper):
             if method is not None and callable(method):
                 setattr(handler, method_name.lower(), method_wrapper(method))
         return handler
+
 
 def allow_anonymous(handler: F = None) -> F:
     """
@@ -82,6 +85,7 @@ def allow_anonymous(handler: F = None) -> F:
         Callable: The decorated handler that allows anonymous access, or the
         decorator when used as a factory.
     """
+
     def _func_wrapper(handler):
         @wraps(handler)
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
@@ -89,6 +93,7 @@ def allow_anonymous(handler: F = None) -> F:
             if request is not None:
                 setattr(request, "allow_anonymous", True)
             return await handler(*args, **kwargs)
+
         return _wrap
 
     def _method_wrapper(method):
@@ -98,6 +103,7 @@ def allow_anonymous(handler: F = None) -> F:
             if request is not None:
                 setattr(request, "allow_anonymous", True)
             return await method(self, *args, **kwargs)
+
         return wrapped_method
 
     def _decorate(handler: F) -> F:
@@ -106,6 +112,7 @@ def allow_anonymous(handler: F = None) -> F:
     # bare usage (@allow_anonymous) decorates now; factory usage
     # (@allow_anonymous()) gets the decorator back to apply itself.
     return _decorate if handler is None else _decorate(handler)
+
 
 def user_session() -> Callable[[F], F]:
     """Decorator for attaching a User from session to the request and view instance."""
@@ -138,6 +145,7 @@ def user_session() -> Callable[[F], F]:
                 args[0].session = session
                 args[0].user = user
             return await handler(*args, session=session, user=user, **kwargs)
+
         return _wrap
 
     def _method_wrapper(method):
@@ -162,6 +170,7 @@ def user_session() -> Callable[[F], F]:
             request.user = user
             _attach_vault_to_request(request, session)
             return await method(self, *args, **kwargs)
+
         return wrapped_method
 
     return lambda handler: _apply_decorator(handler, _func_wrapper, _method_wrapper)
@@ -229,6 +238,7 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
                             hdrs.CONNECTION: "keep-alive",
                         },
                     )
+
         return _wrap
 
     def _method_wrapper(method):
@@ -269,6 +279,7 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
                         hdrs.CONNECTION: "keep-alive",
                     },
                 )
+
         return wrapped_method
 
     return lambda handler: _apply_decorator(handler, _func_wrapper, _method_wrapper)
@@ -345,6 +356,7 @@ def is_superuser(content_type: str = "application/json") -> Callable:
                     hdrs.CONNECTION: "keep-alive",
                 },
             )
+
         return _wrapped
 
     def _wrap_method(method):
@@ -383,6 +395,7 @@ def is_superuser(content_type: str = "application/json") -> Callable:
                     hdrs.CONNECTION: "keep-alive",
                 },
             )
+
         return _wrapped
 
     def _wrapper(handler: F):
@@ -410,9 +423,7 @@ def allowed_groups(groups: list, content_type: str = "application/json") -> Call
             else:
                 request = args[-1]
             if request is None:
-                raise ValueError(
-                    f"web.Request was not found in arguments. {handler!s}"
-                )
+                raise ValueError(f"web.Request was not found in arguments. {handler!s}")
             # avoid check on OPTION method:
             if request.method == hdrs.METH_OPTIONS:
                 return await handler(*args, **kwargs)
@@ -459,9 +470,7 @@ def allowed_groups(groups: list, content_type: str = "application/json") -> Call
     return _wrapper
 
 
-def allowed_programs(
-    programs: list, content_type: str = "application/json"
-) -> Callable:
+def allowed_programs(programs: list, content_type: str = "application/json") -> Callable:
     """Restrict the Handler only to certain Programs in User information."""
 
     def _wrap_function(handler):
@@ -488,9 +497,7 @@ def allowed_programs(
             except KeyError:
                 userinfo = {}
             # Check if any allowed program appears in the userinfo programs
-            member = "programs" in userinfo and bool(
-                not set(userinfo["programs"]).isdisjoint(programs)
-            )
+            member = "programs" in userinfo and bool(not set(userinfo["programs"]).isdisjoint(programs))
             if member:
                 return await handler(*args, **kwargs)
             else:
@@ -501,6 +508,7 @@ def allowed_programs(
                         hdrs.CONNECTION: "keep-alive",
                     },
                 )
+
         return _wrapped
 
     def _wrap_method(method):
@@ -525,9 +533,7 @@ def allowed_programs(
                 userinfo = session[AUTH_SESSION_OBJECT]
             except KeyError:
                 userinfo = {}
-            member = "programs" in userinfo and bool(
-                not set(userinfo["programs"]).isdisjoint(programs)
-            )
+            member = "programs" in userinfo and bool(not set(userinfo["programs"]).isdisjoint(programs))
             if member:
                 return await method(self, *args, **kwargs)
             else:
@@ -538,6 +544,7 @@ def allowed_programs(
                         hdrs.CONNECTION: "keep-alive",
                     },
                 )
+
         return _wrapped
 
     def _wrapper(handler: F):
@@ -601,6 +608,7 @@ def apikey_required(content_type: str = "application/json") -> Callable:
                         hdrs.CONNECTION: "keep-alive",
                     },
                 ) from ex
+
         return _wrapped
 
     def _wrap_method(method):
@@ -644,6 +652,7 @@ def apikey_required(content_type: str = "application/json") -> Callable:
                         hdrs.CONNECTION: "keep-alive",
                     },
                 ) from ex
+
         return _wrapped
 
     def _wrapper(handler: F):
@@ -660,9 +669,8 @@ def apikey_required(content_type: str = "application/json") -> Callable:
 
     return _wrapper
 
-def allowed_organizations(
-    org: list, content_type: str = "application/json"
-) -> Callable:
+
+def allowed_organizations(org: list, content_type: str = "application/json") -> Callable:
     """Restrict the Handler only to certain organizations in User information."""
 
     def _wrap_function(handler):
@@ -698,6 +706,7 @@ def allowed_organizations(
                     reason="Access Denied",
                     headers={hdrs.CONTENT_TYPE: content_type, hdrs.CONNECTION: "keep-alive"},
                 )
+
         return _wrapped
 
     def _wrap_method(method):
@@ -733,6 +742,7 @@ def allowed_organizations(
                     reason="Access Denied",
                     headers={hdrs.CONTENT_TYPE: content_type, hdrs.CONNECTION: "keep-alive"},
                 )
+
         return _wrapped
 
     def _wrapper(handler: F):
@@ -749,9 +759,7 @@ def allowed_organizations(
     return _wrapper
 
 
-def is_restricted(
-    users: list = None, groups: list = None, content_type: str = "application/json"
-) -> Callable:
+def is_restricted(users: list = None, groups: list = None, content_type: str = "application/json") -> Callable:
     """
     Restrict access to specific Users or Groups.
     Logic:
@@ -759,6 +767,7 @@ def is_restricted(
       - If 'groups' is provided, current user MUST have at least one group in the list.
       - If both are provided, BOTH conditions must be met (Intersection).
     """
+
     def _wrap_function(handler):
         @wraps(handler)
         async def _wrapped(*args, **kwargs) -> web.StreamResponse:
@@ -824,6 +833,7 @@ def is_restricted(
                         },
                     )
             return await handler(*args, **kwargs)
+
         return _wrapped
 
     def _wrap_method(method):
@@ -890,6 +900,7 @@ def is_restricted(
                         },
                     )
             return await method(self, *args, **kwargs)
+
         return _wrapped
 
     def _wrapper(handler: F):
@@ -1107,10 +1118,7 @@ async def _check_policies(
 
     pdp = _get_pdp(request)
     if pdp is None:
-        logger.error(
-            "check_access: ABAC is not enabled on this Application, "
-            "denying access to %s", request.path
-        )
+        logger.error("check_access: ABAC is not enabled on this Application, " "denying access to %s", request.path)
         return False, "ABAC is not enabled on this Application.", None
 
     try:
@@ -1132,21 +1140,15 @@ async def _check_policies(
         policy = _find_policy(pdp, name)
         if policy is None:
             # Fail closed: a policy that is not declared can never grant access.
-            logger.error(
-                "check_access: Policy '%s' is not declared on ABAC.", name
-            )
+            logger.error("check_access: Policy '%s' is not declared on ABAC.", name)
             reasons.append(f"Policy '{name}' is not declared on ABAC.")
             if require_all:
                 return False, "; ".join(reasons), None
             continue
         try:
-            response = _evaluate_policy(
-                policy, ctx, env, action, resource, rtype
-            )
+            response = _evaluate_policy(policy, ctx, env, action, resource, rtype)
         except Exception as exc:  # noqa: BLE001 - never leak a 500 from a check
-            logger.exception(
-                "check_access: Policy '%s' failed to evaluate: %s", name, exc
-            )
+            logger.exception("check_access: Policy '%s' failed to evaluate: %s", name, exc)
             reasons.append(f"Policy '{name}' failed to evaluate.")
             if require_all:
                 return False, "; ".join(reasons), None
@@ -1223,25 +1225,19 @@ def check_access(
     """
     names = [policy] if isinstance(policy, str) else list(policy)
     if not names:
-        raise ValueError(
-            "check_access requires at least one ABAC Policy name."
-        )
+        raise ValueError("check_access requires at least one ABAC Policy name.")
 
     def _wrapper(func):
         @wraps(func)
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
             request = _find_request(args, kwargs)
             if request is None:
-                raise ValueError(
-                    f"web.Request was not found in arguments. {func!s}"
-                )
+                raise ValueError(f"web.Request was not found in arguments. {func!s}")
             # avoid check on OPTION method:
             if request.method == hdrs.METH_OPTIONS:
                 return await func(*args, **kwargs)
             # Short-circuit for explicitly excluded paths (public URLs etc.)
-            if _is_path_excluded(request) or getattr(
-                request, "allow_anonymous", False
-            ):
+            if _is_path_excluded(request) or getattr(request, "allow_anonymous", False):
                 return await func(*args, **kwargs)
             if request.get("authenticated", False) is False:
                 raise web.HTTPUnauthorized(

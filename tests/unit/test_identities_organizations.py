@@ -1,4 +1,5 @@
 """FEAT-102 / TASK-99 — AuthUser.organizations normalization (spec §4 table 1)."""
+
 import copy
 
 import pytest
@@ -18,8 +19,8 @@ BAD_ORG_DICTS = [
     {"organization": "x"},
     {"org_id": "1"},
     {"org_id": "1", "organization": "n", "extra": 1},
-    {"org_id": "", "organization": "x"},          # AC9
-    {"org_id": "1", "organization": "   "},       # AC9
+    {"org_id": "", "organization": "x"},  # AC9
+    {"org_id": "1", "organization": "   "},  # AC9
 ]
 SUBCLASS_KWARGS = [
     (BasicUser, {}),
@@ -35,7 +36,7 @@ SUBCLASS_KWARGS = [
 def test_basicuser_dict_organizations_become_models():
     user = BasicUser(id=1, data={}, organizations=[dict(ORG_DICT)])
     assert isinstance(user.organizations[0], Organization)
-    assert user.organizations[0].org_id == "7"                       # AC1
+    assert user.organizations[0].org_id == "7"  # AC1
 
 
 def test_dict_organizations_via_data_initvar():

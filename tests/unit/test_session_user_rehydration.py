@@ -1,4 +1,5 @@
 """FEAT-102 / TASK-100 — legacy session rehydration (spec §4 round-trip table)."""
+
 import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -65,7 +66,7 @@ def test_jsonpickle_roundtrip_keeps_attribute_access():
     user = BasicUser(id=1, data={}, organizations=[dict(ORG_DICT)])
     restored = jsonpickle.decode(jsonpickle.encode(user))
     assert isinstance(restored.organizations[0], Organization)
-    assert restored.organizations[0].org_id == "7"                     # AC6
+    assert restored.organizations[0].org_id == "7"  # AC6
 
 
 @pytest.mark.asyncio
@@ -95,15 +96,25 @@ async def test_allowed_organizations_accepts_legacy_dict_session():
     async def handler(request):
         return web.Response(text="ok")
 
-    with patch("navigator_auth.decorators.get_session", new_callable=AsyncMock,
-               return_value=FakeSession(_legacy_payload([ORG_DICT]))), \
-            patch("navigator_auth.decorators._attach_vault_to_request"):
+    with (
+        patch(
+            "navigator_auth.decorators.get_session",
+            new_callable=AsyncMock,
+            return_value=FakeSession(_legacy_payload([ORG_DICT])),
+        ),
+        patch("navigator_auth.decorators._attach_vault_to_request"),
+    ):
         resp = await handler(FakeRequest())
     assert resp.text == "ok"
 
-    with patch("navigator_auth.decorators.get_session", new_callable=AsyncMock,
-               return_value=FakeSession(_legacy_payload([BAD_ORG]))), \
-            patch("navigator_auth.decorators._attach_vault_to_request"):
+    with (
+        patch(
+            "navigator_auth.decorators.get_session",
+            new_callable=AsyncMock,
+            return_value=FakeSession(_legacy_payload([BAD_ORG])),
+        ),
+        patch("navigator_auth.decorators._attach_vault_to_request"),
+    ):
         with pytest.raises(web.HTTPUnauthorized):
             await handler(FakeRequest())
 

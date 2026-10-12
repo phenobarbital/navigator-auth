@@ -18,7 +18,6 @@ from ..conf import (
     AUTH_TOKEN_SECRET,
 )
 
-
 # Authenticated Entity
 from typing import Any, Union
 from collections.abc import Mapping
