@@ -37,6 +37,7 @@ from .vault.integration import (
 )
 from .identity.migrations import setup_identity_columns
 from .backends.idp import IdentityProvider
+from .identities import AuthUser
 from .conf import (
     AUTH_MECHANISM_KEY,
     AUTH_MECHANISM_BEARER,
@@ -761,13 +762,16 @@ class AuthHandler:
         return self.app
 
     async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:
+        """Rehydrate the session user; see ``BaseAuthBackend.get_session_user``."""
         try:
             if session:
                 user = session.decode(name)
                 if user:
+                    if isinstance(user, AuthUser):
+                        user.normalize_memberships()
                     user.is_authenticated = True
                 return user
-        except (AttributeError, RuntimeError) as ex:
+        except (AttributeError, RuntimeError, ValueError) as ex:
             logging.warning(f"NAV: Unable to decode User session: {ex}")
 
     def default_headers(self, message: str, exception: BaseException = None) -> dict:

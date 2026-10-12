@@ -684,11 +684,12 @@ def allowed_organizations(
             member = False
             try:
                 user = session.decode("user")
+                user.normalize_organizations()
                 for o in user.organizations:
                     if o.organization in org:
                         member = True
                         break
-            except (AttributeError, TypeError, RuntimeError):
+            except (AttributeError, TypeError, RuntimeError, ValueError):
                 member = False
             if member:
                 return await handler(*args, **kwargs)
@@ -718,11 +719,12 @@ def allowed_organizations(
             member = False
             try:
                 user = session.decode("user")
+                user.normalize_organizations()
                 for o in user.organizations:
                     if o.organization in org:
                         member = True
                         break
-            except (AttributeError, TypeError, RuntimeError):
+            except (AttributeError, TypeError, RuntimeError, ValueError):
                 member = False
             if member:
                 return await method(self, *args, **kwargs)

@@ -36,7 +36,7 @@ from ..libs.sanitize import sanitize_request
 from ..libs.redirect import safe_redirect_url, is_safe_redirect
 
 # Authenticated Identity
-from ..identities import Identity, AuthBackend
+from ..identities import Identity, AuthBackend, AuthUser
 from .idp import IdentityProvider
 
 
@@ -376,14 +376,23 @@ class BaseAuthBackend(ABC):
         return _wrap
 
     async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:
+        """Rehydrate the user stored under *name* in *session*.
+
+        Session payloads written before FEAT-102 may hold membership dicts;
+        they are normalized here via ``normalize_memberships()``. A payload
+        that cannot be normalized is treated like an undecodable session:
+        a warning is logged and ``None`` is returned (fail closed).
+        """
         try:
             user = None
             if session:
                 user = session.decode(name)
                 if user:
+                    if isinstance(user, AuthUser):
+                        user.normalize_memberships()
                     user.is_authenticated = True
             return user
-        except (AttributeError, RuntimeError) as ex:
+        except (AttributeError, RuntimeError, ValueError) as ex:
             self.logger.warning(f"NAV: Unable to decode User session: {ex}")
 
     async def verify_exceptions(self, request: web.Request) -> bool:
