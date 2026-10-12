@@ -8,7 +8,7 @@ base_branch: dev
 **Feature ID**: FEAT-102
 **Date**: 2026-10-12
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 0.28.7
 
 > **Inputs:** free-form problem report passed to `/sdd-spec` (no brainstorm or
@@ -93,13 +93,12 @@ read `user.organizations[...].org_id` crash.
   `AttributeError: 'BasicUser' object has no attribute 'user_id'` (reproduced
   with a probe subclass). Fixing that is a `datamodel`/`Identity` redesign, not
   this bug.
-- `AuthUser.groups` (`add_group`, `identities.py:133-136`) and
-  `TokenUser.programs` (`backends/token.py:27-29`) have the same dict
-  pass-through shape. They are **not** touched here; this spec's helper is
-  written so a follow-up can reuse the pattern (§8 Q3).
-- Changing `Organization`'s own validation rules (e.g. rejecting empty
-  strings — `Organization(org_id="", organization="x")` is accepted today).
-  AC4 requires the model's semantics to be preserved (§8 Q2).
+- Anything about `groups` / `programs` beyond the normalization in Module 4
+  (§8 Q3 resolved: they ARE covered here). The ABAC policy classes' own
+  `groups` sets (`abac/policies/*`) are unrelated and untouched.
+- Changing `Organization`'s own model validation. The model still accepts
+  `Organization(org_id="", organization="x")`; the empty-string rejection
+  decided in §8 Q2 lives in the normalization helpers, not in the model.
 - Migrating stored session payloads in Redis / cookies, or changing
   `navigator-session`'s `ModelHandler.restore`. navigator-session is a
   separate distribution; see §2 "Legacy session policy".
@@ -136,11 +135,16 @@ Two small, local changes plus tests:
    construction path and the later-add path share one code path and are
    idempotent: re-adding an `Organization` yields an equal list, and the input
    list/dicts are left untouched.
+   **Empty strings are rejected (§8 Q2):** after coercion, an `org_id` or
+   `organization` that is empty or whitespace-only raises the same chained
+   `ValueError`, for instances and mappings alike.
 
 2. **Legacy session policy — normalize at navigator-auth's own rehydration
    points, never migrate storage.** A new idempotent public method
    `AuthUser.normalize_organizations() -> None` rebuilds `self.organizations`
-   through `add_organization()`. It is called from the four places where
+   through `add_organization()`; `AuthUser.normalize_memberships() -> None` is
+   the single entry point the session hooks call (organizations + groups, plus
+   programs on `TokenUser` — Module 4). It is called from the four places where
    navigator-auth itself turns a session payload back into a user and reads
    organizations:
    - `BaseAuthBackend.get_session_user` (`backends/abstract.py:378-387`)
@@ -157,7 +161,7 @@ Two small, local changes plus tests:
    `except (AttributeError, TypeError, RuntimeError)` → `member = False` → 401.
    Downstream code that calls `session.decode("user")` directly is **not**
    migrated by this spec; the documented policy for it is "call
-   `user.normalize_organizations()` or let the session expire
+   `user.normalize_memberships()` or let the session expire
    (`SESSION_TIMEOUT`, default 360000 s) / re-login". New sessions written
    after this change already carry `Organization` instances, which jsonpickle
    restores as `Organization` (verified), so the policy only concerns payloads
@@ -210,6 +214,8 @@ Two small, local changes plus tests:
 | `AuthHandler.get_session_user` (`auth.py:757-765`) | modifies | Same change; needs `from .identities import AuthUser` (no import cycle: `identities.py` imports only `slugify`/`datamodel`). |
 | `allowed_organizations` (`decorators.py:663-740`) | modifies | Normalize before iterating; add `ValueError` to the except tuple. |
 | `navigator_session.SessionData.encode/decode` (`data.py:308-345`), `ModelHandler` (`data.py:21-36`) | uses (read-only) | jsonpickle round-trip; not modified. |
+| `Group` (`identities.py:20-30`), `AuthUser.add_group` (`identities.py:133-136`) | modifies (Module 4) | `add_group` coerces `str` / `Mapping` / instance; empty `group` rejected. `Guest = Group(group="guest")` (`identities.py:34`) still works (`noauth.py:57`). |
+| `Program` (`identities.py:52-64`), `TokenUser` (`backends/token.py:27-29`), `TokenAuth.authenticate` (`token.py:103`) | modifies (Module 4) | `TokenUser.__post_init__` + `add_program` / `normalize_programs`; `token.py:103` normalizes after assigning `usr.programs`. |
 
 ### Data Models
 
@@ -267,6 +273,42 @@ class AuthUser(Identity):
             ValueError, TypeError: as :func:`_coerce_organization`; the list
                 is left as it was before the call when an entry fails.
         """
+
+    def normalize_memberships(self) -> None:
+        """Normalize every membership list of this user in place.
+
+        Calls :meth:`normalize_organizations` and :meth:`normalize_groups`;
+        subclasses with more membership lists override and call ``super()``
+        (``TokenUser`` adds ``normalize_programs``). This is the method the
+        session rehydration hooks call. Idempotent; raises like the parts.
+        """
+
+    def add_group(self, group: Union[Group, str, Mapping[str, Any]]) -> None:
+        """Append *group* as a ``Group`` (``str`` → ``Group(group=...)``;
+        ``Mapping`` → ``Group(**dict(group))``; instance kept as-is).
+        Empty/whitespace ``group`` → ``ValueError``; other types → ``TypeError``.
+        """
+
+    def normalize_groups(self) -> None:
+        """Re-run group normalization over ``self.groups`` (idempotent, atomic)."""
+
+
+# navigator_auth/backends/token.py
+class TokenUser(AuthUser):
+    def __post_init__(self, data) -> None:
+        """Run ``AuthUser.__post_init__`` then :meth:`normalize_programs`."""
+
+    def add_program(self, program: Union[Program, Mapping[str, Any]]) -> None:
+        """Append *program* as a ``Program`` (instance kept; ``Mapping`` →
+        ``Program(**dict(program))``). ``str`` is NOT accepted (``program_id`` is
+        required) → ``TypeError``; incomplete / empty ``program_name`` → ``ValueError``.
+        """
+
+    def normalize_programs(self) -> None:
+        """Re-run program normalization over ``self.programs`` (``None`` → ``[]``)."""
+
+    def normalize_memberships(self) -> None:
+        """``super().normalize_memberships()`` then :meth:`normalize_programs`."""
 ```
 
 ---
@@ -310,6 +352,11 @@ class AuthUser(Identity):                          # verified: identities.py:95
         """<docstring in §2>"""
         ...  # current = list(self.organizations or []); rebuilt = [_coerce_organization(o) for o in current]
         ...  # assign only after every element coerced (atomic w.r.t. failures)
+
+    def normalize_memberships(self) -> None:     # new — the hook entry point (M2 calls this)
+        """<docstring in §2>"""
+        self.normalize_organizations()
+        ...  # Module 4 adds self.normalize_groups() here
 ```
 
 ### Module 2: Rehydration hooks for legacy sessions
@@ -333,7 +380,7 @@ class BaseAuthBackend(ABC):
                 user = session.decode(name)                         # verified: :382
                 if user:
                     if isinstance(user, AuthUser):                  # new
-                        user.normalize_organizations()              # new
+                        user.normalize_memberships()                # new
                     user.is_authenticated = True                    # verified: :384
             return user
         except (AttributeError, RuntimeError, ValueError) as ex:    # verified: :386 (add ValueError)
@@ -363,10 +410,54 @@ class AuthHandler:
   `tests/unit/test_user_session_decorator.py:27-36`.
 - **Depends on**: Modules 1 and 2.
 
+### Module 4: Same normalization for `groups` and `TokenUser.programs` (§8 Q3)
+- **Path**: `navigator_auth/identities.py`, `navigator_auth/backends/token.py`
+- **Responsibility**: add `_coerce_group` / `_coerce_program` helpers next to
+  `_coerce_organization` (same error contract, same empty-string rule);
+  rewrite `add_group` (`identities.py:133-136`) to use the helper while
+  keeping the `str` shortcut (a bare name IS a complete `Group`); add
+  `normalize_groups` and fold it into `normalize_memberships`; give `TokenUser`
+  a `__post_init__`, `add_program`, `normalize_programs` and a
+  `normalize_memberships` override; make `token.py:103` normalize after
+  `usr.programs = programs`.
+- **Depends on**: Module 1 (helpers/pattern), Module 2 (hooks already call
+  `normalize_memberships`).
+- **Interface skeleton**: signatures in §2 New Public Interfaces.
+
+```python
+# navigator_auth/identities.py
+def _coerce_group(group: Any) -> Group: ...        # str -> Group(group=group); Mapping -> Group(**dict(group)); Group -> as-is
+def _coerce_program(program: Any) -> Program: ...  # Mapping -> Program(**dict(program)); Program -> as-is; str -> TypeError
+
+class AuthUser(Identity):
+    def add_group(self, group: Union[Group, str, Mapping[str, Any]]) -> None:   # replaces identities.py:133-136
+        self.groups.append(_coerce_group(group))
+    def normalize_groups(self) -> None: ...
+    def normalize_memberships(self) -> None:
+        self.normalize_organizations()
+        self.normalize_groups()
+
+# navigator_auth/backends/token.py
+from ..identities import AuthUser, Program, _coerce_program   # verified: token.py imports AuthUser/Program today (check exact line in task)
+class TokenUser(AuthUser):                                     # verified: token.py:27
+    tenant: str                                                # verified: :28
+    programs: list[Program]                                    # verified: :29
+    def __post_init__(self, data) -> None:
+        super(TokenUser, self).__post_init__(data)
+        self.normalize_programs()
+    def add_program(self, program: Union[Program, Mapping[str, Any]]) -> None: ...
+    def normalize_programs(self) -> None: ...
+    def normalize_memberships(self) -> None:
+        super().normalize_memberships()
+        self.normalize_programs()
+# token.py:103  `usr.programs = programs`  ->  keep, then `usr.normalize_programs()`
+```
+
 ### Delegation-eligible modules
 
 | Module | Eligible | Decided patterns / exact contracts |
 |---|---|---|
+| M4 groups/programs | yes | Mirror of M1 with `str` kept for groups only; names fixed above. |
 | M1 `identities.py` | yes | Skeleton above is final: helper name `_coerce_organization`, method name `normalize_organizations`, `TypeError` for non-mapping, `ValueError` (chained) for bad mapping, same-object preservation, atomic reassignment. |
 | M2 rehydration hooks | yes | Exactly the four call sites and the two `except` tuples listed; `isinstance(user, AuthUser)` guard in the two `get_session_user` methods (the default `_ident` is bare `Identity`, `abstract.py:75`). |
 | M3 tests | yes | Test names and fixtures in §4; style of `tests/unit/test_user_session_decorator.py`. |
@@ -389,6 +480,17 @@ class AuthHandler:
 | `test_invalid_entries_raise_explicitly` | M1 | AC8 — parametrized: `"acme"` → `TypeError`; `7` → `TypeError`; `None` → `TypeError`; `{"organization": "x"}` → `ValueError`; `{"org_id": "1"}` → `ValueError`; `{"org_id": "1", "organization": "n", "extra": 1}` → `ValueError`; `ValueError.__cause__` is not `None`. |
 | `test_failed_add_leaves_list_unchanged` | M1 | AC8 — after a failed `add_organization`/`normalize_organizations`, `user.organizations` equals its pre-call value. |
 | `test_all_ident_subclasses_normalize` | M1 | Parametrized over `BasicUser`, `OauthUser` (`token`, `given_name`, `family_name`), `TokenUser` (`tenant`, `programs=[]`), `APIKeyUser` (`token`, `api_key`), `AnonymousUser`, `DjangoUser` (`sessionid`), `PasskeyUser`. |
+
+### Unit Tests — `tests/unit/test_identities_groups_programs.py` (Module 4)
+
+| Test | Module | Description / AC |
+|---|---|---|
+| `test_groups_str_dict_instance_normalized` | M4 | AC10 — `groups=["editors", {"group": "admins"}, Group(group="x")]` → three `Group`; instance preserved (`is`); `Guest` still usable via `add_group(Guest)`. |
+| `test_group_invalid_entries_raise` | M4 | AC9/AC10 — `""` / `"  "` / `{"group": ""}` → `ValueError`; `7` / `None` → `TypeError`; `{"group": "x", "extra": 1}` → `ValueError`. |
+| `test_tokenuser_programs_normalized_on_construction_and_add` | M4 | AC10 — `TokenUser(id=1, data={}, tenant="t", programs=[{"program_id": 1, "program_name": "P"}])` → `Program` with `program_slug == "p"`; `add_program({...})` appends a `Program`; `programs` absent → `[]`. |
+| `test_program_invalid_entries_raise` | M4 | `"name"` → `TypeError`; `{"program_name": "x"}` → `ValueError`; `{"program_id": 1, "program_name": ""}` → `ValueError`. |
+| `test_normalize_memberships_covers_all_lists` | M4 | Legacy-shaped user (dicts forced into `organizations`, `groups`, `programs` via `object.__setattr__`) → after `normalize_memberships()` every element is a model. |
+| `test_tokenauth_assignment_path_normalizes` | M4 | Mimic `token.py:103`: `usr.programs = [dict]; usr.normalize_programs()` → `Program`. |
 
 ### Integration / Round-trip Tests — `tests/unit/test_session_user_rehydration.py`
 
@@ -450,6 +552,15 @@ class-level fields and `to_dict()` then fails for instances built with other
 - [ ] AC8 — `str`, non-mapping values → `TypeError`; incomplete or unknown-key
   mappings → chained `ValueError`; the list is unchanged after a failure;
   `create_user` surfaces it as `InvalidAuth`. All tested.
+- [ ] AC9 (§8 Q2) — An `org_id` or `organization` that is empty or
+  whitespace-only is rejected with `ValueError` by the normalization helper,
+  for mappings and instances alike; same rule for `Group.group` and
+  `Program.program_name`.
+- [ ] AC10 (§8 Q3) — `AuthUser.groups` and `TokenUser.programs` receive the
+  same treatment: construction, `add_group` / `add_program`, and
+  `normalize_memberships()` yield only `Group` / `Program` instances;
+  `add_group("name")` keeps working; `tests/unit/test_identities_groups_programs.py`
+  passes.
 - [ ] No `_ident` subclass needs its own change (parametrized test over all
   seven).
 - [ ] All new tests pass:
@@ -607,11 +718,12 @@ No new dependency is added.
   reject? — *Resolved by spec author*: reject (`ValueError`), consistent with
   `Organization.Meta.strict = True`. Tolerating would need a documented
   allow-list and silently drops data. *Owner for override: Jesus Lara*.
-- [ ] Q2 — Should empty strings (`org_id=""` / `organization=""`) be rejected
-  during normalization? Today the model accepts them; AC4 says keep model
-  semantics, so this spec does not reject them. — *Owner: Jesus Lara*
-- [ ] Q3 — Apply the same normalization to `groups` (`add_group`) and
-  `TokenUser.programs` in a follow-up spec? — *Owner: Jesus Lara*
+- [x] Q2 — Should empty strings (`org_id=""` / `organization=""`) be rejected
+  during normalization? — *Resolved by Jesus Lara, 2026-10-13*: yes, rejected.
+  Implemented in the normalization helpers (AC9), not in the model.
+- [x] Q3 — Apply the same normalization to `groups` (`add_group`) and
+  `TokenUser.programs`? — *Resolved by Jesus Lara, 2026-10-13*: yes, apply —
+  folded into this spec as Module 4 / AC10 (not a follow-up).
 
 ---
 
@@ -631,7 +743,8 @@ accepted brainstorm/proposal).
 
 - **Default isolation unit**: `per-spec` — one worktree
   `.worktrees/feat-FEAT-102-fix-organizations-orgid` (from `origin/dev`),
-  tasks sequential: M1 → M2 → M3 (M3 may be folded into M1/M2 by `/sdd-task`).
+  tasks sequential: M1 → M2 → M4 (M3's tests are folded into the task that
+  owns each module).
 - **Parallelizable tasks**: none worth it; M2 depends on M1's method name,
   M3 depends on both. Total change is ~60 lines of library code plus tests.
 - **Cross-feature dependencies**: none. No other open spec touches
@@ -644,3 +757,4 @@ accepted brainstorm/proposal).
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-10-12 | Jesus Lara | Initial draft from the problem report; reproduction and root cause recorded in §6. |
+| 0.2 | 2026-10-13 | Jesus Lara | Status → approved. Q2 (reject empty strings → AC9) and Q3 (groups/programs → Module 4, AC10) resolved and folded into §1/§2/§3/§4/§5. |
