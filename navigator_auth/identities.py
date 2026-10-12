@@ -1,7 +1,9 @@
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
+from collections.abc import Mapping
 from dataclasses import InitVar
 from slugify import slugify
 from datamodel import BaseModel, Column
+from datamodel.exceptions import ValidationError
 
 
 class AuthBackend(BaseModel):
@@ -47,6 +49,48 @@ class Organization(BaseModel):
     class Meta:
         strict = True
         frozen = False
+
+
+def _coerce_organization(org: Any) -> Organization:
+    """Return *org* as an ``Organization``.
+
+    Args:
+        org: An ``Organization`` instance (returned unchanged, same object) or a
+            ``Mapping`` with the model's fields (``org_id``, ``organization``,
+            optional ``slug``). The mapping is copied; the caller's object is
+            never mutated.
+
+    Returns:
+        A valid ``Organization``.
+
+    Raises:
+        TypeError: *org* is neither an ``Organization`` nor a ``Mapping``
+            (this includes ``str`` — the former string shortcut is gone).
+        ValueError: the mapping cannot build a valid ``Organization``
+            (missing required field, unknown key, model validation error),
+            or ``org_id`` / ``organization`` is empty or whitespace-only.
+            The original exception, when any, is chained.
+    """
+    if isinstance(org, Organization):
+        result = org
+    elif isinstance(org, Mapping):
+        try:
+            result = Organization(**dict(org))
+        except (ValueError, TypeError, ValidationError) as err:
+            raise ValueError(f"Invalid organization entry {org!r}: {err}") from err
+    else:
+        raise TypeError(
+            "organization must be an Organization or a mapping, "
+            f"got {type(org).__name__}"
+        )
+    if (
+        str(result.org_id).strip() == ""
+        or str(result.organization).strip() == ""
+    ):
+        raise ValueError(
+            f"Invalid organization entry {org!r}: empty org_id/organization"
+        )
+    return result
 
 
 class Program(BaseModel):
@@ -96,6 +140,14 @@ class AuthUser(Identity):
     """AuthUser
 
     Model for any Authenticated User.
+
+    Organizations: every element of ``organizations`` is an ``Organization``;
+    mappings are coerced in ``add_organization`` (``str`` entries raise
+    ``TypeError``, invalid mappings raise ``ValueError``). Sessions written
+    before FEAT-102 may hold dicts — navigator-auth normalizes them in its
+    own rehydration points; code that calls ``session.decode('user')``
+    directly must call ``normalize_memberships()`` or wait for re-login /
+    session expiry.
     """
 
     first_name: str
@@ -135,7 +187,34 @@ class AuthUser(Identity):
             group = Group(group=group)
         self.groups.append(group)
 
-    def add_organization(self, org: Organization):
-        if isinstance(org, str):
-            org = Organization(organization=org)
-        self.organizations.append(org)
+    def add_organization(self, org: Union[Organization, Mapping[str, Any]]) -> None:
+        """Append *org* to ``self.organizations`` as an ``Organization``.
+
+        Delegates to :func:`_coerce_organization`; see it for accepted inputs
+        and raised errors. Idempotent for already-valid instances.
+        """
+        self.organizations.append(_coerce_organization(org))
+
+    def normalize_organizations(self) -> None:
+        """Re-run organization normalization over ``self.organizations``.
+
+        Intended for objects rehydrated without ``__post_init__`` (jsonpickle
+        session payloads written before FEAT-102). Idempotent: a list that is
+        already all ``Organization`` is rebuilt with the same objects. A
+        ``None`` list becomes ``[]``.
+
+        Raises:
+            ValueError, TypeError: as :func:`_coerce_organization`; the list
+                is left as it was before the call when an entry fails.
+        """
+        current = list(self.organizations or [])
+        self.organizations = [_coerce_organization(o) for o in current]
+
+    def normalize_memberships(self) -> None:
+        """Normalize every membership list of this user in place.
+
+        Calls :meth:`normalize_organizations`; subclasses with more
+        membership lists override and call ``super()``. This is the method
+        the session rehydration hooks call. Idempotent; raises like the parts.
+        """
+        self.normalize_organizations()
