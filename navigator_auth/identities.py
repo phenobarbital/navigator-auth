@@ -93,6 +93,64 @@ def _coerce_organization(org: Any) -> Organization:
     return result
 
 
+def _coerce_group(group: Any) -> Group:
+    """Return *group* as a ``Group``.
+
+    Args:
+        group: A ``Group`` (returned unchanged), a non-empty ``str`` (becomes
+            ``Group(group=<str>)``) or a ``Mapping`` with the model's fields.
+
+    Raises:
+        TypeError: any other type.
+        ValueError: the mapping cannot build a ``Group``, or the resulting
+            ``group`` name is empty / whitespace-only (chained when possible).
+    """
+    if isinstance(group, Group):
+        result = group
+    elif isinstance(group, str):
+        result = Group(group=group)
+    elif isinstance(group, Mapping):
+        try:
+            result = Group(**dict(group))
+        except (ValueError, TypeError, ValidationError) as err:
+            raise ValueError(f"Invalid group entry {group!r}: {err}") from err
+    else:
+        raise TypeError(
+            f"group must be a Group, str or mapping, got {type(group).__name__}"
+        )
+    if str(result.group).strip() == "":
+        raise ValueError(f"Invalid group entry {group!r}: empty group")
+    return result
+
+
+def _coerce_program(program: Any) -> "Program":
+    """Return *program* as a ``Program``.
+
+    An instance is kept; a ``Mapping`` becomes ``Program(**dict(program))``.
+
+    Raises:
+        TypeError: not a ``Program`` or ``Mapping`` (``str`` included —
+            ``program_id`` is required).
+        ValueError: the mapping cannot build a ``Program``, or
+            ``program_name`` is empty / whitespace-only.
+    """
+    if isinstance(program, Program):
+        result = program
+    elif isinstance(program, Mapping):
+        try:
+            result = Program(**dict(program))
+        except (ValueError, TypeError, ValidationError) as err:
+            raise ValueError(f"Invalid program entry {program!r}: {err}") from err
+    else:
+        raise TypeError(
+            "program must be a Program or a mapping, "
+            f"got {type(program).__name__}"
+        )
+    if str(result.program_name).strip() == "":
+        raise ValueError(f"Invalid program entry {program!r}: empty program_name")
+    return result
+
+
 class Program(BaseModel):
     program_id: int = Column(required=True)
     program_name: str = Column(required=True)
@@ -182,10 +240,14 @@ class AuthUser(Identity):
             self.organizations = []
 
     ### User Methods.
-    def add_group(self, group: Group):
-        if isinstance(group, str):
-            group = Group(group=group)
-        self.groups.append(group)
+    def add_group(self, group: Union[Group, str, Mapping[str, Any]]) -> None:
+        """Append *group* to ``self.groups`` as a ``Group`` (see :func:`_coerce_group`)."""
+        self.groups.append(_coerce_group(group))
+
+    def normalize_groups(self) -> None:
+        """Re-run group normalization over ``self.groups`` (idempotent, atomic; ``None`` → ``[]``)."""
+        current = list(self.groups or [])
+        self.groups = [_coerce_group(g) for g in current]
 
     def add_organization(self, org: Union[Organization, Mapping[str, Any]]) -> None:
         """Append *org* to ``self.organizations`` as an ``Organization``.
@@ -213,8 +275,10 @@ class AuthUser(Identity):
     def normalize_memberships(self) -> None:
         """Normalize every membership list of this user in place.
 
-        Calls :meth:`normalize_organizations`; subclasses with more
+        Calls :meth:`normalize_organizations` and :meth:`normalize_groups`
+        (organizations and groups); subclasses with more
         membership lists override and call ``super()``. This is the method
         the session rehydration hooks call. Idempotent; raises like the parts.
         """
         self.normalize_organizations()
+        self.normalize_groups()
