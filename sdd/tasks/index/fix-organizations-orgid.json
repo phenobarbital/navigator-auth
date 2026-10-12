@@ -52,7 +52,7 @@
       "feature_id": "FEAT-102",
       "feature": "fix-organizations-orgid",
       "spec": "sdd/specs/fix-organizations-orgid.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -62,8 +62,8 @@
       "parallelism_notes": "Extends identities.py written by TASK-99 (normalize_memberships body). Independent of TASK-100's files but relies on TASK-100's hooks calling normalize_memberships for legacy groups/programs.",
       "assigned_to": null,
       "started_at": "2026-10-12T23:08:24+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-101-groups-programs-normalization.md"
+      "completed_at": "2026-10-12T23:12:49+00:00",
+      "file": "sdd/tasks/completed/TASK-101-groups-programs-normalization.md"
     }
   ]
 }
