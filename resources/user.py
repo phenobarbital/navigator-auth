@@ -75,6 +75,7 @@ class User(Model):
     created_at: datetime = Column(required=False)
     reports_to_associate_oid: str = Column(required=False)
     manager_id: str = Column(required=False)
+    organizations: list
 
     def birth_date(self):
         if self.birthday:
