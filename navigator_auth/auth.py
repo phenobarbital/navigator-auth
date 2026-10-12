@@ -608,9 +608,15 @@ class AuthHandler:
             try:
                 session = await self._session.storage.get_session(request)
             except Exception:  # pylint: disable=W0703
-                # always return a null session for user:
-                session = await self._session.storage.new_session(request, {})
-        if isinstance(session, bool):
+                session = None
+            if not session:
+                # storage returns None after logout / expired session:
+                # always return a null session for user.
+                try:
+                    session = await self._session.storage.new_session(request, {})
+                except Exception:  # pylint: disable=W0703
+                    session = None
+        if isinstance(session, bool) or session is None:
             # missing User Data:
             if request.get("authenticated", False):
                 userdata = dict(request.get("userdata", {}))
