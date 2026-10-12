@@ -124,3 +124,13 @@ async def test_create_user_rejects_malformed_organizations():
     with pytest.raises(InvalidAuth) as exc:
         await BaseAuthBackend.create_user(_backend_stub(), {"organizations": [BAD_ORG]})
     assert isinstance(exc.value.__cause__, ValueError)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("getter", [BaseAuthBackend.get_session_user, AuthHandler.get_session_user])
+@pytest.mark.parametrize("field,bad", [("organizations", None), ("groups", 7)])
+async def test_legacy_non_mapping_entry_fails_closed(getter, field, bad):
+    user = BasicUser(id=1, data={"username": "legacy"})
+    object.__setattr__(user, field, [bad])
+    session = FakeSession(jsonpickle.encode(user))
+    assert await getter(_backend_stub(), session) is None

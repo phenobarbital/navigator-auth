@@ -4,8 +4,9 @@ Navigator Authentication using an API Token for partners.
 description: Single API Token Authentication
 """
 
+from typing import Any, Union
 from aiohttp import hdrs
-from collections.abc import Callable, Awaitable
+from collections.abc import Callable, Awaitable, Mapping
 import jwt
 from aiohttp import web
 from navigator_session import get_session
@@ -19,8 +20,6 @@ from ..conf import (
 )
 
 # Authenticated Entity
-from typing import Any, Union
-from collections.abc import Mapping
 from ..identities import AuthUser, Program, _coerce_program
 from .abstract import BaseAuthBackend
 
@@ -47,8 +46,9 @@ class TokenUser(AuthUser):
 
     def normalize_memberships(self) -> None:
         """``super().normalize_memberships()`` then :meth:`normalize_programs`."""
+        programs = [_coerce_program(p) for p in list(self.programs or [])]
         super().normalize_memberships()
-        self.normalize_programs()
+        self.programs = programs
 
 
 class TokenAuth(BaseAuthBackend):

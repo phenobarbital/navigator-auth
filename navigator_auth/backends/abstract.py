@@ -392,7 +392,7 @@ class BaseAuthBackend(ABC):
                         user.normalize_memberships()
                     user.is_authenticated = True
             return user
-        except (AttributeError, RuntimeError, ValueError) as ex:
+        except (AttributeError, RuntimeError, ValueError, TypeError) as ex:
             self.logger.warning(f"NAV: Unable to decode User session: {ex}")
 
     async def verify_exceptions(self, request: web.Request) -> bool:

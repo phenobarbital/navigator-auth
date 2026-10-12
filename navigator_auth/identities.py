@@ -262,10 +262,13 @@ class AuthUser(Identity):
     def normalize_memberships(self) -> None:
         """Normalize every membership list of this user in place.
 
-        Calls :meth:`normalize_organizations` and :meth:`normalize_groups`
-        (organizations and groups); subclasses with more
-        membership lists override and call ``super()``. This is the method
-        the session rehydration hooks call. Idempotent; raises like the parts.
+        Covers organizations and groups; subclasses with more membership
+        lists override and call ``super()``. This is the method the session
+        rehydration hooks call. Idempotent; raises like the parts
+        (``ValueError`` / ``TypeError``) and is atomic: every list is
+        rebuilt first and assigned only when all of them are valid.
         """
-        self.normalize_organizations()
-        self.normalize_groups()
+        organizations = [_coerce_organization(o) for o in list(self.organizations or [])]
+        groups = [_coerce_group(g) for g in list(self.groups or [])]
+        self.organizations = organizations
+        self.groups = groups

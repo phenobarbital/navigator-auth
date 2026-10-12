@@ -742,7 +742,7 @@ class AuthHandler:
                         user.normalize_memberships()
                     user.is_authenticated = True
                 return user
-        except (AttributeError, RuntimeError, ValueError) as ex:
+        except (AttributeError, RuntimeError, ValueError, TypeError) as ex:
             logging.warning(f"NAV: Unable to decode User session: {ex}")
 
     def default_headers(self, message: str, exception: BaseException = None) -> dict:

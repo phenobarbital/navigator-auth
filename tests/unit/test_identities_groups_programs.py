@@ -78,3 +78,14 @@ def test_tokenauth_assignment_path_normalizes():
     usr.programs = [dict(PROGRAM_DICT)]
     usr.normalize_programs()
     assert isinstance(usr.programs[0], Program)
+
+
+def test_normalize_memberships_is_atomic_across_lists():
+    user = BasicUser(id=1, data={})
+    orgs = [{"org_id": "7", "organization": "Example"}]
+    object.__setattr__(user, "organizations", list(orgs))
+    object.__setattr__(user, "groups", [7])
+    with pytest.raises(TypeError):
+        user.normalize_memberships()
+    assert user.organizations == orgs
+    assert user.groups == [7]
