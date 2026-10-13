@@ -37,6 +37,7 @@ from .vault.integration import (
 )
 from .identity.migrations import setup_identity_columns
 from .backends.idp import IdentityProvider
+from .identities import AuthUser
 from .conf import (
     AUTH_MECHANISM_KEY,
     AUTH_MECHANISM_BEARER,
@@ -127,9 +128,7 @@ class AuthHandler:
         self._session = None
         self.secure_cookies = secure_cookies
         self.enable_authdb = enable_authdb
-        self._backend_list: tuple = (
-            tuple(backends) if backends is not None else AUTHENTICATION_BACKENDS
-        )
+        self._backend_list: tuple = tuple(backends) if backends is not None else AUTHENTICATION_BACKENDS
         if "scheme" in kwargs:
             self.auth_scheme = kwargs["scheme"]
         else:
@@ -195,9 +194,7 @@ class AuthHandler:
                 paths = await provider()
                 self.register_exclusions(paths)
             except Exception as exc:
-                self.logger.warning(
-                    "AuthHandler: exclude provider %r failed: %s", provider, exc
-                )
+                self.logger.warning("AuthHandler: exclude provider %r failed: %s", provider, exc)
         # Load provider service-tag ranges (e.g. PowerBI) into their subnet
         # backends. No-op unless such a backend is installed in
         # AUTHORIZATION_BACKENDS.
@@ -225,9 +222,7 @@ class AuthHandler:
                     added,
                 )
             except Exception as exc:
-                self.logger.error(
-                    f"{name}: failed to load service tags: {exc}"
-                )
+                self.logger.error(f"{name}: failed to load service tags: {exc}")
 
     async def on_cleanup(self, app):
         """
@@ -279,15 +274,15 @@ class AuthHandler:
                 b.append(authz_allow_hosts())
             elif backend == "authz_hosts":
                 b.append(authz_hosts())
-            elif backend == 'allowed_ips':
+            elif backend == "allowed_ips":
                 b.append(authz_allowed_ips())
-            elif backend == 'authz_allowed_ips':
+            elif backend == "authz_allowed_ips":
                 b.append(authz_allowed_ips())
-            elif backend == 'powerbi':
+            elif backend == "powerbi":
                 b.append(authz_powerbi())
-            elif backend == 'authz_powerbi':
+            elif backend == "authz_powerbi":
                 b.append(authz_powerbi())
-            elif backend == 'useragent':
+            elif backend == "useragent":
                 b.append(authz_useragent())
             elif backend == "authz_useragent":
                 b.append(authz_useragent())
@@ -358,20 +353,13 @@ class AuthHandler:
         """Resolve an enabled external (OAuth2/OpenID) backend by its
         service slug (e.g. 'azure', 'google', 'github', 'okta', 'odoo')."""
         for backend in self.backends.values():
-            if (
-                getattr(backend, "_external_auth", False)
-                and getattr(backend, "_service_name", None) == service
-            ):
+            if getattr(backend, "_external_auth", False) and getattr(backend, "_service_name", None) == service:
                 return backend
         return None
 
     def external_backends(self) -> list:
         """All enabled external backends (for the identities UI)."""
-        return [
-            backend
-            for backend in self.backends.values()
-            if getattr(backend, "_external_auth", False)
-        ]
+        return [backend for backend in self.backends.values() if getattr(backend, "_external_auth", False)]
 
     async def _login_token(self, request: web.Request):
         # Using TrocToken or other backend on list with auth
@@ -503,15 +491,9 @@ class AuthHandler:
             # at now: create the user-session
             try:
                 response = JSONResponse(userdata, status=200)
-                await self._session.storage.load_session(
-                    request,
-                    userdata,
-                    response=response
-                )
+                await self._session.storage.load_session(request, userdata, response=response)
             except Exception as err:
-                raise self.Unauthorized(
-                    reason=f"Error Creating User Session: {err.message}", exception=err
-                ) from err
+                raise self.Unauthorized(reason=f"Error Creating User Session: {err.message}", exception=err) from err
             # Load vault for the authenticated session (non-blocking)
             try:
                 session = await get_session(request, new=False)
@@ -528,13 +510,9 @@ class AuthHandler:
                     if refresh_token and redis:
                         try:
                             # 3 months = 90 days = 7776000 seconds
-                            await redis.setex(
-                                f"auth:refresh_token:{refresh_token}", 7776000, str(user_id)
-                            )
+                            await redis.setex(f"auth:refresh_token:{refresh_token}", 7776000, str(user_id))
                         except Exception as e:
-                            self.logger.error(
-                                f"Failed to save refresh token to redis: {e}"
-                            )
+                            self.logger.error(f"Failed to save refresh token to redis: {e}")
 
                     if db_pool:
                         vault = await load_vault_for_session(
@@ -663,22 +641,16 @@ class AuthHandler:
             redis = RedisStorage(driver="redis", dsn=REDIS_AUTH_URL)
             redis.configure(self.app)  # pylint: disable=E1123
         except RuntimeError as ex:
-            raise web.HTTPServerError(
-                reason=f"Error creating Redis connection: {ex}"
-            ) from ex
+            raise web.HTTPServerError(reason=f"Error creating Redis connection: {ex}") from ex
         ## getting Database Connection:
         if self.enable_authdb:
             try:
                 pool = PostgresStorage(driver="pg", dsn=default_dsn)
                 pool.configure(self.app)  # pylint: disable=E1123
             except RuntimeError as ex:
-                raise web.HTTPServerError(
-                    reason=f"Error creating Database connection: {ex}"
-                ) from ex
+                raise web.HTTPServerError(reason=f"Error creating Database connection: {ex}") from ex
         else:
-            logging.warning(
-                "Auth: 'authdb' PostgreSQL pool disabled (enable_authdb=False)."
-            )
+            logging.warning("Auth: 'authdb' PostgreSQL pool disabled (enable_authdb=False).")
         # startup operations over extension backend
         self.app.on_startup.append(self.auth_startup)
         # cleanup operations over Auth backend
@@ -761,13 +733,16 @@ class AuthHandler:
         return self.app
 
     async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:
+        """Rehydrate the session user; see ``BaseAuthBackend.get_session_user``."""
         try:
             if session:
                 user = session.decode(name)
                 if user:
+                    if isinstance(user, AuthUser):
+                        user.normalize_memberships()
                     user.is_authenticated = True
                 return user
-        except (AttributeError, RuntimeError) as ex:
+        except (AttributeError, RuntimeError, ValueError, TypeError) as ex:
             logging.warning(f"NAV: Unable to decode User session: {ex}")
 
     def default_headers(self, message: str, exception: BaseException = None) -> dict:
@@ -849,11 +824,7 @@ class AuthHandler:
             issuer = issuer_url(request)
         except Exception:  # pylint: disable=W0703
             return {}
-        return {
-            "WWW-Authenticate": (
-                f'Bearer resource_metadata="{issuer}{WELL_KNOWN_PRM_PATH}"'
-            )
-        }
+        return {"WWW-Authenticate": (f'Bearer resource_metadata="{issuer}{WELL_KNOWN_PRM_PATH}"')}
 
     def ForbiddenAccess(self, reason: Union[str, dict], status: int = 403, **kwargs) -> web.HTTPError:
         return self.auth_error(reason=reason, **kwargs, status=status)
@@ -901,9 +872,7 @@ class AuthHandler:
         for path in paths:
             self.remove_exclude_list(path)
 
-    def add_exclude_provider(
-        self, provider: Callable[[], Awaitable[Iterable[str]]]
-    ) -> None:
+    def add_exclude_provider(self, provider: Callable[[], Awaitable[Iterable[str]]]) -> None:
         """Register an async callable that yields auth-exempt paths.
 
         On each server startup, AuthHandler will call every registered provider
@@ -1041,9 +1010,7 @@ class AuthHandler:
                 if await storage.is_revoked(jti):
                     return True
             except Exception as exc:  # pylint: disable=W0703
-                self.logger.warning(
-                    f"Auth Middleware: unable to check revocation of jti={jti}: {exc}"
-                )
+                self.logger.warning(f"Auth Middleware: unable to check revocation of jti={jti}: {exc}")
         return False
 
     @web.middleware
@@ -1180,16 +1147,10 @@ class AuthHandler:
                             ):
                                 try:
                                     user = await self._idp.get_user(str(uid))
-                                    await session.save_encoded_data(
-                                        request,
-                                        "user",
-                                        user
-                                    )
+                                    await session.save_encoded_data(request, "user", user)
                                     user.is_authenticated = True
                                 except Exception as ex:
-                                    self.logger.warning(
-                                        f"Could not resolve user '{uid}' from payload: {ex}"
-                                    )
+                                    self.logger.warning(f"Could not resolve user '{uid}' from payload: {ex}")
                         if not user:
                             raise self.Unauthorized(
                                 reason="Unable to resolve user object from session or token payload.",
@@ -1207,13 +1168,9 @@ class AuthHandler:
                 # exists precisely for cookie-based sessions (the browser leg of
                 # the OAuth2 flow, e.g. /oauth2/consent), so the cookie must be
                 # honoured -- get_session() ignores it by default.
-                session = await get_session(
-                    request, None, new=False, ignore_cookie=False
-                )
+                session = await get_session(request, None, new=False, ignore_cookie=False)
                 if not session:
-                    raise self.Unauthorized(
-                        reason="There is no Session or Authentication is missing"
-                    )
+                    raise self.Unauthorized(reason="There is no Session or Authentication is missing")
                 # verify if a user is in session:
                 try:
                     user = await self.get_session_user(session)
@@ -1229,14 +1186,10 @@ class AuthHandler:
                     raise
                 except Exception as err:
                     self.logger.warning(f"Error checking User in Session: {err}")
-                    raise self.Unauthorized(
-                        reason="Error checking User in Session"
-                    ) from err
+                    raise self.Unauthorized(reason="Error checking User in Session") from err
         except AuthException as err:
-            logging.error(
-                f"Auth Middleware: Invalid Signature,\
-                secret or authentication failed: {err}"
-            )
+            logging.error(f"Auth Middleware: Invalid Signature,\
+                secret or authentication failed: {err}")
             raise self.Unauthorized(
                 reason="Auth Middleware: Invalid Signature, \
                 secret or authentication failed.",

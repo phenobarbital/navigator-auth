@@ -4,8 +4,9 @@ Navigator Authentication using an API Token for partners.
 description: Single API Token Authentication
 """
 
+from typing import Any, Union
 from aiohttp import hdrs
-from collections.abc import Callable, Awaitable
+from collections.abc import Callable, Awaitable, Mapping
 import jwt
 from aiohttp import web
 from navigator_session import get_session
@@ -18,15 +19,36 @@ from ..conf import (
     AUTH_TOKEN_SECRET,
 )
 
-
 # Authenticated Entity
-from ..identities import AuthUser, Program
+from ..identities import AuthUser, Program, _coerce_program
 from .abstract import BaseAuthBackend
 
 
 class TokenUser(AuthUser):
+    """Partner-token user; ``programs`` is normalized to ``Program`` instances (FEAT-102)."""
+
     tenant: str
     programs: list[Program]
+
+    def __post_init__(self, data) -> None:
+        """Run ``AuthUser.__post_init__`` then :meth:`normalize_programs`."""
+        super(TokenUser, self).__post_init__(data)
+        self.normalize_programs()
+
+    def add_program(self, program: Union[Program, Mapping[str, Any]]) -> None:
+        """Append *program* as a ``Program`` (see ``identities._coerce_program``)."""
+        self.programs.append(_coerce_program(program))
+
+    def normalize_programs(self) -> None:
+        """Re-run program normalization over ``self.programs`` (idempotent, atomic; ``None`` → ``[]``)."""
+        current = list(self.programs or [])
+        self.programs = [_coerce_program(p) for p in current]
+
+    def normalize_memberships(self) -> None:
+        """``super().normalize_memberships()`` then :meth:`normalize_programs`."""
+        programs = [_coerce_program(p) for p in list(self.programs or [])]
+        super().normalize_memberships()
+        self.programs = programs
 
 
 class TokenAuth(BaseAuthBackend):
@@ -101,6 +123,7 @@ class TokenAuth(BaseAuthBackend):
                 usr.id = uid
                 usr.set(self.username_attribute, uid)
                 usr.programs = programs
+                usr.normalize_programs()
                 usr.tenant = tenant
                 # saving user-data into request:
                 session = await self.remember(request, uid, userdata, usr)

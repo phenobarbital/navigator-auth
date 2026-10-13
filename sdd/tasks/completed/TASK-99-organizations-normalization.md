@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-102 — Normalize `AuthUser.organizations` received as JSON
 **Spec**: `sdd/specs/fix-organizations-orgid.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -381,10 +381,8 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (sequential fallback; parrot-sdd-coder unavailable: execution_not_found)
+**Date**: 2026-10-12
+**Notes**: _coerce_organization + add_organization/normalize_* implemented; 26 unit tests pass; ruff clean; middleware/basic auth tests pass (15).
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none
