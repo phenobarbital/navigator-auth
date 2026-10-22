@@ -62,6 +62,9 @@ EXCHANGE_REASONS = frozenset(
 #: authorize request across the provider round-trip.  Only the handle
 #: travels in the browser; the request itself stays in IdentityFlowStore.
 OAUTH2_RESUME_COOKIE: str = "nav_oauth2_flow"
+#: FEAT-103 Module 2 — set on the request once a login grant has been vaulted,
+#: so the OAuth2-AS resume does not re-save a partial TokenResponse over it.
+CAPTURED_LOGIN_GRANT = "_nav_captured_login_grant"
 
 #: IdentityFlowStore key holding the parked authorize request.
 OAUTH2_PENDING_FLOW_KEY: str = "oauth2_pending_{flow_id}"
@@ -437,8 +440,12 @@ class ExternalAuth(BaseAuthBackend):
             return response
 
         # Best-effort: persist the upstream credential in the Identity Vault,
-        # exactly as the identity-link flow does.
-        await self._vault_upstream_token(request)
+        # exactly as the identity-link flow does — UNLESS the login already
+        # captured the full grant (FEAT-103 Module 2). Re-saving the partial,
+        # session-rebuilt TokenResponse here would drop the captured expiry and
+        # scopes, or create a second row under a different account id.
+        if not request.get(CAPTURED_LOGIN_GRANT, False):
+            await self._vault_upstream_token(request)
 
         domain_url = self.get_domain(request)
         resume_url = f"{domain_url}/oauth2/authorize?flow={quote(flow_id)}"
@@ -452,14 +459,28 @@ class ExternalAuth(BaseAuthBackend):
         self.logger.notice(f"OAuth2 AS: resuming authorize flow {flow_id}")
         return response
 
-    async def _vault_upstream_token(self, request: web.Request) -> None:
-        """Store the upstream provider token in ``auth.user_identities``.
+    async def _vault_upstream_token(
+        self,
+        request: web.Request,
+        *,
+        token: Optional["TokenResponse"] = None,
+    ) -> None:
+        """Cipher the upstream provider credential into ``auth.user_identities``.
 
         The AS-initiated login is the same kind of event as an explicit
         identity link — the user has just authorised this deployment against
         Google/Microsoft — so the credential is ciphered into the vault
-        through the same ``IdentityStore`` path.  Best-effort: a vault failure
-        must never break the login or the authorize resume.
+        through the same ``IdentityStore`` path.
+
+        Args:
+            request: The in-flight request; carries the session and ``authdb``.
+            token: The full grant captured during the login negotiation. When
+                ``None`` the legacy behaviour is kept: a PARTIAL TokenResponse
+                carrying only the access token is rebuilt from the session.
+
+        Note:
+            Best-effort — a vault failure logs a warning and must never break
+            the login or the authorize resume (unchanged contract).
         """
         try:
             from navigator_session import get_session
@@ -469,20 +490,32 @@ class ExternalAuth(BaseAuthBackend):
             session = await get_session(request, new=False)
             if not session:
                 return
-            access_token = session.get("auth_token")
-            if not access_token:
-                return
             user_id = session.get("user_id")
             if user_id is None:
                 session_obj = session.get(AUTH_SESSION_OBJECT) or {}
                 user_id = session_obj.get("user_id")
             if user_id is None:
                 return
-            token = TokenResponse(
-                access_token=access_token,
-                token_type=session.get("token_type") or self.scheme,
-                provider_user_id=str(session.get(self.userid_attribute) or ""),
-            )
+            if token is None:
+                access_token = session.get("auth_token")
+                if not access_token:
+                    return
+                token = TokenResponse(
+                    access_token=access_token,
+                    token_type=session.get("token_type") or self.scheme,
+                    provider_user_id=str(
+                        session.get(self.userid_attribute) or ""
+                    ),
+                )
+            if not token.provider_user_id:
+                # FEAT-103 Module 2: never persist an unbound login grant — a
+                # row without provider_user_id cannot be matched by
+                # get_for_provider_account and would disable refresh.
+                self.logger.warning(
+                    f"{self._service_name}: no verified external account id; "
+                    "skipping credential capture."
+                )
+                return
             store = IdentityStore(request.app["authdb"])
             await store.save_linked_identity(
                 user_id, self._service_name, token, {}
@@ -491,6 +524,24 @@ class ExternalAuth(BaseAuthBackend):
             self.logger.warning(
                 f"{self._service_name}: could not vault the upstream token: {err}"
             )
+
+    async def capture_login_credential(
+        self,
+        request: web.Request,
+        token: "TokenResponse",
+    ) -> None:
+        """Vault a credential captured during the login negotiation.
+
+        Called by a backend's ``auth_callback``/``authenticate`` AFTER
+        ``validate_user_info`` has created the session — ``save_linked_identity``
+        keys on the local ``user_id``, which only exists once the session does.
+
+        Marks the request so ``_resume_oauth2_authorize`` skips its partial
+        re-save (which would otherwise overwrite this grant's expiry and
+        scopes, or create a second row under a different account id).
+        """
+        request[CAPTURED_LOGIN_GRANT] = True
+        await self._vault_upstream_token(request, token=token)
 
     # ------------------------------------------------------------------
     # Identity-link flow: a logged-in user authorizes this backend's

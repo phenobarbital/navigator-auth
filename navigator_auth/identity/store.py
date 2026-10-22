@@ -246,6 +246,56 @@ class IdentityStore:
         )
         return rows[0]
 
+    async def get_for_provider_account(
+        self,
+        user_id: Any,
+        provider: str,
+        provider_user_id: Optional[str],
+    ) -> Optional[UserIdentity]:
+        """The enabled credential-bearing identity for one EXACT account.
+
+        Unlike :meth:`get_by_provider`, this never falls back to "the newest
+        linked account": a session bound to external account A must never be
+        refreshed with account B's credential, however recently B was linked
+        (FEAT-103 Module 4).
+
+        Args:
+            user_id: Local Navigator user id.
+            provider: Backend service name (``self._service_name``).
+            provider_user_id: Verified external account id. ``None`` or an
+                empty string returns ``None`` — a legacy row without a
+                binding requires a re-login, it is not a match.
+
+        Returns:
+            The matching ``UserIdentity``, or ``None``.
+        """
+        if not provider_user_id:
+            return None
+        async with await self._pool.acquire() as conn:
+            UserIdentity.Meta.connection = conn
+            try:
+                rows = await UserIdentity.filter(
+                    user_id=user_id,
+                    auth_provider=provider,
+                    provider_user_id=str(provider_user_id),
+                )
+            except NoDataFound:
+                return None
+        rows = [
+            row
+            for row in rows or []
+            if getattr(row, "access_token", None) and getattr(row, "enabled", True)
+        ]
+        if len(rows) > 1:
+            # A partial unique index normally prevents this, but a legacy
+            # table may predate it: surface the integrity problem.
+            logger.warning(
+                "get_for_provider_account: %d enabled credential rows for "
+                "user_id=%s provider=%s; using the first.",
+                len(rows), user_id, provider,
+            )
+        return rows[0] if rows else None
+
     async def delete(self, user_id: Any, identity_id: Any) -> bool:
         async with await self._pool.acquire() as conn:
             UserIdentity.Meta.connection = conn
