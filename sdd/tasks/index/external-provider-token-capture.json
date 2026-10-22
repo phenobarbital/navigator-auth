@@ -187,7 +187,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -202,8 +202,8 @@
       "parallelism_notes": "Module 7, provider-agnostic half. A new file that collides with nothing, but it tests code from six prior tasks, so it is false by the 'extends a prior task' rule.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-111-tests-external-token-capture.md"
+      "completed_at": "2026-10-22T22:14:07+00:00",
+      "file": "sdd/tasks/completed/TASK-111-tests-external-token-capture.md"
     },
     {
       "id": "TASK-112",
