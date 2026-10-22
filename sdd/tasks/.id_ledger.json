@@ -1,6 +1,6 @@
 {
   "next_task_id": 102,
-  "next_feature_id": 103,
-  "updated_at": "2026-10-12T22:04:56+00:00",
-  "updated_by": "fix-organizations-orgid"
+  "next_feature_id": 104,
+  "updated_at": "2026-10-22T17:37:21+00:00",
+  "updated_by": "external-provider-token-capture"
 }
