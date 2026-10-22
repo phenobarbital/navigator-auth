@@ -57,6 +57,26 @@ class TestSQLFile:
         assert "ALTER COLUMN key_version TYPE INTEGER" in sql
         assert "DROP" not in sql.upper()
 
+    def test_base_columns_sql_is_additive_and_guarded(self):
+        """FEAT-103 Module 0: 004 adds the model's base columns, never drops."""
+        sql = (SQL_DIR / "004_identity_base_columns.sql").read_text()
+        assert "ADD COLUMN IF NOT EXISTS" in sql
+        for column in (
+            "identity_id", "display_name", "title", "nickname",
+            "email", "phone", "short_bio", "avatar",
+        ):
+            assert column in sql
+        # The legacy (user_id, uid) PK and the uid column stay put.
+        code = "\n".join(
+            ln for ln in sql.splitlines() if not ln.lstrip().startswith("--")
+        ).upper()
+        assert "DROP" not in code
+        assert "ADD PRIMARY KEY" not in code
+        # Guards: table-absent, and only when identity_id is not already PK.
+        assert "to_regclass('auth.user_identities') IS NULL" in sql
+        assert "contype = 'p'" in sql
+        assert "IS DISTINCT FROM 'identity_id'" in sql
+
 
 class TestEnsureIdentityColumns:
     @pytest.mark.asyncio
@@ -64,11 +84,15 @@ class TestEnsureIdentityColumns:
         pool, conn = _make_pool_async_cm()
         await ensure_identity_columns(pool)
         # FEAT-096 TASK-047: 001 then 002; FEAT-099: 003 (INTEGER key_version).
-        assert conn.execute.await_count == 3
-        first, second, third = (c.args[0] for c in conn.execute.await_args_list)
+        assert conn.execute.await_count == 4
+        # FEAT-103 TASK-102: 004 (base columns).
+        first, second, third, fourth = (
+            c.args[0] for c in conn.execute.await_args_list
+        )
         assert "auth.user_identities" in first
         assert "id_token" in second
         assert "key_version TYPE INTEGER" in third
+        assert "identity_id" in fourth
 
     @pytest.mark.asyncio
     async def test_awaitable_acquire_releases(self):
@@ -81,8 +105,8 @@ class TestEnsureIdentityColumns:
         pool.acquire = MagicMock(side_effect=lambda: _acquire())
         pool.release = AsyncMock()
         await ensure_identity_columns(pool)
-        assert conn.execute.await_count == 3
-        assert pool.release.await_count == 3
+        assert conn.execute.await_count == 4
+        assert pool.release.await_count == 4
         pool.release.assert_awaited_with(conn)
 
 
@@ -98,4 +122,4 @@ class TestSetupIdentityColumns:
     async def test_calls_through(self):
         pool, conn = _make_pool_async_cm()
         await setup_identity_columns(pool)
-        assert conn.execute.await_count == 3
+        assert conn.execute.await_count == 4
