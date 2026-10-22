@@ -23,6 +23,7 @@ from ..conf import (
     AZURE_ADFS_DOMAIN,
     AZURE_ADFS_TENANT_ID,
     AZURE_SESSION_TIMEOUT,
+    AZURE_FLOW_TTL,
     AZURE_MAPPING,
     AZURE_TRUSTED_APPIDS,
 )
@@ -234,12 +235,12 @@ class AzureAuth(ExternalAuth):
                     scopes=SCOPE,
                     redirect_uri=redirect_uri,
                     domain_hint=AZURE_ADFS_DOMAIN,
-                    max_age=int(AZURE_SESSION_TIMEOUT),
+                    max_age=AZURE_SESSION_TIMEOUT,
                 )
                 async with aioredis.Redis(connection_pool=self._pool) as redis:
                     state = flow["state"]
                     flow["internal_redirect"] = redirect
-                    await redis.setex(f"azure_auth_{state}", AZURE_SESSION_TIMEOUT, json_encoder(flow))
+                    await redis.setex(f"azure_auth_{state}", AZURE_FLOW_TTL, json_encoder(flow))
                 login_url = flow["auth_uri"]
                 return self.redirect(login_url)
             except Exception as err:
