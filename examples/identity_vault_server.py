@@ -40,6 +40,13 @@ can see exactly what got mounted.
 stored credential and calls the provider's API with it (Microsoft Graph,
 GitHub, Odoo userinfo, Google userinfo).
 
+**Measuring the login token** — ``GET /api/v1/demo/token-claims`` decodes
+the *timing* claims of ``session["auth_token"]`` (``exp - iat``, plus
+``acrs`` / ``xms_pftexp``) and returns only those, never the token. It is
+the instrument for the FEAT-103 §8 Q1 experiment; the library's own
+``GET /api/v2/user/session`` dumps the whole session payload instead,
+raw ``auth_token`` and ``id_token`` included.
+
 Run it **from the repository root**::
 
     mkdir -p env/dev && touch env/dev/.env    # navconfig needs this once
@@ -118,6 +125,7 @@ import base64  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
 import secrets  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 import aiohttp  # noqa: E402
@@ -128,6 +136,7 @@ from navigator_auth import AuthHandler  # noqa: E402
 from navigator_auth.backends.idp import IdentityProvider  # noqa: E402
 from navigator_auth.conf import (  # noqa: E402
     AUTH_EXCLUDE_LIST_KEY,
+    AZURE_SESSION_TIMEOUT,
     ODOO_DOMAIN,
     ODOO_USERINFO_PATH,
     default_dsn,
@@ -380,6 +389,114 @@ async def provider_whoami(
     )
 
 
+#: Claims the FEAT-103 §8 Q1 experiment is about: the lifetime (``exp - iat``)
+#: plus the freshness claims the spec's *unverified* hypothesis rests on
+#: (``acrs``, ``xms_pftexp``). Everything else in the token is left alone.
+Q1_CLAIMS = ("iat", "exp", "nbf", "auth_time", "acrs", "xms_pftexp", "aud", "appid")
+
+
+def _jwt_claims(token: str) -> dict:
+    """Decode a JWT payload WITHOUT verifying it — a local read, claims only.
+
+    Args:
+        token: A JWT. Signature and audience are deliberately NOT checked:
+            this reads timing claims out of a token the server already holds,
+            it does not accept one from a caller.
+
+    Returns:
+        The decoded payload.
+
+    Raises:
+        ValueError: The string is not a JWT (an opaque provider token).
+    """
+    parts = token.split(".")
+    if len(parts) < 2:
+        raise ValueError("not a JWT: no payload segment")
+    payload = parts[1] + "=" * (-len(parts[1]) % 4)  # restore base64 padding
+    return json.loads(base64.urlsafe_b64decode(payload))
+
+
+@is_authenticated()
+@user_session()
+async def token_claims(
+    request: web.Request, *, session=None, user=None
+) -> web.StreamResponse:
+    """Timing claims of the session's provider access token — never the token.
+
+    The instrument for the FEAT-103 §8 Q1 experiment: *does ``max_age``
+    change the Graph access-token lifetime?* Log in, read
+    ``lifetime_seconds`` here, then log in again with a different
+    ``AZURE_SESSION_TIMEOUT`` and compare::
+
+        AZURE_SESSION_TIMEOUT=36000 PYTHONPATH=$PWD \\
+            python examples/identity_vault_server.py
+
+    A changed lifetime means ``max_age`` is the lever; an unchanged one
+    means the short lifetime is tenant policy. Either way it is a one-line
+    note in spec §7.
+
+    Unlike ``/api/v2/user/session`` — which returns the whole session
+    payload, raw ``auth_token`` and ``id_token`` included — this returns
+    only decoded timing claims, so nothing secret reaches the browser.
+    """
+    if session is None or not (token := session.get("auth_token")):
+        raise web.HTTPNotFound(
+            text=json.dumps(
+                {
+                    "error": "no provider access token in this session",
+                    "hint": "log in through an external provider (Azure) first; "
+                    "a Basic or OAuth2 login has no provider token",
+                }
+            ),
+            content_type="application/json",
+        )
+    try:
+        claims = _jwt_claims(token)
+    except ValueError as err:
+        raise web.HTTPUnprocessableEntity(
+            text=json.dumps(
+                {
+                    "error": str(err),
+                    "hint": "this provider issues opaque access tokens "
+                    "(GitHub does); only a JWT carries iat/exp",
+                }
+            ),
+            content_type="application/json",
+        )
+
+    iat, exp = claims.get("iat"), claims.get("exp")
+    lifetime = exp - iat if isinstance(iat, int) and isinstance(exp, int) else None
+    present = {name: claims[name] for name in Q1_CLAIMS if name in claims}
+    readable = {
+        name: datetime.fromtimestamp(value, timezone.utc).isoformat()
+        for name, value in present.items()
+        if name in ("iat", "exp", "nbf", "auth_time", "xms_pftexp")
+        and isinstance(value, int)
+    }
+    userdata = request.get("userdata") or {}
+    return web.json_response(
+        {
+            # The arm of the experiment this reading belongs to.
+            "max_age": AZURE_SESSION_TIMEOUT,
+            "auth_method": userdata.get("auth_method"),
+            "lifetime_seconds": lifetime,
+            "lifetime_minutes": round(lifetime / 60, 1) if lifetime else None,
+            "reference": "spec §6 measured 419 s (~7 min) with max_age=120",
+            "claims": present,
+            "claims_utc": readable,
+            # Cross-check against what build_user_info published (FEAT-103).
+            "session_markers": {
+                key: session.get(key)
+                for key in (
+                    "external_expires_at",
+                    "has_refresh_token",
+                    "external_provider_user_id",
+                )
+            },
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Startup helpers
 # ---------------------------------------------------------------------------
@@ -476,6 +593,9 @@ def make_app() -> web.Application:
         r"/api/v1/demo/whoami/{provider:[a-z0-9_]+}",
         provider_whoami,
         name="demo_whoami",
+    )
+    app.router.add_get(
+        "/api/v1/demo/token-claims", token_claims, name="demo_token_claims"
     )
 
     # the page shell and its configuration are public; everything else is not.
