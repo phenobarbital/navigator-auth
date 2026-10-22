@@ -462,6 +462,69 @@ class AzureAuth(ExternalAuth):
             token.refresh_token = refresh_token
         return token
 
+    @staticmethod
+    def _explicit_permissions(scopes: Optional[list]) -> set:
+        """Explicitly granted permission names, normalized for comparison.
+
+        Drops MSAL-reserved scopes and ``.default`` selectors (a request
+        selector, never a granted permission) and strips any resource prefix
+        (``https://graph.microsoft.com/Mail.Read`` -> ``mail.read``).
+        """
+        names = set()
+        for scope in scopes or []:
+            name = scope.rsplit("/", 1)[-1].lower()
+            if name in MSAL_RESERVED_SCOPES or name == ".default":
+                continue
+            names.add(name)
+        return names
+
+    async def refresh_provider_tokens(
+        self, token: TokenResponse
+    ) -> Optional[TokenResponse]:
+        """Refresh an Azure LOGIN grant without downgrading its scopes.
+
+        ``refresh_identity_tokens`` asks for ``AZURE_IDENTITY_SCOPES`` (default
+        ``User.Read``), which is correct for an identity LINK and wrong for a
+        login grant that may hold more. This override requests the stored
+        grant's own scopes, minus the MSAL-reserved ones MSAL adds itself.
+
+        Returns:
+            The rotated credential, or ``None`` when the refresh fails or comes
+            back with an explicitly REDUCED permission set (which must not
+            replace the session credential).
+        """
+        if not token.refresh_token:
+            return None
+        requested = [
+            s for s in (token.scopes or []) if s not in MSAL_RESERVED_SCOPES
+        ]
+        if not requested:
+            self.logger.warning(
+                "azure: stored grant records no scopes; falling back to "
+                "identity scopes for the refresh."
+            )
+            requested = self.identity_scopes()
+        cache = msal.SerializableTokenCache()
+        app = self.get_msal_app(token_cache=cache)
+        result = app.acquire_token_by_refresh_token(
+            token.refresh_token, scopes=requested
+        )
+        refreshed = self._token_from_msal_result(
+            result, cache, requested_scopes=requested
+        )
+        if not refreshed.refresh_token:
+            # Entra did not rotate: keep using the current one.
+            refreshed.refresh_token = token.refresh_token
+        held = self._explicit_permissions(token.scopes)
+        granted = self._explicit_permissions(refreshed.scopes)
+        if held and not held <= granted:
+            self.logger.warning(
+                "azure: refresh returned a reduced permission grant "
+                f"(missing: {sorted(held - granted)}); not publishing it."
+            )
+            return None
+        return refreshed
+
     async def logout(self, request):
         pass
 

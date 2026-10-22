@@ -645,6 +645,135 @@ class ExternalAuth(BaseAuthBackend):
             token.refresh_token = refresh_token
         return token
 
+    async def refresh_provider_tokens(
+        self, token: "TokenResponse"
+    ) -> Optional["TokenResponse"]:
+        """Refresh a LOGIN grant, preserving what that grant was issued for.
+
+        Distinct from :meth:`refresh_identity_tokens`, which refreshes an
+        identity-LINK credential and is free to use ``identity_scopes()``. A
+        login grant may hold scopes the identity flow never asks for, and
+        silently downgrading them breaks the consumer that needed them.
+
+        The default implementation delegates to ``refresh_identity_tokens``,
+        which keeps every backend that has not been adapted working exactly as
+        before. Backends whose refresh is scope-sensitive override this
+        (``AzureAuth``).
+
+        Args:
+            token: The decrypted stored credential, including ``scopes``.
+
+        Returns:
+            The rotated credential, or ``None`` when the refresh cannot be
+            completed or its result must not replace the stored grant.
+        """
+        if not token.refresh_token:
+            return None
+        return await self.refresh_identity_tokens(token.refresh_token)
+
+    async def get_live_provider_token(
+        self,
+        request: web.Request,
+        user_id: Any,
+        *,
+        leeway: Optional[int] = None,
+    ) -> Optional["TokenResponse"]:
+        """Return a non-expired provider credential, refreshing if needed.
+
+        The session's provider access token (``session["auth_token"]``) can
+        outlive its usefulness by a factor of hundreds — a measured 7-minute
+        Entra token inside a 100-hour session. A consumer that needs to call
+        the provider calls this instead of reading the session key.
+
+        Args:
+            request: The authenticated request.
+            user_id: Local Navigator user id. MUST match the session's own
+                local user; a mismatch returns ``None``.
+            leeway: Refresh when the credential expires within this many
+                seconds. Defaults to ``IDENTITY_REFRESH_LEEWAY``.
+
+        Returns:
+            A live ``TokenResponse``, or ``None`` when the account binding is
+            missing or mismatched, no credential is stored, or a required
+            refresh cannot complete.
+
+        Note:
+            Never falls back to another linked account, however recently it was
+            linked or refreshed — ``get_by_provider``'s newest-wins selection
+            is deliberately NOT used here.
+        """
+        from navigator_session import get_session
+        from ..identity.store import IdentityStore
+        from ..conf import IDENTITY_REFRESH_LEEWAY
+
+        if leeway is None:
+            leeway = IDENTITY_REFRESH_LEEWAY
+        try:
+            session = await get_session(request, new=False)
+            if not session:
+                return None
+            if session.get("auth_method") != self._service_name:
+                self.logger.warning(
+                    f"{self._service_name}: get_live_provider_token called on a "
+                    f"session authenticated by {session.get('auth_method')!r}."
+                )
+                return None
+            session_user = session.get("user_id")
+            if session_user is None:
+                session_obj = session.get(AUTH_SESSION_OBJECT) or {}
+                session_user = session_obj.get("user_id")
+            if session_user is None or str(session_user) != str(user_id):
+                self.logger.warning(
+                    f"{self._service_name}: user_id does not match the session."
+                )
+                return None
+            provider_user_id = session.get("external_provider_user_id")
+            if not provider_user_id:
+                # A legacy session predating FEAT-103 carries no binding.
+                # Guessing an account is worse than requiring a re-login.
+                self.logger.warning(
+                    f"{self._service_name}: session has no external account "
+                    "binding; re-login required."
+                )
+                return None
+            store = IdentityStore(request.app["authdb"])
+            identity = await store.get_for_provider_account(
+                session_user, self._service_name, provider_user_id
+            )
+            if identity is None:
+                return None
+            token = store.decrypt_credential(identity)
+            if not token.is_expiring(leeway):
+                return token
+            try:
+                refreshed = await self.refresh_provider_tokens(token)
+            except Exception as err:  # pylint: disable=W0703
+                self.logger.warning(
+                    f"{self._service_name}: provider token refresh failed: {err}"
+                )
+                refreshed = None
+            if refreshed is None:
+                # "Expiring" (within leeway) is not "expired": a credential
+                # that is still valid right now remains usable when no refresh
+                # is possible. Only a truly expired one yields None.
+                if not token.is_expiring(0):
+                    return token
+                return None
+            # The vault is the system of record: persist BEFORE publishing to
+            # the session, so a failed write never leaves the session
+            # advertising a credential the vault does not hold.
+            await store.update_tokens(identity, refreshed)
+            session["auth_token"] = refreshed.access_token
+            if refreshed.expires_at is not None:
+                session["external_expires_at"] = refreshed.expires_at.isoformat()
+            session["has_refresh_token"] = bool(refreshed.refresh_token)
+            return refreshed
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(
+                f"{self._service_name}: cannot obtain a live provider token: {err}"
+            )
+            return None
+
     async def get_identity_userinfo(self, token: "TokenResponse") -> dict:
         """Provider userinfo for the linked account (best-effort)."""
         try:
