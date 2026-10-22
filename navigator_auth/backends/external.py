@@ -10,6 +10,7 @@ from datetime import datetime
 from collections.abc import Callable
 import importlib
 from abc import abstractmethod
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse, parse_qs, quote
 from requests.models import PreparedRequest
 import aiohttp
@@ -82,6 +83,16 @@ class OauthUser(AuthUser):
         self.last_name = self.family_name
 
 
+class _RefreshGuard:
+    """One refresh lock, plus how many coroutines hold or await it."""
+
+    __slots__ = ("lock", "users")
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.users = 0
+
+
 class ExternalAuth(BaseAuthBackend):
     """ExternalAuth.
 
@@ -115,6 +126,8 @@ class ExternalAuth(BaseAuthBackend):
         self._issuer: str = None
         self.users_info: str = None
         self.authority: str = None
+        # Per-(user, external account) refresh guards — see _refresh_guard.
+        self._refresh_guards: dict = {}
 
     def configure(self, app):
         # add the callback url
@@ -465,7 +478,7 @@ class ExternalAuth(BaseAuthBackend):
         request: web.Request,
         *,
         token: Optional["TokenResponse"] = None,
-    ) -> None:
+    ) -> bool:
         """Cipher the upstream provider credential into ``auth.user_identities``.
 
         The AS-initiated login is the same kind of event as an explicit
@@ -479,6 +492,11 @@ class ExternalAuth(BaseAuthBackend):
                 ``None`` the legacy behaviour is kept: a PARTIAL TokenResponse
                 carrying only the access token is rebuilt from the session.
 
+        Returns:
+            ``True`` when a credential was written to the vault, ``False``
+            when it was skipped (no session, no local user, no verified
+            external account) or the write failed.
+
         Note:
             Best-effort — a vault failure logs a warning and must never break
             the login or the authorize resume (unchanged contract).
@@ -490,17 +508,17 @@ class ExternalAuth(BaseAuthBackend):
 
             session = await get_session(request, new=False)
             if not session:
-                return
+                return False
             user_id = session.get("user_id")
             if user_id is None:
                 session_obj = session.get(AUTH_SESSION_OBJECT) or {}
                 user_id = session_obj.get("user_id")
             if user_id is None:
-                return
+                return False
             if token is None:
                 access_token = session.get("auth_token")
                 if not access_token:
-                    return
+                    return False
                 token = TokenResponse(
                     access_token=access_token,
                     token_type=session.get("token_type") or self.scheme,
@@ -516,15 +534,17 @@ class ExternalAuth(BaseAuthBackend):
                     f"{self._service_name}: no verified external account id; "
                     "skipping credential capture."
                 )
-                return
+                return False
             store = IdentityStore(request.app["authdb"])
             await store.save_linked_identity(
                 user_id, self._service_name, token, {}
             )
+            return True
         except Exception as err:  # pylint: disable=W0703
             self.logger.warning(
                 f"{self._service_name}: could not vault the upstream token: {err}"
             )
+            return False
 
     async def capture_login_credential(
         self,
@@ -539,10 +559,14 @@ class ExternalAuth(BaseAuthBackend):
 
         Marks the request so ``_resume_oauth2_authorize`` skips its partial
         re-save (which would otherwise overwrite this grant's expiry and
-        scopes, or create a second row under a different account id).
+        scopes, or create a second row under a different account id) — but
+        ONLY once the credential is actually in the vault. A grant that could
+        not be bound to a verified external account writes nothing, and
+        suppressing the legacy re-save in that case would lose a credential
+        the session-rebuilt path can still bind (issue:74b9b67e52df).
         """
-        request[CAPTURED_LOGIN_GRANT] = True
-        await self._vault_upstream_token(request, token=token)
+        if await self._vault_upstream_token(request, token=token):
+            request[CAPTURED_LOGIN_GRANT] = True
 
     # ------------------------------------------------------------------
     # Identity-link flow: a logged-in user authorizes this backend's
@@ -672,6 +696,46 @@ class ExternalAuth(BaseAuthBackend):
             return None
         return await self.refresh_identity_tokens(token.refresh_token)
 
+    @asynccontextmanager
+    async def _refresh_guard(self, user_id: Any, provider_user_id: str):
+        """Serialize the refresh of ONE (user, external account) credential.
+
+        Two coroutines that find the same credential expiring must not both
+        call the provider: a provider that ROTATES refresh tokens makes the
+        old one single-use, so the second call fails and — worse — can
+        invalidate the rotation the first one just stored.
+
+        The guard is created on first use and dropped once nobody holds or
+        awaits it, so the map never outgrows the accounts being refreshed.
+
+        Args:
+            user_id: Local Navigator user id.
+            provider_user_id: Verified external account id.
+
+        Note:
+            In-process only: a second worker still races. What makes that
+            race safe is the re-read INSIDE the guard — the loser sees the
+            winner's rotated credential and returns it instead of refreshing
+            a token the provider has already retired.
+        """
+        # Lazily initialized: a subclass that does not call super().__init__
+        # must still be serialized, not silently left racing.
+        guards = getattr(self, "_refresh_guards", None)
+        if guards is None:
+            guards = self._refresh_guards = {}
+        key = (str(user_id), str(provider_user_id))
+        guard = guards.get(key)
+        if guard is None:
+            guard = guards[key] = _RefreshGuard()
+        guard.users += 1
+        try:
+            async with guard.lock:
+                yield
+        finally:
+            guard.users -= 1
+            if guard.users <= 0:
+                guards.pop(key, None)
+
     async def get_live_provider_token(
         self,
         request: web.Request,
@@ -746,29 +810,53 @@ class ExternalAuth(BaseAuthBackend):
             token = store.decrypt_credential(identity)
             if not token.is_expiring(leeway):
                 return token
-            try:
-                refreshed = await self.refresh_provider_tokens(token)
-            except Exception as err:  # pylint: disable=W0703
-                self.logger.warning(
-                    f"{self._service_name}: provider token refresh failed: {err}"
+            async with self._refresh_guard(session_user, provider_user_id):
+                # Re-read under the guard. A concurrent caller may have
+                # rotated this very credential while we waited, and a rotated
+                # refresh token is single-use — spending the stale copy fails
+                # at the provider (issue:9f45626c2eb4).
+                identity = await store.get_for_provider_account(
+                    session_user, self._service_name, provider_user_id
                 )
-                refreshed = None
-            if refreshed is None:
-                # "Expiring" (within leeway) is not "expired": a credential
-                # that is still valid right now remains usable when no refresh
-                # is possible. Only a truly expired one yields None.
-                if not token.is_expiring(0):
+                if identity is None:
+                    # Unlinked while we waited: nothing left to refresh.
+                    return None
+                token = store.decrypt_credential(identity)
+                if not token.is_expiring(leeway):
                     return token
-                return None
-            # The vault is the system of record: persist BEFORE publishing to
-            # the session, so a failed write never leaves the session
-            # advertising a credential the vault does not hold.
-            await store.update_tokens(identity, refreshed)
-            session["auth_token"] = refreshed.access_token
-            if refreshed.expires_at is not None:
-                session["external_expires_at"] = refreshed.expires_at.isoformat()
-            session["has_refresh_token"] = bool(refreshed.refresh_token)
-            return refreshed
+                try:
+                    refreshed = await self.refresh_provider_tokens(token)
+                except Exception as err:  # pylint: disable=W0703
+                    self.logger.warning(
+                        f"{self._service_name}: provider token refresh "
+                        f"failed: {err}"
+                    )
+                    refreshed = None
+                if refreshed is None:
+                    # "Expiring" (within leeway) is not "expired": a
+                    # credential that is still valid right now remains usable
+                    # when no refresh is possible. Only a truly expired one
+                    # yields None.
+                    if not token.is_expiring(0):
+                        return token
+                    return None
+                # The vault is the system of record: persist BEFORE publishing
+                # to the session, so a failed write never leaves the session
+                # advertising a credential the vault does not hold.
+                await store.update_tokens(identity, refreshed)
+                session["auth_token"] = refreshed.access_token
+                if refreshed.expires_at is not None:
+                    session["external_expires_at"] = (
+                        refreshed.expires_at.isoformat()
+                    )
+                if refreshed.id_token:
+                    # build_user_info published the login id_token under this
+                    # key; leaving it in place would advertise an OIDC token
+                    # older than the access token beside it
+                    # (issue:d73106586c38).
+                    session["id_token"] = refreshed.id_token
+                session["has_refresh_token"] = bool(refreshed.refresh_token)
+                return refreshed
         except Exception as err:  # pylint: disable=W0703
             self.logger.warning(
                 f"{self._service_name}: cannot obtain a live provider token: {err}"

@@ -12,6 +12,7 @@ from navigator_auth.identity.store import (
     cached_credential,
     invalidate_cached,
 )
+from navigator_auth.identity.types import TokenResponse
 
 
 MASTER_KEYS = {1: b"\x00" * 32}
@@ -209,3 +210,49 @@ class TestDuplicateRowOrdering:
         with _patch_filter([older, newer]):
             picked = await _store().get_by_provider(1, "github")
         assert picked is newer
+
+
+class TestUpdateTokens:
+    """issue:d73106586c38 — a refreshed id_token must reach the vault."""
+
+    @staticmethod
+    def _identity(store):
+        identity = MagicMock()
+        identity.user_id = 1
+        identity.auth_provider = "github"
+        identity.provider_user_id = "99"
+        identity.access_token = _enc(store, "AT.old", "access_token")
+        identity.refresh_token = _enc(store, "RT.old", "refresh_token")
+        identity.id_token = _enc(store, "ID.old", "id_token")
+        identity.update = AsyncMock(return_value=identity)
+        return identity
+
+    @pytest.mark.asyncio
+    async def test_refreshed_id_token_is_resealed(self):
+        store = _store()
+        identity = self._identity(store)
+        await store.update_tokens(
+            identity,
+            TokenResponse(
+                access_token="AT.new",
+                refresh_token="RT.new",
+                id_token="ID.new",
+                expires_in=3600,
+            ),
+        )
+        assert store._open(identity, "access_token") == "AT.new"
+        assert store._open(identity, "refresh_token") == "RT.new"
+        assert store._open(identity, "id_token") == "ID.new"
+        identity.update.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_stored_id_token_survives_a_refresh_without_one(self):
+        store = _store()
+        identity = self._identity(store)
+        await store.update_tokens(
+            identity, TokenResponse(access_token="AT.new", expires_in=3600)
+        )
+        assert store._open(identity, "access_token") == "AT.new"
+        # neither secret the refresh omitted was erased
+        assert store._open(identity, "refresh_token") == "RT.old"
+        assert store._open(identity, "id_token") == "ID.old"
