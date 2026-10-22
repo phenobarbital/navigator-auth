@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-103
@@ -241,10 +241,7 @@ Test lives in TASK-111: `test_check_credentials_redacts_provider_tokens`
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: Same block applied in azure.py, github.py, google.py (indent adapted). `auth_token` and `id_token` are masked in place via mask_value (keys retained). FILL IN decision: `data["refresh_token"]` (NAVIGATOR's own) is left in clear -- it is the caller's own credential, indexed in Redis (auth:refresh_token:<tok>) so the caller can use it, spec §5 names only the PROVIDER refresh token, and redacting would silently break callers' refresh. Other backends (adfs, okta, odoo, saml): none builds a `{**data, **userdata}` check_credentials body (grep of `**userdata` in backends/ shows only these three plus unrelated login-return dicts in basic/django/api/troc/noauth) so nothing else to redact. pytest azure+github+google verifier tests: 27 passed (artifacts/logs/TASK-108.log); ruff clean on the 3 files. Redaction test is TASK-111's.
+**Deviations from spec**: none

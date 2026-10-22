@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-103, TASK-104
@@ -510,10 +510,7 @@ Tests live in TASK-112:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: Blocks A-D applied. FILL INs: MSAL_RESERVED_SCOPES placed at module scope just above `class AzureAuth`; the `"token_type" not in result` error branch stays AHEAD of the normalizer (user-visible failed_redirect pages unchanged); the acquire_token_silent cache-hit path does NOT capture (it never returns a refresh_token, and the existing code does nothing with a silent hit anyway). Smoke check of the normalizer printed `r i ['User.Read'] True`. pytest test_azure_token_verifier + tests/unit/identity: 139 passed (artifacts/logs/TASK-105.log); ruff azure.py clean. Behavioural tests are TASK-112.
+**Deviations from spec**: none

@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-105, TASK-106
@@ -384,10 +384,7 @@ This task *is* the test specification; spec §4 "Unit Tests —
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: Appended fixture + 6 spec-named tests and 3 extras (normalizer cache fallback, no-account-id binding, refresh-omits-scope) to tests/test_azure_token_verifier.py; added imports (MagicMock, patch, datetime, AZURE_IDENTITY_SCOPES, TokenResponse). No existing test modified. `pytest tests/test_azure_token_verifier.py`: 16 passed incl. test_check_credentials_audience_bound_regression (artifacts/logs/TASK-112.log); ruff clean. auth_callback tests stub MSAL app, redis pool and capture_login_credential (the vault write itself is covered in TASK-111). The reduced-grant test uses an EXPIRED stored credential so get_live_provider_token returns None; session auth_token asserted unchanged and update_tokens not awaited.
+**Deviations from spec**: none

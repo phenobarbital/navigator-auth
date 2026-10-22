@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: low
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-106, TASK-107, TASK-109
@@ -362,12 +362,9 @@ used.
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Experiment (§8 Q1)**: run / NOT run — <max_age used, measured exp - iat, or why not>
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: Docs half DONE: docs/settings.rst (AZURE_SESSION_TIMEOUT narrowed + AZURE_FLOW_TTL), docs/vault.rst (new "External provider credential capture" section: the four session keys, refresh-token-never-in-session, `session["refresh_token"]` collision warning, get_live_provider_token on-demand semantics, ~850x asymmetry, no cross-account fallback, masked check_credentials), docs/api.rst (client-visible expires_in/expires_at + usr.expires_at, cross-ref to CHANGELOG; CHANGELOG itself not duplicated). Placement: extended vault.rst/api.rst (no new page, so no toctree change). The measured 419 s figure is quoted from the spec §6, not re-measured by me.
+**Docs build NOT verified**: sphinx and docutils are not installed in the shared venv, so `make -C docs html` was not run; the RST was written to match the existing page style but is unbuilt.
+**Experiment (§8 Q1): NOT run.** It needs a live Azure/Entra login by the operator against the real tenant, which this unattended run cannot perform. NOTHING was measured and NO result was written: the spec file was deliberately left unmodified (§7 bullet "The 7-minute lifetime has no verified cause" and §8 Q1 unchanged; §5's experiment criterion remains unchecked). Operator procedure: with AZURE_SESSION_TIMEOUT now independent of the flow TTL, raise it (or remove max_age at AzureAuth.authenticate) locally, log in via the browser flow, decode session["auth_token"] LOCALLY (claims only, never paste/commit it), compute exp - iat; if it differs from 419 s then max_age is the lever (Q1/Q4 share a cause), otherwise the 7 minutes are tenant policy. Record as a one-line note in spec §7 and update §8 Q1 + revision history.
+**Deviations from spec**: spec file not modified (experiment unrun) although the task table lists it as MODIFY; task closed as done-with-issues.

@@ -51,3 +51,25 @@ api
 --------------
 
 .. autofunction:: navigator_auth.storages.abstract.AuthStorage
+
+``Token expiry fields`` (FEAT-103, client-visible change)
+-----------------------------------------------------------
+
+Login, refresh, ephemeral-token and external-callback responses publish:
+
+``expires_in``
+   Integer **seconds remaining** (RFC 6749 section 4.2.2), never below ``0``.
+   Previously these responses carried an absolute epoch under this key, which
+   no client could consume correctly. This extends the existing ``B1`` decision
+   ("expires_in is seconds", ``navigator_auth/backends/oauth2/backend.py``) to
+   the legacy login publishers; the OAuth2 provider backend already behaved
+   this way.
+
+``expires_at``
+   New. Integer absolute epoch of the expiry.
+
+The dynamic user attribute follows the same change: ``request.user.expires_in``
+is now seconds remaining and ``request.user.expires_at`` carries the epoch. That
+attribute is undeclared on ``Identity``, so there is no schema version to bump —
+any consumer that read ``request.user.expires_in`` as a timestamp must switch to
+``expires_at``. See the ``CHANGELOG.md`` entry for the same note.

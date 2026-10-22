@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-104, TASK-105
@@ -466,10 +466,7 @@ Tests live in TASK-111 (`test_get_live_provider_token_returns_cached_when_fresh`
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: Blocks A-C applied. FILL INs: (1) when refresh yields None (or raises), a credential that is expiring-within-leeway but not yet expired (`not is_expiring(0)`) is returned as-is; an already-expired one yields None. A refresh exception is caught inside so this fallback applies to it too. (2) Azure reduced-grant: `_explicit_permissions` drops MSAL-reserved scopes and `.default` selectors and strips resource prefixes (case-insensitive); None is returned if any held explicit permission is missing from the refreshed grant. Hand-run smoke (artifacts/logs/TASK-106.log): refresh requested ['User.Read','Mail.Read'] (no openid; not AZURE_IDENTITY_SCOPES); dropping Mail.Read -> None; full grant -> rotated token with refresh token retained. pytest identity+azure verifier: 139 passed; ruff azure.py clean, external.py only the 2 pre-existing F841. Real tests are TASK-111/112.
+**Deviations from spec**: `leeway` signature is `Optional[int]=None` resolving to IDENTITY_REFRESH_LEEWAY (as in the task blueprint) rather than a module-level default in the spec's sketch.

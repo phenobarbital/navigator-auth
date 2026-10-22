@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -375,10 +375,48 @@ See Block C/D above. The static-SQL tests go in the existing
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: Added 004 (additive ADD COLUMN IF NOT EXISTS for 8 columns, NULL backfill, guarded DO block with to_regclass + PK-introspection guard), registered it, updated test counts to 4, added static-SQL assertions. `pytest tests/unit/identity/test_identity_migrations.py`: 9 passed (artifacts/logs/TASK-102.log). `examples/sql/identity_vault_schema.sql` already carries all 8 columns: unchanged.
+**Manual DB proof NOT performed**: the only reachable database is the shared `navigator` dev DB at nav-api.dev.local (no local Postgres/psql here); running DDL against it was not authorised for this run. The three outcomes (legacy table -> save_linked_identity succeeds; second run no-op; canonical DB no-op) remain UNVERIFIED and are left to the operator.
+**Pre-existing**: `ruff check navigator_auth/identity/` reports 1 F401 in flow_store.py (not touched by this task).
+**Deviations from spec**: the spec says "promote identity_id to PRIMARY KEY only when the PK isn't already identity_id" while also keeping the legacy (user_id, uid) PK; a table can have one PK, so on a legacy table 004 adds a UNIQUE index `uq_user_identities_identity_id` instead (least destructive, per the task's FILL IN guidance). Concern for operator: if legacy `uid` is NOT NULL without default, model INSERTs (which omit uid) would still fail; unverified against the real table.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
+### Addendum — 2026-10-23, legacy `uid` blocker confirmed and fixed
 
-**Deviations from spec**: none | describe if any
+The concern raised above ("if legacy `uid` is NOT NULL without default, model
+INSERTs would still fail") was **confirmed against the real table** and fixed.
+
+Inspection of `auth.user_identities` on the `navigator` dev DB:
+`uid` is `character varying` (unbounded), `is_nullable = NO`,
+`column_default = NULL`, and the primary key is still `(user_id, uid)`.
+004 is applied there (all 8 base columns plus
+`uq_user_identities_identity_id` are present).
+
+**Fix**: `005_identity_legacy_uid_default.sql` sets a surrogate
+`DEFAULT gen_random_uuid()::varchar` on `uid`, guarded on three axes (table
+absent, column absent i.e. canonical DB, default already set). Nothing is
+dropped; the legacy PK, the column and every existing row are untouched.
+`uid` has no reader — the canonical DDL has no such column and nothing in
+`navigator_auth` selects or writes it.
+
+**Manual DB proof — now performed** for two of the three outcomes, inside a
+transaction that was rolled back so the shared dev DB was left byte-identical:
+
+1. *legacy table → the model-shaped insert succeeds*: **VERIFIED**. Before 005
+   the insert raises `NotNullViolationError: null value in column "uid" ...`;
+   after 005 it succeeds with `uid` auto-filled.
+2. *second run is a no-op*: **VERIFIED** — three consecutive runs of 005 leave
+   a single unchanged default, and the `column_default IS NULL` guard means no
+   `ALTER` is issued after the first.
+3. *canonical database is a no-op*: **STILL UNVERIFIED** — no canonical
+   database is reachable from here. The guard is covered by a static-SQL test
+   only.
+
+Note the dev DB does **not** yet carry the default: the proof transaction was
+rolled back, so 005 applies there on the next application startup via
+`ensure_identity_columns`.
+
+Tests: `pytest tests/unit/identity/ tests/test_identity_id_token.py` → 173
+passed. Also removed an unused `pathlib.Path` import left in
+`tests/unit/identity/test_identity_migrations.py`.

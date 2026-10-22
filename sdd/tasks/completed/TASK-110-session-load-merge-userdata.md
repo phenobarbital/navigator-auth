@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -360,10 +360,9 @@ TASK-111, not here.
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: CROSS-REPO. To avoid putting a half-edited tree behind the shared editable install, the navigator-session work was done in a separate git worktree `/home/jesuslara/proyectos/navigator-session-FEAT103-wt` on new branch `feat/FEAT-103-load-session-merge-userdata` (from main @ 97a1763). Commit `5c7cf9f` there: `RedisStorage.load_session(..., merge_userdata: bool = False)` -- after ghost-session validation and before SessionData construction, `data = {**data, **userdata}` when merge_userdata is True and userdata is non-empty; `version.py` 1.1.0 -> 1.1.1; new `tests/test_redis_load_session_merge.py` (3 tests: merges, default unchanged, no-payload still seeds new_session). The live checkout `/home/jesuslara/proyectos/navigator-session` was NOT modified (still `main`, clean) so the editable install is unaffected. NOT pushed, NOT merged, NO release. Tests: navigator-session 344 passed (with PYTHONPATH at the worktree); navigator-auth full suite with that PYTHONPATH: 37 failed / 1520 passed, FAILED set identical to the dev baseline. navigator-auth side: pyproject.toml:52 floor >=1.1.1 (editable override at ~:142 untouched; uv.lock not regenerated).
+FILL IN: `session[SESSION_KEY] = session_id` (redis.py ~:221) left untouched; it runs after the merge and re-sets the key regardless, so a merged SESSION_KEY cannot rebind the identity.
+**Left for operator**: review/merge branch `feat/FEAT-103-load-session-merge-userdata` in navigator-session, tag/release 1.1.1 to the index (until then CI/prod resolution of navigator-auth with floor >=1.1.1 will FAIL to resolve), then `git worktree remove /home/jesuslara/proyectos/navigator-session-FEAT103-wt`; regenerate uv.lock if desired.
+**Deviations from spec**: used a separate git worktree for the navigator-session branch instead of switching the live checkout's branch (safer for the shared editable install); `auth.py:494` is intentionally not opted in.

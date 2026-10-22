@@ -19,6 +19,8 @@ _MIGRATION_FILES = (
     "001_identity_credentials.sql",
     "002_identity_id_token.sql",
     "003_identity_key_version_integer.sql",
+    "004_identity_base_columns.sql",
+    "005_identity_legacy_uid_default.sql",
 )
 
 

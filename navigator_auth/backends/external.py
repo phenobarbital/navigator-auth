@@ -6,6 +6,7 @@ Abstract Model to any Oauth2 or external Auth Support.
 import asyncio
 import secrets
 from typing import Any, Optional
+from datetime import datetime
 from collections.abc import Callable
 import importlib
 from abc import abstractmethod
@@ -38,6 +39,7 @@ from ..conf import (
     REDIS_AUTH_URL,
 )
 from .abstract import BaseAuthBackend
+from ..libs.expiry import expiry_fields
 from . import jwksutils
 
 #: FEAT-096 TASK-048 — reason codes surfaced in InvalidAuth messages/logs
@@ -61,6 +63,9 @@ EXCHANGE_REASONS = frozenset(
 #: authorize request across the provider round-trip.  Only the handle
 #: travels in the browser; the request itself stays in IdentityFlowStore.
 OAUTH2_RESUME_COOKIE: str = "nav_oauth2_flow"
+#: FEAT-103 Module 2 — set on the request once a login grant has been vaulted,
+#: so the OAuth2-AS resume does not re-save a partial TokenResponse over it.
+CAPTURED_LOGIN_GRANT = "_nav_captured_login_grant"
 
 #: IdentityFlowStore key holding the parked authorize request.
 OAUTH2_PENDING_FLOW_KEY: str = "oauth2_pending_{flow_id}"
@@ -436,8 +441,12 @@ class ExternalAuth(BaseAuthBackend):
             return response
 
         # Best-effort: persist the upstream credential in the Identity Vault,
-        # exactly as the identity-link flow does.
-        await self._vault_upstream_token(request)
+        # exactly as the identity-link flow does — UNLESS the login already
+        # captured the full grant (FEAT-103 Module 2). Re-saving the partial,
+        # session-rebuilt TokenResponse here would drop the captured expiry and
+        # scopes, or create a second row under a different account id.
+        if not request.get(CAPTURED_LOGIN_GRANT, False):
+            await self._vault_upstream_token(request)
 
         domain_url = self.get_domain(request)
         resume_url = f"{domain_url}/oauth2/authorize?flow={quote(flow_id)}"
@@ -451,14 +460,28 @@ class ExternalAuth(BaseAuthBackend):
         self.logger.notice(f"OAuth2 AS: resuming authorize flow {flow_id}")
         return response
 
-    async def _vault_upstream_token(self, request: web.Request) -> None:
-        """Store the upstream provider token in ``auth.user_identities``.
+    async def _vault_upstream_token(
+        self,
+        request: web.Request,
+        *,
+        token: Optional["TokenResponse"] = None,
+    ) -> None:
+        """Cipher the upstream provider credential into ``auth.user_identities``.
 
         The AS-initiated login is the same kind of event as an explicit
         identity link — the user has just authorised this deployment against
         Google/Microsoft — so the credential is ciphered into the vault
-        through the same ``IdentityStore`` path.  Best-effort: a vault failure
-        must never break the login or the authorize resume.
+        through the same ``IdentityStore`` path.
+
+        Args:
+            request: The in-flight request; carries the session and ``authdb``.
+            token: The full grant captured during the login negotiation. When
+                ``None`` the legacy behaviour is kept: a PARTIAL TokenResponse
+                carrying only the access token is rebuilt from the session.
+
+        Note:
+            Best-effort — a vault failure logs a warning and must never break
+            the login or the authorize resume (unchanged contract).
         """
         try:
             from navigator_session import get_session
@@ -468,20 +491,32 @@ class ExternalAuth(BaseAuthBackend):
             session = await get_session(request, new=False)
             if not session:
                 return
-            access_token = session.get("auth_token")
-            if not access_token:
-                return
             user_id = session.get("user_id")
             if user_id is None:
                 session_obj = session.get(AUTH_SESSION_OBJECT) or {}
                 user_id = session_obj.get("user_id")
             if user_id is None:
                 return
-            token = TokenResponse(
-                access_token=access_token,
-                token_type=session.get("token_type") or self.scheme,
-                provider_user_id=str(session.get(self.userid_attribute) or ""),
-            )
+            if token is None:
+                access_token = session.get("auth_token")
+                if not access_token:
+                    return
+                token = TokenResponse(
+                    access_token=access_token,
+                    token_type=session.get("token_type") or self.scheme,
+                    provider_user_id=str(
+                        session.get(self.userid_attribute) or ""
+                    ),
+                )
+            if not token.provider_user_id:
+                # FEAT-103 Module 2: never persist an unbound login grant — a
+                # row without provider_user_id cannot be matched by
+                # get_for_provider_account and would disable refresh.
+                self.logger.warning(
+                    f"{self._service_name}: no verified external account id; "
+                    "skipping credential capture."
+                )
+                return
             store = IdentityStore(request.app["authdb"])
             await store.save_linked_identity(
                 user_id, self._service_name, token, {}
@@ -490,6 +525,24 @@ class ExternalAuth(BaseAuthBackend):
             self.logger.warning(
                 f"{self._service_name}: could not vault the upstream token: {err}"
             )
+
+    async def capture_login_credential(
+        self,
+        request: web.Request,
+        token: "TokenResponse",
+    ) -> None:
+        """Vault a credential captured during the login negotiation.
+
+        Called by a backend's ``auth_callback``/``authenticate`` AFTER
+        ``validate_user_info`` has created the session — ``save_linked_identity``
+        keys on the local ``user_id``, which only exists once the session does.
+
+        Marks the request so ``_resume_oauth2_authorize`` skips its partial
+        re-save (which would otherwise overwrite this grant's expiry and
+        scopes, or create a second row under a different account id).
+        """
+        request[CAPTURED_LOGIN_GRANT] = True
+        await self._vault_upstream_token(request, token=token)
 
     # ------------------------------------------------------------------
     # Identity-link flow: a logged-in user authorizes this backend's
@@ -593,6 +646,135 @@ class ExternalAuth(BaseAuthBackend):
             token.refresh_token = refresh_token
         return token
 
+    async def refresh_provider_tokens(
+        self, token: "TokenResponse"
+    ) -> Optional["TokenResponse"]:
+        """Refresh a LOGIN grant, preserving what that grant was issued for.
+
+        Distinct from :meth:`refresh_identity_tokens`, which refreshes an
+        identity-LINK credential and is free to use ``identity_scopes()``. A
+        login grant may hold scopes the identity flow never asks for, and
+        silently downgrading them breaks the consumer that needed them.
+
+        The default implementation delegates to ``refresh_identity_tokens``,
+        which keeps every backend that has not been adapted working exactly as
+        before. Backends whose refresh is scope-sensitive override this
+        (``AzureAuth``).
+
+        Args:
+            token: The decrypted stored credential, including ``scopes``.
+
+        Returns:
+            The rotated credential, or ``None`` when the refresh cannot be
+            completed or its result must not replace the stored grant.
+        """
+        if not token.refresh_token:
+            return None
+        return await self.refresh_identity_tokens(token.refresh_token)
+
+    async def get_live_provider_token(
+        self,
+        request: web.Request,
+        user_id: Any,
+        *,
+        leeway: Optional[int] = None,
+    ) -> Optional["TokenResponse"]:
+        """Return a non-expired provider credential, refreshing if needed.
+
+        The session's provider access token (``session["auth_token"]``) can
+        outlive its usefulness by a factor of hundreds — a measured 7-minute
+        Entra token inside a 100-hour session. A consumer that needs to call
+        the provider calls this instead of reading the session key.
+
+        Args:
+            request: The authenticated request.
+            user_id: Local Navigator user id. MUST match the session's own
+                local user; a mismatch returns ``None``.
+            leeway: Refresh when the credential expires within this many
+                seconds. Defaults to ``IDENTITY_REFRESH_LEEWAY``.
+
+        Returns:
+            A live ``TokenResponse``, or ``None`` when the account binding is
+            missing or mismatched, no credential is stored, or a required
+            refresh cannot complete.
+
+        Note:
+            Never falls back to another linked account, however recently it was
+            linked or refreshed — ``get_by_provider``'s newest-wins selection
+            is deliberately NOT used here.
+        """
+        from navigator_session import get_session
+        from ..identity.store import IdentityStore
+        from ..conf import IDENTITY_REFRESH_LEEWAY
+
+        if leeway is None:
+            leeway = IDENTITY_REFRESH_LEEWAY
+        try:
+            session = await get_session(request, new=False)
+            if not session:
+                return None
+            if session.get("auth_method") != self._service_name:
+                self.logger.warning(
+                    f"{self._service_name}: get_live_provider_token called on a "
+                    f"session authenticated by {session.get('auth_method')!r}."
+                )
+                return None
+            session_user = session.get("user_id")
+            if session_user is None:
+                session_obj = session.get(AUTH_SESSION_OBJECT) or {}
+                session_user = session_obj.get("user_id")
+            if session_user is None or str(session_user) != str(user_id):
+                self.logger.warning(
+                    f"{self._service_name}: user_id does not match the session."
+                )
+                return None
+            provider_user_id = session.get("external_provider_user_id")
+            if not provider_user_id:
+                # A legacy session predating FEAT-103 carries no binding.
+                # Guessing an account is worse than requiring a re-login.
+                self.logger.warning(
+                    f"{self._service_name}: session has no external account "
+                    "binding; re-login required."
+                )
+                return None
+            store = IdentityStore(request.app["authdb"])
+            identity = await store.get_for_provider_account(
+                session_user, self._service_name, provider_user_id
+            )
+            if identity is None:
+                return None
+            token = store.decrypt_credential(identity)
+            if not token.is_expiring(leeway):
+                return token
+            try:
+                refreshed = await self.refresh_provider_tokens(token)
+            except Exception as err:  # pylint: disable=W0703
+                self.logger.warning(
+                    f"{self._service_name}: provider token refresh failed: {err}"
+                )
+                refreshed = None
+            if refreshed is None:
+                # "Expiring" (within leeway) is not "expired": a credential
+                # that is still valid right now remains usable when no refresh
+                # is possible. Only a truly expired one yields None.
+                if not token.is_expiring(0):
+                    return token
+                return None
+            # The vault is the system of record: persist BEFORE publishing to
+            # the session, so a failed write never leaves the session
+            # advertising a credential the vault does not hold.
+            await store.update_tokens(identity, refreshed)
+            session["auth_token"] = refreshed.access_token
+            if refreshed.expires_at is not None:
+                session["external_expires_at"] = refreshed.expires_at.isoformat()
+            session["has_refresh_token"] = bool(refreshed.refresh_token)
+            return refreshed
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(
+                f"{self._service_name}: cannot obtain a live provider token: {err}"
+            )
+            return None
+
     async def get_identity_userinfo(self, token: "TokenResponse") -> dict:
         """Provider userinfo for the linked account (best-effort)."""
         try:
@@ -665,18 +847,45 @@ class ExternalAuth(BaseAuthBackend):
     async def finish_logout(self, request: web.Request):
         """finish_logout, Finish Logout Method."""
 
-    def build_user_info(self, userdata: dict, token: str, mapping: dict) -> tuple:
+    def build_user_info(
+        self,
+        userdata: dict,
+        token: str,
+        mapping: dict,
+        *,
+        id_token: Optional[str] = None,
+        refresh_token: Optional[str] = None,
+        expires_at: Optional[datetime] = None,
+        provider_user_id: Optional[str] = None,
+    ) -> tuple:
         """build_user_info.
             Get user or validate user from User Model.
         Args:
             userdata (Dict): User data gets from Auth Backend.
             token (str): User token gets from Auth Backend.
             mapping (dict): User mapping gets from Auth Backend.
+            id_token (str, optional): Provider OIDC ID token, published in the
+                session as ``id_token``. Keyword-only.
+            refresh_token (str, optional): Provider refresh token. Used ONLY to
+                set ``has_refresh_token``; the secret itself is NEVER written
+                into ``userdata`` — it goes to the ciphered vault instead
+                (FEAT-103 Module 2). Keyword-only.
+            expires_at (datetime, optional): Real expiry of ``token``, published
+                as the ISO-8601 string ``external_expires_at``. Keyword-only.
+            provider_user_id (str, optional): Verified external account id,
+                published as ``external_provider_user_id`` and used by
+                ``get_live_provider_token`` to bind a session to exactly one
+                linked account. Keyword-only.
         Returns:
             Tuple: user_id and user_data.
         Raises:
             UserNotFound: when user doesn't exists on Backend.
             ValueError: User doesn't have username attributes.
+
+        Note:
+            All four capture arguments default to ``None`` and each new key is
+            written only when its argument was supplied, so the existing
+            3-argument call sites produce byte-identical output.
         """
         # Get data for user mapping:
         userdata = self.get_user_mapping(user=userdata, mapping=mapping)
@@ -695,6 +904,19 @@ class ExternalAuth(BaseAuthBackend):
         # set original token in userdata
         userdata["auth_token"] = token
         userdata["token_type"] = self.scheme
+        # FEAT-103 Module 1 — additive provider-credential capture.
+        # NOTE: the provider refresh token is deliberately NOT stored here.
+        # `refresh_token` in this dict is NAVIGATOR's own refresh token
+        # (validate_user_info) and auth.py indexes it in Redis for 90 days;
+        # writing the provider's secret there would corrupt Navigator's flow.
+        if id_token is not None:
+            userdata["id_token"] = id_token
+        if expires_at is not None:
+            userdata["external_expires_at"] = expires_at.isoformat()
+        if refresh_token is not None:
+            userdata["has_refresh_token"] = bool(refresh_token)
+        if provider_user_id is not None:
+            userdata["external_provider_user_id"] = str(provider_user_id)
         return (userdata, userid)
 
     async def validate_user_info(self, request: web.Request, user_id: Any, userdata: Any, token: str) -> dict:
@@ -763,7 +985,13 @@ class ExternalAuth(BaseAuthBackend):
             }
             # Create the User Token.
             token, refresh_token, exp, scheme = self._idp.create_token(data=payload)
-            return {"token": token, "refresh_token": refresh_token, "type": scheme, "expires_in": exp, **userdata}
+            return {
+                "token": token,
+                "refresh_token": refresh_token,
+                "type": scheme,
+                **expiry_fields(exp),
+                **userdata,
+            }
         except Exception as err:
             logging.exception(str(err))
             raise

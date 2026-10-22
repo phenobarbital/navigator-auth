@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-103, TASK-104, TASK-106, TASK-107, TASK-108, TASK-109
@@ -580,10 +580,9 @@ and the `msal_result_full` fixture shape (spec §4 "Test Data / Fixtures").
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: 21 spec-named tests + extras (29 collected incl. parametrization, plus `test_vault_upstream_token_legacy_fallback_rebuilds_from_session`, `test_oauth2_resume_without_capture_keeps_legacy_save` control, `test_noauth_publisher_returns_seconds_not_epoch`). `pytest tests/unit/identity/test_external_token_capture.py`: 29 passed (artifacts/logs/TASK-111.log). Full suite 37 failed / 1549 passed; FAILED set identical to dev baseline. ruff clean on the file. All mock-based (no DB/Redis/cipher).
+**Execution vs inspection**: test_user_object_expires_in_is_seconds -- EXECUTED for noauth.py only; basic.py, troc.py, token.py asserted BY INSPECTION of source (expiry_fields use, no raw `expires_in = exp`). Redaction: all three (azure, github, google) EXECUTED via real check_credentials with stubbed verify/build/validate. test_azure_flow_ttl EXECUTED via AzureAuth.authenticate with patched AZURE_FLOW_TTL/AZURE_SESSION_TIMEOUT. Session-write invariant EXECUTED via AuthHandler.api_login with spies (asserts order remember -> load_session). The B1 test also string-checks oauth2/backend.py source for the B1 expression.
+Added `pytestmark` DeprecationWarning ignore (aiohttp/JSONResponse under filterwarnings=error).
+**Deviations from spec**: none

@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-102, TASK-103
@@ -441,10 +441,7 @@ Tests live in TASK-111: `test_vault_upstream_token_uses_passed_tokenresponse`,
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: Implemented Blocks A-D. FILL IN resolved: >1 matching row logs a warning and takes rows[0]. `capture_login_credential` is the helper TASK-105 must call from the Azure paths; the login-path call itself lives there (this task only provides the helper + marker). pytest tests/unit/identity + test_azure_token_verifier: 139 passed (artifacts/logs/TASK-104.log). ruff: only the 2 pre-existing F841 (now at external.py:1143/1145). New tests are TASK-111's.
+**Deviations from spec**: none

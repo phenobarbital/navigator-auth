@@ -14,16 +14,16 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
       "parallel": true,
-      "parallelism_notes": "Module 0. Touches only navigator_auth/identity/sql/, identity/migrations.py and tests/unit/identity/test_identity_migrations.py \u2014 no file shared with any other task in this spec. Safe in its own worktree, and the spec's Worktree Strategy wants it to land first because G2 (the vault write) is unreachable until it does.",
+      "parallelism_notes": "Module 0. Touches only navigator_auth/identity/sql/, identity/migrations.py and tests/unit/identity/test_identity_migrations.py — no file shared with any other task in this spec. Safe in its own worktree, and the spec's Worktree Strategy wants it to land first because G2 (the vault write) is unreachable until it does.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-102-identity-base-columns-migration.md"
+      "completed_at": "2026-10-22T22:01:23+00:00",
+      "file": "sdd/tasks/completed/TASK-102-identity-base-columns-migration.md"
     },
     {
       "id": "TASK-103",
@@ -32,7 +32,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -40,17 +40,17 @@
       "parallelism_notes": "Module 1. Edits navigator_auth/backends/external.py, which TASK-104, TASK-106 and TASK-107 also edit. First in the 1->2->3 chain, so it must land before them rather than beside them.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-103-build-user-info-capture-kwargs.md"
+      "completed_at": "2026-10-22T22:02:18+00:00",
+      "file": "sdd/tasks/completed/TASK-103-build-user-info-capture-kwargs.md"
     },
     {
       "id": "TASK-104",
       "slug": "generalized-vaulting",
-      "title": "Generalized vaulting \u2014 explicit TokenResponse + exact-account lookup",
+      "title": "Generalized vaulting — explicit TokenResponse + exact-account lookup",
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -61,8 +61,8 @@
       "parallelism_notes": "Module 2. Extends TASK-103's signature and needs TASK-102's table shape to write at all. Shares external.py with TASK-103/106/107 and identity/store.py with TASK-106.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-104-generalized-vaulting.md"
+      "completed_at": "2026-10-22T22:02:54+00:00",
+      "file": "sdd/tasks/completed/TASK-104-generalized-vaulting.md"
     },
     {
       "id": "TASK-105",
@@ -71,7 +71,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -79,20 +79,20 @@
         "TASK-104"
       ],
       "parallel": false,
-      "parallelism_notes": "Module 3. Calls TASK-103's kwargs and TASK-104's capture_login_credential. Edits navigator_auth/backends/azure.py, shared with TASK-108 (redaction) and TASK-109 (AZURE_FLOW_TTL) \u2014 the spec says to sequence those, not run them concurrently.",
+      "parallelism_notes": "Module 3. Calls TASK-103's kwargs and TASK-104's capture_login_credential. Edits navigator_auth/backends/azure.py, shared with TASK-108 (redaction) and TASK-109 (AZURE_FLOW_TTL) — the spec says to sequence those, not run them concurrently.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-105-azure-token-capture-wiring.md"
+      "completed_at": "2026-10-22T22:03:42+00:00",
+      "file": "sdd/tasks/completed/TASK-105-azure-token-capture-wiring.md"
     },
     {
       "id": "TASK-106",
       "slug": "get-live-provider-token",
-      "title": "On-demand refresh \u2014 get_live_provider_token + refresh_provider_tokens",
+      "title": "On-demand refresh — get_live_provider_token + refresh_provider_tokens",
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -103,17 +103,17 @@
       "parallelism_notes": "Module 4. Needs TASK-104's get_for_provider_account and TASK-105's scope capture. Edits both external.py and azure.py.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-106-get-live-provider-token.md"
+      "completed_at": "2026-10-22T22:05:05+00:00",
+      "file": "sdd/tasks/completed/TASK-106-get-live-provider-token.md"
     },
     {
       "id": "TASK-107",
       "slug": "expires-in-seconds-b1",
-      "title": "Extend convention B1 \u2014 expires_in is seconds, expires_at is the epoch",
+      "title": "Extend convention B1 — expires_in is seconds, expires_at is the epoch",
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [],
@@ -121,8 +121,8 @@
       "parallelism_notes": "Module 5. Functionally independent of 1-4, but edits external.py:766 (shared with TASK-103/104/106) plus auth.py, basic.py, troc.py, noauth.py, token.py. The spec requires coordinating those shared-file edits, so it is sequenced rather than parallel.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-107-expires-in-seconds-b1.md"
+      "completed_at": "2026-10-22T22:08:23+00:00",
+      "file": "sdd/tasks/completed/TASK-107-expires-in-seconds-b1.md"
     },
     {
       "id": "TASK-108",
@@ -131,18 +131,18 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [
         "TASK-103"
       ],
       "parallel": false,
-      "parallelism_notes": "Module 6. Needs only TASK-103's key names (fixed in spec \u00a72), but edits azure.py, github.py and google.py \u2014 azure.py is shared with TASK-105 and TASK-109.",
+      "parallelism_notes": "Module 6. Needs only TASK-103's key names (fixed in spec §2), but edits azure.py, github.py and google.py — azure.py is shared with TASK-105 and TASK-109.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-108-redact-check-credentials.md"
+      "completed_at": "2026-10-22T22:08:51+00:00",
+      "file": "sdd/tasks/completed/TASK-108-redact-check-credentials.md"
     },
     {
       "id": "TASK-109",
@@ -151,16 +151,16 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [],
       "parallel": false,
-      "parallelism_notes": "Module 8. No code dependency, but edits conf.py and azure.py:212/217 \u2014 azure.py is shared with TASK-105 and TASK-108. Spec Module 8: 'sequence it with 3 rather than running it concurrently'. Unblocks TASK-113's Q1 experiment.",
+      "parallelism_notes": "Module 8. No code dependency, but edits conf.py and azure.py:212/217 — azure.py is shared with TASK-105 and TASK-108. Spec Module 8: 'sequence it with 3 rather than running it concurrently'. Unblocks TASK-113's Q1 experiment.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-109-azure-flow-ttl-split.md"
+      "completed_at": "2026-10-22T22:09:21+00:00",
+      "file": "sdd/tasks/completed/TASK-109-azure-flow-ttl-split.md"
     },
     {
       "id": "TASK-110",
@@ -169,25 +169,25 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [],
       "parallel": true,
-      "parallelism_notes": "Module 9. Changes a DIFFERENT distribution (/home/jesuslara/proyectos/navigator-session) plus this repo's pyproject.toml:52 floor \u2014 no source file shared with any other task. Note the shared .venv is editable-installed against that repo, so the edit is live for every session on this machine while it exists; work on a branch there and never 'uv sync' in a worktree.",
+      "parallelism_notes": "Module 9. Changes a DIFFERENT distribution (/home/jesuslara/proyectos/navigator-session) plus this repo's pyproject.toml:52 floor — no source file shared with any other task. Note the shared .venv is editable-installed against that repo, so the edit is live for every session on this machine while it exists; work on a branch there and never 'uv sync' in a worktree.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-110-session-load-merge-userdata.md"
+      "completed_at": "2026-10-22T22:10:58+00:00",
+      "file": "sdd/tasks/completed/TASK-110-session-load-merge-userdata.md"
     },
     {
       "id": "TASK-111",
       "slug": "tests-external-token-capture",
-      "title": "Unit tests \u2014 tests/unit/identity/test_external_token_capture.py",
+      "title": "Unit tests — tests/unit/identity/test_external_token_capture.py",
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -202,17 +202,17 @@
       "parallelism_notes": "Module 7, provider-agnostic half. A new file that collides with nothing, but it tests code from six prior tasks, so it is false by the 'extends a prior task' rule.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-111-tests-external-token-capture.md"
+      "completed_at": "2026-10-22T22:14:07+00:00",
+      "file": "sdd/tasks/completed/TASK-111-tests-external-token-capture.md"
     },
     {
       "id": "TASK-112",
       "slug": "tests-azure-capture-refresh",
-      "title": "Azure tests \u2014 MSAL capture, cache fallback and scope-preserving refresh",
+      "title": "Azure tests — MSAL capture, cache fallback and scope-preserving refresh",
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -223,17 +223,17 @@
       "parallelism_notes": "Module 7, Azure half. Sole editor of tests/test_azure_token_verifier.py, but it exercises TASK-105's normalizer and TASK-106's refresh hook.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-112-tests-azure-capture-refresh.md"
+      "completed_at": "2026-10-22T22:14:54+00:00",
+      "file": "sdd/tasks/completed/TASK-112-tests-azure-capture-refresh.md"
     },
     {
       "id": "TASK-113",
       "slug": "docs-changelog-maxage-experiment",
-      "title": "Docs, and run the \u00a78 Q1 max_age experiment",
+      "title": "Docs, and run the §8 Q1 max_age experiment",
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done-with-issues",
       "priority": "low",
       "effort": "S",
       "depends_on": [
@@ -242,11 +242,11 @@
         "TASK-109"
       ],
       "parallel": true,
-      "parallelism_notes": "Edits docs/*.rst and the spec's \u00a77/\u00a78 only \u2014 no source or test file shared with any task. Depends on TASK-109 because the Q1 experiment is impossible until max_age is adjustable independently of the flow TTL. The experiment itself needs a live Azure login by the operator and must not be fabricated.",
+      "parallelism_notes": "Edits docs/*.rst and the spec's §7/§8 only — no source or test file shared with any task. Depends on TASK-109 because the Q1 experiment is impossible until max_age is adjustable independently of the flow TTL. The experiment itself needs a live Azure login by the operator and must not be fabricated.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-113-docs-changelog-maxage-experiment.md"
+      "completed_at": "2026-10-22T22:15:42+00:00",
+      "file": "sdd/tasks/completed/TASK-113-docs-changelog-maxage-experiment.md"
     }
   ]
 }

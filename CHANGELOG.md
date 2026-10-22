@@ -1,5 +1,22 @@
 # Unreleased
 
+- **`expires_in` is now seconds-remaining; new `expires_at` (FEAT-103,
+  client-visible behaviour change).** Login, refresh, ephemeral-token and
+  external-callback responses published the absolute expiry epoch (a float)
+  under the key `expires_in`, which RFC 6749 §4.2.2 defines as a duration.
+  `expires_in` is now an integer number of seconds remaining (never below 0)
+  and the absolute instant is published alongside as the new integer
+  `expires_at`. This extends the existing B1 decision
+  (`backends/oauth2/backend.py`: "expires_in is seconds") to the legacy login
+  publishers (`external`, `auth` refresh/ephemeral, `basic`, `troc`, `noauth`).
+  `IdentityProvider.create_token` is unchanged.
+- **`request.user.expires_in` changes the same way (FEAT-103,
+  client-visible).** The dynamic user attribute (set by `basic`, `troc`,
+  `noauth`, `token`) is now integer seconds remaining and gains
+  `request.user.expires_at` (absolute epoch). The attribute is undeclared on
+  `Identity`/`AuthUser`, so there is no schema version to bump: any consumer
+  that read it as a timestamp must switch to `expires_at`.
+
 - **CSRF: `str` `SECRET_KEY` crash and API-key / partner-token scoping
   (0.28.5).**
   - With `AUTH_SECRET_KEY` set (a `str`; `SECRET_KEY` is `bytes` only for

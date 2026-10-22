@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -270,10 +270,7 @@ Tests live in TASK-111: `test_azure_flow_ttl_is_independent_of_max_age`,
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: conf.py: AZURE_SESSION_TIMEOUT -> getint (120); new AZURE_FLOW_TTL getint (600). azure.py: max_age=AZURE_SESSION_TIMEOUT (int() dropped), setex uses AZURE_FLOW_TTL. Step-1 grep (navigator_auth/ tests/ docs/ examples/ env/ etc/): only conf.py decl, azure.py import+2 uses (now changed) and adfs.py:29 dead import -- no str reader. Runtime check printed `120 600`. pytest test_azure_token_verifier: 7 passed; ruff clean on both files. Settings docs: no existing settings list covers the Azure block (none under docs/, env/, etc/), so none invented -- TASK-113 owns docs. adfs.py:29 dead import LEFT in place (different file, not in task's list). Note: `AZURE_SESSION_TIMEOUT=2m`-style non-numeric env values now fail at import (getint strictness).
+**Deviations from spec**: none

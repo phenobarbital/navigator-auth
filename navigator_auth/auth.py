@@ -37,6 +37,7 @@ from .vault.integration import (
 )
 from .identity.migrations import setup_identity_columns
 from .backends.idp import IdentityProvider
+from .libs.expiry import expiry_fields
 from .identities import AuthUser
 from .conf import (
     AUTH_MECHANISM_KEY,
@@ -434,7 +435,12 @@ class AuthHandler:
                 self.logger.error(f"Failed to rotate refresh token in redis: {e}")
 
             return JSONResponse(
-                {"token": token, "refresh_token": new_refresh_token, "expires_in": exp, "token_type": scheme},
+                {
+                    "token": token,
+                    "refresh_token": new_refresh_token,
+                    **expiry_fields(exp),
+                    "token_type": scheme,
+                },
                 status=200,
             )
         except Exception as err:
@@ -454,7 +460,10 @@ class AuthHandler:
                 with contextlib.suppress(AttributeError):
                     payload[SESSION_ID] = session.id
             token, _, exp, scheme = self._idp.create_ephemeral_token(data=payload)
-            return JSONResponse({"token": token, "expires_in": exp, "token_type": scheme}, status=200)
+            return JSONResponse(
+                {"token": token, **expiry_fields(exp), "token_type": scheme},
+                status=200,
+            )
         except Exception as err:
             raise self.auth_error(reason=f"Error Creating Token: {err}", exception=err) from err
 
