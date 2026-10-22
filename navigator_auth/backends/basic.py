@@ -24,6 +24,7 @@ from ..exceptions import (
     InvalidAuth,
 )
 from ..responses import JSONResponse
+from ..libs.expiry import expiry_fields
 from ..identities import AuthUser
 
 # FEAT-098 — per-user index of live jti's, so a password reset (or any
@@ -254,11 +255,13 @@ class BasicAuth(BaseAuthBackend):
                     await self._index_user_jti(uid, jti, ttl)
             except Exception as ex:  # pylint: disable=W0703
                 self.logger.warning(f"BasicAuth: unable to record jti for user {uid}: {ex}")
+        _expiry = expiry_fields(exp)
         usr.access_token = token
         usr.token_type = scheme
-        usr.expires_in = exp
+        usr.expires_in = _expiry["expires_in"]
+        usr.expires_at = _expiry["expires_at"]
         userdata["refresh_token"] = refresh_token
-        userdata["expires_in"] = exp
+        userdata.update(_expiry)
         userdata["token_type"] = scheme
         if "auth_method" not in userdata:
             userdata["auth_method"] = "basic"

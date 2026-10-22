@@ -21,6 +21,7 @@ from ..conf import (
 
 # Authenticated Entity
 from ..identities import AuthUser, Program, _coerce_program
+from ..libs.expiry import expiry_fields
 from .abstract import BaseAuthBackend
 
 
@@ -141,7 +142,9 @@ class TokenAuth(BaseAuthBackend):
                 token, refresh_token, exp, scheme = self._idp.create_token(data=user)
                 usr.access_token = token
                 usr.token_type = scheme
-                usr.expires_in = exp
+                _expiry = expiry_fields(exp)
+                usr.expires_in = _expiry["expires_in"]
+                usr.expires_at = _expiry["expires_at"]
                 return {"token": f"{tenant}:{token}", "refresh_token": refresh_token, **user}
             except Exception as err:  # pylint: disable=W0703
                 self.logger.exception(f"TokenAuth: Authentication Error: {err}")

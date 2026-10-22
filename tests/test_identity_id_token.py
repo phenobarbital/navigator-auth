@@ -279,10 +279,12 @@ async def test_migration_runs_002_after_001():
             return FakeCtx()
 
     await migrations.ensure_identity_columns(FakePool())
-    assert len(executed_sql) == 3
+    assert len(executed_sql) == 4
     assert "provider_user_id" in executed_sql[0]
     assert "id_token" in executed_sql[1]
     assert "key_version TYPE INTEGER" in executed_sql[2]
+    # FEAT-103 TASK-102: 004 (base columns).
+    assert "identity_id" in executed_sql[3]
 
 
 @pytest.mark.asyncio

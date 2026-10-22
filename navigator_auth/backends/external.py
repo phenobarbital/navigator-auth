@@ -39,6 +39,7 @@ from ..conf import (
     REDIS_AUTH_URL,
 )
 from .abstract import BaseAuthBackend
+from ..libs.expiry import expiry_fields
 from . import jwksutils
 
 #: FEAT-096 TASK-048 — reason codes surfaced in InvalidAuth messages/logs
@@ -984,7 +985,13 @@ class ExternalAuth(BaseAuthBackend):
             }
             # Create the User Token.
             token, refresh_token, exp, scheme = self._idp.create_token(data=payload)
-            return {"token": token, "refresh_token": refresh_token, "type": scheme, "expires_in": exp, **userdata}
+            return {
+                "token": token,
+                "refresh_token": refresh_token,
+                "type": scheme,
+                **expiry_fields(exp),
+                **userdata,
+            }
         except Exception as err:
             logging.exception(str(err))
             raise
