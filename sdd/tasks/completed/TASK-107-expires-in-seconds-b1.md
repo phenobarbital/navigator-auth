@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -428,10 +428,10 @@ Tests live in TASK-111: `test_expires_in_is_seconds_remaining`,
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: Helper `navigator_auth/libs/expiry.py` + 6 response publishers (external, auth x2, basic, troc, noauth) + 4 attribute sites (basic, troc, noauth, token) + CHANGELOG entries for both client-visible changes. Smoke: expiry_fields(now+3600) -> {'expires_in': 3599, ...}; expired -> expires_in 0. Full suite `pytest tests`: 37 failed / 1520 passed vs baseline (origin/dev 8897024, same machine, same shared DB) 37 failed / 1519 passed; the FAILED sets are byte-identical (artifacts/logs/baseline_failures_dev.txt vs TASK-107_failures.txt). No new failures.
+**Out-of-list file touched**: `tests/test_identity_id_token.py::test_migration_runs_002_after_001` asserted exactly 3 migration statements; TASK-102's 004 made it red, so its count was bumped 3 -> 4 (+ an assertion on the 4th). Not listed in TASK-102; flagged here.
+**Repo-wide ruff**: `ruff check navigator_auth/` reports 37 pre-existing errors (so the AC "clean" is unattainable repo-wide); touched files add none.
+**IMPORTANT side effect**: the existing suite talks to the shared dev DB (nav-api.dev.local). In the baseline-vs-new run, vault writes failed with `null value in column "uid" ... violates not-null constraint` rather than `column "identity_id" does not exist`, which implies migration 004 got applied to that DB by the test run (setup_identity_columns). It also shows legacy `uid` is NOT NULL with no default, so model INSERTs still fail on that table even with 004 -- see report.
+**Deviations from spec**: none in behaviour.

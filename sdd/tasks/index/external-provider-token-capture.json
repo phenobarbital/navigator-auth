@@ -113,7 +113,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [],
@@ -121,8 +121,8 @@
       "parallelism_notes": "Module 5. Functionally independent of 1-4, but edits external.py:766 (shared with TASK-103/104/106) plus auth.py, basic.py, troc.py, noauth.py, token.py. The spec requires coordinating those shared-file edits, so it is sequenced rather than parallel.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-107-expires-in-seconds-b1.md"
+      "completed_at": "2026-10-22T22:08:23+00:00",
+      "file": "sdd/tasks/completed/TASK-107-expires-in-seconds-b1.md"
     },
     {
       "id": "TASK-108",
