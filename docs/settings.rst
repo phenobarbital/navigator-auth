@@ -152,3 +152,25 @@ Settings for the three-step recovery flow (see :doc:`password_recovery`).
    ``handlers/recovery.py``. Honoured for one release — used as a fallback
    when ``AUTH_RECOVERY_CALLBACK`` is unset, with a ``DeprecationWarning``.
    See the migration note in :doc:`password_recovery`.
+
+
+Azure / Entra ID (FEAT-103)
+----------------------------
+
+``AZURE_SESSION_TIMEOUT``
+   Integer, seconds. The OIDC ``max_age`` freshness requirement sent to Entra
+   ID on ``initiate_auth_code_flow``. MSAL enforces it on the callback with its
+   own hardcoded 120-second skew, so a user who lingers on the Microsoft login
+   screen longer than this gets an authentication error. Defaults to ``120``.
+   **This is not a TTL** — before FEAT-103 the same setting also governed the
+   Redis lifetime of the login-flow record; that job moved to
+   ``AZURE_FLOW_TTL``. A non-numeric value now fails at import
+   (``getint``).
+
+``AZURE_FLOW_TTL``
+   Integer, seconds. Redis lifetime of the pending login-flow record written
+   when the browser is redirected to Microsoft. If it expires before the user
+   returns, the callback answers *"Lost Authentication Flow, please try
+   again."* Defaults to ``600``, matching the other flow-record TTLs in
+   ``navigator_auth/conf.py``. Do not merge it back into
+   ``AZURE_SESSION_TIMEOUT``.
