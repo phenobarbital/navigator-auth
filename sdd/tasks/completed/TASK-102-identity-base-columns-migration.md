@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -375,10 +375,9 @@ See Block C/D above. The static-SQL tests go in the existing
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: Added 004 (additive ADD COLUMN IF NOT EXISTS for 8 columns, NULL backfill, guarded DO block with to_regclass + PK-introspection guard), registered it, updated test counts to 4, added static-SQL assertions. `pytest tests/unit/identity/test_identity_migrations.py`: 9 passed (artifacts/logs/TASK-102.log). `examples/sql/identity_vault_schema.sql` already carries all 8 columns: unchanged.
+**Manual DB proof NOT performed**: the only reachable database is the shared `navigator` dev DB at nav-api.dev.local (no local Postgres/psql here); running DDL against it was not authorised for this run. The three outcomes (legacy table -> save_linked_identity succeeds; second run no-op; canonical DB no-op) remain UNVERIFIED and are left to the operator.
+**Pre-existing**: `ruff check navigator_auth/identity/` reports 1 F401 in flow_store.py (not touched by this task).
+**Deviations from spec**: the spec says "promote identity_id to PRIMARY KEY only when the PK isn't already identity_id" while also keeping the legacy (user_id, uid) PK; a table can have one PK, so on a legacy table 004 adds a UNIQUE index `uq_user_identities_identity_id` instead (least destructive, per the task's FILL IN guidance). Concern for operator: if legacy `uid` is NOT NULL without default, model INSERTs (which omit uid) would still fail; unverified against the real table.
