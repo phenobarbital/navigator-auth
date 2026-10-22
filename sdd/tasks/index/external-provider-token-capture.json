@@ -131,7 +131,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [
@@ -141,8 +141,8 @@
       "parallelism_notes": "Module 6. Needs only TASK-103's key names (fixed in spec §2), but edits azure.py, github.py and google.py — azure.py is shared with TASK-105 and TASK-109.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-108-redact-check-credentials.md"
+      "completed_at": "2026-10-22T22:08:51+00:00",
+      "file": "sdd/tasks/completed/TASK-108-redact-check-credentials.md"
     },
     {
       "id": "TASK-109",
