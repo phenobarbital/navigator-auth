@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-103 — Capture, vault and refresh the external provider credential
 **Spec**: `sdd/specs/external-provider-token-capture.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -301,10 +301,7 @@ leave the existing suite red; it does not add test files of its own.
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: Implemented per blueprint (datetime import, 4 keyword-only args, 4 guarded session keys, refresh token only -> has_refresh_token). Regression run: 159 passed (azure/github/google verifier tests + tests/unit/identity; artifacts/logs/TASK-103.log). ruff: 2 pre-existing F841 at external.py:1092/1094 (same on baseline). mypy: 511 errors, identical count before/after.
+**Deviations from spec**: none

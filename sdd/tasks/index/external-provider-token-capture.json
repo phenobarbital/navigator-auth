@@ -32,7 +32,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -40,8 +40,8 @@
       "parallelism_notes": "Module 1. Edits navigator_auth/backends/external.py, which TASK-104, TASK-106 and TASK-107 also edit. First in the 1->2->3 chain, so it must land before them rather than beside them.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-103-build-user-info-capture-kwargs.md"
+      "completed_at": "2026-10-22T22:02:18+00:00",
+      "file": "sdd/tasks/completed/TASK-103-build-user-info-capture-kwargs.md"
     },
     {
       "id": "TASK-104",
