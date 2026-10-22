@@ -6,6 +6,7 @@ Abstract Model to any Oauth2 or external Auth Support.
 import asyncio
 import secrets
 from typing import Any, Optional
+from datetime import datetime
 from collections.abc import Callable
 import importlib
 from abc import abstractmethod
@@ -665,18 +666,45 @@ class ExternalAuth(BaseAuthBackend):
     async def finish_logout(self, request: web.Request):
         """finish_logout, Finish Logout Method."""
 
-    def build_user_info(self, userdata: dict, token: str, mapping: dict) -> tuple:
+    def build_user_info(
+        self,
+        userdata: dict,
+        token: str,
+        mapping: dict,
+        *,
+        id_token: Optional[str] = None,
+        refresh_token: Optional[str] = None,
+        expires_at: Optional[datetime] = None,
+        provider_user_id: Optional[str] = None,
+    ) -> tuple:
         """build_user_info.
             Get user or validate user from User Model.
         Args:
             userdata (Dict): User data gets from Auth Backend.
             token (str): User token gets from Auth Backend.
             mapping (dict): User mapping gets from Auth Backend.
+            id_token (str, optional): Provider OIDC ID token, published in the
+                session as ``id_token``. Keyword-only.
+            refresh_token (str, optional): Provider refresh token. Used ONLY to
+                set ``has_refresh_token``; the secret itself is NEVER written
+                into ``userdata`` — it goes to the ciphered vault instead
+                (FEAT-103 Module 2). Keyword-only.
+            expires_at (datetime, optional): Real expiry of ``token``, published
+                as the ISO-8601 string ``external_expires_at``. Keyword-only.
+            provider_user_id (str, optional): Verified external account id,
+                published as ``external_provider_user_id`` and used by
+                ``get_live_provider_token`` to bind a session to exactly one
+                linked account. Keyword-only.
         Returns:
             Tuple: user_id and user_data.
         Raises:
             UserNotFound: when user doesn't exists on Backend.
             ValueError: User doesn't have username attributes.
+
+        Note:
+            All four capture arguments default to ``None`` and each new key is
+            written only when its argument was supplied, so the existing
+            3-argument call sites produce byte-identical output.
         """
         # Get data for user mapping:
         userdata = self.get_user_mapping(user=userdata, mapping=mapping)
@@ -695,6 +723,19 @@ class ExternalAuth(BaseAuthBackend):
         # set original token in userdata
         userdata["auth_token"] = token
         userdata["token_type"] = self.scheme
+        # FEAT-103 Module 1 — additive provider-credential capture.
+        # NOTE: the provider refresh token is deliberately NOT stored here.
+        # `refresh_token` in this dict is NAVIGATOR's own refresh token
+        # (validate_user_info) and auth.py indexes it in Redis for 90 days;
+        # writing the provider's secret there would corrupt Navigator's flow.
+        if id_token is not None:
+            userdata["id_token"] = id_token
+        if expires_at is not None:
+            userdata["external_expires_at"] = expires_at.isoformat()
+        if refresh_token is not None:
+            userdata["has_refresh_token"] = bool(refresh_token)
+        if provider_user_id is not None:
+            userdata["external_provider_user_id"] = str(provider_user_id)
         return (userdata, userid)
 
     async def validate_user_info(self, request: web.Request, user_id: Any, userdata: Any, token: str) -> dict:
