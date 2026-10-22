@@ -12,7 +12,6 @@ from navigator_auth.identity.store import (
     cached_credential,
     invalidate_cached,
 )
-from navigator_auth.identity.types import TokenResponse
 
 
 MASTER_KEYS = {1: b"\x00" * 32}
@@ -151,3 +150,62 @@ class TestVaultCacheHelpers:
         session = self._session_with_vault(vault)
         # must not raise
         await cache_credential(session, "github", {"a": 1})
+
+
+class _Row:
+    """Minimal stand-in for an ``auth.user_identities`` row."""
+
+    def __init__(self, identity_id, refreshed_at=None, created_at=None):
+        self.identity_id = identity_id
+        self.refreshed_at = refreshed_at
+        self.created_at = created_at
+        self.access_token = b"ciphered"
+        self.enabled = True
+
+
+def _patch_filter(rows):
+    model = MagicMock()
+    model.filter = AsyncMock(return_value=list(rows))
+    return patch("navigator_auth.identity.store.UserIdentity", model)
+
+
+class TestDuplicateRowOrdering:
+    """A duplicated (user, provider, account) must resolve deterministically."""
+
+    @pytest.mark.asyncio
+    async def test_newest_duplicate_wins_whatever_the_db_order(self):
+        now = datetime.now(timezone.utc)
+        older = _Row("a", refreshed_at=now - timedelta(hours=1))
+        newer = _Row("b", refreshed_at=now)
+        for rows in ([older, newer], [newer, older]):
+            with _patch_filter(rows):
+                picked = await _store().get_for_provider_account(1, "github", "99")
+            assert picked is newer
+
+    @pytest.mark.asyncio
+    async def test_equal_timestamps_break_on_identity_id(self):
+        now = datetime.now(timezone.utc)
+        first = _Row("aaa", refreshed_at=now)
+        second = _Row("bbb", refreshed_at=now)
+        for rows in ([first, second], [second, first]):
+            with _patch_filter(rows):
+                picked = await _store().get_for_provider_account(1, "github", "99")
+            assert picked is second
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_created_at_without_refreshed_at(self):
+        now = datetime.now(timezone.utc)
+        older = _Row("a", created_at=now - timedelta(days=1))
+        newer = _Row("b", created_at=now)
+        with _patch_filter([older, newer]):
+            picked = await _store().get_for_provider_account(1, "github", "99")
+        assert picked is newer
+
+    @pytest.mark.asyncio
+    async def test_get_by_provider_still_picks_the_newest(self):
+        now = datetime.now(timezone.utc)
+        older = _Row("a", refreshed_at=now - timedelta(hours=2))
+        newer = _Row("b", refreshed_at=now)
+        with _patch_filter([older, newer]):
+            picked = await _store().get_by_provider(1, "github")
+        assert picked is newer

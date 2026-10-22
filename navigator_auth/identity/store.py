@@ -46,6 +46,28 @@ class IdentityCredentialError(Exception):
         self.reason = reason
 
 
+def _newest_first(rows: list[Any]) -> None:
+    """Order credential rows newest-first, in place and deterministically.
+
+    Rows rank on ``refreshed_at``, falling back to ``created_at``. Ties — two
+    rows written in the same transaction, or both timestamps missing — break on
+    ``identity_id``, so the same row always wins instead of whatever order the
+    database happened to return.
+
+    Args:
+        rows: Identity rows to sort in place.
+    """
+    rows.sort(
+        key=lambda r: (
+            getattr(r, "refreshed_at", None)
+            or getattr(r, "created_at", None)
+            or datetime.min.replace(tzinfo=timezone.utc),
+            str(getattr(r, "identity_id", "") or ""),
+        ),
+        reverse=True,
+    )
+
+
 class IdentityStore:
     """CRUD for ciphered identity credentials on auth.user_identities."""
 
@@ -238,12 +260,7 @@ class IdentityStore:
         ]
         if not rows:
             return None
-        rows.sort(
-            key=lambda r: getattr(r, "refreshed_at", None)
-            or getattr(r, "created_at", None)
-            or datetime.min.replace(tzinfo=timezone.utc),
-            reverse=True,
-        )
+        _newest_first(rows)
         return rows[0]
 
     async def get_for_provider_account(
@@ -287,14 +304,21 @@ class IdentityStore:
             if getattr(row, "access_token", None) and getattr(row, "enabled", True)
         ]
         if len(rows) > 1:
-            # A partial unique index normally prevents this, but a legacy
-            # table may predate it: surface the integrity problem.
+            # The partial unique index on (user_id, auth_provider,
+            # provider_user_id) normally prevents this, but a legacy table may
+            # predate it — and on a table that already holds duplicates the
+            # index cannot be created at all. Surface the integrity problem,
+            # then pick the newest row deterministically rather than whichever
+            # one the database listed first (issue:c9c05c53ec05).
             logger.warning(
                 "get_for_provider_account: %d enabled credential rows for "
-                "user_id=%s provider=%s; using the first.",
+                "user_id=%s provider=%s; using the newest.",
                 len(rows), user_id, provider,
             )
-        return rows[0] if rows else None
+        if not rows:
+            return None
+        _newest_first(rows)
+        return rows[0]
 
     async def delete(self, user_id: Any, identity_id: Any) -> bool:
         async with await self._pool.acquire() as conn:
