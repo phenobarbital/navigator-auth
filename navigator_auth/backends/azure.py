@@ -3,6 +3,7 @@
 Description: Backend Authentication/Authorization using Microsoft authentication.
 """
 
+import asyncio
 import base64
 import time
 from datetime import datetime, timezone
@@ -507,8 +508,11 @@ class AzureAuth(ExternalAuth):
             requested = self.identity_scopes()
         cache = msal.SerializableTokenCache()
         app = self.get_msal_app(token_cache=cache)
-        result = app.acquire_token_by_refresh_token(
-            token.refresh_token, scopes=requested
+        # MSAL is synchronous and performs network I/O: keep it off the loop.
+        result = await asyncio.to_thread(
+            app.acquire_token_by_refresh_token,
+            token.refresh_token,
+            scopes=requested,
         )
         refreshed = self._token_from_msal_result(
             result, cache, requested_scopes=requested
