@@ -16,7 +16,7 @@ from msal.authority import AuthorityBuilder, AZURE_PUBLIC
 from navconfig.logging import logging
 from navigator_session import get_session
 from ..exceptions import AuthException, UserNotFound, InvalidAuth
-from ..identity.types import TokenResponse
+from ..identity.types import TokenResponse, mask_value
 from ..conf import (
     AZURE_ADFS_CLIENT_ID,
     AZURE_ADFS_CLIENT_SECRET,
@@ -724,7 +724,16 @@ class AzureAuth(ExternalAuth):
                 if not session:
                     # Empty Session
                     session = {}
+                # FEAT-103 Module 6: never return the provider's tokens in the response
+                # body. `auth_token` is the provider ACCESS token (build_user_info) and
+                # `id_token` is the provider's OIDC token; both are secrets to the caller.
+                # The session keeps them (get_live_provider_token reads them) — this only
+                # redacts the HTTP body. `data["refresh_token"]` is NAVIGATOR's own refresh
+                # token (the caller's own credential) and is deliberately left as is.
                 sessioninfo = {**data, **userdata}
+                for key in ("auth_token", "id_token"):
+                    if key in sessioninfo:
+                        sessioninfo[key] = mask_value(sessioninfo[key])
                 return JSONResponse(sessioninfo, status=200)
             except RuntimeError as err:
                 response = {"message": "Session Error", "error": str(err)}
