@@ -233,7 +233,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done-with-issues",
       "priority": "low",
       "effort": "S",
       "depends_on": [
@@ -245,8 +245,8 @@
       "parallelism_notes": "Edits docs/*.rst and the spec's §7/§8 only — no source or test file shared with any task. Depends on TASK-109 because the Q1 experiment is impossible until max_age is adjustable independently of the flow TTL. The experiment itself needs a live Azure login by the operator and must not be fabricated.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-113-docs-changelog-maxage-experiment.md"
+      "completed_at": "2026-10-22T22:15:42+00:00",
+      "file": "sdd/tasks/completed/TASK-113-docs-changelog-maxage-experiment.md"
     }
   ]
 }
