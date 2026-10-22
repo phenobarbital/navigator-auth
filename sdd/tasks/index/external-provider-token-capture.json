@@ -169,7 +169,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [],
@@ -177,8 +177,8 @@
       "parallelism_notes": "Module 9. Changes a DIFFERENT distribution (/home/jesuslara/proyectos/navigator-session) plus this repo's pyproject.toml:52 floor — no source file shared with any other task. Note the shared .venv is editable-installed against that repo, so the edit is live for every session on this machine while it exists; work on a branch there and never 'uv sync' in a worktree.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-110-session-load-merge-userdata.md"
+      "completed_at": "2026-10-22T22:10:58+00:00",
+      "file": "sdd/tasks/completed/TASK-110-session-load-merge-userdata.md"
     },
     {
       "id": "TASK-111",
