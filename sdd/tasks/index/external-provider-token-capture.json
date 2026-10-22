@@ -92,7 +92,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -103,8 +103,8 @@
       "parallelism_notes": "Module 4. Needs TASK-104's get_for_provider_account and TASK-105's scope capture. Edits both external.py and azure.py.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-106-get-live-provider-token.md"
+      "completed_at": "2026-10-22T22:05:05+00:00",
+      "file": "sdd/tasks/completed/TASK-106-get-live-provider-token.md"
     },
     {
       "id": "TASK-107",
