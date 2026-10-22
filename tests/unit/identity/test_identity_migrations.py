@@ -1,5 +1,4 @@
 """Unit tests for navigator_auth.identity.migrations."""
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -77,6 +76,32 @@ class TestSQLFile:
         assert "contype = 'p'" in sql
         assert "IS DISTINCT FROM 'identity_id'" in sql
 
+    def test_legacy_uid_default_sql_is_guarded_and_additive(self):
+        """FEAT-103 Module 0: 005 unblocks G2 on a legacy table.
+
+        004 adds the model's columns but leaves `uid VARCHAR NOT NULL` with no
+        default, so a model insert (which omits `uid`) still fails. 005 gives
+        it a surrogate default without dropping the column or the legacy PK.
+        """
+        path = SQL_DIR / "005_identity_legacy_uid_default.sql"
+        assert path.is_file()
+        sql = path.read_text()
+        code = "\n".join(
+            ln for ln in sql.splitlines() if not ln.lstrip().startswith("--")
+        )
+        # The one and only effect: a DEFAULT on the legacy uid column.
+        assert "ALTER COLUMN uid SET DEFAULT gen_random_uuid()::varchar" in code
+        # Nothing is dropped, no NOT NULL is touched, no PK is rewritten.
+        upper = code.upper()
+        assert "DROP" not in upper
+        assert "NOT NULL" not in upper
+        assert "PRIMARY KEY" not in upper
+        # Guards: table absent -> skip; canonical table (no uid) -> skip;
+        # already defaulted -> skip, so steady-state startups take no lock.
+        assert "to_regclass('auth.user_identities') IS NULL" in code
+        assert "column_name = 'uid'" in code
+        assert "column_default IS NULL" in code
+
 
 class TestEnsureIdentityColumns:
     @pytest.mark.asyncio
@@ -84,15 +109,16 @@ class TestEnsureIdentityColumns:
         pool, conn = _make_pool_async_cm()
         await ensure_identity_columns(pool)
         # FEAT-096 TASK-047: 001 then 002; FEAT-099: 003 (INTEGER key_version).
-        assert conn.execute.await_count == 4
-        # FEAT-103 TASK-102: 004 (base columns).
-        first, second, third, fourth = (
+        assert conn.execute.await_count == 5
+        # FEAT-103 TASK-102: 004 (base columns), 005 (legacy uid default).
+        first, second, third, fourth, fifth = (
             c.args[0] for c in conn.execute.await_args_list
         )
         assert "auth.user_identities" in first
         assert "id_token" in second
         assert "key_version TYPE INTEGER" in third
         assert "identity_id" in fourth
+        assert "ALTER COLUMN uid SET DEFAULT" in fifth
 
     @pytest.mark.asyncio
     async def test_awaitable_acquire_releases(self):
@@ -105,8 +131,8 @@ class TestEnsureIdentityColumns:
         pool.acquire = MagicMock(side_effect=lambda: _acquire())
         pool.release = AsyncMock()
         await ensure_identity_columns(pool)
-        assert conn.execute.await_count == 4
-        assert pool.release.await_count == 4
+        assert conn.execute.await_count == 5
+        assert pool.release.await_count == 5
         pool.release.assert_awaited_with(conn)
 
 
@@ -122,4 +148,4 @@ class TestSetupIdentityColumns:
     async def test_calls_through(self):
         pool, conn = _make_pool_async_cm()
         await setup_identity_columns(pool)
-        assert conn.execute.await_count == 4
+        assert conn.execute.await_count == 5
