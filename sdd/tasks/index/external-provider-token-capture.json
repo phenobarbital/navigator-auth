@@ -212,7 +212,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -223,8 +223,8 @@
       "parallelism_notes": "Module 7, Azure half. Sole editor of tests/test_azure_token_verifier.py, but it exercises TASK-105's normalizer and TASK-106's refresh hook.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-112-tests-azure-capture-refresh.md"
+      "completed_at": "2026-10-22T22:14:54+00:00",
+      "file": "sdd/tasks/completed/TASK-112-tests-azure-capture-refresh.md"
     },
     {
       "id": "TASK-113",
