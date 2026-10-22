@@ -71,7 +71,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -82,8 +82,8 @@
       "parallelism_notes": "Module 3. Calls TASK-103's kwargs and TASK-104's capture_login_credential. Edits navigator_auth/backends/azure.py, shared with TASK-108 (redaction) and TASK-109 (AZURE_FLOW_TTL) — the spec says to sequence those, not run them concurrently.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-105-azure-token-capture-wiring.md"
+      "completed_at": "2026-10-22T22:03:42+00:00",
+      "file": "sdd/tasks/completed/TASK-105-azure-token-capture-wiring.md"
     },
     {
       "id": "TASK-106",
