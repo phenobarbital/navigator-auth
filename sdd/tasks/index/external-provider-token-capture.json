@@ -50,7 +50,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -61,8 +61,8 @@
       "parallelism_notes": "Module 2. Extends TASK-103's signature and needs TASK-102's table shape to write at all. Shares external.py with TASK-103/106/107 and identity/store.py with TASK-106.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-104-generalized-vaulting.md"
+      "completed_at": "2026-10-22T22:02:54+00:00",
+      "file": "sdd/tasks/completed/TASK-104-generalized-vaulting.md"
     },
     {
       "id": "TASK-105",
