@@ -72,6 +72,11 @@ def decode_part(raw, encoding="utf-8"):
     return output
 
 
+#: MSAL adds these itself (application.py:832-851); they must never appear in
+#: a scopes list we send back to Entra.
+MSAL_RESERVED_SCOPES = frozenset({"openid", "profile", "offline_access"})
+
+
 class AzureAuth(ExternalAuth):
     """AzureAuth.
 
@@ -123,13 +128,20 @@ class AzureAuth(ExternalAuth):
             token_cache=token_cache,
         )
 
-    def get_msal_client(self):
+    def get_msal_client(self, token_cache: msal.SerializableTokenCache = None):
+        """Public-client app used by the user/password (ROPC) grant.
+
+        Takes an optional ``token_cache`` so the ROPC login can capture the
+        refresh token, mirroring ``get_msal_app``. The grant itself is
+        unchanged.
+        """
         authority = self._issuer if self._issuer else self.authority
         return msal.ClientApplication(
             AZURE_ADFS_CLIENT_ID,
             authority=authority,
             client_credential=AZURE_ADFS_CLIENT_SECRET,
             validate_authority=True,
+            token_cache=token_cache,
         )
 
     async def authenticate(self, request: web.Request):
@@ -145,7 +157,8 @@ class AzureAuth(ExternalAuth):
         if user and pwd:
             Default_SCOPE = ["User.ReadBasic.All"]
             # will use User/Pass Authentication
-            app = self.get_msal_client()
+            cache = msal.SerializableTokenCache()
+            app = self.get_msal_client(token_cache=cache)
             # Firstly, check the cache to see if this end user has signed in before
             accounts = app.get_accounts(username=user)
             result = None
@@ -160,18 +173,30 @@ class AzureAuth(ExternalAuth):
                     client_info = json_decoder(decode_part(result["client_info"]))
                 try:
                     if "access_token" in result:
-                        access_token = result["access_token"]
+                        grant = self._token_from_msal_result(
+                            result, cache, requested_scopes=Default_SCOPE
+                        )
+                        access_token = grant.access_token
                         data = await self.get(
                             url=self.userinfo_uri,
                             token=access_token,
                             token_type="Bearer",
                         )
                         data = {**data, **client_info}
+                        # FEAT-103 Module 3: account id from the VERIFIED profile.
+                        grant.provider_user_id = self.get_identity_userid(data)
                         userdata, uid = self.build_user_info(
-                            userdata=data, token=access_token, mapping=self.user_mapping
+                            userdata=data,
+                            token=access_token,
+                            mapping=self.user_mapping,
+                            id_token=grant.id_token,
+                            refresh_token=grant.refresh_token,
+                            expires_at=grant.expires_at,
+                            provider_user_id=grant.provider_user_id,
                         )
                         # also, user information:
                         data = await self.validate_user_info(request, uid, userdata, access_token)
+                        await self.capture_login_credential(request, grant)
                         # Redirect User to HOME
                         return self.home_redirect(request, token=data["token"], token_type=self.scheme)
                     else:
@@ -237,7 +262,8 @@ class AzureAuth(ExternalAuth):
                 return self.failed_redirect(
                     request, error="ERROR_RATE_LIMIT_EXCEEDED", message="Lost Authentication Flow, please try again."
                 )
-            app = self.get_msal_app()
+            cache = msal.SerializableTokenCache()
+            app = self.get_msal_app(token_cache=cache)
             internal_redirect = flow.pop("internal_redirect", None)
             try:
                 result = app.acquire_token_by_auth_code_flow(auth_code_flow=flow, auth_response=auth_response)
@@ -252,8 +278,13 @@ class AzureAuth(ExternalAuth):
                         )
                     else:
                         return self.failed_redirect(request, error="AUTHENTICATION_ERROR", message=f"Info: {result}")
-                token_type = result["token_type"]
-                access_token = result["access_token"]
+                grant = self._token_from_msal_result(
+                    result,
+                    cache,
+                    requested_scopes=["https://graph.microsoft.com/.default"],
+                )
+                token_type = grant.token_type
+                access_token = grant.access_token
                 client_info = {}
                 if "client_info" in result:
                     # It happens when client_info and profile are in request
@@ -267,8 +298,22 @@ class AzureAuth(ExternalAuth):
                     )
                     # build user information:
                     data = {**data, **client_info}
-                    userdata, uid = self.build_user_info(userdata=data, token=access_token, mapping=self.user_mapping)
+                    # FEAT-103 Module 3: the external account id comes from the
+                    # VERIFIED Graph profile, never from a request parameter.
+                    grant.provider_user_id = self.get_identity_userid(data)
+                    userdata, uid = self.build_user_info(
+                        userdata=data,
+                        token=access_token,
+                        mapping=self.user_mapping,
+                        id_token=grant.id_token,
+                        refresh_token=grant.refresh_token,
+                        expires_at=grant.expires_at,
+                        provider_user_id=grant.provider_user_id,
+                    )
                     data = await self.validate_user_info(request, uid, userdata, access_token)
+                    # Vault the full grant AFTER the session exists — the
+                    # ciphered write keys on the local user_id.
+                    await self.capture_login_credential(request, grant)
                 except Exception as err:
                     logging.exception(f"Azure: Error getting User information: {err}")
                     return self.failed_redirect(
@@ -304,8 +349,15 @@ class AzureAuth(ExternalAuth):
     def _refresh_token_from_cache(
         cache: msal.SerializableTokenCache,
     ) -> Optional[str]:
-        """MSAL never returns the refresh token in the result dict;
-        it must be read from the token cache."""
+        """Read a refresh token out of an MSAL token cache.
+
+        Verified against msal 1.38.0: the ``authorization_code`` and
+        ``refresh_token`` grants DO return ``refresh_token`` in the result dict
+        (``_clean_up`` strips only ``refresh_in`` and ``_``-prefixed keys,
+        ``application.py:155-166``). Only ``acquire_token_silent`` hides it.
+        This helper is therefore a FALLBACK for results that omit it, not the
+        primary source — see ``_token_from_msal_result``.
+        """
         try:
             tokens = cache.find(msal.TokenCache.CredentialType.REFRESH_TOKEN)
             for entry in tokens:
@@ -318,18 +370,45 @@ class AzureAuth(ExternalAuth):
 
     @staticmethod
     def _token_from_msal_result(
-        result: dict, cache: msal.SerializableTokenCache
+        result: dict,
+        cache: msal.SerializableTokenCache,
+        requested_scopes: Optional[list] = None,
     ) -> TokenResponse:
+        """Normalize an MSAL result dict into a ``TokenResponse``.
+
+        Args:
+            result: Raw MSAL result from any grant.
+            cache: The cache the MSAL app was built with; used only as a
+                refresh-token fallback.
+            requested_scopes: Scopes this grant actually asked for, used when
+                the result omits ``scope``. MSAL-reserved scopes
+                (``openid``/``profile``/``offline_access``) are dropped — MSAL
+                adds them itself and Entra rejects them in a scopes list.
+
+        Raises:
+            AuthException: when the result carries an error or no access token.
+        """
         if "error" in result or "access_token" not in result:
             error = result.get("error", "unknown_error")
             desc = result.get("error_description", "")
             raise AuthException(f"azure: {error}: {desc}")
         scope = result.get("scope")
         scopes = scope.split() if isinstance(scope, str) else list(scope or [])
+        if not scopes and requested_scopes:
+            scopes = [
+                s for s in requested_scopes if s not in MSAL_RESERVED_SCOPES
+            ]
         return TokenResponse(
             access_token=result["access_token"],
             token_type=result.get("token_type", "Bearer"),
-            refresh_token=AzureAuth._refresh_token_from_cache(cache),
+            # msal 1.38.0 returns refresh_token on the authorization_code and
+            # refresh_token grants; the cache is only a fallback (see
+            # _refresh_token_from_cache).
+            refresh_token=(
+                result.get("refresh_token")
+                or AzureAuth._refresh_token_from_cache(cache)
+            ),
+            id_token=result.get("id_token"),
             expires_in=result.get("expires_in"),
             scopes=scopes,
             raw={k: v for k, v in result.items() if k != "refresh_token"},
