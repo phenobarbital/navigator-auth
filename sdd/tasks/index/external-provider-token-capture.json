@@ -151,7 +151,7 @@
       "feature_id": "FEAT-103",
       "feature": "external-provider-token-capture",
       "spec": "sdd/specs/external-provider-token-capture.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [],
@@ -159,8 +159,8 @@
       "parallelism_notes": "Module 8. No code dependency, but edits conf.py and azure.py:212/217 — azure.py is shared with TASK-105 and TASK-108. Spec Module 8: 'sequence it with 3 rather than running it concurrently'. Unblocks TASK-113's Q1 experiment.",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-109-azure-flow-ttl-split.md"
+      "completed_at": "2026-10-22T22:09:21+00:00",
+      "file": "sdd/tasks/completed/TASK-109-azure-flow-ttl-split.md"
     },
     {
       "id": "TASK-110",
