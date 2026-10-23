@@ -277,7 +277,7 @@ class AzureAuth(ExternalAuth):
                             request, error="AUTHENTICATION_ERROR", message="Failed to generate session token"
                         )
                     else:
-                        logging.error(f"Azure: unexpected MSAL auth response: {result}")
+                        logging.error(f"Azure: unexpected MSAL auth response (keys: {sorted(result)})")
                         return self.failed_redirect(
                             request,
                             error="AUTHENTICATION_ERROR",
