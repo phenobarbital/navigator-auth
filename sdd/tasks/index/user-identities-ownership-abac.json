@@ -68,7 +68,7 @@
       "feature_id": "FEAT-105",
       "feature": "user-identities-ownership-abac",
       "spec": "sdd/specs/user-identities-ownership-abac.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -76,8 +76,8 @@
       "parallelism_notes": "Spec G9. No code dependency on any other task — it should land FIRST to close a live injection sink. Marked parallel:false only because it edits navigator_auth/handlers/userattrs.py, which TASK-123/124/125/126 also edit; a separate worktree would collide on that file. Its test file (test_user_account_set_address.py) is its own.",
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-121-parameterize-set-address.md"
+      "completed_at": "2026-10-23T22:50:49+00:00",
+      "file": "sdd/tasks/completed/TASK-121-parameterize-set-address.md"
     },
     {
       "id": "TASK-122",
