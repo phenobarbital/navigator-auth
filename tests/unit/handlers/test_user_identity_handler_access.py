@@ -260,3 +260,230 @@ class TestMetadataLists:
         h = _handler()
         h._session = _session()
         assert await h._set_user_id(None, None, {}) == OWNER_ID
+
+
+# ---------------------------------------------------------------------------
+# Write path (TASK-124)
+# ---------------------------------------------------------------------------
+class _Row:
+    """A fetched row double for _set_update."""
+
+    def __init__(self, owner=OWNER_ID):
+        self.user_id = owner
+        self.identity_id = "abc"
+
+
+def _audit_pdp():
+    audit = MagicMock()
+    audit.log = AsyncMock()
+    return FakePDP([_allow_policy_all()], audit), audit
+
+
+def _allow_policy_all():
+    return Policy(
+        POLICY, description="d", effect=PolicyEffect.ALLOW,
+        actions=["identity:read", "identity:revoke", "identity:delete"],
+        groups=["superuser"], priority=1,
+    )
+
+
+def _wh(body=None, model=None, pdp=None, path="/api/v1/user_identity/abc"):
+    h = _handler(path=path, model=model, pdp=pdp)
+    h.json_data = AsyncMock(return_value=body)
+    h._session = _session()
+    return h
+
+
+class TestReadonlyColumns:
+    @pytest.mark.asyncio
+    async def test_owner_write_to_readonly_column_refused(self):
+        h = _wh()
+        with _patch_sessions(_session()), pytest.raises(web.HTTPBadRequest) as ei:
+            await h._set_update(_Row(), {"access_token": "x"})
+        assert "access_token" in ei.value.text
+
+    @pytest.mark.asyncio
+    async def test_every_readonly_column_is_refused(self):
+        h = _wh()
+        with _patch_sessions(_session()):
+            for col in UserIdentityHandler.readonly_columns:
+                with pytest.raises(web.HTTPBadRequest):
+                    await h._set_update(_Row(), {col: "x"})
+
+    @pytest.mark.asyncio
+    async def test_readonly_refused_in_a_batched_payload(self):
+        h = _wh()
+        with pytest.raises(web.HTTPBadRequest):
+            h._reject_readonly([{"email": "a@b"}, {"access_token": "x"}])
+
+    @pytest.mark.asyncio
+    async def test_refusal_does_not_echo_the_value(self):
+        h = _wh()
+        with pytest.raises(web.HTTPBadRequest) as ei:
+            h._reject_readonly({"access_token": "SENTINEL-TOKEN"})
+        assert "SENTINEL-TOKEN" not in ei.value.text
+
+    @pytest.mark.asyncio
+    async def test_writable_column_still_accepted(self):
+        h = _wh()
+        h._reject_readonly({"display_name": "n"})
+        with _patch_sessions(_session()), patch(
+            "navigator.views.ModelView._set_update", new=AsyncMock()
+        ) as up:
+            await h._set_update(_Row(), {"display_name": "n"})
+        up.assert_awaited_once()
+
+
+class TestWriteOwnership:
+    @pytest.mark.asyncio
+    async def test_put_forces_owner(self):
+        h = _wh(body={"email": "a@b"})
+        with _patch_sessions(_session()), patch(
+            "navigator.views.ModelView._post_data",
+            new=AsyncMock(return_value={"email": "a@b"}),
+        ):
+            data = await h._post_data()
+        assert data["user_id"] == OWNER_ID
+
+    @pytest.mark.asyncio
+    async def test_put_with_foreign_owner_refused(self):
+        h = _wh(body={"user_id": OTHER_ID})
+        with _patch_sessions(_session()), pytest.raises(web.HTTPForbidden):
+            await h._pre_put()
+
+    @pytest.mark.asyncio
+    async def test_superuser_put_for_another_user_refused(self):
+        pdp, _ = _audit_pdp()
+        h = _wh(body={"user_id": OTHER_ID}, pdp=pdp)
+        with _patch_sessions(_session(groups=["superuser"])):
+            with pytest.raises(web.HTTPForbidden):
+                await h._pre_put()
+
+    @pytest.mark.asyncio
+    async def test_cross_user_patch_refused_for_non_superuser(self):
+        h = _wh()
+        with _patch_sessions(_session()), pytest.raises(web.HTTPForbidden):
+            await h._set_update(_Row(OTHER_ID), {"display_name": "x"})
+
+    @pytest.mark.asyncio
+    async def test_owner_patch_needs_no_policy(self):
+        h = _wh()
+        with _patch_sessions(_session()), patch(
+            "navigator.views.ModelView._set_update", new=AsyncMock()
+        ):
+            await h._set_update(_Row(), {"display_name": "x"})
+
+    @pytest.mark.asyncio
+    async def test_owner_cannot_reassign_row(self):
+        h = _wh()
+        with _patch_sessions(_session()), pytest.raises(web.HTTPForbidden):
+            await h._set_update(_Row(), {"user_id": OTHER_ID})
+
+    @pytest.mark.asyncio
+    async def test_patch_null_owner_is_dropped(self):
+        h = _wh()
+        data = {"display_name": "x", "user_id": None}
+        with _patch_sessions(_session()), patch(
+            "navigator.views.ModelView._set_update", new=AsyncMock()
+        ):
+            await h._set_update(_Row(), data)
+        assert "user_id" not in data
+
+
+class TestSuperuserWriteEnvelope:
+    @pytest.mark.asyncio
+    async def test_superuser_may_revoke_a_foreign_row(self):
+        pdp, audit = _audit_pdp()
+        h = _wh(pdp=pdp)
+        with _patch_sessions(_session(groups=["superuser"])), patch(
+            "navigator.views.ModelView._set_update", new=AsyncMock()
+        ) as up:
+            await h._set_update(_Row(OTHER_ID), {"enabled": False})
+        up.assert_awaited_once()
+        audit.log.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_superuser_cannot_edit_another_column(self):
+        pdp, _ = _audit_pdp()
+        h = _wh(pdp=pdp)
+        with _patch_sessions(_session(groups=["superuser"])), pytest.raises(web.HTTPForbidden):
+            await h._set_update(_Row(OTHER_ID), {"display_name": "x"})
+
+    @pytest.mark.asyncio
+    async def test_superuser_cannot_smuggle_a_column_alongside_the_revoke(self):
+        pdp, _ = _audit_pdp()
+        h = _wh(pdp=pdp)
+        with _patch_sessions(_session(groups=["superuser"])), patch(
+            "navigator.views.ModelView._set_update", new=AsyncMock()
+        ) as up:
+            with pytest.raises(web.HTTPForbidden):
+                await h._set_update(
+                    _Row(OTHER_ID), {"enabled": False, "email": "a@x"}
+                )
+        up.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_superuser_enable_true_is_not_a_revoke(self):
+        pdp, _ = _audit_pdp()
+        h = _wh(pdp=pdp)
+        with _patch_sessions(_session(groups=["superuser"])), pytest.raises(web.HTTPForbidden):
+            await h._set_update(_Row(OTHER_ID), {"enabled": True})
+
+    @pytest.mark.asyncio
+    async def test_superuser_revoke_denied_without_policy(self):
+        h = _wh()
+        with _patch_sessions(_session(groups=["superuser"])), pytest.raises(web.HTTPForbidden):
+            await h._set_update(_Row(OTHER_ID), {"enabled": False})
+
+
+class _DelModel(FakeModel):
+    async def get(self, **kw):
+        self.calls.append(("get", kw))
+        if not self.rows:
+            from asyncdb.exceptions import NoDataFound
+            raise NoDataFound("none")
+        return _Row(self.rows[0]["user_id"])
+
+
+class TestDeletePath:
+    @pytest.mark.asyncio
+    async def test_owner_may_delete_own_row(self):
+        h = _wh(model=_DelModel([_row()]))
+        with _patch_sessions(_session()):
+            assert await h._del_primary_data({"id": "abc"}) == "abc"
+
+    @pytest.mark.asyncio
+    async def test_foreign_delete_returns_404(self):
+        h = _wh(model=_DelModel([_row(OTHER_ID)]))
+        with _patch_sessions(_session()), pytest.raises(web.HTTPNotFound):
+            await h._del_primary_data({"id": "abc"})
+
+    @pytest.mark.asyncio
+    async def test_foreign_and_missing_delete_are_indistinguishable(self):
+        out = []
+        for rows in ([_row(OTHER_ID)], []):
+            h = _wh(model=_DelModel(rows))
+            with _patch_sessions(_session()), pytest.raises(web.HTTPNotFound) as ei:
+                await h._del_primary_data({"id": "abc"})
+            out.append((ei.value.status, ei.value.text))
+        assert out[0] == out[1]
+
+    @pytest.mark.asyncio
+    async def test_delete_without_id_is_refused(self):
+        h = _wh(model=_DelModel([_row()]))
+        with _patch_sessions(_session()), pytest.raises(web.HTTPBadRequest):
+            await h._del_primary_data({})
+
+    @pytest.mark.asyncio
+    async def test_superuser_delete_is_allowed_and_audited(self):
+        pdp, audit = _audit_pdp()
+        h = _wh(model=_DelModel([_row(OTHER_ID)]), pdp=pdp)
+        with _patch_sessions(_session(groups=["superuser"])):
+            assert await h._del_primary_data({"id": "abc"}) == "abc"
+        audit.log.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_unauthenticated_write_is_401(self):
+        h = _wh()
+        with _patch_sessions(None), pytest.raises(web.HTTPUnauthorized):
+            await h._pre_delete()

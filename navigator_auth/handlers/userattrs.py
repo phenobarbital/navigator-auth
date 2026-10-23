@@ -209,3 +209,216 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
                         "identity:read", owner, not_found_on_deny=True
                     )
         return result
+
+    # ------------------------------------------------------------------
+    # Write path (TASK-124)
+    # ------------------------------------------------------------------
+    async def _pre_write(self) -> bool:
+        """Shared gate for the four write verbs: 501 then 401."""
+        self._require_owner_column()
+        await self.acting_user()
+        return True
+
+    async def _pre_put(self, *args, **kwargs) -> bool:
+        """Gate an insert: owner-only, no foreign ``user_id``.
+
+        A ``PUT`` creates a row, so there is no existing owner to authorize
+        against and nothing for a superuser to revoke: a foreign owner value
+        is refused 403 for every role (spec G5 — no ``identity:create``).
+        The body is readable here (aiohttp caches it), so the owner check
+        is done now, before upstream parses anything.
+
+        Returns:
+            ``True``. Refusals are raised.
+        """
+        await self._pre_write()
+        user_id, _ = await self.acting_user()
+        owner_col = self.owner_column
+        try:
+            raw = await self.json_data()
+        except Exception:  # noqa: BLE001 - malformed body is upstream's 400
+            raw = None
+        for element in (raw if isinstance(raw, list) else [raw]):
+            if (
+                isinstance(element, dict)
+                and element.get(owner_col) is not None
+                and str(element[owner_col]) != str(user_id)
+            ):
+                self.error(response={"error": "Forbidden"}, status=403)
+        return True
+
+    async def _pre_patch(self, *args, **kwargs) -> bool:
+        """Gate a partial update. Row ownership is decided in `_set_update`."""
+        return await self._pre_write()
+
+    async def _pre_post(self, *args, **kwargs) -> bool:
+        """Gate an upsert. `POST` may insert OR update."""
+        return await self._pre_write()
+
+    async def _pre_delete(self, *args, **kwargs) -> bool:
+        """Gate a delete. The target row is resolved in `_del_primary_data`."""
+        return await self._pre_write()
+
+    def _reject_readonly(self, data) -> None:
+        """Refuse 400 when a payload names a vault-managed column.
+
+        Applies to **everyone, the owner included**: these columns are
+        written only by ``IdentityStore.update_tokens``
+        (navigator_auth/identity/store.py:409), which re-ciphers the token
+        with the current key version.
+
+        Args:
+            data: The incoming payload — a ``dict`` or a ``list`` of dicts.
+
+        Raises:
+            web.HTTPBadRequest: a ``readonly_columns`` member is present.
+        """
+        elements = data if isinstance(data, list) else [data]
+        refused = sorted({
+            key
+            for element in elements if isinstance(element, dict)
+            for key in element if key in self.readonly_columns
+        })
+        if refused:
+            self.error(
+                response={
+                    "error": "Vault-managed columns cannot be written here",
+                    "columns": refused,
+                    "hint": (
+                        "Tokens are managed by IdentityStore.update_tokens "
+                        "(/api/v1/user/identities/...)."
+                    ),
+                },
+                status=400,
+            )
+
+    async def _post_user_id(self, value, column, data):
+        """Fill ``user_id`` with the session's when the payload omits it.
+
+        Unlike ``_set_user_id`` this never overwrites an explicit value, so
+        a foreign owner can be detected and refused instead of silently
+        rewritten (or, worse, silently re-owning a foreign row).
+        """
+        if value is not None:
+            return value
+        return await self.get_userid(session=self._session)
+
+    async def _patch_user_id(self, value, column, data):
+        """Leave ``user_id`` as sent on PATCH (``_set_user_id`` would clobber).
+
+        ``_set_update`` removes a ``None`` and refuses a changed owner.
+        """
+        return value
+
+    async def _post_data(self, *args, **kwargs):
+        """Reject vault columns and bind the owner before a write.
+
+        Covers ``PUT`` and ``POST`` (navigator/views/model.py:609).
+        """
+        data = await super()._post_data(*args, **kwargs)
+        self._reject_readonly(data)
+        user_id, is_superuser = await self.acting_user()
+        owner_col = self.owner_column
+        for element in (data if isinstance(data, list) else [data]):
+            if not isinstance(element, dict):
+                continue
+            value = element.get(owner_col)
+            if value is None:
+                element[owner_col] = user_id
+                continue
+            if str(value) == str(user_id):
+                continue
+            # Foreign owner: never for a normal user; a superuser may only
+            # target it with a pure revoke (POST updating an existing row —
+            # authorized again against the fetched row in _set_update).
+            extra = set(element) - {owner_col, self.pk, "enabled"}
+            is_revoke = (
+                is_superuser and not extra
+                and element.get("enabled") is False
+                and element.get(self.pk) is not None
+            )
+            if not is_revoke:
+                self.error(response={"error": "Forbidden"}, status=403)
+        return data
+
+    async def _patch_data(self, *args, **kwargs):
+        """Reject vault columns on `PATCH` (navigator/views/model.py:756)."""
+        data = await super()._patch_data(*args, **kwargs)
+        self._reject_readonly(data)
+        return data
+
+    async def _set_update(self, model, data) -> None:
+        """Authorize the update against the FETCHED row, then delegate.
+
+        The only upstream hook that sees the target row and the incoming
+        data together (navigator/views/model.py:732).
+
+        Args:
+            model: The row as fetched from the database.
+            data: The incoming payload for this row.
+
+        Raises:
+            web.HTTPForbidden: not the owner and not an authorized revoke.
+            web.HTTPBadRequest: a vault-managed column was named.
+        """
+        self._reject_readonly(data)
+        owner_col = self.owner_column
+        owner_id = getattr(model, owner_col, None)
+        user_id, is_superuser = await self.acting_user()
+        if owner_col in data:
+            if data[owner_col] is None:
+                data.pop(owner_col)
+            elif str(data[owner_col]) != str(owner_id):
+                # Re-owning a row is never allowed, by anyone.
+                self.error(response={"error": "Forbidden"}, status=403)
+        is_owner = owner_id is not None and str(owner_id) == str(user_id)
+        if not is_owner:
+            if is_superuser:
+                extra = set(data) - {owner_col, self.pk, "enabled"}
+                if extra or data.get("enabled") is not False:
+                    await self.audit_decision(
+                        "identity:revoke", False, owner_id,
+                        "cross-user write outside the revoke envelope"
+                    )
+                    self.error(response={"error": "Forbidden"}, status=403)
+            await self.authorize_row("identity:revoke", owner_id)
+        return await super()._set_update(model, data)
+
+    async def _del_primary_data(self, args: dict):
+        """Resolve and authorize the delete target.
+
+        Upstream calls this only when the subclass defines it
+        (navigator/views/model.py:1516-1517). A request with no id in the
+        URL is refused: upstream would otherwise fall through to its
+        body-driven delete paths (``model.remove(**data)`` / bulk), which
+        never see a row owner.
+
+        Args:
+            args: The URL arguments for this request.
+
+        Returns:
+            The primary-key value upstream should delete by.
+
+        Raises:
+            web.HTTPNotFound: the row is not the caller's and the caller is
+                not an authorized superuser — the same generic 404 for a
+                nonexistent row, so the id is no existence oracle.
+        """
+        objid = (args or {}).get("id") or (args or {}).get(self.pk)
+        if not objid:
+            self.error(
+                response={"error": "A primary key is required in the URL"},
+                status=400,
+            )
+        row = None
+        try:
+            async with await self.handler(request=self.request) as conn:
+                self.model.Meta.connection = conn
+                row = await self.model.get(**{self.pk: objid})
+        except Exception:  # noqa: BLE001 - missing/invalid id => no owner
+            row = None
+        owner_id = getattr(row, self.owner_column, None) if row else None
+        await self.authorize_row(
+            "identity:delete", owner_id, not_found_on_deny=True
+        )
+        return objid
