@@ -32,7 +32,7 @@
       "feature_id": "FEAT-105",
       "feature": "user-identities-ownership-abac",
       "spec": "sdd/specs/user-identities-ownership-abac.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -40,8 +40,8 @@
       "parallelism_notes": "Spec Module 2. Additive change to navigator_auth/decorators.py plus a new tests/test_policy_allows.py. Touches no file any other task touches; tests go at tests/ root beside test_check_access.py (the house location for decorator tests), so it does not even share the tests/unit/handlers package.",
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-119-policy-allows-public-api.md"
+      "completed_at": "2026-10-23T22:50:01+00:00",
+      "file": "sdd/tasks/completed/TASK-119-policy-allows-public-api.md"
     },
     {
       "id": "TASK-120",
