@@ -167,56 +167,58 @@ class AzureAuth(ExternalAuth):
             if accounts:
                 result = app.acquire_token_silent(Default_SCOPE, account=accounts[0])
             if not result:
-                # we need to get a new token from AAD
+                # No cached token for this account: acquire a fresh one from AAD.
+                # Whatever the source — silent cache hit or user/password grant —
+                # execution continues into the shared login body below.
                 result = app.acquire_token_by_username_password(user, pwd, Default_SCOPE)
-                client_info = {}
-                if "client_info" in result:
-                    # It happens when client_info and profile are in request
-                    client_info = json_decoder(decode_part(result["client_info"]))
-                try:
-                    if "access_token" in result:
-                        grant = self._token_from_msal_result(
-                            result, cache, requested_scopes=Default_SCOPE
+            client_info = {}
+            if "client_info" in result:
+                # It happens when client_info and profile are in request
+                client_info = json_decoder(decode_part(result["client_info"]))
+            try:
+                if "access_token" in result:
+                    grant = self._token_from_msal_result(
+                        result, cache, requested_scopes=Default_SCOPE
+                    )
+                    access_token = grant.access_token
+                    data = await self.get(
+                        url=self.userinfo_uri,
+                        token=access_token,
+                        token_type="Bearer",
+                    )
+                    data = {**data, **client_info}
+                    # FEAT-103 Module 3: account id from the VERIFIED profile.
+                    grant.provider_user_id = self.get_identity_userid(data)
+                    userdata, uid = self.build_user_info(
+                        userdata=data,
+                        token=access_token,
+                        mapping=self.user_mapping,
+                        id_token=grant.id_token,
+                        refresh_token=grant.refresh_token,
+                        expires_at=grant.expires_at,
+                        provider_user_id=grant.provider_user_id,
+                    )
+                    # also, user information:
+                    data = await self.validate_user_info(request, uid, userdata, access_token)
+                    await self.capture_login_credential(request, grant)
+                    # Redirect User to HOME
+                    return self.home_redirect(request, token=data["token"], token_type=self.scheme)
+                else:
+                    if 65001 in result.get("error_codes", []):
+                        # AAD requires user consent for U/P flow
+                        print(
+                            "Visit this to consent:",
+                            app.get_authorization_request_url(Default_SCOPE),
                         )
-                        access_token = grant.access_token
-                        data = await self.get(
-                            url=self.userinfo_uri,
-                            token=access_token,
-                            token_type="Bearer",
-                        )
-                        data = {**data, **client_info}
-                        # FEAT-103 Module 3: account id from the VERIFIED profile.
-                        grant.provider_user_id = self.get_identity_userid(data)
-                        userdata, uid = self.build_user_info(
-                            userdata=data,
-                            token=access_token,
-                            mapping=self.user_mapping,
-                            id_token=grant.id_token,
-                            refresh_token=grant.refresh_token,
-                            expires_at=grant.expires_at,
-                            provider_user_id=grant.provider_user_id,
-                        )
-                        # also, user information:
-                        data = await self.validate_user_info(request, uid, userdata, access_token)
-                        await self.capture_login_credential(request, grant)
-                        # Redirect User to HOME
-                        return self.home_redirect(request, token=data["token"], token_type=self.scheme)
                     else:
-                        if 65001 in result.get("error_codes", []):
-                            # AAD requires user consent for U/P flow
-                            print(
-                                "Visit this to consent:",
-                                app.get_authorization_request_url(Default_SCOPE),
-                            )
-                        else:
-                            error = result.get("error")
-                            desc = result.get("error_description")
-                            correlation = result.get("correlation_id")
-                            message = f"Azure {error}: {desc}, correlation id: {correlation}"
-                            logging.exception(message)
-                            raise web.HTTPForbidden(reason=message)
-                except Exception as err:
-                    raise web.HTTPForbidden(reason=f"Azure: Invalid Response from Server {err}.")
+                        error = result.get("error")
+                        desc = result.get("error_description")
+                        correlation = result.get("correlation_id")
+                        message = f"Azure {error}: {desc}, correlation id: {correlation}"
+                        logging.exception(message)
+                        raise web.HTTPForbidden(reason=message)
+            except Exception as err:
+                raise web.HTTPForbidden(reason=f"Azure: Invalid Response from Server {err}.")
         else:
             qs = self.queryparams(request)
             redirect = None
