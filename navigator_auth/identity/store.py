@@ -18,6 +18,21 @@ logger = logging.getLogger("navigator.identity")
 # Session Vault key for the cached credential of a provider:
 IDENTITY_VAULT_KEY = "identity:{provider}"
 
+# Read projection for auth.user_identities.
+#
+# asyncdb's ``Model.filter()`` issues ``SELECT *`` and hands every column it
+# gets back to the dataclass ``__init__``, so a single column the model does
+# not declare makes hydration raise
+# ``TypeError: UserIdentity.__init__() got an unexpected keyword argument``.
+# A legacy table has exactly such a column: ``uid``, half of its legacy
+# primary key, which ``005_identity_legacy_uid_default.sql`` deliberately
+# leaves in place. ``Model.get()`` never had the problem because it projects
+# the model's own columns — every read here does the same, which also keeps
+# any future legacy column from breaking hydration again.
+_IDENTITY_FIELDS: tuple[str, ...] = tuple(UserIdentity.get_fields(UserIdentity))
+_IDENTITY_TABLE = f"{UserIdentity.Meta.schema}.{UserIdentity.Meta.name}"
+_IDENTITY_SELECT = f"SELECT {', '.join(_IDENTITY_FIELDS)} FROM {_IDENTITY_TABLE}"
+
 try:
     from navigator_session.vault import VaultCryptoError
 except ImportError:  # pragma: no cover - IdentityCipher raises ConfigError first
@@ -66,6 +81,71 @@ def _newest_first(rows: list[Any]) -> None:
         ),
         reverse=True,
     )
+
+
+def _user_id_param(value: Any) -> Any:
+    """Normalize a ``user_id`` for a parameterized query.
+
+    ``auth.users.user_id`` is an integer, but a session can carry it as the
+    string ``"35"``. asyncdb's ``filter()`` inlined the value into the SQL
+    text and let Postgres cast it; a bound parameter is typed, so the string
+    form would be rejected outright.
+
+    Args:
+        value: ``user_id`` as it arrives from the session or a caller.
+
+    Returns:
+        The integer form of a digits-only string, otherwise ``value``.
+    """
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return value
+
+
+async def _filter_identities(conn: Any, **criteria: Any) -> list[UserIdentity]:
+    """Identity rows matching an equality filter, hydrated as models.
+
+    Replaces ``UserIdentity.filter()``: same equality semantics, but it
+    projects ``_IDENTITY_SELECT`` instead of ``SELECT *`` so a legacy column
+    on the table cannot break hydration (see the ``_IDENTITY_SELECT`` note).
+
+    Args:
+        conn: An acquired database connection.
+        **criteria: ``column=value`` filters AND-ed together. Every column
+            must be declared on ``UserIdentity``.
+
+    Returns:
+        The matching rows in database order; empty when nothing matches.
+
+    Raises:
+        ValueError: A filter names a column the model does not declare.
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+    for column, value in criteria.items():
+        if column not in _IDENTITY_FIELDS:
+            raise ValueError(f"{_IDENTITY_TABLE} has no column {column!r}")
+        params.append(value)
+        conditions.append(f"{column} = ${len(params)}")
+    sql = _IDENTITY_SELECT
+    if conditions:
+        sql = f"{sql} WHERE {' AND '.join(conditions)}"
+    rows = await conn.fetch_all(sql, *params)
+    # Mirrors Model.filter(): the old-value map is class-level, so it is
+    # reset before a batch of rows is hydrated. Unknown keys are dropped the
+    # way Model.get() drops them — the projection should never return one,
+    # and hydration must not depend on that.
+    UserIdentity.reset_values(UserIdentity)
+    return [
+        UserIdentity(
+            **{
+                column: value
+                for column, value in dict(row).items()
+                if column in _IDENTITY_FIELDS
+            }
+        )
+        for row in rows or []
+    ]
 
 
 class IdentityStore:
@@ -221,12 +301,10 @@ class IdentityStore:
     async def list_for_user(self, user_id: Any) -> list[dict]:
         """All linked identities for a user, with secrets masked out."""
         async with await self._pool.acquire() as conn:
-            UserIdentity.Meta.connection = conn
-            try:
-                rows = await UserIdentity.filter(user_id=user_id)
-            except NoDataFound:
-                return []
-        return [self.masked(row) for row in rows or []]
+            rows = await _filter_identities(
+                conn, user_id=_user_id_param(user_id)
+            )
+        return [self.masked(row) for row in rows]
 
     async def get_one(
         self, user_id: Any, identity_id: Any
@@ -246,16 +324,14 @@ class IdentityStore:
     ) -> Optional[UserIdentity]:
         """The newest enabled credential-bearing identity for a provider."""
         async with await self._pool.acquire() as conn:
-            UserIdentity.Meta.connection = conn
-            try:
-                rows = await UserIdentity.filter(
-                    user_id=user_id, auth_provider=provider
-                )
-            except NoDataFound:
-                return None
+            rows = await _filter_identities(
+                conn,
+                user_id=_user_id_param(user_id),
+                auth_provider=provider,
+            )
         rows = [
             row
-            for row in rows or []
+            for row in rows
             if getattr(row, "access_token", None) and getattr(row, "enabled", True)
         ]
         if not rows:
@@ -289,18 +365,15 @@ class IdentityStore:
         if not provider_user_id:
             return None
         async with await self._pool.acquire() as conn:
-            UserIdentity.Meta.connection = conn
-            try:
-                rows = await UserIdentity.filter(
-                    user_id=user_id,
-                    auth_provider=provider,
-                    provider_user_id=str(provider_user_id),
-                )
-            except NoDataFound:
-                return None
+            rows = await _filter_identities(
+                conn,
+                user_id=_user_id_param(user_id),
+                auth_provider=provider,
+                provider_user_id=str(provider_user_id),
+            )
         rows = [
             row
-            for row in rows or []
+            for row in rows
             if getattr(row, "access_token", None) and getattr(row, "enabled", True)
         ]
         if len(rows) > 1:
@@ -433,14 +506,12 @@ class IdentityStore:
         disabled rows match.
         """
         async with await self._pool.acquire() as conn:
-            UserIdentity.Meta.connection = conn
-            try:
-                rows = await UserIdentity.filter(
-                    auth_provider=provider, provider_user_id=provider_user_id
-                )
-            except NoDataFound:
-                return None
-        rows = [row for row in rows or [] if getattr(row, "enabled", True)]
+            rows = await _filter_identities(
+                conn,
+                auth_provider=provider,
+                provider_user_id=str(provider_user_id),
+            )
+        rows = [row for row in rows if getattr(row, "enabled", True)]
         if not rows:
             return None
         return rows[0].user_id

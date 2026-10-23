@@ -176,9 +176,7 @@ class AzureAuth(ExternalAuth):
                     client_info = json_decoder(decode_part(result["client_info"]))
                 try:
                     if "access_token" in result:
-                        grant = self._token_from_msal_result(
-                            result, cache, requested_scopes=Default_SCOPE
-                        )
+                        grant = self._token_from_msal_result(result, cache, requested_scopes=Default_SCOPE)
                         # MSAL may answer from its own cache: never publish a
                         # grant that is already inside the refresh leeway
                         # (issue:3fd80396c685).
@@ -290,7 +288,12 @@ class AzureAuth(ExternalAuth):
                             request, error="AUTHENTICATION_ERROR", message="Failed to generate session token"
                         )
                     else:
-                        return self.failed_redirect(request, error="AUTHENTICATION_ERROR", message=f"Info: {result}")
+                        logging.error(f"Azure: unexpected MSAL auth response (keys: {sorted(result)})")
+                        return self.failed_redirect(
+                            request,
+                            error="AUTHENTICATION_ERROR",
+                            message="Authentication failed.",
+                        )
                 grant = self._token_from_msal_result(
                     result,
                     cache,
@@ -335,7 +338,9 @@ class AzureAuth(ExternalAuth):
                 except Exception as err:
                     logging.exception(f"Azure: Error getting User information: {err}")
                     return self.failed_redirect(
-                        request, error="ERROR_USER_NOT_FOUND", message=f"Error getting User information: {err}"
+                        request,
+                        error="ERROR_USER_NOT_FOUND",
+                        message="Error getting user information.",
                     )
                 # Redirect User to HOME
                 try:
@@ -344,13 +349,15 @@ class AzureAuth(ExternalAuth):
                     token = None
                 return self.home_redirect(request, token=token, token_type=token_type, uri=internal_redirect)
             except Exception as err:
-                logging.exception(err)
+                logging.exception(f"Azure: invalid user information: {err}")
                 return self.failed_redirect(
-                    request, error="ERROR_INVALID_REQUEST", message=f"Error getting User information: {err}"
+                    request,
+                    error="ERROR_INVALID_REQUEST",
+                    message="Invalid user information.",
                 )
         except Exception as err:
-            logging.exception(err)
-            return self.failed_redirect(request, error="ERROR_UNKNOWN", message=f"Error: {err}")
+            logging.exception(f"Azure: authentication callback failed: {err}")
+            return self.failed_redirect(request, error="ERROR_UNKNOWN", message="Authentication failed.")
 
     ### Identity-link flow (MSAL-based)
     def identity_scopes(self) -> list:
@@ -413,28 +420,21 @@ class AzureAuth(ExternalAuth):
         scope = result.get("scope")
         scopes = scope.split() if isinstance(scope, str) else list(scope or [])
         if not scopes and requested_scopes:
-            scopes = [
-                s for s in requested_scopes if s not in MSAL_RESERVED_SCOPES
-            ]
+            scopes = [s for s in requested_scopes if s not in MSAL_RESERVED_SCOPES]
         return TokenResponse(
             access_token=result["access_token"],
             token_type=result.get("token_type", "Bearer"),
             # msal 1.38.0 returns refresh_token on the authorization_code and
             # refresh_token grants; the cache is only a fallback (see
             # _refresh_token_from_cache).
-            refresh_token=(
-                result.get("refresh_token")
-                or AzureAuth._refresh_token_from_cache(cache)
-            ),
+            refresh_token=(result.get("refresh_token") or AzureAuth._refresh_token_from_cache(cache)),
             id_token=result.get("id_token"),
             expires_in=result.get("expires_in"),
             scopes=scopes,
             raw={k: v for k, v in result.items() if k != "refresh_token"},
         )
 
-    async def authorize_identity(
-        self, request: web.Request, user_id, finish_redirect: str
-    ):
+    async def authorize_identity(self, request: web.Request, user_id, finish_redirect: str):
         from ..conf import IDENTITY_LINK_TTL
 
         redirect_uri = self.get_redirect_uri(request)
@@ -452,14 +452,10 @@ class AzureAuth(ExternalAuth):
             "redirect_uri": redirect_uri,
             "extra": {"msal_flow": flow},
         }
-        await self._flow_store.start_link(
-            flow["state"], payload, ttl=IDENTITY_LINK_TTL
-        )
+        await self._flow_store.start_link(flow["state"], payload, ttl=IDENTITY_LINK_TTL)
         return self.redirect(flow["auth_uri"])
 
-    async def exchange_code_for_tokens(
-        self, request: web.Request, flow: dict
-    ) -> TokenResponse:
+    async def exchange_code_for_tokens(self, request: web.Request, flow: dict) -> TokenResponse:
         auth_response = dict(request.rel_url.query.items())
         cache = msal.SerializableTokenCache()
         app = self.get_msal_app(token_cache=cache)
@@ -472,9 +468,7 @@ class AzureAuth(ExternalAuth):
     async def refresh_identity_tokens(self, refresh_token: str) -> TokenResponse:
         cache = msal.SerializableTokenCache()
         app = self.get_msal_app(token_cache=cache)
-        result = app.acquire_token_by_refresh_token(
-            refresh_token, scopes=self.identity_scopes()
-        )
+        result = app.acquire_token_by_refresh_token(refresh_token, scopes=self.identity_scopes())
         token = self._token_from_msal_result(result, cache)
         if not token.refresh_token:
             token.refresh_token = refresh_token
@@ -496,9 +490,7 @@ class AzureAuth(ExternalAuth):
             names.add(name)
         return names
 
-    async def refresh_provider_tokens(
-        self, token: TokenResponse
-    ) -> Optional[TokenResponse]:
+    async def refresh_provider_tokens(self, token: TokenResponse) -> Optional[TokenResponse]:
         """Refresh an Azure LOGIN grant without downgrading its scopes.
 
         ``refresh_identity_tokens`` asks for ``AZURE_IDENTITY_SCOPES`` (default
@@ -513,13 +505,10 @@ class AzureAuth(ExternalAuth):
         """
         if not token.refresh_token:
             return None
-        requested = [
-            s for s in (token.scopes or []) if s not in MSAL_RESERVED_SCOPES
-        ]
+        requested = [s for s in (token.scopes or []) if s not in MSAL_RESERVED_SCOPES]
         if not requested:
             self.logger.warning(
-                "azure: stored grant records no scopes; falling back to "
-                "identity scopes for the refresh."
+                "azure: stored grant records no scopes; falling back to " "identity scopes for the refresh."
             )
             requested = self.identity_scopes()
         cache = msal.SerializableTokenCache()
@@ -530,9 +519,7 @@ class AzureAuth(ExternalAuth):
             token.refresh_token,
             scopes=requested,
         )
-        refreshed = self._token_from_msal_result(
-            result, cache, requested_scopes=requested
-        )
+        refreshed = self._token_from_msal_result(result, cache, requested_scopes=requested)
         if not refreshed.refresh_token:
             # Entra did not rotate: keep using the current one.
             refreshed.refresh_token = token.refresh_token
@@ -676,9 +663,7 @@ class AzureAuth(ExternalAuth):
         scope = claims.get("scp")
         scopes = scope.split() if isinstance(scope, str) else list(scope or [])
         try:
-            userinfo = await self.get(
-                url=self.userinfo_uri, token=token, token_type=token_type
-            )
+            userinfo = await self.get(url=self.userinfo_uri, token=token, token_type=token_type)
         except Exception as err:
             self.logger.warning(f"azure: Graph /me failed during token exchange: {err}")
             raise InvalidAuth("expired") from err

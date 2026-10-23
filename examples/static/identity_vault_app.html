@@ -449,14 +449,30 @@
         }
 
         function renderSession(me) {
-            $('session-view').innerHTML = Object.entries({
+            const rows = {
                 user_id: me.user_id,
                 username: me.username,
                 email: me.email,
                 display_name: me.display_name,
                 auth_method: me.auth_method,
                 session_id: me.session_id,
-            }).map(([k, v]) => `<dt>${k}</dt><dd>${v ?? '—'}</dd>`).join('');
+            };
+            // Only an external (SSO) login carries a provider credential; the
+            // token itself is shown masked — the clear value is in the JSON.
+            if (me.authorization) {
+                const a = me.authorization;
+                rows.authorization = `${a.type} ${mask(a.token)}`
+                    + ` · expires ${a.expires_at ?? '—'} · from ${a.source}`;
+            }
+            $('session-view').innerHTML = Object.entries(rows)
+                .map(([k, v]) => `<dt>${k}</dt><dd>${v ?? '—'}</dd>`).join('');
+        }
+
+        function mask(token) {
+            if (!token) return '—';
+            return token.length <= 12
+                ? '*'.repeat(token.length)
+                : `${token.slice(0, 6)}…${token.slice(-4)}`;
         }
 
         function renderIdentities(identities) {
