@@ -1,4 +1,5 @@
 """Normalized token payload returned by every backend's identity flow."""
+
 import base64
 import json
 from typing import Any, Optional
