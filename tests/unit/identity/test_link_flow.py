@@ -176,6 +176,40 @@ class TestFinishIdentityLink:
         result = await backend.finish_identity_link(request, self._flow())
         assert result == "FAILED"
 
+    @pytest.mark.asyncio
+    async def test_denied_message_leaks_no_query_input(self, flow_store):
+        """?error_description is attacker-controlled and must not be echoed."""
+        backend = _generic_backend(flow_store)
+        backend.failed_redirect = MagicMock(return_value="FAILED")
+        request = make_mocked_request(
+            "GET",
+            "/auth/github/callback/?error=access_denied"
+            "&error_description=PWNED123&state=s",
+        )
+        await backend.finish_identity_link(request, self._flow())
+        kwargs = backend.failed_redirect.call_args.kwargs
+        assert kwargs["error"] == "IDENTITY_LINK_DENIED"
+        assert "PWNED123" not in kwargs["message"]
+        assert "access_denied" not in kwargs["message"]
+
+    @pytest.mark.asyncio
+    async def test_failed_message_leaks_no_exception_text(self, flow_store):
+        """The FEAT-104 case: a ValidationError's text must not reach the user."""
+        backend = _generic_backend(flow_store)
+        backend.failed_redirect = MagicMock(return_value="FAILED")
+        backend.exchange_code_for_tokens = AsyncMock(
+            side_effect=AuthException("LEAKED_DETAIL\nHint: payload attribute")
+        )
+        request = make_mocked_request(
+            "GET", "/auth/github/callback/?code=c&state=s"
+        )
+        request.app["authdb"] = MagicMock()
+        await backend.finish_identity_link(request, self._flow())
+        kwargs = backend.failed_redirect.call_args.kwargs
+        assert kwargs["error"] == "IDENTITY_LINK_FAILED"
+        assert "LEAKED_DETAIL" not in kwargs["message"]
+        assert "payload" not in kwargs["message"]
+
 
 class TestAzureIdentityLink:
     def _azure(self, flow_store=None):

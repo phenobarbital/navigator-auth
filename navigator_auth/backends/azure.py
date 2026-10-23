@@ -279,7 +279,12 @@ class AzureAuth(ExternalAuth):
                             request, error="AUTHENTICATION_ERROR", message="Failed to generate session token"
                         )
                     else:
-                        return self.failed_redirect(request, error="AUTHENTICATION_ERROR", message=f"Info: {result}")
+                        logging.error(f"Azure: unexpected MSAL auth response: {result}")
+                        return self.failed_redirect(
+                            request,
+                            error="AUTHENTICATION_ERROR",
+                            message="Authentication failed.",
+                        )
                 grant = self._token_from_msal_result(
                     result,
                     cache,
@@ -319,7 +324,9 @@ class AzureAuth(ExternalAuth):
                 except Exception as err:
                     logging.exception(f"Azure: Error getting User information: {err}")
                     return self.failed_redirect(
-                        request, error="ERROR_USER_NOT_FOUND", message=f"Error getting User information: {err}"
+                        request,
+                        error="ERROR_USER_NOT_FOUND",
+                        message="Error getting user information.",
                     )
                 # Redirect User to HOME
                 try:
@@ -328,13 +335,17 @@ class AzureAuth(ExternalAuth):
                     token = None
                 return self.home_redirect(request, token=token, token_type=token_type, uri=internal_redirect)
             except Exception as err:
-                logging.exception(err)
+                logging.exception(f"Azure: invalid user information: {err}")
                 return self.failed_redirect(
-                    request, error="ERROR_INVALID_REQUEST", message=f"Error getting User information: {err}"
+                    request,
+                    error="ERROR_INVALID_REQUEST",
+                    message="Invalid user information.",
                 )
         except Exception as err:
-            logging.exception(err)
-            return self.failed_redirect(request, error="ERROR_UNKNOWN", message=f"Error: {err}")
+            logging.exception(f"Azure: authentication callback failed: {err}")
+            return self.failed_redirect(
+                request, error="ERROR_UNKNOWN", message="Authentication failed."
+            )
 
     ### Identity-link flow (MSAL-based)
     def identity_scopes(self) -> list:

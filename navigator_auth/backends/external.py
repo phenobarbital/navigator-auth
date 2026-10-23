@@ -806,8 +806,16 @@ class ExternalAuth(BaseAuthBackend):
 
         if error := request.rel_url.query.get("error"):
             desc = request.rel_url.query.get("error_description", "")
+            self.logger.warning(
+                "%s: identity link denied by provider: error=%r description=%r",
+                self._service_name,
+                error,
+                desc,
+            )
             return self.failed_redirect(
-                request, error="IDENTITY_LINK_DENIED", message=f"{error}: {desc}"
+                request,
+                error="IDENTITY_LINK_DENIED",
+                message="Identity link was denied by the provider.",
             )
         try:
             token = await self.exchange_code_for_tokens(request, flow)
@@ -825,7 +833,7 @@ class ExternalAuth(BaseAuthBackend):
             return self.failed_redirect(
                 request,
                 error="IDENTITY_LINK_FAILED",
-                message=f"Identity link failed: {err}",
+                message="Identity link failed.",
             )
         # best-effort: cache the decrypted credential in the session vault
         try:
