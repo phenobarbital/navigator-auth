@@ -395,9 +395,7 @@ class TestSafeFilter:
         """No PDP / undeclared policy => the superuser is NOT widened."""
         for pdp in (None, FakePDP([], _audit())):
             host = Host(_request(pdp))
-            with S(_session(groups=["superuser"])), patch(
-                "navigator_auth.handlers.guards.AuditLog"
-            ):
+            with S(_session(groups=["superuser"])), patch("navigator_auth.handlers.guards.AuditLog"):
                 await host.safe_filter("email=a")
             sql, args = host.conn.calls[0]
             assert '"user_id" = $2' in sql and 42 in args

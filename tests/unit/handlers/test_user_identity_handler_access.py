@@ -704,17 +704,22 @@ class TestReviewRegressions:
     async def test_single_attribute_patch_form_refused(self):
         """A non-JSON PATCH body bypasses _set_update upstream => 400."""
         h = _wh()
-        with _patch_sessions(_session()), patch(
-            "navigator.views.ModelView._patch_data",
-            new=AsyncMock(return_value="evil"),
-        ), pytest.raises(web.HTTPBadRequest):
+        with (
+            _patch_sessions(_session()),
+            patch(
+                "navigator.views.ModelView._patch_data",
+                new=AsyncMock(return_value="evil"),
+            ),
+            pytest.raises(web.HTTPBadRequest),
+        ):
             await h._patch_data()
 
     @pytest.mark.asyncio
     async def test_put_vault_column_in_query_string_refused(self):
         h = _wh(path="/api/v1/user_identity")
         h._request = make_mocked_request(
-            "PUT", "/api/v1/user_identity?access_token=x",
+            "PUT",
+            "/api/v1/user_identity?access_token=x",
             app={"auth": MagicMock()},
         )
         with _patch_sessions(_session()), pytest.raises(web.HTTPBadRequest):
@@ -723,6 +728,7 @@ class TestReviewRegressions:
     @pytest.mark.asyncio
     async def test_patch_meta_has_no_credentials(self):
         from navigator_auth.models import UserIdentity
+
         h = _wh()
         h.model = UserIdentity
         h._request.match_info.update({"meta": ":meta"})

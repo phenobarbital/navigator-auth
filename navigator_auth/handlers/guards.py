@@ -259,12 +259,12 @@ class OwnerOrSuperuserGuard:
             )
             if action:
                 allowed, reason, _ = await policy_allows(
-                    self.policy_name, self.request, action=action,
+                    self.policy_name,
+                    self.request,
+                    action=action,
                     resource=self.request.path,
                 )
-                await self.audit_decision(
-                    action, bool(allowed), None, f"filter on '{column}': {reason}"
-                )
+                await self.audit_decision(action, bool(allowed), None, f"filter on '{column}': {reason}")
                 widen = bool(allowed)
         if not widen and self.owner_column:
             sql += f' AND "{self.owner_column}" = $2'

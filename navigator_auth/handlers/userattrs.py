@@ -167,9 +167,7 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
         vault-column check would apply. Only dict / list-of-dict payloads
         are accepted.
         """
-        ok = isinstance(data, dict) or (
-            isinstance(data, list) and all(isinstance(d, dict) for d in data)
-        )
+        ok = isinstance(data, dict) or (isinstance(data, list) and all(isinstance(d, dict) for d in data))
         if not ok:
             self.error(
                 response={"error": "PATCH requires a JSON object body"},
@@ -593,9 +591,7 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
         vault-column check would apply. Only dict / list-of-dict payloads
         are accepted.
         """
-        ok = isinstance(data, dict) or (
-            isinstance(data, list) and all(isinstance(d, dict) for d in data)
-        )
+        ok = isinstance(data, dict) or (isinstance(data, list) and all(isinstance(d, dict) for d in data))
         if not ok:
             self.error(
                 response={"error": "PATCH requires a JSON object body"},
