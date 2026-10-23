@@ -50,7 +50,7 @@
       "feature_id": "FEAT-104",
       "feature": "bug-identity",
       "spec": "sdd/specs/bug-identity.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [
@@ -60,8 +60,8 @@
       "parallelism_notes": "Imports header_safe from TASK-115, so it cannot start until that lands. Also edits navigator_auth/backends/external.py, which TASK-117 edits too — running them concurrently would conflict in the same file.",
       "assigned_to": null,
       "started_at": "2026-10-23T00:15:24+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-116-failed-redirect-header-safe.md"
+      "completed_at": "2026-10-23T00:23:36+00:00",
+      "file": "sdd/tasks/completed/TASK-116-failed-redirect-header-safe.md"
     },
     {
       "id": "TASK-117",

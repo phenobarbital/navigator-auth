@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-104 — Identity-Link Failure: Non-Nullable Token Columns and Unsafe Error Headers
 **Spec**: `sdd/specs/bug-identity.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-115
@@ -318,8 +318,8 @@ pytest tests/unit/identity/ -q
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: failed_redirect sanitizes error+message via header_safe; 5 tests on the real method; 187 identity tests pass. Ruff F841 x2 in external.py pre-existing.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none
