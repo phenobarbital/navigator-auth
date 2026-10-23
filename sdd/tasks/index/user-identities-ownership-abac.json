@@ -107,7 +107,7 @@
       "feature_id": "FEAT-105",
       "feature": "user-identities-ownership-abac",
       "spec": "sdd/specs/user-identities-ownership-abac.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -117,8 +117,8 @@
       "parallelism_notes": "Spec Module 4, part 1 of 3 (Module 4 is split because one task would exceed the per-file blueprint size cap and mixes three unrelated concerns). Edits navigator_auth/handlers/userattrs.py, shared with TASK-121/124/125/126 — strictly sequential.",
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-123-identity-handler-read-path.md"
+      "completed_at": "2026-10-23T22:54:00+00:00",
+      "file": "sdd/tasks/completed/TASK-123-identity-handler-read-path.md"
     },
     {
       "id": "TASK-124",
