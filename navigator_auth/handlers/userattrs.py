@@ -177,6 +177,7 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
     async def patch(self):
         """Serve a redacted ``:meta`` (upstream returns ``__fields__`` raw)."""
         if self.get_args().get("meta") == ":meta":
+            await self._pre_write()  # 501 gate + 401, as for every verb
             fields = [f for f in self.model.__fields__ if f in self.public_columns]
             return self.json_response(fields)
         return await super().patch()
@@ -601,6 +602,7 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
     async def patch(self):
         """Serve a redacted ``:meta`` (upstream returns ``__fields__`` raw)."""
         if self.get_args().get("meta") == ":meta":
+            await self._pre_write()  # 501 gate + 401, as for every verb
             fields = [f for f in self.model.__fields__ if f not in self.credential_columns]
             return self.json_response(fields)
         return await super().patch()
@@ -690,9 +692,23 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
             is_revoke = (
                 is_superuser and not extra and element.get("enabled") is False and element.get(self.pk) is not None
             )
+            if is_revoke and not await self._target_exists(element[self.pk]):
+                # Upstream post() INSERTS when the pk is unknown, bypassing
+                # _set_update (policy + audit): only an existing row may be
+                # revoked through this verb.
+                is_revoke = False
             if not is_revoke:
                 self.error(response={"error": "Forbidden"}, status=403)
         return data
+
+    async def _target_exists(self, objid) -> bool:
+        """Return True when a row with this primary key exists."""
+        try:
+            async with await self.handler(request=self.request) as conn:
+                self.model.Meta.connection = conn
+                return bool(await self.model.get(**{self.pk: objid}))
+        except Exception:  # noqa: BLE001 - unknown/invalid id => not found
+            return False
 
     async def _patch_data(self, *args, **kwargs):
         """Reject vault columns on `PATCH` (navigator/views/model.py:756)."""

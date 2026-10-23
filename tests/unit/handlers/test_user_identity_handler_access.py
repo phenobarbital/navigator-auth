@@ -732,6 +732,38 @@ class TestReviewRegressions:
         h = _wh()
         h.model = UserIdentity
         h._request.match_info.update({"meta": ":meta"})
-        resp = await h.patch()
+        with _patch_sessions(_session()):
+            resp = await h.patch()
         names = json.loads(resp.text)
         assert "email" in names and not (set(names) & set(CREDENTIALS))
+
+
+class TestCodexReviewRegressions:
+    @pytest.mark.asyncio
+    async def test_patch_meta_requires_authentication(self):
+        h = _wh()
+        h._request.match_info.update({"meta": ":meta"})
+        with _patch_sessions(None), pytest.raises(web.HTTPUnauthorized):
+            await h.patch()
+
+    @pytest.mark.asyncio
+    async def test_superuser_revoke_post_for_unknown_pk_refused(self):
+        pdp, _ = _audit_pdp()
+        h = _wh(pdp=pdp, model=FakeModel([]))  # get() -> None: row missing
+        body = {"identity_id": "new", "user_id": OTHER_ID, "enabled": False}
+        with _patch_sessions(_session(groups=["superuser"])), patch(
+            "navigator.views.ModelView._post_data",
+            new=AsyncMock(return_value=dict(body)),
+        ), pytest.raises(web.HTTPForbidden):
+            await h._post_data()
+
+    @pytest.mark.asyncio
+    async def test_superuser_revoke_post_for_existing_pk_allowed(self):
+        pdp, _ = _audit_pdp()
+        h = _wh(pdp=pdp, model=_DelModel([_row(OTHER_ID)]))
+        body = {"identity_id": "abc", "user_id": OTHER_ID, "enabled": False}
+        with _patch_sessions(_session(groups=["superuser"])), patch(
+            "navigator.views.ModelView._post_data",
+            new=AsyncMock(return_value=dict(body)),
+        ):
+            assert (await h._post_data())["user_id"] == OTHER_ID
