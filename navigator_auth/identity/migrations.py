@@ -8,6 +8,7 @@ migration. Every file is additive (``ADD COLUMN IF NOT EXISTS``) except
 at all. ``006`` is a guarded no-op on a canonical database and on every
 startup after the first.
 """
+
 import logging
 from pathlib import Path
 from typing import Any
@@ -84,16 +85,14 @@ async def ensure_identity_columns(db_pool: Any) -> None:
             if first_error is None:
                 first_error = err
             logger.error(
-                "Identity migration %s failed: %s — continuing with the "
-                "remaining migrations.",
+                "Identity migration %s failed: %s — continuing with the remaining migrations.",
                 filename,
                 err,
             )
 
     if failures:
         raise RuntimeError(
-            f"{len(failures)} of {len(_MIGRATION_FILES)} identity migrations "
-            f"failed: {', '.join(failures)}"
+            f"{len(failures)} of {len(_MIGRATION_FILES)} identity migrations failed: {', '.join(failures)}"
         ) from first_error
 
     logger.info("Identity credential columns ensured.")
