@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-105 — Owner-or-Superuser ABAC Ownership for the Auth Model CRUD Surfaces
 **Spec**: `sdd/specs/user-identities-ownership-abac.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-122
@@ -872,10 +872,8 @@ assert set(PartnerKey.get_columns()) - PartnerKeyHandler.public_columns == {"tok
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-24
+**Notes**: 36 tests pass; ruff clean on partners.py. Decisions: post() requires BOTH partner:create and partner:revoke (it chooses insert/update at runtime; requiring only create would let create-only policies mutate keys). No _filtering added (local base has no _filter). DEVIATION: _post_get does not delegate to super() — local base calls json_response(content=...) which the installed navigator-api 4.0.1 rejects (param is 'response') and its fields branch reads the wrong variable; I used positional json_response(). OBSERVATION (pre-existing, out of scope, local base handlers/model.py): put/patch/post/delete/get-meta there also call json_response(content=...) and will TypeError on 4.0.1; and delete() maps 'not found' to status 204 which error() turns into 400.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

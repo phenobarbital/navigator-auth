@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-105 — Owner-or-Superuser ABAC Ownership for the Auth Model CRUD Surfaces
 **Spec**: `sdd/specs/user-identities-ownership-abac.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-125, TASK-126, TASK-127
@@ -760,10 +760,8 @@ YAMLStorage._parse_file(PACK)   # @staticmethod — no instance needed
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-24
+**Notes**: 8 integration tests pass against the SHIPPED pack (YAMLStorage._parse_file -> ResourcePolicy objects); full set (unit+integration+regression) 689 pass. pdp.md: appended an English addendum (existing Spanish brief untouched) rather than a new file, to keep spec Module 9's named location. CHANGELOG.md entry added (repo convention: Unreleased section). No pytest testpaths restriction, so tests/integration/ is used. Owner scenario compares the CRUD payload against IdentityStore.masked() output rather than driving UserIdentitiesHandler through @user_session (needs a real vault store/cipher).
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

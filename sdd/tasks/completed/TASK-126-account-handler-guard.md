@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-105 — Owner-or-Superuser ABAC Ownership for the Auth Model CRUD Surfaces
 **Spec**: `sdd/specs/user-identities-ownership-abac.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-121, TASK-125
@@ -740,10 +740,8 @@ assert set(UserAccount.get_columns()) == UserAccountHandler.public_columns
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-24
+**Notes**: 32 tests pass; regression green. Reading of account:revoke: UserAccount has no revocation column, so every cross-user PATCH/POST/PUT is refused 403 (superuser attempts are audited); account:delete is the superuser's only mutating power on a foreign row. Not escalated: the task text itself prescribes this reading. :meta is bounded to public_columns via redact_schema (copy, no mutation). Same extras as TASK-123..125 (instance-level owner filter, _post_user_id/_patch_user_id to stop _set_user_id clobbering, id-less DELETE refused, write responses scrubbed, 501 raised directly).
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

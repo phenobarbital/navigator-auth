@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-105 — Owner-or-Superuser ABAC Ownership for the Auth Model CRUD Surfaces
 **Spec**: `sdd/specs/user-identities-ownership-abac.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-124
@@ -846,10 +846,8 @@ from navigator_auth.identity.store import IdentityStore   # for masked()'s key s
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-24
+**Notes**: 119 unit tests in tests/unit/handlers pass; regression green. Extensions beyond blueprint: head() X-Columns redacted (as the task asked); _get_meta_info also handles :info (upstream routes :info through _model_response with a column-keyed dict); _patch/_post/_put/_delete_response overridden with _scrub() so write responses cannot echo token bytes (upstream serializes the written row verbatim). _masked_shape(row, original) takes the original row for has_*_token. With ?fields= the response is the plain allowlist subset (no reshape).
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

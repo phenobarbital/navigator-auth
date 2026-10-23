@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-105 — Owner-or-Superuser ABAC Ownership for the Auth Model CRUD Surfaces
 **Spec**: `sdd/specs/user-identities-ownership-abac.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-123
@@ -725,10 +725,8 @@ assert "identity:create" not in UserIdentityHandler.superuser_actions
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-24
+**Notes**: 37 tests in file pass; regression green. Beyond blueprint (needed for correctness, all in userattrs.py): (1) upstream _set_user_id CLOBBERS user_id on every PUT/POST/PATCH payload (would re-own a foreign row on a superuser revoke, and silently rewrite a foreign owner instead of refusing) -> added _post_user_id/_patch_user_id that preserve an explicit value; (2) _pre_put reads the body to refuse a foreign owner for every role incl. superuser; (3) _set_update refuses any owner reassignment; (4) _del_primary_data refuses a DELETE with no URL id (400), because upstream otherwise falls into body-driven model.remove()/bulk delete that never sees a row owner. Residual: a superuser POST of a pure revoke-shaped payload for a nonexistent pk could insert a placeholder row (POST insert branch has no row to authorize).
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none
