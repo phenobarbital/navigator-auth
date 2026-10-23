@@ -10,7 +10,7 @@ base_branch: dev
 **Feature ID**: FEAT-105
 **Date**: 2026-10-23
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 0.29.0
 
 > **Scope note (rev 0.2)**: this spec started at `auth.user_identities` only.
