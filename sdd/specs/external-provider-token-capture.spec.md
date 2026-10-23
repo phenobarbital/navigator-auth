@@ -663,8 +663,11 @@ def msal_result_full():
 - [ ] `pytest tests/ -v` shows no new failures versus the `dev` baseline
 - [ ] `build_user_info` called with its old 3-argument signature produces
       output identical to `dev` — verified by test, not by inspection (G1)
-- [ ] After an Azure login, `auth.user_identities` holds a row for the user
-      with non-null ciphered `refresh_token` and `id_token` (G2)
+- [x] After an Azure login, `auth.user_identities` holds a row for the user
+      with non-null ciphered `refresh_token` and `id_token` (G2) — *verified
+      live 2026-10-23 on a real Entra login: ciphered `refresh_token` 1779 B,
+      `id_token` 2330 B, `access_token` 3658 B, 28 scopes, `key_version = 1`,
+      on the legacy-shaped dev table with migration 005's `uid` default (§6)*
 - [ ] The raw provider refresh token appears in **no** session value and in
       **no** HTTP response body (G2, G6)
 - [ ] `session["id_token"]`, `session["external_expires_at"]` and
@@ -691,7 +694,10 @@ def msal_result_full():
       `max_age` (G7, §8 Q4)
 - [ ] The §8 Q1 experiment has been run and its outcome recorded in §7 as a
       one-line note — either `max_age` affects the Graph token's lifetime, or
-      the 7 minutes are tenant policy (§8 Q1)
+      the 7 minutes are tenant policy (§8 Q1). *Attempt 1 (2026-10-23) ran but
+      was inconclusive: Entra served a cached token, so the reading could not
+      be attributed to the arm under test. Outcome and a revised protocol are
+      recorded in §8 Q1 and §7; a conforming attempt is still owed.*
 - [ ] `navigator-session`'s `load_session` merges fresh `userdata` on the
       opt-in path and is byte-identical to `1.1.0` on the default path;
       `navigator_session.__version__ == "1.1.1"` and this repo's
@@ -719,6 +725,50 @@ iat        1792689808  (2026-10-22T17:23:28Z)
 exp        1792690227  (2026-10-22T17:30:27Z)
 lifetime   419 s = 7.0 min
 ```
+
+#### Second sample (2026-10-23) — the lifetime is **variable**, not fixed
+
+A second real token for the same tenant, app and sign-in method decoded to a
+**5457 s (90.95 min)** lifetime — inside Microsoft's documented 60-90 min, not
+7 minutes:
+
+```
+aud        https://graph.microsoft.com     appid  bbc8ff0c-… (navigator-auth)
+ver        1.0        amr  ["fido", "mfa"]        acr   1
+acrs       ["p1", "pfdr"]      xms_pftexp  iat + 25.52 h
+scp        27 delegated Graph scopes       signin_state  ["kmsi"]
+iat        1792713419  (2026-10-22T23:56:59Z)
+exp        1792718876  (2026-10-23T01:27:56Z)
+lifetime   5457 s = 90.95 min
+```
+
+Both samples are genuine `exp - iat` readings, so **this tenant issues Graph
+access tokens of materially different lifetimes (419 s and 5457 s) under an
+otherwise identical configuration**. The cause of the short one is still
+unknown; §8 Q1 records why the first experiment could not attribute it.
+
+The same login also showed the provider token being **reused** across a second
+round-trip, which is the confound that broke that experiment
+(`issue:3fd80396c685`):
+
+```
+token      iat 23:56:59Z   exp 01:27:56Z        -> issued lifetime 5457 s
+vault row  refreshed_at 00:02:00.495Z
+           expires_at   01:27:55.538Z           -> expires_at - refreshed_at = 5155.04 s
+           5457 - 5155 = 302 s;  iat -> vault write gap = 301 s
+           vault expires_at == token exp (within 0.5 s)  -> the SAME token
+```
+
+A second authorization-code round-trip five minutes later stored the token
+issued at 23:56:59, and Entra's `expires_in` reported only the **remainder**
+(5155 s) of its 5457 s lifetime. Nothing may infer an *issued lifetime* from
+`expires_in`.
+
+The G2 write was verified live on this login: `auth.user_identities` held the
+row with ciphered `refresh_token` (1779 B), `id_token` (2330 B) and
+`access_token` (3658 B), 28 scopes, `key_version = 1`, on the **legacy-shaped**
+dev table with migration 005's `uid` default applied (`uid` auto-filled with
+`582e05ac-…`).
 
 A Navigator JWT minted through `IdentityProvider.create_token` on the same
 tree, for comparison:
@@ -994,12 +1044,30 @@ Callers that MUST keep working with the unchanged 3-arg signature:
   after the same 120 s. Not introduced by this feature. Module 8 fixes the
   second half (the flow TTL); the `max_age` half stays deliberately, see
   Non-Goals and §8 Q4.
-- **The 7-minute lifetime has no verified cause** (§8 Q1). Module 8 makes
-  `max_age` independently adjustable so the experiment can run, but the
-  outcome is unknown: if it is tenant policy, every Graph-using session will
-  refresh roughly every 5 minutes at `IDENTITY_REFRESH_LEEWAY=120`. Watch for
-  AAD throttling and refresh-token rotation churn under load; the leeway is
-  operator-tunable precisely so this can be backed off without a release.
+- **The 7-minute lifetime has no verified cause** (§8 Q1), and the lifetime is
+  now known to be **variable**. Module 8 made `max_age` independently
+  adjustable and the experiment was attempted on 2026-10-23; it came back
+  **inconclusive** (§8 Q1, attempt 1). What the attempt did establish is that
+  this tenant issues both 419 s and 5457 s Graph tokens under an otherwise
+  identical configuration (§6, two samples), so the planning assumption "every
+  Graph token is a 7-minute credential" is wrong as stated — but the short
+  lifetime is real and unexplained, so the pessimistic case still governs
+  design. At `IDENTITY_REFRESH_LEEWAY=120` a session holding a 419 s token
+  refreshes roughly every 5 minutes, while one holding a 5457 s token refreshes
+  about every 89. Watch for AAD throttling and refresh-token rotation churn
+  under load; the leeway is operator-tunable precisely so this can be backed
+  off without a release.
+- **Provider tokens are reused across logins** (`issue:3fd80396c685`,
+  discovered while running the Q1 experiment). Navigator's logout ends only the
+  Navigator session; Entra's SSO/KMSI session survives, so the next
+  authorization-code round-trip can return Entra's cached access token — same
+  `iat` and `exp`, with `expires_in` reduced to the remaining seconds — and the
+  login path publishes it into the fresh session unchanged. A consumer reading
+  `session["auth_token"]` directly can therefore get a nearly-expired
+  credential at the instant of login. `get_live_provider_token` (G4) is
+  unaffected because it re-checks expiry against the leeway, but the login path
+  never re-publishes a fresher token into the session (`external.py:847` only
+  runs on refresh).
 - **`usr.expires_in` is an undeclared, dynamic attribute** (§8 Q2 scope
   extension). `identities.py` declares `access_token` (`:164`) but no
   `expires_in`, so there is no contract to version. It is set at
@@ -1061,6 +1129,39 @@ Callers that MUST keep working with the unchanged 3-arg signature:
       freshness claims (`acrs: ["p1","pfdr"]`, `xms_pftexp` = `iat` + 25.5 h) —
       suggestive, not evidence. Either outcome is a one-line note in §7; neither
       blocks a module. → §7 Known Risks, Module 8.
+
+      **Attempt 1 — 2026-10-23 — INCONCLUSIVE, and why.** The experiment was
+      run with the example server on `AZURE_SESSION_TIMEOUT=36000` (verified
+      from the running process environment), and the token read back had a
+      5457 s lifetime. That reading **cannot be attributed to `max_age`**: its
+      `iat` was 23:56:59Z, while the `max_age=36000` process did not start
+      until 00:01:50Z. Entra had served its **cached** token from the previous
+      login — the reuse documented in §6 and `issue:3fd80396c685`. So the
+      reading describes a grant issued by an earlier process under unknown
+      settings, not arm B.
+
+      What attempt 1 did settle: the 419 s figure in §6 is **not** a
+      measurement error (both samples are genuine `exp - iat`), and the
+      lifetime on this tenant varies between 419 s and 5457 s. Q1's question
+      therefore stands unanswered and gets sharper: *what distinguishes a 419 s
+      issue from a 5457 s one?* — `max_age` is only one candidate.
+
+      **Revised protocol (any future attempt must satisfy all three).**
+      1. **Prove freshness before believing a reading**: accept it only when
+         the token's `iat` is later than the moment the server process started
+         *and* later than the click that began the login. A reading whose `iat`
+         predates the process is measuring someone else's grant.
+      2. **Defeat Entra's reuse**: send `prompt=login` on the authorization
+         request, or sign out of Entra itself (not only Navigator) / use a
+         fresh browser profile, so a new token is actually issued.
+      3. **Pair the arms within one sitting**, same tenant, same account, same
+         sign-in method, recording `iat`, `exp`, `exp - iat`, `acrs`,
+         `xms_pftexp` and the `max_age` in effect for each.
+
+      `GET /api/v1/demo/token-claims` on the example server reports exactly
+      these fields, including the freshness check in (1), so the next attempt
+      needs no raw token handling. Never paste a live access token to record a
+      result.
 - [x] **Q2** — Should `expires_in` change in place or be deprecated over a
       release? — *Resolved, 2026-10-22, by in-repo precedent rather than by
       preference*: **change it in place.** This was never an open product
@@ -1191,4 +1292,5 @@ the reviewer's word:
 | 0.1 | 2026-10-22 | Jesus Lara | Initial draft — token capture, vaulting, on-demand refresh, `expires_in` contract fix |
 | 0.2 | 2026-10-22 | Codex | Review fixes: complete MSAL normalization, preserve login scopes on refresh, bind capture/refresh to the verified external account, and add regression criteria |
 | 0.3 | 2026-10-22 | Claude | Added Module 0: the `auth.user_identities` base table predates the `UserIdentity` model, so `IdentityStore` cannot write and G2 was unreachable. Evidence from a real token exchange (§1 (e), §6, Q5) |
+| 0.5 | 2026-10-23 | Claude | §8 Q1 experiment attempt 1: **inconclusive** — Entra served a cached token, so the reading could not be attributed to the `max_age` arm under test; revised protocol recorded. Corrected a 0.4 assumption: the §6 419 s figure is a genuine `exp - iat`, **not** a measurement error, and a second real sample shows the lifetime varies (419 s vs 5457 s) under an otherwise identical configuration. New §7 risk + `issue:3fd80396c685`: provider tokens are reused across logins, so a fresh session can hold a nearly-expired credential. G2 verified live on a real Entra login against the legacy-shaped table (§5, §6). Added `GET /api/v1/demo/token-claims` to the example server as the Q1 instrument |
 | 0.4 | 2026-10-22 | Claude | Resolved §8 Q1-Q4. Q2 settled by the in-repo **B1** precedent (`oauth2/backend.py:9`) rather than by preference, and extended to `usr.expires_in` (G5). New Module 8 — split `AZURE_SESSION_TIMEOUT` (G7, Q4). New Module 9 — `load_session` merge in the `navigator-session` repo plus its `1.1.1` bump (G8, Q3). Q1 reduced to a bounded `max_age` experiment with the leeway decision taken independently. Corrected a 0.1 error: the `load_session` discard is **not** the cause of the stale `auth_token` |

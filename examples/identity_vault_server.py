@@ -394,6 +394,13 @@ async def provider_whoami(
 #: (``acrs``, ``xms_pftexp``). Everything else in the token is left alone.
 Q1_CLAIMS = ("iat", "exp", "nbf", "auth_time", "acrs", "xms_pftexp", "aud", "appid")
 
+#: When this process started. A token whose ``iat`` predates it was issued by
+#: an earlier run — Entra reuses its cached token across logins
+#: (``issue:3fd80396c685``), which is what made Q1 attempt 1 inconclusive. Any
+#: reading that fails this check measures the previous process's grant, under
+#: whatever settings *that* one had, and must not be attributed to this arm.
+PROCESS_STARTED = datetime.now(timezone.utc)
+
 
 def _jwt_claims(token: str) -> dict:
     """Decode a JWT payload WITHOUT verifying it — a local read, claims only.
@@ -474,6 +481,10 @@ async def token_claims(
         and isinstance(value, int)
     }
     userdata = request.get("userdata") or {}
+    now = datetime.now(timezone.utc)
+    # Protocol step 1 (spec §8 Q1): a reading is only attributable to THIS
+    # arm when the token was issued after this process started.
+    fresh = isinstance(iat, int) and iat > PROCESS_STARTED.timestamp()
     return web.json_response(
         {
             # The arm of the experiment this reading belongs to.
@@ -481,7 +492,20 @@ async def token_claims(
             "auth_method": userdata.get("auth_method"),
             "lifetime_seconds": lifetime,
             "lifetime_minutes": round(lifetime / 60, 1) if lifetime else None,
-            "reference": "spec §6 measured 419 s (~7 min) with max_age=120",
+            # Freshness: without this, Entra's reuse silently invalidates the
+            # measurement (issue:3fd80396c685).
+            "issued_after_process_start": fresh,
+            "process_started": PROCESS_STARTED.isoformat(),
+            "token_age_seconds": round(now.timestamp() - iat) if isinstance(iat, int) else None,
+            "remaining_seconds": round(exp - now.timestamp()) if isinstance(exp, int) else None,
+            "verdict": (
+                "usable for Q1: this token was issued by this process"
+                if fresh
+                else "NOT usable for Q1: token predates this process — Entra "
+                "served a cached token; re-login with prompt=login or a fresh "
+                "IdP session before recording a result"
+            ),
+            "reference": "spec §6 samples: 419 s with max_age=120, 5457 s (arm unknown)",
             "claims": present,
             "claims_utc": readable,
             # Cross-check against what build_user_info published (FEAT-103).

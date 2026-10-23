@@ -368,3 +368,51 @@ used.
 **Docs build NOT verified**: sphinx and docutils are not installed in the shared venv, so `make -C docs html` was not run; the RST was written to match the existing page style but is unbuilt.
 **Experiment (§8 Q1): NOT run.** It needs a live Azure/Entra login by the operator against the real tenant, which this unattended run cannot perform. NOTHING was measured and NO result was written: the spec file was deliberately left unmodified (§7 bullet "The 7-minute lifetime has no verified cause" and §8 Q1 unchanged; §5's experiment criterion remains unchecked). Operator procedure: with AZURE_SESSION_TIMEOUT now independent of the flow TTL, raise it (or remove max_age at AzureAuth.authenticate) locally, log in via the browser flow, decode session["auth_token"] LOCALLY (claims only, never paste/commit it), compute exp - iat; if it differs from 419 s then max_age is the lever (Q1/Q4 share a cause), otherwise the 7 minutes are tenant policy. Record as a one-line note in spec §7 and update §8 Q1 + revision history.
 **Deviations from spec**: spec file not modified (experiment unrun) although the task table lists it as MODIFY; task closed as done-with-issues.
+
+### Addendum — 2026-10-23, Q1 experiment attempt 1 (inconclusive) and its instrument
+
+The §8 Q1 experiment was **attempted** against a live Entra login and came
+back **inconclusive**. It was not fabricated and it was not skipped; the
+reason it failed is itself the finding.
+
+**What was measured.** A real Graph access token for the dev tenant:
+`iat` 2026-10-22T23:56:59Z, `exp` 2026-10-23T01:27:56Z → `exp - iat` =
+**5457 s (90.95 min)**, with `acrs ["p1","pfdr"]`, `amr ["fido","mfa"]`,
+`xms_pftexp` = `iat` + 25.52 h, 27 delegated Graph scopes.
+
+**Why it does not answer Q1.** The server under test ran with
+`AZURE_SESSION_TIMEOUT=36000` (arm B — confirmed from the running process's
+environment), but it did not start until 00:01:50Z, *after* that token's
+`iat`. Entra had served its cached token from the previous login, so the
+reading describes a grant issued by an earlier process under unknown settings.
+Corroborated by the vault row: `refreshed_at` 00:02:00.495Z,
+`expires_at` 01:27:55.538Z → 5155.04 s, i.e. `5457 - 5155 = 302 s` against an
+`iat`-to-write gap of 301 s, and the vault `expires_at` equals the token `exp`
+to within 0.5 s — the same token, five minutes old at capture, with
+`expires_in` reporting only the remainder.
+
+**Correction to an earlier assumption.** The §6 419 s figure is a genuine
+`exp - iat`, *not* a mis-measurement of remaining time. Both samples are real,
+so the tenant's Graph token lifetime **varies** (419 s vs 5457 s) under an
+otherwise identical configuration. Q1 is unanswered and sharper: what
+distinguishes the two? `max_age` is only one candidate.
+
+**Filed from this work.**
+- `issue:3fd80396c685` (major) — Entra reuses its cached access token across
+  logins, so a fresh session can hold a nearly-expired provider token, and any
+  cross-login lifetime measurement is invalid unless freshness is proven.
+- `issue:a3580b2685e9` (minor, pre-existing) — in `AzureAuth.authenticate`'s
+  user/password branch, an `acquire_token_silent` cache hit skips the entire
+  login body (`azure.py:169`), so no session and no capture happen.
+
+**Instrument built, so the next attempt needs no raw token handling.**
+`GET /api/v1/demo/token-claims` on the example server returns the decoded
+timing claims only — never the token — plus `lifetime_seconds`, the `max_age`
+in effect, `token_age_seconds`, `remaining_seconds`,
+`issued_after_process_start` and a `verdict` that refuses a reading whose
+`iat` predates the process. The revised three-step protocol is in spec §8 Q1.
+
+**Docs**: the RST added earlier is unchanged and still unbuilt (no sphinx
+here). The spec's §6/§7/§8/§5 and the revision history are updated by this
+commit; the §5 Q1 criterion stays **unchecked** — a conforming attempt is
+still owed.
