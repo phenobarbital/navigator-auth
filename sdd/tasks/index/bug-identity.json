@@ -32,7 +32,7 @@
       "feature_id": "FEAT-104",
       "feature": "bug-identity",
       "spec": "sdd/specs/bug-identity.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -40,8 +40,8 @@
       "parallelism_notes": "Adds a new function to navigator_auth/libs/sanitize.py plus a new test module. No overlap with TASK-114 (models.py) and no caller is wired yet, so it cannot conflict with TASK-116/117. Can run concurrently with TASK-114.",
       "assigned_to": null,
       "started_at": "2026-10-23T00:15:24+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-115-header-safe-helper.md"
+      "completed_at": "2026-10-23T00:23:03+00:00",
+      "file": "sdd/tasks/completed/TASK-115-header-safe-helper.md"
     },
     {
       "id": "TASK-116",
