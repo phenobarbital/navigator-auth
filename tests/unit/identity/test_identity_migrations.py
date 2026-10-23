@@ -21,6 +21,22 @@ def _make_pool_async_cm():
     return pool, conn
 
 
+def _make_failing_pool(marker: str, error: Exception):
+    """Pool whose connection raises ``error`` for the SQL containing ``marker``."""
+    async def _execute(sql):
+        if marker in sql:
+            raise error
+
+    conn = AsyncMock()
+    conn.execute = AsyncMock(side_effect=_execute)
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=conn)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=ctx)
+    return pool, conn
+
+
 class TestSQLFile:
     def test_sql_file_exists(self):
         assert (SQL_DIR / "001_identity_credentials.sql").is_file()
@@ -137,7 +153,6 @@ class TestSQLFile:
         assert "idx_user_identities_user" in code
 
 
-
 class TestEnsureIdentityColumns:
     @pytest.mark.asyncio
     async def test_executes_ddl(self):
@@ -172,6 +187,47 @@ class TestEnsureIdentityColumns:
         assert pool.release.await_count == 6
         pool.release.assert_awaited_with(conn)
 
+    @pytest.mark.asyncio
+    async def test_one_failure_does_not_block_later_migrations(self):
+        """issue:b9f6225031e0 — 003 failing must not skip 004/005/006.
+
+        Every file guards its own effect, so the set is run to the end and the
+        failures are reported together instead of the first one aborting the
+        loop and leaving the schema half-migrated.
+        """
+        pool, conn = _make_failing_pool(
+            "key_version TYPE INTEGER", RuntimeError("lock timeout")
+        )
+        with pytest.raises(RuntimeError) as excinfo:
+            await ensure_identity_columns(pool)
+
+        # All six were attempted, in order, despite 003 blowing up.
+        assert conn.execute.await_count == 6
+        executed = [c.args[0] for c in conn.execute.await_args_list]
+        assert "identity_id" in executed[3]
+        assert "ALTER COLUMN uid SET DEFAULT" in executed[4]
+        assert "DROP COLUMN uid" in executed[5]
+        # The error names the file that failed, and only that one.
+        message = str(excinfo.value)
+        assert "003_identity_key_version_integer.sql" in message
+        assert "1 of 6" in message
+        assert isinstance(excinfo.value.__cause__, RuntimeError)
+
+    @pytest.mark.asyncio
+    async def test_reports_every_failing_file(self):
+        pool, conn = _make_failing_pool(
+            "auth.user_identities", RuntimeError("db exploded")
+        )
+        with pytest.raises(RuntimeError) as excinfo:
+            await ensure_identity_columns(pool)
+        message = str(excinfo.value)
+        assert "6 of 6" in message
+        for filename in (
+            "001_identity_credentials.sql",
+            "006_identity_drop_legacy_uid.sql",
+        ):
+            assert filename in message
+
 
 class TestSetupIdentityColumns:
     @pytest.mark.asyncio
@@ -184,5 +240,15 @@ class TestSetupIdentityColumns:
     @pytest.mark.asyncio
     async def test_calls_through(self):
         pool, conn = _make_pool_async_cm()
+        await setup_identity_columns(pool)
+        assert conn.execute.await_count == 6
+
+    @pytest.mark.asyncio
+    async def test_applies_the_rest_when_one_migration_fails(self):
+        """issue:b9f6225031e0 — startup applies what it can, then logs."""
+        pool, conn = _make_failing_pool(
+            "key_version TYPE INTEGER", RuntimeError("lock timeout")
+        )
+        # must not raise, and must still have run 004/005/006
         await setup_identity_columns(pool)
         assert conn.execute.await_count == 6
