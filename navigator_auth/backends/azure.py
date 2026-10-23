@@ -25,6 +25,7 @@ from ..conf import (
     AZURE_ADFS_TENANT_ID,
     AZURE_SESSION_TIMEOUT,
     AZURE_FLOW_TTL,
+    AZURE_LOGIN_PROMPT,
     AZURE_MAPPING,
     AZURE_TRUSTED_APPIDS,
 )
@@ -176,6 +177,10 @@ class AzureAuth(ExternalAuth):
                 try:
                     if "access_token" in result:
                         grant = self._token_from_msal_result(result, cache, requested_scopes=Default_SCOPE)
+                        # MSAL may answer from its own cache: never publish a
+                        # grant that is already inside the refresh leeway
+                        # (issue:3fd80396c685).
+                        grant = await self.ensure_fresh_login_grant(grant)
                         access_token = grant.access_token
                         data = await self.get(
                             url=self.userinfo_uri,
@@ -192,6 +197,7 @@ class AzureAuth(ExternalAuth):
                             id_token=grant.id_token,
                             refresh_token=grant.refresh_token,
                             expires_at=grant.expires_at,
+                            issued_at=grant.issued_at,
                             provider_user_id=grant.provider_user_id,
                         )
                         # also, user information:
@@ -235,6 +241,11 @@ class AzureAuth(ExternalAuth):
                     redirect_uri=redirect_uri,
                     domain_hint=AZURE_ADFS_DOMAIN,
                     max_age=AZURE_SESSION_TIMEOUT,
+                    # None (the default) keeps silent SSO; `login` makes Entra
+                    # re-authenticate and ISSUE a token instead of serving the
+                    # one it cached (issue:3fd80396c685). Opt-in: it costs a
+                    # credential prompt on every login.
+                    prompt=AZURE_LOGIN_PROMPT,
                 )
                 async with aioredis.Redis(connection_pool=self._pool) as redis:
                     state = flow["state"]
@@ -288,6 +299,10 @@ class AzureAuth(ExternalAuth):
                     cache,
                     requested_scopes=["https://graph.microsoft.com/.default"],
                 )
+                # A silent round-trip at Entra returns the token it already
+                # issued for the surviving SSO session — refresh it before it
+                # reaches the Graph call or the session (issue:3fd80396c685).
+                grant = await self.ensure_fresh_login_grant(grant)
                 token_type = grant.token_type
                 access_token = grant.access_token
                 client_info = {}
@@ -313,6 +328,7 @@ class AzureAuth(ExternalAuth):
                         id_token=grant.id_token,
                         refresh_token=grant.refresh_token,
                         expires_at=grant.expires_at,
+                        issued_at=grant.issued_at,
                         provider_user_id=grant.provider_user_id,
                     )
                     data = await self.validate_user_info(request, uid, userdata, access_token)
