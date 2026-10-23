@@ -147,7 +147,7 @@
       "feature_id": "FEAT-105",
       "feature": "user-identities-ownership-abac",
       "spec": "sdd/specs/user-identities-ownership-abac.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -157,8 +157,8 @@
       "parallelism_notes": "Spec Module 4, part 3 of 3 — the response layer (allowlist projection in the masked() shape, :meta/:sample, head() X-Columns, _filtering -> safe_filter). Same file and class as TASK-123/124; appends test classes to their test module.",
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-125-identity-handler-redaction.md"
+      "completed_at": "2026-10-23T22:57:23+00:00",
+      "file": "sdd/tasks/completed/TASK-125-identity-handler-redaction.md"
     },
     {
       "id": "TASK-126",
