@@ -184,9 +184,10 @@ their own rows, or a `superuser`'s — and a superuser never sees credentials.**
 
 Per §8 Q8 the upstream defects were repaired **first**, in
 `phenobarbital/navigator` at `/home/jesuslara/proyectos/navigator/navigator`,
-on branch `fix/modelview-response-projection-and-filtering` (cut from
-`origin/dev`), commit **`7bc5896`** — committed locally, not yet pushed or
-released. What landed there:
+commit **`7bc5896`** (branch `fix/modelview-response-projection-and-filtering`,
+cut from `origin/dev`). It is **merged into navigator's `origin/dev` and
+version-bumped to `navigator-api` 3.2.4** (`a117f29`), i.e. in release
+process. What landed there:
 
 1. `_hidden` is derived from `secret=True` columns (the `metadata["repr"]`
    lookup never worked — see §1), and `repr=False` is deliberately **not**
@@ -211,11 +212,12 @@ change.
 is not reduced because of it.** Three reasons:
 
 - `pyproject.toml:53` pins `navigator-api>=0.5.0`, so navigator-auth installs
-  against any navigator; a security property that holds only on the newest
-  upstream release is not a security property.
-- The fix is unreleased. Until a navigator version ships and the floor is
-  raised (§8 Q9), nothing guarantees the deployed copy has it.
-- Even with it, it does **not** redact these surfaces: upstream derives
+  against any navigator — including the 3.2.2 currently in this repo's
+  `.venv`. A security property that holds only on the newest upstream release
+  is not a security property until the floor is raised (§8 Q9).
+- The deployed copy is whatever the environment resolved at install time.
+  3.2.4 being tagged does not retro-fix a running deployment.
+- Even on 3.2.4 it does **not** redact these surfaces: upstream derives
   `_hidden` from `secret=True`, and neither `UserIdentity.access_token`
   (`models.py:104-106`) nor `PartnerKey.token` (`handlers/partners.py:24`)
   is declared `secret=True`. Only this feature's explicit allowlist hides
@@ -1066,7 +1068,7 @@ def recording_conn():     # captures (sql, *args) so parameterization is asserta
 
 | Repo | Path | Work |
 |---|---|---|
-| `phenobarbital/navigator` | `/home/jesuslara/proyectos/navigator/navigator` → `navigator/views/model.py` | **Done** (§2 Prerequisite): branch `fix/modelview-response-projection-and-filtering` off `origin/dev`, commit `7bc5896`, 18 new tests, suite 378 passed. Local only — not pushed, not released, so the `navigator-api>=0.5.0` floor is unchanged (§8 Q9). Tracked in that repo, not in this spec's task list. |
+| `phenobarbital/navigator` | `/home/jesuslara/proyectos/navigator/navigator` → `navigator/views/model.py` | **Done and shipping** (§2 Prerequisite): commit `7bc5896` (branch `fix/modelview-response-projection-and-filtering` off `origin/dev`), 18 new tests, suite 378 passed; merged to navigator `origin/dev` and bumped to `navigator-api` **3.2.4** (`a117f29`). The `navigator-api>=0.5.0` floor here is still unchanged (§8 Q9). Tracked in that repo, not in this spec's task list. |
 
 ---
 
@@ -1111,20 +1113,26 @@ sections named after each one.
   out of scope and are listed as audited-and-deferred. → §1 Problem Statement
   A/B/C + Non-Goals, §3 Modules 4/5/6, §5 criteria 3/4/6.
 - [x] **Q8 — The `ModelView` defects are in your own `navigator` repo.**
-  *Resolved*: **fix `ModelView` there first** — and it is now **done**
-  (`fix/modelview-response-projection-and-filtering` @ `7bc5896`, local,
-  unreleased). The local hardening still ships as defense in depth, because
-  `pyproject.toml:53` allows `navigator-api>=0.5.0`, the fix is unreleased,
-  and upstream `_hidden` is derived from `secret=True` — which neither
+  *Resolved*: **fix `ModelView` there first** — and it is now **done and
+  released** (`7bc5896`, merged to navigator `origin/dev`, shipping as
+  `navigator-api` 3.2.4). The local hardening still ships as defense in
+  depth, because `pyproject.toml:53` allows `navigator-api>=0.5.0`, the
+  deployed copy is whatever was resolved at install time (3.2.2 in this
+  repo's `.venv`), and upstream `_hidden` is derived from `secret=True` —
+  which neither
   `UserIdentity.access_token` nor `PartnerKey.token` declares. Doing the
   upstream fix first also surfaced that rev 0.1 of this spec described the
   wrong mechanism (see §1, corrected in rev 0.3). → §2 Prerequisite, §7
   Cross-repository prerequisite, §5 last criterion.
 - [ ] **Q9 — Should `pyproject.toml` raise the `navigator-api>=0.5.0` floor
-  once the upstream fix is released?** Non-blocking; nothing in FEAT-105
-  depends on it. Recommendation: **no** — keep the loose pin and keep the
-  local hardening, so navigator-auth stays safe on older navigator installs.
-  Decide when the navigator release is cut — *Owner: Jesus Lara*
+  to `>=3.2.4` now that the fix is shipping?** Non-blocking; nothing in
+  FEAT-105 depends on it, and the local hardening is written to be correct on
+  3.2.2 as well. Recommendation: **raise it in a separate commit, and keep the
+  local hardening anyway** — the floor buys a correct upstream projection for
+  every *other* `ModelView` in this repo (users, groups, permissions,
+  policies: the deferred surfaces in §1 Non-Goals), which this feature does
+  not touch. Do not bundle the bump into FEAT-105: it would make a dependency
+  upgrade a prerequisite of a security fix — *Owner: Jesus Lara*
 
 ---
 
@@ -1169,3 +1177,4 @@ proposal to review; `sdd/templates/design_research.prompt.md` and
 | 0.1 | 2026-10-23 | Jesus Lara | Initial draft — owner-or-superuser ABAC ownership and redaction for `auth.user_identities` (Q1–Q4 resolved up front) |
 | 0.2 | 2026-10-23 | Jesus Lara | Resolved Q5–Q8: safe parameterized `_filter`; `auth_data` kept; scope widened to `user_accounts` and `partner_keys` (plaintext JWT, superuser-only, return-once token) under one reusable `OwnerOrSuperuserGuard`; `ModelView` repaired upstream first while local hardening stays defense-in-depth. Redaction module moved to `handlers/redaction.py`; added G7–G9 and the `_set_address` injection fix |
 | 0.3 | 2026-10-23 | Jesus Lara | **Corrected §1 and §6** after executing `datamodel` 0.10.21 and the upstream fix: `_hidden` is always empty (`repr` is not a `metadata` key), so the full row ships today and the whitelist inversion is latent; `?_filter=` answers 406 because `get_model.column(field)` raises `TypeError` first, so the SQL sink is unreachable rather than live. Recorded the navigator `ModelView` fix as done (`7bc5896`, unreleased) and why it does not reduce the local hardening |
+| 0.4 | 2026-10-23 | Jesus Lara | Upstream fix merged to navigator `origin/dev` and bumped to `navigator-api` 3.2.4 (`a117f29`): §2, §7 and §8 Q8 updated from "local, unreleased" to "shipping", and Q9 re-scoped to raising the floor to `>=3.2.4` in a separate commit for the benefit of the deferred `ModelView` surfaces |
