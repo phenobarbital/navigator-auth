@@ -102,6 +102,41 @@ class TestSQLFile:
         assert "column_name = 'uid'" in code
         assert "column_default IS NULL" in code
 
+    def test_drop_legacy_uid_sql_is_guarded(self):
+        """006 drops the legacy uid column — the one removal in this set.
+
+        It is what makes ``SELECT *`` readers (navigator-api's ModelHandler
+        behind ``/api/v1/user_identity``) able to hydrate ``UserIdentity`` on
+        a legacy table at all. Verified against a real PostgreSQL 17 in three
+        shapes: legacy (drops, identity_id becomes the PK), canonical
+        (no-op) and legacy-with-a-view-on-uid (warns, changes nothing).
+        """
+        path = SQL_DIR / "006_identity_drop_legacy_uid.sql"
+        assert path.is_file()
+        sql = path.read_text()
+        # Drops comments and the continuation lines of the RAISE messages, so
+        # the CASCADE assertion below sees statements only.
+        code = "\n".join(
+            ln for ln in sql.splitlines()
+            if not ln.lstrip().startswith(("--", "'"))
+        )
+        # The effects: identity_id becomes the key, uid goes.
+        assert "ALTER COLUMN identity_id SET NOT NULL" in code
+        assert "DROP COLUMN uid" in code
+        assert "PRIMARY KEY USING INDEX uq_user_identities_identity_id" in code
+        # Never CASCADE: a dependent view/rule/constraint means skip instead.
+        assert "CASCADE" not in code.upper()
+        assert "pg_rewrite" in code
+        assert "RAISE WARNING" in code
+        # Guards: table absent -> skip; no uid column (canonical) -> skip;
+        # identity_id missing or duplicated -> skip.
+        assert "to_regclass('auth.user_identities') IS NULL" in code
+        assert "IF uid_attnum IS NULL THEN" in code
+        assert "HAVING count(*) > 1" in code
+        # Replaces the user_id lookup the legacy (user_id, uid) PK served.
+        assert "idx_user_identities_user" in code
+
+
 
 class TestEnsureIdentityColumns:
     @pytest.mark.asyncio
@@ -109,9 +144,10 @@ class TestEnsureIdentityColumns:
         pool, conn = _make_pool_async_cm()
         await ensure_identity_columns(pool)
         # FEAT-096 TASK-047: 001 then 002; FEAT-099: 003 (INTEGER key_version).
-        assert conn.execute.await_count == 5
+        assert conn.execute.await_count == 6
         # FEAT-103 TASK-102: 004 (base columns), 005 (legacy uid default).
-        first, second, third, fourth, fifth = (
+        # FEAT-104: 006 (drop the legacy uid column).
+        first, second, third, fourth, fifth, sixth = (
             c.args[0] for c in conn.execute.await_args_list
         )
         assert "auth.user_identities" in first
@@ -119,6 +155,7 @@ class TestEnsureIdentityColumns:
         assert "key_version TYPE INTEGER" in third
         assert "identity_id" in fourth
         assert "ALTER COLUMN uid SET DEFAULT" in fifth
+        assert "DROP COLUMN uid" in sixth
 
     @pytest.mark.asyncio
     async def test_awaitable_acquire_releases(self):
@@ -131,8 +168,8 @@ class TestEnsureIdentityColumns:
         pool.acquire = MagicMock(side_effect=lambda: _acquire())
         pool.release = AsyncMock()
         await ensure_identity_columns(pool)
-        assert conn.execute.await_count == 5
-        assert pool.release.await_count == 5
+        assert conn.execute.await_count == 6
+        assert pool.release.await_count == 6
         pool.release.assert_awaited_with(conn)
 
 
@@ -148,4 +185,4 @@ class TestSetupIdentityColumns:
     async def test_calls_through(self):
         pool, conn = _make_pool_async_cm()
         await setup_identity_columns(pool)
-        assert conn.execute.await_count == 5
+        assert conn.execute.await_count == 6
