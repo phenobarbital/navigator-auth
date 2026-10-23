@@ -21,9 +21,13 @@ class UserAccountHandler(ModelHandler):
     model: Any = UserAccount
     name: str = "User Account"
     pk: str = "account_id"
-    social_network: str = """
-    SELECT social_url FROM auth.social_networks WHERE social_network = '{provider}'
-    """
+    #: G9: the provider is bound as $1, never interpolated. The previous form
+    #: inlined it inside a quoted literal, so a provider of ``x' OR 1=1 --``
+    #: rewrote the statement.
+    social_network: str = (
+        "SELECT social_url FROM auth.social_networks "
+        "WHERE social_network = $1"
+    )
 
     async def _set_user_id(self, value, column, data):
         return await self.get_userid(session=self._session)
@@ -42,8 +46,9 @@ class UserAccountHandler(ModelHandler):
         if provider:
             try:
                 async with await self.handler(request=self.request) as conn:
-                    qry = self.social_network.format(provider=provider)
-                    result = await conn.fetchval(qry, column='social_url')
+                    result = await conn.fetchval(
+                        self.social_network, provider, column='social_url'
+                    )
                     if result:
                         return result.format(uid=userid)
             except DriverError:
