@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-104 — Identity-Link Failure: Non-Nullable Token Columns and Unsafe Error Headers
 **Spec**: `sdd/specs/bug-identity.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -318,8 +318,8 @@ from navigator_auth.libs.sanitize import HEADER_FORBIDDEN, header_safe
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: header_safe/HEADER_FORBIDDEN added to libs/sanitize.py with 11 tests.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none
