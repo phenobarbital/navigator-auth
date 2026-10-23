@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
-from asyncdb.exceptions import NoDataFound
+from asyncdb.exceptions import ModelError, NoDataFound
 from navigator.views import BaseView
 
 from navigator_auth.handlers import model as model_module
@@ -68,6 +68,14 @@ class RaisingModel(DemoModel):
         raise NoDataFound("demo")
 
 
+class BrokenModel(DemoModel):
+    """Model whose ``get()`` fails the way a bad model definition does."""
+
+    @classmethod
+    async def get(cls, **kwargs):
+        raise ModelError("boom")
+
+
 class DemoHandler(ModelHandler):
     model = DemoModel
     name = "Demo"
@@ -87,6 +95,10 @@ class ListPkHandler(DemoHandler):
     """Composite PK, so a request without ``id`` reaches the no-PK branches."""
 
     pk = ["demo_id"]
+
+
+class BrokenHandler(DemoHandler):
+    model = BrokenModel
 
 
 def _handler(
@@ -178,21 +190,51 @@ async def test_post_invalid_payload_reports_the_error():
     handler = _handler("POST", "/demo", handler_cls=ListPkHandler)
     with pytest.raises(web.HTTPNotAcceptable) as excinfo:
         await handler.post()
-    assert b"Invalid payload for Demo" in (excinfo.value.body or b"")
+    assert json.loads(excinfo.value.body)["error"] == "Invalid payload for Demo"
+
+
+@pytest.mark.asyncio
+async def test_error_body_is_json():
+    """``reason=<dict>`` used to render a Python repr behind an application/json header."""
+    handler = _handler("PATCH", "/demo/1", handler_cls=BrokenHandler, id="1")
+    with pytest.raises(web.HTTPBadRequest) as excinfo:
+        await handler.patch()
+    failure = excinfo.value
+    assert failure.content_type == "application/json"
+    body = json.loads(failure.body)
+    assert body["error"] == "Missing Info for Model Demo"
+    assert body["payload"].startswith("boom")
+    assert failure.reason == "Bad Request"
+
+
+def _error_calls() -> list[ast.Call]:
+    tree = ast.parse(MODEL_HANDLER_SOURCE.read_text())
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "error"
+    ]
 
 
 def test_every_error_call_names_its_payload():
     """``error()`` renders ``reason``/``response``; a dict passed as ``exception`` is dropped."""
-    tree = ast.parse(MODEL_HANDLER_SOURCE.read_text())
-    unnamed = [
-        node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "error"
-        and not {kw.arg for kw in node.keywords} & {"reason", "response"}
-    ]
+    unnamed = [call.lineno for call in _error_calls() if not {kw.arg for kw in call.keywords} & {"reason", "response"}]
     assert not unnamed, f"error() without reason=/response= at lines {unnamed}"
+
+
+def test_structured_error_payloads_go_through_response():
+    """``reason=`` is the HTTP reason phrase; only ``response=`` is serialised as JSON.
+
+    Strings stay on ``reason=`` — ``error()`` assigns a non-dict ``response`` to
+    ``body``, and aiohttp rejects a ``str`` body.
+    """
+    misrouted = [
+        call.lineno
+        for call in _error_calls()
+        for kw in call.keywords
+        if kw.arg == "reason" and isinstance(kw.value, (ast.Name, ast.Dict))
+    ]
+    assert not misrouted, f"error(reason=<dict>) at lines {misrouted}; use response="
 
 
 def test_no_response_helper_result_is_discarded():
