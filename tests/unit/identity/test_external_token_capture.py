@@ -232,6 +232,44 @@ class TestBuildUserInfoCapture:
         assert result["expires_at"] == int(exp)
 
 
+    @pytest.mark.asyncio
+    async def test_session_user_carries_local_user_id(self):
+        """The session user must expose the LOCAL user_id, not only the
+        provider's account id.
+
+        An external login builds the session user from provider data, whose
+        ``id`` is the provider account (a GUID on Entra). When the local
+        ``user_id`` is missing from that dict, consumers fall back to
+        ``user.id`` and the Identity Vault rejects it — its ``user_id``
+        column is an integer.
+        """
+        backend = _make(_callbacks=None)
+        userdata, uid = backend.build_user_info(
+            userdata={"id": "4e2aa0ea-56b8-49fe-85cf-05e97d479ba6", "email": "a@b.c"},
+            token="AT.graph",
+            mapping={"id": "id", "email": "email"},
+            provider_user_id="4e2aa0ea-56b8-49fe-85cf-05e97d479ba6",
+        )
+        backend._idp = MagicMock()
+        backend._idp.get_user = AsyncMock(return_value=MagicMock())
+        backend._idp.create_token = MagicMock(
+            return_value=("JWT", "NAV_RT", time.time() + 3600, "Bearer")
+        )
+        backend.get_userdata = MagicMock(
+            return_value={AUTH_SESSION_OBJECT: {"user_id": 35}}
+        )
+        backend.create_user = AsyncMock(return_value=MagicMock())
+        backend.remember = AsyncMock(return_value=SimpleNamespace(session_id="sid"))
+        request = make_mocked_request("GET", "/x")
+        await backend.validate_user_info(request, uid, userdata, "AT.graph")
+        # the dict the session user is built from
+        built_from = backend.create_user.await_args.args[0]
+        assert built_from["user_id"] == 35
+        assert built_from["id"] == "4e2aa0ea-56b8-49fe-85cf-05e97d479ba6"
+        # and the session itself still carries the same local id
+        assert backend.remember.await_args.args[2]["user_id"] == 35
+
+
 # ---------------------------------------------------------------------------
 # Module 2 — vaulting
 # ---------------------------------------------------------------------------
