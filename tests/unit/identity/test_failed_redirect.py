@@ -4,6 +4,7 @@ Deliberately calls the real method. `test_link_flow.py:TestFinishIdentityLink`
 replaces it with a MagicMock, so those tests pass today while the method is
 still unsafe.
 """
+
 from urllib.parse import parse_qs, urlparse
 
 from aiohttp.test_utils import make_mocked_request

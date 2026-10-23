@@ -5,6 +5,7 @@ than the `FakeUserIdentity` stubs used elsewhere in the identity suite. The
 stubs are why FEAT-104 shipped: they covered the store logic and never the
 model's column contract.
 """
+
 from navigator_auth.models import UserIdentity
 
 

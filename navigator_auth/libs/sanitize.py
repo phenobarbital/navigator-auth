@@ -1,16 +1,19 @@
 """Sanitize auth-related query parameters from request URLs, and
 arbitrary values destined for HTTP response headers."""
+
 import re
 from typing import Any
 
 from aiohttp import web
 
-AUTH_QUERY_PARAMS = frozenset({
-    "apikey",
-    "api_key",
-    "auth",
-    "access_token",
-})
+AUTH_QUERY_PARAMS = frozenset(
+    {
+        "apikey",
+        "api_key",
+        "auth",
+        "access_token",
+    }
+)
 
 
 def sanitize_request(

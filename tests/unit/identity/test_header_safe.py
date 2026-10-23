@@ -1,4 +1,5 @@
 """Unit tests for `header_safe` (FEAT-104, TASK-115)."""
+
 import pytest
 
 from navigator_auth.libs.sanitize import HEADER_FORBIDDEN, header_safe

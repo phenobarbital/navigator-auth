@@ -3,6 +3,7 @@ Model System for Navigator Auth.
 
 Model for User, Group and Roles for Navigator Auth.
 """
+
 from uuid import UUID, uuid4
 from typing import Optional
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,7 @@ from .conf import (
 def auto_uuid():
     return uuid4()
 
+
 class UserType(Enum):
     USER = 1  # , 'user'
     CUSTOMER = 2  # , 'customer'
@@ -39,9 +41,7 @@ class UserType(Enum):
 class User(Model):
     """Basic User notation."""
 
-    user_id: int = Column(
-        required=False, primary_key=True, db_default="auto", repr=False
-    )
+    user_id: int = Column(required=False, primary_key=True, db_default="auto", repr=False)
     userid: UUID = Column(required=True, db_default="auto", repr=False)
     first_name: str = Column(required=False, max=254, label="First Name")
     last_name: str = Column(required=False, max=254, label="Last Name")
@@ -60,24 +60,20 @@ class User(Model):
     timezone: str = Column(required=False, max=75, default="UTC", repr=False)
     attributes: Optional[dict] = Column(required=False, default_factory=dict)
     created_at: datetime = Column(required=False, default=datetime.now)
-    last_login: datetime = Column(
-        required=False, readonly=True, default=datetime.now
-    )
+    last_login: datetime = Column(required=False, readonly=True, default=datetime.now)
     # created_by: str = Column(required=False)
 
     class Meta:
         name = AUTH_USERS_TABLE
         schema = AUTH_DB_SCHEMA
-        description: str = 'User Schema'
+        description: str = "User Schema"
         strict = True
         connection = None
         frozen = False
 
 
 class UserIdentity(Model):
-    identity_id: UUID = Column(
-        required=False, primary_key=True, db_default="auto", repr=False
-    )
+    identity_id: UUID = Column(required=False, primary_key=True, db_default="auto", repr=False)
     display_name: str = Column(required=False)
     title: str = Column(required=False)
     nickname: str = Column(required=False)
@@ -85,18 +81,14 @@ class UserIdentity(Model):
     phone: str = Column(required=False)
     short_bio: Text = Column(required=False)
     avatar: Text = Column(required=False)
-    user_id: User = Column(
-        required=True, fk="user_id|username", api="users", label="User"
-    )
+    user_id: User = Column(required=True, fk="user_id|username", api="users", label="User")
     auth_provider: str = Column(required=False)
     auth_data: Optional[dict] = Column(required=False, repr=False)
     attributes: Optional[dict] = Column(required=False, repr=False)
     # Identity Vault: linked external credential (tokens ciphered with the
     # Session Vault master keys — never exposed through the API).
     provider_user_id: str = Column(required=False, repr=False)
-    scopes: Optional[list] = Column(
-        required=False, default_factory=list, repr=False
-    )
+    scopes: Optional[list] = Column(required=False, default_factory=list, repr=False)
     access_token: Optional[bytes] = Column(required=False, repr=False)
     refresh_token: Optional[bytes] = Column(required=False, repr=False)
     id_token: Optional[bytes] = Column(required=False, repr=False)
@@ -105,9 +97,7 @@ class UserIdentity(Model):
     refreshed_at: datetime = Column(required=False, repr=False)
     enabled: bool = Column(required=False, default=True)
     key_version: int = Column(required=False, repr=False)
-    created_at: datetime = Column(
-        required=False, default=datetime.now, repr=False
-    )
+    created_at: datetime = Column(required=False, default=datetime.now, repr=False)
 
     class Meta:
         name = "user_identities"
@@ -116,10 +106,9 @@ class UserIdentity(Model):
         connection = None
         frozen = False
 
+
 class VwUserIdentity(Model):
-    identity_id: UUID = Column(
-        required=False, primary_key=True, db_default="auto", repr=False
-    )
+    identity_id: UUID = Column(required=False, primary_key=True, db_default="auto", repr=False)
     display_name: str = Column(required=False)
     title: str = Column(required=False)
     nickname: str = Column(required=False)
@@ -127,9 +116,7 @@ class VwUserIdentity(Model):
     phone: str = Column(required=False)
     short_bio: Text = Column(required=False)
     avatar: Text = Column(required=False)
-    user_id: User = Column(
-        required=True, fk="user_id|username", api="users", label="User"
-    )
+    user_id: User = Column(required=True, fk="user_id|username", api="users", label="User")
     accounts: Optional[dict] = Column(required=False, default_factory=dict)
 
     class Meta:
@@ -186,9 +173,7 @@ class UserDevices(Model):
 
 
 class Group(Model):
-    group_id: int = Column(
-        required=True, primary_key=True, db_default="auto", repr=False
-    )
+    group_id: int = Column(required=True, primary_key=True, db_default="auto", repr=False)
     group_name: str = Column(required=True)
     is_active: bool = Column(required=True, default=True)
     client_id: int = Column(required=False)
@@ -271,8 +256,10 @@ class UserPermission(Model):
         connection = None
         frozen = False
 
+
 class UserAttributes(Model):
     """Example of Extending User Model for adding more properties"""
+
     user_id: User = Column(required=True, primary_key=True)
     department_code: str = Column(required=False)
     position_id: str = Column(required=False)
@@ -296,9 +283,8 @@ class UserAttributes(Model):
 
 class UserAccount(Model):
     """Social Accounts from User"""
-    account_id: UUID = Column(
-        required=False, primary_key=True, db_default="auto", repr=False
-    )
+
+    account_id: UUID = Column(required=False, primary_key=True, db_default="auto", repr=False)
     user_id: User = Column(required=True)
     provider: str = Column(required=True)
     uid: str = Column(required=False)
@@ -313,8 +299,10 @@ class UserAccount(Model):
         connection = None
         frozen = False
 
+
 def expiration_date(days=365):
     return datetime.now() + timedelta(days=days)
+
 
 class Client(Model):
     client_id: int = Column(required=False, primary_key=True, db_default="auto", repr=False)
@@ -323,7 +311,7 @@ class Client(Model):
     client: str = Column(required=False)
     client_name: str = Column(required=True)
     client_secret: str = Column(required=False, secret=True)
-    client_type: str = Column(required=True, default='public')
+    client_type: str = Column(required=True, default="public")
     redirect_uris: list = Column(required=False, default_factory=list)
     policy_uri: str = Column(required=False)
     client_logo_uri: str = Column(required=False)
@@ -337,7 +325,7 @@ class Client(Model):
     # "none" designates a public client (no secret; PKCE mandatory).
     token_endpoint_auth_method: str = Column(required=False)
     # 'static' (operator-provisioned) | 'dcr' (self-registered) — auditability.
-    registration_source: str = Column(required=False, default='static')
+    registration_source: str = Column(required=False, default="static")
     # Per-client access gate (TASK-042); DCR clients are born gated.
     enforce_access_gate: bool = Column(required=False, default=False)
     created_at: datetime = Column(required=False, default=datetime.now)
@@ -380,9 +368,7 @@ class ClientAccess(Model):
     denormalized public wire identifier the gate actually checks.
     """
 
-    access_id: UUID = Column(
-        required=False, primary_key=True, db_default="auto", repr=False
-    )
+    access_id: UUID = Column(required=False, primary_key=True, db_default="auto", repr=False)
     user_id: User = Column(required=True, fk="user_id|username", api="users")
     # Internal integer FK; absent for memory/redis-tier clients.
     client_id: int = Column(required=False)

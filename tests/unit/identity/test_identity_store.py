@@ -1,4 +1,5 @@
 """Unit tests for IdentityStore and the vault-cache helpers."""
+
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,7 +13,6 @@ from navigator_auth.identity.store import (
     cached_credential,
     invalidate_cached,
 )
-
 
 MASTER_KEYS = {1: b"\x00" * 32}
 
@@ -37,9 +37,7 @@ def _store():
 
 
 def _enc(store, value, field, user_id=1, provider="github", puid="99"):
-    return store._cipher.encrypt(
-        value, user_id=user_id, auth_provider=provider, provider_user_id=puid, field=field
-    )
+    return store._cipher.encrypt(value, user_id=user_id, auth_provider=provider, provider_user_id=puid, field=field)
 
 
 class TestCipherRoundtripThroughStore:
@@ -124,9 +122,7 @@ class TestVaultCacheHelpers:
         vault.exists = AsyncMock(return_value=True)
         vault.get = AsyncMock(return_value={"access_token": "at"})
         session = self._session_with_vault(vault)
-        assert await cached_credential(session, "github") == {
-            "access_token": "at"
-        }
+        assert await cached_credential(session, "github") == {"access_token": "at"}
 
     @pytest.mark.asyncio
     async def test_cached_credential_none_without_vault(self):
@@ -139,9 +135,7 @@ class TestVaultCacheHelpers:
         vault.exists = AsyncMock(return_value=True)
         session = self._session_with_vault(vault)
         await invalidate_cached(session, "github")
-        vault.delete.assert_awaited_once_with(
-            IDENTITY_VAULT_KEY.format(provider="github")
-        )
+        vault.delete.assert_awaited_once_with(IDENTITY_VAULT_KEY.format(provider="github"))
 
     @pytest.mark.asyncio
     async def test_helpers_swallow_vault_errors(self):
@@ -225,12 +219,11 @@ class TestSaveLinkedIdentityNullTokens:
             captured.append(self_)
             return self_
 
-        token = TokenResponse(
-            access_token="at", refresh_token=None, id_token=None, provider_user_id="99"
-        )
-        with patch.object(
-            UserIdentity, "get", new=AsyncMock(side_effect=NoDataFound("none"))
-        ), patch.object(UserIdentity, "insert", new=_insert):
+        token = TokenResponse(access_token="at", refresh_token=None, id_token=None, provider_user_id="99")
+        with (
+            patch.object(UserIdentity, "get", new=AsyncMock(side_effect=NoDataFound("none"))),
+            patch.object(UserIdentity, "insert", new=_insert),
+        ):
             await _store().save_linked_identity(1, "github", token)
         assert len(captured) == 1
         assert captured[0].access_token is not None
