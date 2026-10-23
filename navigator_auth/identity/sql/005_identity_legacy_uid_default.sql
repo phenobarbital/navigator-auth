@@ -13,6 +13,16 @@
 -- `uid` is `character varying`, `is_nullable = NO`, `column_default = NULL`,
 -- and the primary key is `(user_id, uid)`.
 --
+-- SUPERSEDED IN PART (FEAT-104): the claim below that the model can simply
+-- ignore `uid` is wrong. asyncdb's `Model.filter()` / `Model.all()` issue
+-- `SELECT *` and pass every column to the dataclass constructor, so the column
+-- made hydration raise `TypeError: UserIdentity.__init__() got an unexpected
+-- keyword argument 'uid'` on every legacy database.
+-- `006_identity_drop_legacy_uid.sql` therefore drops the column after this
+-- migration has run. This file stays as it is: it is what lets an insert
+-- succeed in the window before 006 completes, and on a database where 006
+-- has to skip because something else depends on `uid`.
+--
 -- Why a DEFAULT and not a drop: `uid` has no reader. The canonical DDL
 -- (`examples/sql/identity_vault_schema.sql:57`) has no such column at all, and
 -- nothing in `navigator_auth` selects or writes it. On a legacy table it is a

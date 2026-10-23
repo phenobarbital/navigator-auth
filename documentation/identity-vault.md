@@ -39,6 +39,31 @@ startup migration (`navigator_auth/identity/sql/001_identity_credentials.sql`):
 `key_version`, plus a partial unique index on
 `(user_id, auth_provider, provider_user_id)`.
 
+### Legacy tables
+
+An `auth.user_identities` that predates the Identity Vault is brought in
+line by the later migrations in the same directory, all idempotent and all
+no-ops on a table created from `examples/sql/identity_vault_schema.sql`:
+
+| File | Effect on a legacy table |
+|---|---|
+| `004_identity_base_columns.sql` | Adds the model's base columns (`identity_id`, `display_name`, …) and a unique index on `identity_id` |
+| `005_identity_legacy_uid_default.sql` | Gives the legacy `uid` column a `gen_random_uuid()` default so a model insert can omit it |
+| `006_identity_drop_legacy_uid.sql` | Promotes `identity_id` to primary key and **drops** `uid` |
+
+`006` is the only migration that removes anything, and it is required:
+asyncdb's `Model.filter()` / `Model.all()` issue `SELECT *` and pass every
+column to the model constructor, so a column the model does not declare
+makes hydration raise `TypeError: ... unexpected keyword argument 'uid'`.
+`IdentityStore` projects its own columns and is immune, but
+`/api/v1/user_identity` goes through navigator-api's `ModelHandler`, which
+does not.
+
+Dropping `uid` is irreversible — the surrogate values are not preserved. If
+a view, a rule or a constraint in your database depends on `uid`, `006`
+logs a warning and changes nothing (it never uses `CASCADE`); remove that
+object and restart to let the migration complete.
+
 Encryption reuses the **Session Vault master keys** from
 `navigator-session`:
 
