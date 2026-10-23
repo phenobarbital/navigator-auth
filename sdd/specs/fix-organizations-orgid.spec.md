@@ -718,6 +718,36 @@ No new dependency is added.
   reject? — *Resolved by spec author*: reject (`ValueError`), consistent with
   `Organization.Meta.strict = True`. Tolerating would need a documented
   allow-list and silently drops data. *Owner for override: Jesus Lara*.
+
+  **OVERRIDDEN by Jesus Lara, 2026-10-23 — organizations now tolerate extra
+  keys, and `name` is a fallback for `organization`.** The override was
+  exercised by the failure the strict reading produced in practice: the real
+  producer is `auth.vw_users`, which aggregates
+
+  ```sql
+  jsonb_agg( to_jsonb(ou.*) || jsonb_build_object('name', org.organization) )
+  ```
+
+  so every entry carries five bookkeeping columns from
+  `auth.organization_users` (`user_id`, `properties`, `created_at`,
+  `updated_at`, `created_by`) and spells the organization's name **`name`**,
+  never `organization`. Under Q5-as-resolved that mapping raised
+  `ValueError` → `create_user` raised `InvalidAuth`
+  (`backends/abstract.py:182`) → `_backend_auth` re-raised `ForbiddenAccess`,
+  i.e. **a 403 on every login for any user who belongs to an organization**
+  (observed for `user_id 35`, org 1, on 2026-10-23).
+
+  The allow-list Q5 asked for is now explicit:
+  `_ORGANIZATION_FIELDS = ("org_id", "organization", "slug")` and
+  `_ORGANIZATION_NAME_KEYS = ("organization", "name")` in `identities.py`.
+  The declared field wins when both spellings are present, so every payload
+  that satisfied FEAT-102 behaves identically. What makes an entry invalid is
+  **unchanged**: a missing or empty `org_id` / organization name still raises
+  (AC9 holds, now also through the `name` spelling).
+
+  Scope of the override: **organizations only**. `_coerce_group` and
+  `_coerce_program` still reject unknown keys; whether Module 4's members
+  should match is a separate decision and is not taken here.
 - [x] Q2 — Should empty strings (`org_id=""` / `organization=""`) be rejected
   during normalization? — *Resolved by Jesus Lara, 2026-10-13*: yes, rejected.
   Implemented in the normalization helpers (AC9), not in the model.
@@ -758,3 +788,4 @@ accepted brainstorm/proposal).
 |---|---|---|---|
 | 0.1 | 2026-10-12 | Jesus Lara | Initial draft from the problem report; reproduction and root cause recorded in §6. |
 | 0.2 | 2026-10-13 | Jesus Lara | Status → approved. Q2 (reject empty strings → AC9) and Q3 (groups/programs → Module 4, AC10) resolved and folded into §1/§2/§3/§4/§5. |
+| 0.3 | 2026-10-23 | Claude | **Q5 overridden by Jesus Lara**: organization mappings now ignore unknown keys and accept `name` as a fallback for `organization`, because the real producer (`auth.vw_users`) emits `to_jsonb(organization_users.*) \|\| {'name': …}` and the strict reading turned that into a 403 on every login for a user with an organization. Allow-list made explicit in `identities.py`; invalidity rules (AC9) unchanged; groups/programs deliberately untouched. |
