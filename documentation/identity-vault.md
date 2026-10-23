@@ -80,8 +80,10 @@ working.
 
 ## HTTP API
 
-All endpoints operate on the authenticated session user's own
-identities only.
+All endpoints in this table (the **vault** surface, `/api/v1/user/identities*`)
+operate on the authenticated session user's own identities only. The generic
+CRUD surface `/api/v1/user_identity*` is covered separately in
+[Generic CRUD surface](#generic-crud-surface-apiv1user_identity).
 
 | Method | Path | Description |
 |---|---|---|
@@ -105,6 +107,58 @@ credential = await idp.get_user_identity_credential(user_id, "google")
 # {'access_token': ..., 'token_type': 'Bearer', 'refresh_token': ...,
 #  'expires_at': ..., 'scopes': [...], 'provider_user_id': ...}
 ```
+
+## Generic CRUD surface (`/api/v1/user_identity*`)
+
+The same table is also exposed through a generic model handler
+(`UserIdentityHandler`). Since FEAT-105 it follows one rule:
+
+> Querying, editing and managing an identity is the **owner's** prerogative
+> over their own rows, or a **superuser's** — and a superuser never sees
+> credentials.
+
+| Caller | Read | Write | Delete |
+|---|---|---|---|
+| Owner | own rows | own rows (never the vault columns) | own rows |
+| Superuser | any user's rows (redacted, audited) | **revoke only** (`{"enabled": false}`), audited | any row, audited |
+| Anyone else | foreign row by id → `404` (identical to a nonexistent id); `?user_id=<other>` → `403` | `403` | `404` |
+
+- **Ownership is enforced in code**, not by the policy: the owner never needs
+  a policy, so self-service keeps working with no PDP configured.
+- **The superuser path is policy-governed and fails closed.** It additionally
+  requires the `user_identities_admin_access` policy (see `pdp.md`). With no
+  PDP, an undeclared policy or a policy that errors, the superuser is denied
+  and only the owner path remains.
+- **Redaction is an allowlist.** Responses contain only public columns, in the
+  same shape as the vault's masked view (`profile`, `has_refresh_token`,
+  `has_id_token`, `expired`, …). `access_token`, `refresh_token`, `id_token`
+  and `key_version` are never serialized — not through `?fields=`, `?_filter=`,
+  `:meta`, `:sample`, `:info`, `HEAD` (`X-Columns`) or write responses, for
+  any role.
+- **Vault-managed columns are read-only here** (`400`): tokens, `key_version`,
+  `provider_user_id`, `token_type`, `expires_at`, `refreshed_at`, `scopes`.
+  Token renewal lives on the vault surface (`PUT /api/v1/user/identities/{id}`).
+- **`?_filter=<column>=<prefix>`** (returns only that column's values, as upstream) is parameterized (`$1`), limited to public
+  columns (anything else is `400`, with the same message for unknown columns)
+  and, for non-superusers, ANDed with `user_id = <you>`.
+- A `DELETE` must carry the id in the URL; body-driven deletes are refused.
+- Every cross-user and admin decision (allow *and* deny) is written to the
+  `AuditLog`, naming the policy rule.
+- If `AUTH_USER_IDENTITY_MODEL` points at a model without a `user_id` column,
+  the surface answers `501` rather than serve unbound.
+
+The same guard protects `/api/v1/user_accounts*` (actions `account:*`; there is
+no revocation column, so a superuser can read and delete but not edit) and
+`/api/v1/partner/tokens*` (see below).
+
+### Partner keys (`/api/v1/partner/tokens*`)
+
+Partner keys have no owner: **every verb is superuser-only** and
+policy-governed (`partner_keys_admin_access`). The signed token is returned
+**once**, in the `201` creation response (`PUT`, or the insert branch of
+`POST`); it is never returned by a read, an update, a delete, `:meta` or
+`HEAD`. Store it when you create it. `POST` requires both `partner:create`
+and `partner:revoke` because it may insert or update.
 
 ## Provider notes
 

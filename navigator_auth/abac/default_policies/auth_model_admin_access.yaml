@@ -1,0 +1,39 @@
+version: "1.0"
+defaults:
+  effect: deny
+policies:
+  - name: user_identities_admin_access
+    effect: allow
+    description: >-
+      Superusers may read (redacted), revoke and delete other users' linked
+      identities. Never grants token material: redaction is enforced in code.
+    resources: ["uri:/api/v1/user_identity*"]
+    actions: ["identity:read", "identity:revoke", "identity:delete"]
+    subjects:
+      groups: ["superuser"]
+    priority: 90
+    enforcing: true
+
+  - name: user_accounts_admin_access
+    effect: allow
+    description: >-
+      Superusers may read, revoke and delete other users' social accounts.
+    resources: ["uri:/api/v1/user_accounts*"]
+    actions: ["account:read", "account:delete"]
+    subjects:
+      groups: ["superuser"]
+    priority: 90
+    enforcing: true
+
+  - name: partner_keys_admin_access
+    effect: allow
+    description: >-
+      Partner keys have no owner: only superusers may manage them. The signed
+      token is returned once at creation and never on a read.
+    resources: ["uri:/api/v1/partner/tokens*"]
+    actions:
+      ["partner:read", "partner:create", "partner:revoke", "partner:delete"]
+    subjects:
+      groups: ["superuser"]
+    priority: 90
+    enforcing: true

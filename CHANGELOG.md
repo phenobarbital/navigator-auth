@@ -1,5 +1,20 @@
 # Unreleased
 
+- **Owner-or-superuser access control on the auth model CRUD surfaces
+  (FEAT-105, client-visible behaviour change).** `/api/v1/user_identity*`,
+  `/api/v1/user_accounts*` and `/api/v1/partner/tokens*` were reachable by any
+  authenticated session and serialized credential columns. They are now
+  ownership-bound (owner, else a policy-governed superuser), answer through an
+  explicit column allowlist, and fail closed. `user_identity`/`user_accounts`:
+  foreign rows are `404`, `?user_id=<other>` is `403`, vault-managed columns
+  are read-only (`400`), superusers get a redacted, audited view limited to
+  revoke/delete. `partner/tokens` is superuser-only and returns the token once.
+  `?_filter=` is parameterized and allowlisted; `UserAccountHandler`'s
+  `social_networks` lookup no longer interpolates the provider (SQL injection).
+  New public `navigator_auth.decorators.policy_allows()` and policy pack
+  `abac/default_policies/auth_model_admin_access.yaml`. See
+  `documentation/identity-vault.md` and `documentation/pdp.md`.
+
 - **A login no longer publishes an already-aged provider token (FEAT-103,
   `issue:3fd80396c685`).** Navigator's `logout` ends only the Navigator
   session, so the next external login is silent at the IdP and Entra answers
