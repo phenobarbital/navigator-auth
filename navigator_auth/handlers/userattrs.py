@@ -21,10 +21,33 @@ from .guards import OwnerOrSuperuserGuard
 from .redaction import redact_row, redact_rows, redact_schema, safe_fields
 
 
-class UserAccountHandler(ModelHandler):
-    model: Any = UserAccount
+class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
+    """Owner-or-superuser CRUD over ``auth.user_accounts`` (FEAT-105).
+
+    Same guard as ``UserIdentityHandler``, different column set. This model
+    carries no token material, so ``credential_columns`` is empty and the
+    projection is a plain allowlist.
+    """
+
+    model: Any = UserAccount                    # verified: navigator_auth/models.py:297
     name: str = "User Account"
     pk: str = "account_id"
+
+    owner_column: str = "user_id"
+    #: No token material on this model — see spec §2 Data Models.
+    credential_columns = frozenset()
+    public_columns = frozenset({
+        "account_id", "user_id", "provider", "uid", "address", "account",
+        "created_at"})
+    policy_name: str = "user_accounts_admin_access"
+    superuser_actions = frozenset({
+        "account:read", "account:revoke", "account:delete"})
+
+    # Per-subclass copies (see UserIdentityHandler). Never RELY on _hidden:
+    # no column on UserAccount declares secret=True.
+    _hidden: list = []
+    _required: list = []
+    _primaries: list = []
     #: G9: the provider is bound as $1, never interpolated. The previous form
     #: inlined it inside a quoted literal, so a provider of ``x' OR 1=1 --``
     #: rewrote the statement.
@@ -58,6 +81,299 @@ class UserAccountHandler(ModelHandler):
             except DriverError:
                 pass
         return None
+
+    # ------------------------------------------------------------------
+    # Access control and redaction (TASK-126) — mirrors UserIdentityHandler
+    # with the ``account:*`` actions. ``UserAccount`` has no revocation
+    # column, so a superuser's only mutating power on a foreign row is
+    # ``account:delete``; every cross-user PATCH/POST/PUT is refused.
+    # ------------------------------------------------------------------
+    def _require_owner_column(self) -> str:
+        """Return the owner column, or refuse the request with 501."""
+        model = getattr(self, "get_model", None) or self.model
+        if not self.owner_column or self.owner_column not in model.get_columns():
+            raise web.HTTPNotImplemented(
+                text='{"error": "Not Implemented"}',
+                content_type="application/json",
+            )
+        return self.owner_column
+
+    async def _pre_get(self, *args, **kwargs) -> bool:
+        """Gate the read path: 501, 401, foreign-owner-param refusal."""
+        self._require_owner_column()
+        await self.acting_user()
+        qp = dict(self.query_parameters(self.request))
+        qp.pop("fields", None)
+        await self.sanitize_query(qp, None)
+        return True
+
+    async def _get_data(self, qp: dict, args: dict):
+        """Bind every read to an owner; widen + authorize for a superuser.
+
+        The owner predicate is installed as an instance-level
+        ``_filter_<owner>`` for non-superusers only (see
+        ``UserIdentityHandler._get_data`` for why a class hook cannot carry
+        the superuser case).
+        """
+        owner_col = self._require_owner_column()
+        user_id, is_superuser = await self.acting_user()
+        qp, _ = await self.sanitize_query(qp, None)
+        primary = await self._get_primary_data(args)
+        widen = False
+        if is_superuser:
+            if primary is not None:
+                widen = True
+            elif owner_col in qp and str(qp[owner_col]) != str(user_id):
+                await self.authorize_row("account:read", owner_id=qp[owner_col])
+                widen = True
+        if not widen:
+            qp = {k: v for k, v in qp.items() if k != owner_col}
+
+            async def _bind_owner(value=None, column=None, data=None):
+                return user_id
+
+            setattr(self, f"_filter_{owner_col}", _bind_owner)
+        try:
+            result = await super()._get_data(qp, args)
+        except NoDataFound:
+            if primary is not None:
+                self.error(response={"error": "Not Found"}, status=404)
+            raise
+        if primary is not None:
+            rows = [r for r in (result if isinstance(result, list) else [result]) if r]
+            if not rows:
+                self.error(response={"error": "Not Found"}, status=404)
+            if widen:
+                for row in rows:
+                    owner = (
+                        row.get(owner_col) if isinstance(row, dict)
+                        else getattr(row, owner_col, None)
+                    )
+                    await self.authorize_row(
+                        "account:read", owner, not_found_on_deny=True
+                    )
+        return result
+
+    async def _pre_write(self) -> bool:
+        """Shared gate for the four write verbs: 501 then 401."""
+        self._require_owner_column()
+        await self.acting_user()
+        return True
+
+    async def _pre_put(self, *args, **kwargs) -> bool:
+        """Gate an insert: a foreign ``user_id`` is refused for every role."""
+        await self._pre_write()
+        user_id, _ = await self.acting_user()
+        try:
+            raw = await self.json_data()
+        except Exception:  # noqa: BLE001 - malformed body is upstream's 400
+            raw = None
+        for element in (raw if isinstance(raw, list) else [raw]):
+            if (
+                isinstance(element, dict)
+                and element.get(self.owner_column) is not None
+                and str(element[self.owner_column]) != str(user_id)
+            ):
+                self.error(response={"error": "Forbidden"}, status=403)
+        return True
+
+    async def _pre_patch(self, *args, **kwargs) -> bool:
+        """Gate a partial update; row ownership is decided in `_set_update`."""
+        return await self._pre_write()
+
+    async def _pre_post(self, *args, **kwargs) -> bool:
+        """Gate an upsert."""
+        return await self._pre_write()
+
+    async def _pre_delete(self, *args, **kwargs) -> bool:
+        """Gate a delete; the target is resolved in `_del_primary_data`."""
+        return await self._pre_write()
+
+    async def _post_user_id(self, value, column, data):
+        """Fill ``user_id`` from the session only when the payload omits it."""
+        if value is not None:
+            return value
+        return await self.get_userid(session=self._session)
+
+    async def _patch_user_id(self, value, column, data):
+        """Leave ``user_id`` as sent on PATCH (``_set_user_id`` would clobber)."""
+        return value
+
+    async def _post_data(self, *args, **kwargs):
+        """Bind the owner on insert/upsert. Covers PUT and POST.
+
+        Delegates to ``super()`` first so ``_set_address`` still runs.
+        """
+        data = await super()._post_data(*args, **kwargs)
+        user_id, _ = await self.acting_user()
+        owner_col = self.owner_column
+        for element in (data if isinstance(data, list) else [data]):
+            if not isinstance(element, dict):
+                continue
+            value = element.get(owner_col)
+            if value is None:
+                element[owner_col] = user_id
+            elif str(value) != str(user_id):
+                self.error(response={"error": "Forbidden"}, status=403)
+        return data
+
+    async def _set_update(self, model, data) -> None:
+        """Authorize the update against the fetched row, then delegate.
+
+        Only the owner may write a row; there is no revocation column, so a
+        superuser has no permitted cross-user payload (403, audited).
+        """
+        owner_col = self.owner_column
+        owner_id = getattr(model, owner_col, None)
+        user_id, is_superuser = await self.acting_user()
+        if owner_col in data:
+            if data[owner_col] is None:
+                data.pop(owner_col)
+            elif str(data[owner_col]) != str(owner_id):
+                self.error(response={"error": "Forbidden"}, status=403)
+        if owner_id is None or str(owner_id) != str(user_id):
+            if is_superuser:
+                await self.audit_decision(
+                    "account:revoke", False, owner_id,
+                    "cross-user write: user_accounts has no revocation column"
+                )
+                self.error(response={"error": "Forbidden"}, status=403)
+            await self.authorize_row("account:revoke", owner_id)
+        return await super()._set_update(model, data)
+
+    async def _del_primary_data(self, args: dict):
+        """Resolve and authorize the delete target; 404 on deny.
+
+        A request with no id is refused so upstream cannot fall into its
+        body-driven delete paths, which never see a row owner.
+        """
+        objid = (args or {}).get("id") or (args or {}).get(self.pk)
+        if not objid:
+            self.error(
+                response={"error": "A primary key is required in the URL"},
+                status=400,
+            )
+        row = None
+        try:
+            async with await self.handler(request=self.request) as conn:
+                self.model.Meta.connection = conn
+                row = await self.model.get(**{self.pk: objid})
+        except Exception:  # noqa: BLE001 - missing/invalid id => no owner
+            row = None
+        owner_id = getattr(row, self.owner_column, None) if row else None
+        await self.authorize_row(
+            "account:delete", owner_id, not_found_on_deny=True
+        )
+        return objid
+
+    def _scrub(self, result: Any) -> Any:
+        """Project a write/delete response body onto ``public_columns``."""
+        if isinstance(result, (list, tuple)):
+            return [self._scrub(item) for item in result]
+        if isinstance(result, dict):
+            if set(result) & self.public_columns:
+                return redact_row(result, self.public_columns)
+            return result
+        if result is None or isinstance(result, (str, bytes, int, float, bool)):
+            return result
+        if any(hasattr(result, c) for c in self.public_columns):
+            return redact_row(result, self.public_columns)
+        return result
+
+    async def _patch_response(self, result, status: int = 202):
+        """Project the PATCH response body."""
+        return await super()._patch_response(self._scrub(result), status=status)
+
+    async def _post_response(self, result, status: int = 200, fields: list = None):
+        """Project the POST response body."""
+        return await super()._post_response(
+            self._scrub(result), status=status, fields=None
+        )
+
+    async def _put_response(self, result, status: int = 200, fields: list = None):
+        """Project the PUT response body."""
+        return await super()._put_response(
+            self._scrub(result), status=status, fields=None
+        )
+
+    async def _delete_response(self, result, status: int = 200):
+        """Project the DELETE response body."""
+        return await super()._delete_response(self._scrub(result), status=status)
+
+    async def _model_response(
+        self,
+        response: Any,
+        fields: list = None,
+        headers: dict = None,
+        status: int = 200,
+    ):
+        """Project through ``public_columns``, then delegate.
+
+        Required even on navigator-api 4.0.1: upstream's projection is driven
+        by ``_hidden``, derived from ``secret=True`` columns only — and no
+        column on ``UserAccount`` declares it, so upstream returns the full
+        row (and any column added to the model later).
+        """
+        if not response:
+            return await super()._model_response(
+                response, fields=None, headers=headers, status=status
+            )
+        safe = safe_fields(fields, self.public_columns)
+        redacted = redact_rows(response, self.public_columns, safe)
+        return await super()._model_response(
+            redacted, fields=None, headers=headers, status=status
+        )
+
+    async def _get_meta_info(self, meta: str, fields: list):
+        """Serve ``:meta`` / ``:sample`` / ``:info`` bounded to ``public_columns``.
+
+        ``redact_schema`` copies, so the model's cached schema is never
+        mutated. All seven columns are public, so this strips only columns
+        added to the model later.
+        """
+        if meta == ":meta":
+            schema = self.get_model.schema(as_dict=True)
+            hidden = frozenset(schema.get("properties", {})) - self.public_columns
+            return self.json_response(redact_schema(schema, hidden))
+        if meta == ":sample":
+            sample = self.get_model.sample()
+            if isinstance(sample, dict):
+                sample = {k: v for k, v in sample.items() if k in self.public_columns}
+            return self.json_response(sample)
+        if meta == ":info":
+            info = {}
+            for _, field in self.get_model.get_columns().items():
+                if field.name in self.public_columns:
+                    info[field.name] = {
+                        "type": str(field.type),
+                        "db_type": field.db_type(),
+                    }
+            return self.json_response(info)
+        return None
+
+    async def head(self):
+        """Keep ``X-Columns`` to the allowlisted column set."""
+        response = await super().head()
+        schema = self.get_model.schema(as_dict=True)
+        cols = [c for c in schema["properties"] if c in self.public_columns]
+        response.headers["X-Columns"] = f"{cols!r}"
+        return response
+
+    async def _filtering(self, queryparams: dict):
+        """Route ``?_filter=`` through the guard's parameterized safe filter.
+
+        Required even on navigator-api 4.0.1, whose ``_filtering`` is
+        parameterized but allowlists "a real column not in ``_hidden``"
+        (empty here) and applies no ownership predicate.
+        """
+        expr = queryparams.get("_filter")
+        if not expr:
+            return None
+        rows = await self.safe_filter(expr)
+        if not rows:
+            return self.no_content(headers={"X-STATUS": "EMPTY"})
+        return await self._model_response(rows)
+
 
 class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
     """Owner-or-superuser CRUD over ``auth.user_identities`` (FEAT-105).
