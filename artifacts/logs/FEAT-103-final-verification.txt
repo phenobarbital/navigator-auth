@@ -1,0 +1,48 @@
+FEAT-103 final full-suite verification
+date:   2026-10-23
+commit: 19d6c43
+venv:   navigator-session 1.1.1 (PyPI wheel), navigator_auth editable
+
+## pytest -q tests/
+================= 37 failed, 1563 passed, 4 skipped in 23.86s ==================
+
+## FAILED node-id set vs dev baseline @8897024 (baseline_failures_dev.txt)
+identical: 37 == 37  -> zero new failures introduced by FEAT-103
+
+tests/test_login.py::test_login_endpoint
+tests/test_oauth2_3lo_session_binding.py::TestDecodeTokenAudience::test_audience_is_verified_when_requested
+tests/test_oauth2_3lo_session_binding.py::TestDecodeTokenAudience::test_token_with_audience_is_decodable
+tests/test_oauth2_3lo_session_binding.py::TestDecodeTokenAudience::test_token_without_audience_still_decodable
+tests/test_oauth2_jwks.py::TestRegistryLoading::test_unreadable_key_file_does_not_log_path
+tests/test_oauth2_mcp_conformance.py::TestClaudeReplay::test_claude_replay_dcr
+tests/test_oauth2_mcp_conformance.py::TestGateLifecycleEndToEnd::test_gate_lifecycle
+tests/test_oauth2_mcp_conformance.py::TestUpstreamGoogleEndToEnd::test_upstream_google_end_to_end
+tests/test_saml_idp.py::test_idp_initiate_ok
+tests/test_saml_idp.py::test_idp_relaystate_validation
+tests/test_saml_idp.py::test_idp_slo_inbound_logout_request
+tests/test_saml_idp.py::test_idp_sso_no_session_detour
+tests/test_saml_idp.py::test_idp_sso_sp_initiated_with_session
+tests/test_saml_roundtrip.py::test_saml_no_blocking_call_on_event_loop
+tests/test_saml_roundtrip.py::test_saml_oauth2_resume_detour
+tests/test_saml_roundtrip.py::test_saml_performance_acs_and_issuance
+tests/test_saml_roundtrip.py::test_saml_roundtrip_idp_initiated
+tests/test_saml_roundtrip.py::test_saml_roundtrip_slo
+tests/test_saml_roundtrip.py::test_saml_roundtrip_sp_initiated
+tests/test_saml_slo.py::test_slo_inbound_logout_request
+tests/test_saml_slo.py::test_slo_logout_response
+tests/test_saml_sp.py::test_sp_acs_bad_signature
+tests/test_saml_sp.py::test_sp_acs_in_response_to_mismatch
+tests/test_saml_sp.py::test_sp_acs_relaystate_offhost
+tests/test_saml_sp.py::test_sp_acs_solicited_ok
+tests/test_saml_sp.py::test_sp_acs_stale_request
+tests/test_saml_sp.py::test_sp_acs_unsolicited_disabled
+tests/test_saml_sp.py::test_sp_acs_unsolicited_ok_then_replay
+tests/test_saml_sp.py::test_sp_authorize_hook_denies
+tests/test_token_exchange_backend.py::test_linked_identity_precedence
+tests/test_token_exchange_backend.py::test_reexchange_preserves_refresh_token
+tests/test_token_exchange_backend.py::test_vaults_credential_not_session
+tests/test_token_exchange_integration.py::test_exchange_end_to_end_azure
+tests/test_yaml_storage_double_load.py::TestPDPDoubleLoadPrevention::test_load_policies_proceeds_when_evaluator_is_empty
+tests/test_yaml_storage_double_load.py::TestPDPDoubleLoadPrevention::test_load_policies_skips_when_evaluator_has_policies
+tests/test_yaml_storage_double_load.py::TestPDPDoubleLoadPrevention::test_reload_policies_always_works
+tests/test_yaml_storage_double_load.py::TestRoundTripConsistency::test_both_paths_produce_same_resources

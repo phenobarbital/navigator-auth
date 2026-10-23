@@ -1,7 +1,22 @@
 """Unit tests for navigator_auth.identity.types.TokenResponse."""
+import base64
+import json
 from datetime import datetime, timedelta, timezone
 
-from navigator_auth.identity.types import TokenResponse, mask_value
+from navigator_auth.identity.types import (
+    TokenResponse,
+    jwt_issued_at,
+    mask_value,
+)
+
+
+def _jwt(**claims) -> str:
+    """A compact JWT whose payload carries *claims* (signature not used)."""
+    def _part(obj):
+        raw = json.dumps(obj).encode()
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+    return f"{_part({'alg': 'RS256'})}.{_part(claims)}.sig"
 
 
 class TestTokenResponse:
@@ -83,6 +98,34 @@ class TestTokenResponse:
         assert token.refresh_token is None
         assert token.scopes == []
         assert token.expires_at is None
+
+
+class TestIssuedAt:
+    """issue:3fd80396c685 — a reused provider token must be observable."""
+
+    def test_issued_at_read_from_the_access_token_iat(self):
+        iat = int(datetime.now(timezone.utc).timestamp()) - 300
+        token = TokenResponse(access_token=_jwt(iat=iat), expires_in=5155)
+        assert token.issued_at == datetime.fromtimestamp(iat, tz=timezone.utc)
+        # the grant reached us 5 minutes after Entra issued it
+        assert 299 <= token.age_seconds() <= 310
+
+    def test_issued_at_is_none_for_an_opaque_token(self):
+        token = TokenResponse(access_token="ya29.opaque-google-token")
+        assert token.issued_at is None
+        assert token.age_seconds() is None
+
+    def test_issued_at_is_none_when_the_jwt_carries_no_iat(self):
+        assert TokenResponse(access_token=_jwt(sub="x")).issued_at is None
+
+    def test_explicit_issued_at_is_not_overwritten(self):
+        when = datetime(2026, 10, 23, tzinfo=timezone.utc)
+        token = TokenResponse(access_token=_jwt(iat=1), issued_at=when)
+        assert token.issued_at == when
+
+    def test_jwt_issued_at_never_raises_on_garbage(self):
+        for value in (None, "", "a.b", "x.y.z", "...", 42, _jwt(iat="soon")):
+            assert jwt_issued_at(value) is None
 
 
 class TestMaskValue:

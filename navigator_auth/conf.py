@@ -440,6 +440,13 @@ AZURE_SESSION_TIMEOUT = config.getint("AZURE_SESSION_TIMEOUT", fallback=120)
 # user who lingered on the Microsoft login screen lost the flow record and got
 # "Lost Authentication Flow, please try again."
 AZURE_FLOW_TTL = config.getint("AZURE_FLOW_TTL", fallback=600)
+# AZURE_LOGIN_PROMPT is the OIDC `prompt` sent on the login authorization
+# request. Empty (the default) keeps silent SSO: Entra reuses its own session
+# AND the access token it already issued for it, so a re-login can publish an
+# already-aged provider token (issue:3fd80396c685). Set it to `login` where a
+# genuinely newly-issued credential is required (or to measure token lifetime
+# across logins) — at the cost of a credential prompt on every login.
+AZURE_LOGIN_PROMPT = config.get("AZURE_LOGIN_PROMPT", fallback="").strip() or None
 
 # ADFS SAML Relay: When set, after OIDC login the user is redirected
 # to ADFS IdP-initiated SSO for this Relying Party (display name as

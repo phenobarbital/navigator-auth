@@ -408,12 +408,29 @@ class IdentityStore:
     async def update_tokens(
         self, identity: UserIdentity, token: TokenResponse
     ) -> UserIdentity:
-        """Persist refreshed tokens on an existing identity row (same context)."""
+        """Persist refreshed tokens on an existing identity row (same context).
+
+        ``access_token`` is always replaced; ``refresh_token`` and ``id_token``
+        only when the refresh actually returned one, so a provider that omits
+        either on the refresh grant does not erase what is stored.
+
+        Args:
+            identity: The row to update, as read from this store.
+            token: The rotated credential.
+
+        Returns:
+            The updated row.
+        """
         user_id, provider = identity.user_id, identity.auth_provider
         puid = identity.provider_user_id
         identity.access_token = self._seal(token.access_token, user_id, provider, puid, "access_token")
         if token.refresh_token:
             identity.refresh_token = self._seal(token.refresh_token, user_id, provider, puid, "refresh_token")
+        if token.id_token:
+            # Only when the refresh returned one: an OIDC provider may omit
+            # id_token on the refresh grant, and the stored one is still the
+            # truth about the account (issue:d73106586c38).
+            identity.id_token = self._seal(token.id_token, user_id, provider, puid, "id_token")
         identity.token_type = token.token_type
         identity.expires_at = token.expires_at
         identity.refreshed_at = datetime.now(timezone.utc)
