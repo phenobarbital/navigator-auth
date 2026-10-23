@@ -100,7 +100,7 @@ class ModelHandler(BaseView):
         except (ValueError, RuntimeError) as err:
             return self.critical(reason="Error Decoding Session", request=self.request, exception=err)
         if not self._session:
-            self.error(reason={"message": "Unauthorized"}, status=403)
+            self.error(response={"message": "Unauthorized"}, status=403)
         return self._session
 
     async def head(self):
@@ -176,11 +176,11 @@ class ModelHandler(BaseView):
                     result = await self.model.get(**args)
                 except ModelError as ex:
                     error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
-                    return self.error(reason=error, status=400)
+                    return self.error(response=error, status=400)
                 except NoDataFound:
-                    self.error(reason=error, status=404)
+                    self.error(response=error, status=404)
                 if not result:
-                    self.error(reason=error, status=404)
+                    self.error(response=error, status=404)
                 return await self._post_get(result, fields=fields)
         else:
             try:
@@ -193,7 +193,7 @@ class ModelHandler(BaseView):
                     return await self._post_get(result, fields=fields)
             except ModelError as ex:
                 error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
-                return self.error(reason=error, status=400)
+                return self.error(response=error, status=400)
             except ValidationError as ex:
                 error = {
                     "error": f"Unable to load {self.name} info from Database",
@@ -205,7 +205,7 @@ class ModelHandler(BaseView):
                     "error": f"Invalid payload for {self.name}",
                     "payload": str(ex),
                 }
-                return self.error(reason=error, status=406)
+                return self.error(response=error, status=406)
             except (DriverError, ProviderError, RuntimeError) as ex:
                 error = {
                     "error": "Database Error",
@@ -228,26 +228,26 @@ class ModelHandler(BaseView):
                 return self.json_response(result, status=201)
         except ModelError as ex:
             error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
-            return self.error(reason=error, status=400)
+            return self.error(response=error, status=400)
         except ValidationError as ex:
             error = {
                 "error": f"Unable to insert {self.name} info",
                 "payload": ex.payload,
             }
-            return self.error(reason=error, status=406)
+            return self.error(response=error, status=406)
         except StatementError as ex:
             # UniqueViolation, already exists:
             error = {
                 "error": f"Record already exists for {self.name}",
                 "payload": str(ex),
             }
-            return self.error(reason=error, status=412)
+            return self.error(response=error, status=412)
         except (TypeError, AttributeError, ValueError) as ex:
             error = {
                 "error": f"Invalid payload for {self.name}",
                 "payload": str(ex),
             }
-            return self.error(reason=error, status=406)
+            return self.error(response=error, status=406)
 
     async def patch(self):
         """Patch an existing Client or retrieve the column names."""
@@ -296,13 +296,13 @@ class ModelHandler(BaseView):
                     result = await self.model.get(**args)
                 except ModelError as ex:
                     error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
-                    return self.error(reason=error, status=400)
+                    return self.error(response=error, status=400)
                 except NoDataFound:
                     headers = {"x-error": f"{self.name} was not Found"}
-                    self.no_content(headers=headers)
+                    return self.no_content(headers=headers)
                 if not result:
                     headers = {"x-error": f"{self.name} was not Found"}
-                    self.no_content(headers=headers)
+                    return self.no_content(headers=headers)
                 ## saved with new changes:
                 for key, val in data.items():
                     if key in result.get_fields():
@@ -360,13 +360,13 @@ class ModelHandler(BaseView):
                         return self.json_response(result, status=201)
                     except ModelError as ex:
                         error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
-                        return self.error(reason=error, status=400)
+                        return self.error(response=error, status=400)
                     except ValidationError as ex:
                         error = {
                             "error": f"Unable to insert {self.name} info",
                             "payload": ex.payload,
                         }
-                        return self.error(reason=error, status=406)
+                        return self.error(response=error, status=406)
                 ## saved with new changes:
                 for key, val in data.items():
                     if key in result.get_fields():
@@ -383,19 +383,19 @@ class ModelHandler(BaseView):
                     return self.json_response(result, status=201)
             except ModelError as ex:
                 error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
-                return self.error(reason=error, status=400)
+                return self.error(response=error, status=400)
             except ValidationError as ex:
                 error = {
                     "error": f"Unable to insert {self.name} info",
                     "payload": ex.payload,
                 }
-                return self.error(reason=error, status=406)
+                return self.error(response=error, status=406)
             except (TypeError, AttributeError, ValueError) as ex:
                 error = {
                     "error": f"Invalid payload for {self.name}",
                     "payload": str(ex),
                 }
-                return self.error(exception=error, status=406)
+                return self.error(response=error, status=406)
 
     async def delete(self):
         """Delete a Client."""

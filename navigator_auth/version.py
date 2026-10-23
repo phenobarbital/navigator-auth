@@ -4,7 +4,7 @@ Navigator-Auth add an authentication/authorization layer over an aiohttp applica
 
 __title__ = "navigator_auth"
 __description__ = "Navigator Auth is an Authentication/Authorization Toolkit for aiohttp."
-__version__ = "0.28.8"  # pragma: no cover
+__version__ = "0.28.9"  # pragma: no cover
 __author__ = "Jesus Lara"
 __author_email__ = "jesuslarag@gmail.com"
 __copyright__ = "Copyright (c) 2019-2025 Jesus Lara"
