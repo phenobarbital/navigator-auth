@@ -487,3 +487,203 @@ class TestDeletePath:
         h = _wh()
         with _patch_sessions(None), pytest.raises(web.HTTPUnauthorized):
             await h._pre_delete()
+
+
+# ---------------------------------------------------------------------------
+# Response redaction (TASK-125)
+# ---------------------------------------------------------------------------
+import json  # noqa: E402
+
+CREDENTIALS = ("access_token", "refresh_token", "id_token", "key_version")
+SENTINEL = b"SENTINEL-TOKEN-BYTES"
+
+
+def _full_row(owner=OWNER_ID):
+    return {
+        "identity_id": "abc", "user_id": owner, "email": "e@x",
+        "auth_provider": "git", "auth_data": {"n": 1}, "scopes": ["s"],
+        "access_token": SENTINEL, "refresh_token": b"rt", "id_token": b"it",
+        "key_version": 3, "enabled": True,
+    }
+
+
+class _Capture:
+    """Capture what reaches upstream's _model_response."""
+
+    def __init__(self):
+        self.payload = None
+
+    async def __call__(self, response, fields=None, headers=None, status=200):
+        self.payload = response
+        return web.Response(text="ok")
+
+
+def _body(payload):
+    return json.dumps(payload, default=lambda o: repr(o))
+
+
+class TestResponseRedaction:
+    async def _run(self, response, fields=None):
+        h = _handler()
+        cap = _Capture()
+        with patch("navigator.views.ModelView._model_response", new=cap):
+            await h._model_response(response, fields=fields)
+        return cap.payload
+
+    @pytest.mark.asyncio
+    async def test_no_credential_key_in_any_response(self):
+        out = await self._run(_full_row())
+        assert not (set(out) & set(CREDENTIALS))
+        assert out["has_refresh_token"] is True and out["profile"] == {"n": 1}
+
+    @pytest.mark.asyncio
+    async def test_fields_param_cannot_project_credentials(self):
+        out = await self._run(_full_row(), ["access_token", "refresh_token", "email"])
+        assert out == {"email": "e@x"}
+
+    @pytest.mark.asyncio
+    async def test_fields_naming_only_credentials_returns_no_data(self):
+        out = await self._run(_full_row(), ["access_token"])
+        assert out == {}
+
+    @pytest.mark.asyncio
+    async def test_superuser_response_is_redacted_too(self):
+        out = await self._run(_full_row(OTHER_ID))
+        assert not (set(out) & set(CREDENTIALS))
+
+    @pytest.mark.asyncio
+    async def test_list_and_scalar_shapes_preserved(self):
+        assert isinstance(await self._run([_full_row()]), list)
+        assert isinstance(await self._run(_full_row()), dict)
+
+    @pytest.mark.asyncio
+    async def test_no_token_bytes_anywhere_in_the_payload(self):
+        out = await self._run([_full_row()])
+        assert "SENTINEL" not in _body(out)
+
+    @pytest.mark.asyncio
+    async def test_write_responses_are_scrubbed(self):
+        h = _handler()
+        scrubbed = h._scrub(_full_row())
+        assert not (set(scrubbed) & set(CREDENTIALS))
+        assert h._scrub({"message": "gone"}) == {"message": "gone"}
+        assert h._scrub([_full_row()])[0].get("access_token") is None
+
+
+class TestMetaRedaction:
+    @pytest.mark.asyncio
+    async def test_meta_strips_credential_columns(self):
+        from navigator_auth.models import UserIdentity
+        h = _handler()
+        h.get_model = UserIdentity
+        resp = await h._get_meta_info(":meta", None)
+        body = json.loads(resp.text)
+        assert not (set(body["properties"]) & set(CREDENTIALS))
+        assert "email" in body["properties"]
+
+    @pytest.mark.asyncio
+    async def test_sample_strips_credential_columns(self):
+        h = _handler()
+        h.get_model = MagicMock()
+        h.get_model.sample.return_value = {"email": "a", "access_token": "x"}
+        resp = await h._get_meta_info(":sample", None)
+        assert json.loads(resp.text) == {"email": "a"}
+
+    @pytest.mark.asyncio
+    async def test_meta_does_not_mutate_the_cached_schema(self):
+        from navigator_auth.models import UserIdentity
+        h = _handler()
+        h.get_model = UserIdentity
+        await h._get_meta_info(":meta", None)
+        assert "access_token" in UserIdentity.schema(as_dict=True)["properties"]
+
+    @pytest.mark.asyncio
+    async def test_meta_returns_none_for_a_non_meta_request(self):
+        assert await _handler()._get_meta_info(None, None) is None
+
+    @pytest.mark.asyncio
+    async def test_head_x_columns_has_no_credentials(self):
+        from navigator_auth.models import UserIdentity
+        h = _handler()
+        h.get_model = UserIdentity
+        with patch(
+            "navigator.views.ModelView.head",
+            new=AsyncMock(return_value=web.Response(headers={"X-Columns": "all"})),
+        ):
+            resp = await h.head()
+        assert not any(c in resp.headers["X-Columns"] for c in CREDENTIALS)
+        assert "email" in resp.headers["X-Columns"]
+
+
+class _FilterModel(FakeModel):
+    columns = {
+        "identity_id": None, "user_id": None, "email": None,
+        "auth_provider": None, "access_token": None,
+    }
+
+
+class _FConn:
+    def __init__(self):
+        self.calls = []
+
+    async def fetch_all(self, sql, *args):
+        self.calls.append((sql, args))
+        return [{"email": "a@b", "auth_provider": "git"}]
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+def _fh(conn):
+    h = _handler(model=_FilterModel())
+    h.handler = AsyncMock(return_value=conn)
+    return h
+
+
+class TestSafeFilterWiring:
+    @pytest.mark.asyncio
+    async def test_filter_on_credential_column_is_400(self):
+        conn = _FConn()
+        h = _fh(conn)
+        with _patch_sessions(_session()), pytest.raises(web.HTTPBadRequest):
+            await h._filtering({"_filter": "access_token=x"})
+        assert conn.calls == []
+
+    @pytest.mark.asyncio
+    async def test_filter_on_public_column_is_parameterized(self):
+        conn = _FConn()
+        h = _fh(conn)
+        with _patch_sessions(_session()):
+            resp = await h._filtering({"_filter": "auth_provider=git"})
+        assert resp is not None
+        sql, args = conn.calls[0]
+        assert "$1" in sql and "git" in args[0]
+
+    @pytest.mark.asyncio
+    async def test_filter_result_is_redacted(self):
+        conn = _FConn()
+        h = _fh(conn)
+        cap = _Capture()
+        with _patch_sessions(_session()), patch(
+            "navigator.views.ModelView._model_response", new=cap
+        ):
+            await h._filtering({"_filter": "auth_provider=git"})
+        assert not (set(cap.payload[0]) & set(CREDENTIALS))
+
+    @pytest.mark.asyncio
+    async def test_filtering_returns_none_without_the_parameter(self):
+        assert await _handler()._filtering({}) is None
+
+    @pytest.mark.asyncio
+    async def test_upstream_filtering_is_unreachable(self):
+        conn = _FConn()
+        h = _fh(conn)
+        boom = MagicMock(side_effect=AssertionError("upstream _filtering called"))
+        with _patch_sessions(_session()), patch(
+            "navigator.views.ModelView._filtering", new=boom
+        ):
+            await h._filtering({"_filter": "auth_provider=git"})
+        boom.assert_not_called()

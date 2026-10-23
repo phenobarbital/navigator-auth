@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any
 from aiohttp import web
 from asyncdb.exceptions import (
@@ -17,6 +18,7 @@ from ..conf import (
 # from .model import ModelHandler
 from .handler import ModelHandler
 from .guards import OwnerOrSuperuserGuard
+from .redaction import redact_row, redact_rows, redact_schema, safe_fields
 
 
 class UserAccountHandler(ModelHandler):
@@ -422,3 +424,212 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
             "identity:delete", owner_id, not_found_on_deny=True
         )
         return objid
+
+    # ------------------------------------------------------------------
+    # Response redaction (TASK-125)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _col(row: Any, name: str, default: Any = None) -> Any:
+        """Read one column from a ``dict`` or model row."""
+        if isinstance(row, dict):
+            return row.get(name, default)
+        return getattr(row, name, default)
+
+    def _masked_shape(self, row: dict, original: Any) -> dict:
+        """Reshape an allowlisted row into the ``IdentityStore.masked()`` form.
+
+        Keeps the two identity surfaces from drifting (spec §8 Q6):
+        ``auth_data`` is emitted as ``profile``, token material becomes
+        ``has_refresh_token`` / ``has_id_token``, and ``expired`` is derived
+        from ``expires_at`` (a naive datetime is read as UTC).
+
+        Args:
+            row: An already-redacted row (credential columns are gone).
+            original: The pre-redaction row, the only place the
+                ``has_*_token`` booleans can be derived from.
+
+        Returns:
+            The reshaped row.
+        """
+        out = dict(row)
+        expires_at = out.get("expires_at")
+        expired = False
+        if isinstance(expires_at, datetime):
+            aware = (
+                expires_at.replace(tzinfo=timezone.utc)
+                if expires_at.tzinfo is None else expires_at
+            )
+            expired = aware <= datetime.now(timezone.utc)
+        out["expired"] = expired
+        if out.get("identity_id") is not None:
+            out["identity_id"] = str(out["identity_id"])
+        out["scopes"] = list(out.get("scopes") or [])
+        for key in ("expires_at", "refreshed_at", "created_at"):
+            value = out.get(key)
+            out[key] = value.isoformat() if hasattr(value, "isoformat") else value
+        out["profile"] = out.pop("auth_data", None) or {}
+        out["has_refresh_token"] = self._col(original, "refresh_token") is not None
+        out["has_id_token"] = self._col(original, "id_token") is not None
+        return out
+
+    async def _model_response(
+        self,
+        response: Any,
+        fields: list = None,
+        headers: dict = None,
+        status: int = 200,
+    ):
+        """Project every response through ``public_columns``, then delegate.
+
+        Required even on navigator-api 4.0.1, whose own projection is driven
+        by ``_hidden`` — derived from ``secret=True`` columns only, which
+        **no** credential column on ``UserIdentity`` declares. Upstream
+        therefore returns the full row, token bytes included. This override
+        is the only thing that redacts this surface; do not remove it as
+        redundant.
+
+        Args:
+            response: The row or rows to serialize.
+            fields: The caller's ``?fields=`` projection.
+            headers: Extra response headers.
+            status: HTTP status.
+
+        Returns:
+            The upstream response, built from redacted rows.
+        """
+        if not response:
+            return await super()._model_response(
+                response, fields=None, headers=headers, status=status
+            )
+        safe = safe_fields(fields, self.public_columns)
+        redacted = redact_rows(response, self.public_columns, safe)
+        if safe is None:
+            if isinstance(response, (list, tuple)):
+                redacted = [
+                    self._masked_shape(r, o) for r, o in zip(redacted, response)
+                ]
+            else:
+                redacted = self._masked_shape(redacted, response)
+        return await super()._model_response(
+            redacted, fields=None, headers=headers, status=status
+        )
+
+    def _scrub(self, result: Any) -> Any:
+        """Redact the body of a write/delete response.
+
+        ``_post_response`` / ``_put_response`` / ``_patch_response`` /
+        ``_delete_response`` serialize the written row verbatim. Rows are
+        projected onto ``public_columns``; error/message dicts that carry no
+        column names pass through untouched.
+        """
+        if isinstance(result, (list, tuple)):
+            return [self._scrub(item) for item in result]
+        known = self.public_columns | self.credential_columns
+        if isinstance(result, dict):
+            if set(result) & known:
+                return redact_row(result, self.public_columns)
+            return result
+        if result is None or isinstance(result, (str, bytes, int, float, bool)):
+            return result
+        if any(hasattr(result, c) for c in known):
+            return redact_row(result, self.public_columns)
+        return result
+
+    async def _patch_response(self, result, status: int = 202):
+        """Redact the PATCH response body."""
+        return await super()._patch_response(self._scrub(result), status=status)
+
+    async def _post_response(self, result, status: int = 200, fields: list = None):
+        """Redact the POST response body."""
+        return await super()._post_response(
+            self._scrub(result), status=status, fields=None
+        )
+
+    async def _put_response(self, result, status: int = 200, fields: list = None):
+        """Redact the PUT response body."""
+        return await super()._put_response(
+            self._scrub(result), status=status, fields=None
+        )
+
+    async def _delete_response(self, result, status: int = 200):
+        """Redact the DELETE response body."""
+        return await super()._delete_response(self._scrub(result), status=status)
+
+    async def _get_meta_info(self, meta: str, fields: list):
+        """Redact the ``:meta`` / ``:sample`` / ``:info`` payloads.
+
+        ``get()`` serves these BEFORE ``_filtering`` and ``_get_data`` and
+        they bypass the row projection, returning the raw model schema —
+        which enumerates every credential column. They are built here from
+        the redacted schema; any other ``meta`` value returns ``None`` so
+        ``get()`` continues into the normal flow.
+
+        Args:
+            meta: The ``{meta}`` URL segment, e.g. ``":meta"``.
+            fields: The caller's projection (unused).
+
+        Returns:
+            The redacted meta response, or ``None``.
+        """
+        if meta == ":meta":
+            # redact_schema copies: schema(as_dict=True) is a cached, shared dict.
+            schema = redact_schema(
+                self.get_model.schema(as_dict=True), self.credential_columns
+            )
+            return self.json_response(schema)
+        if meta == ":sample":
+            sample = self.get_model.sample()
+            if isinstance(sample, dict):
+                sample = {
+                    k: v for k, v in sample.items()
+                    if k not in self.credential_columns
+                }
+            return self.json_response(sample)
+        if meta == ":info":
+            info = {}
+            for _, field in self.get_model.get_columns().items():
+                if field.name in self.credential_columns:
+                    continue
+                info[field.name] = {
+                    "type": str(field.type),
+                    "db_type": field.db_type(),
+                }
+            return self.json_response(info)
+        return None
+
+    async def head(self):
+        """Keep ``X-Columns`` from enumerating the credential columns.
+
+        Upstream builds the header from the full model schema. Not named in
+        spec §3 Module 4, but spec G3 forbids enumerating credentials for
+        any role, and a HEAD response's headers are a response.
+        """
+        response = await super().head()
+        schema = redact_schema(
+            self.get_model.schema(as_dict=True), self.credential_columns
+        )
+        response.headers["X-Columns"] = f"{list(schema['properties'])!r}"
+        return response
+
+    async def _filtering(self, queryparams: dict):
+        """Route ``?_filter=`` through the guard's parameterized safe filter.
+
+        Required even on navigator-api 4.0.1, whose own ``_filtering`` *is*
+        parameterized: its allowlist is "a real column not in ``_hidden``" —
+        empty here — so ``?_filter=access_token=x`` is valid upstream and
+        returns token bytes; and it applies no ownership predicate.
+
+        Args:
+            queryparams: The request query parameters.
+
+        Returns:
+            The filter response, or ``None`` when no ``_filter`` was
+            requested — ``get()`` checks for ``None`` to continue.
+        """
+        expr = queryparams.get("_filter")
+        if not expr:
+            return None
+        rows = await self.safe_filter(expr)
+        if not rows:
+            return self.no_content(headers={"X-STATUS": "EMPTY"})
+        return await self._model_response(rows)
