@@ -141,9 +141,7 @@ class OwnerOrSuperuserGuard:
         if self.owner_column is not None and owner_id is not None and str(owner_id) == str(user_id):
             return True
         if not is_superuser:
-            await self.audit_decision(
-                action, False, owner_id, f"user {user_id} is not the owner and not a superuser"
-            )
+            await self.audit_decision(action, False, owner_id, f"user {user_id} is not the owner and not a superuser")
             self._refuse(not_found_on_deny)
         if action not in self.superuser_actions:
             await self.audit_decision(action, False, owner_id, f"action '{action}' is outside superuser_actions")

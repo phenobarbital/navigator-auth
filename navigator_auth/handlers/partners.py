@@ -8,9 +8,7 @@ from ..conf import AUTH_DB_SCHEMA, AUTH_TOKEN_ISSUER, AUTH_JWT_ALGORITHM, AUTH_T
 from ..exceptions import ConfigError
 from .model import ModelHandler
 from .guards import OwnerOrSuperuserGuard
-from .redaction import (
-    redact_rows, redact_schema, safe_fields, scrub_payload
-)
+from .redaction import redact_rows, redact_schema, safe_fields, scrub_payload
 
 
 class PartnerKey(Model):
@@ -97,9 +95,7 @@ class PartnerKeyHandler(OwnerOrSuperuserGuard, ModelHandler):
 
     def _scrub(self, result: Any) -> Any:
         """Redact a decoded response body (allowlist, recursive)."""
-        return scrub_payload(
-            result, self.public_columns, self.credential_columns
-        )
+        return scrub_payload(result, self.public_columns, self.credential_columns)
 
     def _redact_response(self, response):
         """Rebuild a JSON response with its body redacted (same status).
@@ -110,12 +106,8 @@ class PartnerKeyHandler(OwnerOrSuperuserGuard, ModelHandler):
             body = response.body
             payload = json.loads(body.decode() if isinstance(body, bytes) else body)
         except (AttributeError, TypeError, ValueError):
-            self.error(
-                response={"error": "Unable to redact the response"}, status=500
-            )
-        return self.json_response(
-            self._scrub(payload), status=response.status
-        )
+            self.error(response={"error": "Unable to redact the response"}, status=500)
+        return self.json_response(self._scrub(payload), status=response.status)
 
     def _meta_requested(self) -> bool:
         try:
@@ -155,9 +147,7 @@ class PartnerKeyHandler(OwnerOrSuperuserGuard, ModelHandler):
         if not result:
             return await super()._post_get(result, fields=None)
         safe = safe_fields(fields, self.public_columns)
-        return await super()._post_get(
-            redact_rows(result, self.public_columns, safe), fields=None
-        )
+        return await super()._post_get(redact_rows(result, self.public_columns, safe), fields=None)
 
     async def put(self):
         """Superuser-only create; the 201 carries ``token`` ONCE.

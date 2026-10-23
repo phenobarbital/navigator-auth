@@ -163,10 +163,7 @@ def scrub_payload(
     if isinstance(payload, dict):
         if set(payload) & known:
             return redact_row(payload, public_columns)
-        return {
-            k: scrub_payload(v, public_columns, credential_columns)
-            for k, v in payload.items()
-        }
+        return {k: scrub_payload(v, public_columns, credential_columns) for k, v in payload.items()}
     if payload is None or isinstance(payload, (str, bytes, int, float, bool)):
         return payload
     if any(hasattr(payload, c) for c in known):

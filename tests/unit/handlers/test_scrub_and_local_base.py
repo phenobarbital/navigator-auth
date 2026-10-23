@@ -1,4 +1,5 @@
 """Regression tests for the review fixes (FEAT-105)."""
+
 import inspect
 
 from navigator_auth.handlers import model as local_model

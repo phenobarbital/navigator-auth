@@ -11,9 +11,7 @@ from ..conf import AUTH_USER_IDENTITY_MODEL
 # from .model import ModelHandler
 from .handler import ModelHandler
 from .guards import OwnerOrSuperuserGuard
-from .redaction import (
-    redact_rows, redact_schema, safe_fields, scrub_payload
-)
+from .redaction import redact_rows, redact_schema, safe_fields, scrub_payload
 
 
 class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
@@ -275,9 +273,7 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
 
     def _scrub(self, result: Any) -> Any:
         """Redact the body of a write/delete response (allowlist, recursive)."""
-        return scrub_payload(
-            result, self.public_columns, self.credential_columns
-        )
+        return scrub_payload(result, self.public_columns, self.credential_columns)
 
     async def _patch_response(self, result, status: int = 202):
         """Project the PATCH response body."""
@@ -865,9 +861,7 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
 
     def _scrub(self, result: Any) -> Any:
         """Redact the body of a write/delete response (allowlist, recursive)."""
-        return scrub_payload(
-            result, self.public_columns, self.credential_columns
-        )
+        return scrub_payload(result, self.public_columns, self.credential_columns)
 
     async def _patch_response(self, result, status: int = 202):
         """Redact the PATCH response body."""
