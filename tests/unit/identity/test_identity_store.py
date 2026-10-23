@@ -7,12 +7,15 @@ import pytest
 
 from navigator_auth.identity.crypto import IdentityCipher
 from navigator_auth.identity.store import (
+    _IDENTITY_SELECT,
     IDENTITY_VAULT_KEY,
     IdentityStore,
+    _filter_identities,
     cache_credential,
     cached_credential,
     invalidate_cached,
 )
+from navigator_auth.models import UserIdentity
 
 MASTER_KEYS = {1: b"\x00" * 32}
 
@@ -158,9 +161,10 @@ class _Row:
 
 
 def _patch_filter(rows):
-    model = MagicMock()
-    model.filter = AsyncMock(return_value=list(rows))
-    return patch("navigator_auth.identity.store.UserIdentity", model)
+    return patch(
+        "navigator_auth.identity.store._filter_identities",
+        AsyncMock(return_value=list(rows)),
+    )
 
 
 class TestDuplicateRowOrdering:
@@ -250,3 +254,80 @@ class TestSaveLinkedIdentityNullTokens:
         assert existing.refresh_token == sealed_rt
         assert existing.id_token == sealed_id
         existing.update.assert_awaited_once()
+
+
+class TestFilterIdentitiesProjection:
+    """Reads must survive a legacy column on ``auth.user_identities``.
+
+    A pre-Identity-Vault table keeps ``uid`` (half of its legacy primary
+    key). ``SELECT *`` fed it into ``UserIdentity.__init__`` and every
+    filter-based read died with
+    ``TypeError: ... unexpected keyword argument 'uid'``.
+    """
+
+    def _row(self, **extra):
+        row = {
+            "identity_id": "11111111-1111-1111-1111-111111111111",
+            "user_id": 35,
+            "auth_provider": "azure",
+            "access_token": b"ciphered",
+            "refresh_token": None,
+            "id_token": None,
+            "enabled": True,
+        }
+        row.update(extra)
+        return row
+
+    def test_projection_names_the_model_columns(self):
+        assert "*" not in _IDENTITY_SELECT
+        for column in ("identity_id", "user_id", "auth_provider", "access_token"):
+            assert column in _IDENTITY_SELECT
+        assert "uid," not in _IDENTITY_SELECT
+
+    @pytest.mark.asyncio
+    async def test_hydrates_rows_carrying_a_legacy_column(self):
+        conn = AsyncMock()
+        conn.fetch_all = AsyncMock(return_value=[self._row(uid="legacy-surrogate")])
+        rows = await _filter_identities(conn, user_id=35)
+        assert len(rows) == 1
+        assert isinstance(rows[0], UserIdentity)
+        assert rows[0].auth_provider == "azure"
+        assert rows[0].refresh_token is None
+        assert not hasattr(rows[0], "uid")
+
+    @pytest.mark.asyncio
+    async def test_criteria_become_bound_parameters(self):
+        conn = AsyncMock()
+        conn.fetch_all = AsyncMock(return_value=None)
+        rows = await _filter_identities(
+            conn, user_id=35, auth_provider="azure"
+        )
+        assert rows == []
+        sql, *params = conn.fetch_all.await_args.args
+        assert sql.endswith("WHERE user_id = $1 AND auth_provider = $2")
+        assert params == [35, "azure"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_column_is_rejected(self):
+        conn = AsyncMock()
+        with pytest.raises(ValueError):
+            await _filter_identities(conn, uid="legacy-surrogate")
+        conn.fetch_all.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_string_user_id_is_bound_as_an_integer(self):
+        conn = AsyncMock()
+        conn.fetch_all = AsyncMock(return_value=[self._row()])
+        pool = MagicMock()
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=conn)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+
+        async def _acquire():
+            return ctx
+
+        pool.acquire = MagicMock(side_effect=lambda: _acquire())
+        store = IdentityStore(pool, cipher=IdentityCipher(master_keys=MASTER_KEYS))
+        identities = await store.list_for_user("35")
+        assert len(identities) == 1
+        assert conn.fetch_all.await_args.args[1] == 35

@@ -1,11 +1,10 @@
-"""Contract tests for the real `UserIdentity` model (FEAT-104, TASK-114).
+"""Contract tests for the real ``UserIdentity`` model (FEAT-104, TASK-114).
 
-These deliberately use `navigator_auth.models.UserIdentity` itself rather
-than the `FakeUserIdentity` stubs used elsewhere in the identity suite. The
+These deliberately use ``navigator_auth.models.UserIdentity`` itself rather
+than the ``FakeUserIdentity`` stubs used elsewhere in the identity suite. The
 stubs are why FEAT-104 shipped: they covered the store logic and never the
 model's column contract.
 """
-
 from navigator_auth.models import UserIdentity
 
 
@@ -34,11 +33,11 @@ class TestUserIdentityNullableTokens:
         """No regression on the sealed path: bytes round-trip unchanged."""
         identity = UserIdentity(
             user_id=1,
-            auth_provider="github",
+            auth_provider="azure",
             access_token=b"at",
             refresh_token=b"rt",
-            id_token=b"id",
+            id_token=b"it",
         )
         assert identity.access_token == b"at"
         assert identity.refresh_token == b"rt"
-        assert identity.id_token == b"id"
+        assert identity.id_token == b"it"
