@@ -1148,7 +1148,7 @@ async def _check_policies(
         try:
             response = _evaluate_policy(policy, ctx, env, action, resource, rtype)
         except Exception as exc:  # noqa: BLE001 - never leak a 500 from a check
-            logger.exception("check_access: Policy '%s' failed to evaluate: %s", name, exc)
+            logger.error("check_access: Policy '%s' failed to evaluate: %s", name, exc)
             reasons.append(f"Policy '{name}' failed to evaluate.")
             if require_all:
                 return False, "; ".join(reasons), None
@@ -1165,6 +1165,57 @@ async def _check_policies(
     if require_all and reasons:
         return True, "; ".join(reasons), last_response
     return False, "; ".join(reasons) or "Access Denied", last_response
+
+
+async def policy_allows(
+    policy: Union[str, list],
+    request: web.Request,
+    action: str = None,
+    resource: str = None,
+    resource_type: Any = None,
+    require_all: bool = False,
+) -> tuple[bool, str, Any]:
+    """Evaluate ABAC policies for a request outside a decorator.
+
+    Public, documented wrapper over the fail-closed :func:`_check_policies`
+    used by :func:`check_access`, for handlers whose decision depends on data
+    known only at request time (e.g. the owner of a row, which is unknown
+    until the row has been fetched).
+
+    Like :func:`check_access`, the evaluation **always fails closed**: it
+    denies when ABAC is not enabled on the Application, when a named policy
+    is not declared on the PDP, and when a policy raises while evaluating.
+    A missing policy can therefore only ever remove access, never grant it.
+
+    Args:
+        policy: Name of the ABAC Policy, or a list of names. With a list,
+            access is granted when **any** of them allows it, unless
+            ``require_all`` is True.
+        request: The live request whose session and path are evaluated.
+        action: Optional action (e.g. ``"identity:read"``) the policy must
+            cover for access to be granted.
+        resource: Optional resource name the policy must cover (the resource
+            type defaults to ``ResourceType.URI`` when none is given).
+        resource_type: Optional ``ResourceType`` (or its string value) used
+            together with ``resource``.
+        require_all: Require every named policy to allow access.
+
+    Returns:
+        ``(allowed, reason, response)`` — ``response`` is the last
+        ``PolicyResponse`` produced, or ``None`` when nothing was evaluated.
+        ``reason`` is always a non-empty string, suitable for an audit
+        record. ``allowed`` is ``False`` when ABAC is absent, the policy is
+        not declared, or evaluation raised.
+
+    Raises:
+        ValueError: ``policy`` resolved to an empty list of names.
+    """
+    names = [policy] if isinstance(policy, str) else list(policy)
+    if not names:
+        raise ValueError("policy_allows requires at least one ABAC Policy name.")
+    return await _check_policies(
+        request, names, action, resource, resource_type, require_all
+    )
 
 
 def check_access(
