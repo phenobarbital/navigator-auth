@@ -19,7 +19,7 @@ policies:
     description: >-
       Superusers may read, revoke and delete other users' social accounts.
     resources: ["uri:/api/v1/user_accounts*"]
-    actions: ["account:read", "account:revoke", "account:delete"]
+    actions: ["account:read", "account:delete"]
     subjects:
       groups: ["superuser"]
     priority: 90

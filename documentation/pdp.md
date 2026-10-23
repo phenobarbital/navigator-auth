@@ -40,7 +40,7 @@ automatically.
 | Policy | Resource | Actions | Subjects |
 |---|---|---|---|
 | `user_identities_admin_access` | `uri:/api/v1/user_identity*` | `identity:read`, `identity:revoke`, `identity:delete` | group `superuser` |
-| `user_accounts_admin_access` | `uri:/api/v1/user_accounts*` | `account:read`, `account:revoke`, `account:delete` | group `superuser` |
+| `user_accounts_admin_access` | `uri:/api/v1/user_accounts*` | `account:read`, `account:delete` | group `superuser` |
 | `partner_keys_admin_access` | `uri:/api/v1/partner/tokens*` | `partner:read`, `partner:create`, `partner:revoke`, `partner:delete` | group `superuser` |
 
 All three are `allow`, `enforcing`, priority 90 (below `admin_full_access`).

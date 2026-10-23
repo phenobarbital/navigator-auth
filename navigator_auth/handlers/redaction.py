@@ -134,3 +134,41 @@ def redact_schema(
     if isinstance(required, (list, tuple)):
         result["required"] = [c for c in required if c not in credential_columns]
     return result
+
+
+def scrub_payload(
+    payload: Any,
+    public_columns: frozenset[str],
+    credential_columns: frozenset[str],
+) -> Any:
+    """Redact a response body of unknown shape (write / delete responses).
+
+    Rows (``dict`` or model objects naming any known column) are projected
+    onto ``public_columns``; any other ``dict`` — an error wrapper such as
+    ``{"data": {...}}`` — is walked recursively, so a row nested inside it is
+    still projected. Scalars pass through.
+
+    Args:
+        payload: A decoded body, a row, or a list of either.
+        public_columns: The allowlist.
+        credential_columns: Columns that identify a payload as a row even
+            when they are not public (so a credential-only dict is emptied).
+
+    Returns:
+        The redacted payload, same overall shape.
+    """
+    known = public_columns | credential_columns
+    if isinstance(payload, (list, tuple)):
+        return [scrub_payload(p, public_columns, credential_columns) for p in payload]
+    if isinstance(payload, dict):
+        if set(payload) & known:
+            return redact_row(payload, public_columns)
+        return {
+            k: scrub_payload(v, public_columns, credential_columns)
+            for k, v in payload.items()
+        }
+    if payload is None or isinstance(payload, (str, bytes, int, float, bool)):
+        return payload
+    if any(hasattr(payload, c) for c in known):
+        return redact_row(payload, public_columns)
+    return payload

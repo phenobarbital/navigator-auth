@@ -3,6 +3,7 @@ from typing import Any
 from aiohttp import web
 from asyncdb.exceptions import NoDataFound
 from asyncdb.exceptions import DriverError
+from datamodel.exceptions import ValidationError
 from navigator_session import get_session, AUTH_SESSION_OBJECT
 from ..models import UserAccount, UserIdentity, VwUserIdentity
 from ..conf import AUTH_USER_IDENTITY_MODEL
@@ -10,7 +11,9 @@ from ..conf import AUTH_USER_IDENTITY_MODEL
 # from .model import ModelHandler
 from .handler import ModelHandler
 from .guards import OwnerOrSuperuserGuard
-from .redaction import redact_row, redact_rows, redact_schema, safe_fields
+from .redaction import (
+    redact_rows, redact_schema, safe_fields, scrub_payload
+)
 
 
 class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
@@ -30,7 +33,7 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
     credential_columns = frozenset()
     public_columns = frozenset({"account_id", "user_id", "provider", "uid", "address", "account", "created_at"})
     policy_name: str = "user_accounts_admin_access"
-    superuser_actions = frozenset({"account:read", "account:revoke", "account:delete"})
+    superuser_actions = frozenset({"account:read", "account:delete"})
 
     # Per-subclass copies (see UserIdentityHandler). Never RELY on _hidden:
     # no column on UserAccount declares secret=True.
@@ -241,10 +244,10 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
         if owner_id is None or str(owner_id) != str(user_id):
             if is_superuser:
                 await self.audit_decision(
-                    "account:revoke", False, owner_id, "cross-user write: user_accounts has no revocation column"
+                    "account:update", False, owner_id, "cross-user write: user_accounts has no revocation column"
                 )
                 self.error(response={"error": "Forbidden"}, status=403)
-            await self.authorize_row("account:revoke", owner_id)
+            await self.authorize_row("account:update", owner_id)
         return await super()._set_update(model, data)
 
     async def _del_primary_data(self, args: dict):
@@ -264,25 +267,17 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
             async with await self.handler(request=self.request) as conn:
                 self.model.Meta.connection = conn
                 row = await self.model.get(**{self.pk: objid})
-        except Exception:  # noqa: BLE001 - missing/invalid id => no owner
-            row = None
+        except (NoDataFound, ValidationError):
+            row = None  # missing / malformed id => no owner (generic 404)
         owner_id = getattr(row, self.owner_column, None) if row else None
         await self.authorize_row("account:delete", owner_id, not_found_on_deny=True)
         return objid
 
     def _scrub(self, result: Any) -> Any:
-        """Project a write/delete response body onto ``public_columns``."""
-        if isinstance(result, (list, tuple)):
-            return [self._scrub(item) for item in result]
-        if isinstance(result, dict):
-            if set(result) & self.public_columns:
-                return redact_row(result, self.public_columns)
-            return result
-        if result is None or isinstance(result, (str, bytes, int, float, bool)):
-            return result
-        if any(hasattr(result, c) for c in self.public_columns):
-            return redact_row(result, self.public_columns)
-        return result
+        """Redact the body of a write/delete response (allowlist, recursive)."""
+        return scrub_payload(
+            result, self.public_columns, self.credential_columns
+        )
 
     async def _patch_response(self, result, status: int = 202):
         """Project the PATCH response body."""
@@ -366,9 +361,7 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
         if not expr:
             return None
         rows = await self.safe_filter(expr)
-        if not rows:
-            return self.no_content(headers={"X-STATUS": "EMPTY"})
-        return await self._model_response(rows)
+        return self.json_response(redact_rows(rows, self.public_columns))
 
 
 class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
@@ -707,7 +700,7 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
             async with await self.handler(request=self.request) as conn:
                 self.model.Meta.connection = conn
                 return bool(await self.model.get(**{self.pk: objid}))
-        except Exception:  # noqa: BLE001 - unknown/invalid id => not found
+        except (NoDataFound, ValidationError):
             return False
 
     async def _patch_data(self, *args, **kwargs):
@@ -784,8 +777,8 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
             async with await self.handler(request=self.request) as conn:
                 self.model.Meta.connection = conn
                 row = await self.model.get(**{self.pk: objid})
-        except Exception:  # noqa: BLE001 - missing/invalid id => no owner
-            row = None
+        except (NoDataFound, ValidationError):
+            row = None  # missing / malformed id => no owner (generic 404)
         owner_id = getattr(row, self.owner_column, None) if row else None
         await self.authorize_row("identity:delete", owner_id, not_found_on_deny=True)
         return objid
@@ -871,25 +864,10 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
         return await super()._model_response(redacted, fields=None, headers=headers, status=status)
 
     def _scrub(self, result: Any) -> Any:
-        """Redact the body of a write/delete response.
-
-        ``_post_response`` / ``_put_response`` / ``_patch_response`` /
-        ``_delete_response`` serialize the written row verbatim. Rows are
-        projected onto ``public_columns``; error/message dicts that carry no
-        column names pass through untouched.
-        """
-        if isinstance(result, (list, tuple)):
-            return [self._scrub(item) for item in result]
-        known = self.public_columns | self.credential_columns
-        if isinstance(result, dict):
-            if set(result) & known:
-                return redact_row(result, self.public_columns)
-            return result
-        if result is None or isinstance(result, (str, bytes, int, float, bool)):
-            return result
-        if any(hasattr(result, c) for c in known):
-            return redact_row(result, self.public_columns)
-        return result
+        """Redact the body of a write/delete response (allowlist, recursive)."""
+        return scrub_payload(
+            result, self.public_columns, self.credential_columns
+        )
 
     async def _patch_response(self, result, status: int = 202):
         """Redact the PATCH response body."""
@@ -975,6 +953,4 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
         if not expr:
             return None
         rows = await self.safe_filter(expr)
-        if not rows:
-            return self.no_content(headers={"X-STATUS": "EMPTY"})
-        return await self._model_response(rows)
+        return self.json_response(redact_rows(rows, self.public_columns))

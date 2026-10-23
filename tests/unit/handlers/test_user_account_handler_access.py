@@ -80,7 +80,7 @@ def _pdp():
         POLICY,
         description="d",
         effect=PolicyEffect.ALLOW,
-        actions=["account:read", "account:revoke", "account:delete"],
+        actions=["account:read", "account:delete"],
         groups=["superuser"],
         priority=1,
     )
@@ -163,7 +163,7 @@ class TestConfiguration:
 
     def test_policy_name_and_actions_match_the_pack(self):
         assert UserAccountHandler.policy_name == POLICY
-        assert UserAccountHandler.superuser_actions == frozenset({"account:read", "account:revoke", "account:delete"})
+        assert UserAccountHandler.superuser_actions == frozenset({"account:read", "account:delete"})
 
     def test_hidden_lists_are_per_subclass(self):
         from navigator.views import ModelView

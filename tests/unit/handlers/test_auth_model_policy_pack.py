@@ -27,7 +27,6 @@ EXPECTED_ACTIONS = {
     },
     "user_accounts_admin_access": {
         "account:read",
-        "account:revoke",
         "account:delete",
     },
     "partner_keys_admin_access": {

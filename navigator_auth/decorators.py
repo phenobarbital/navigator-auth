@@ -1148,7 +1148,7 @@ async def _check_policies(
         try:
             response = _evaluate_policy(policy, ctx, env, action, resource, rtype)
         except Exception as exc:  # noqa: BLE001 - never leak a 500 from a check
-            logger.error("check_access: Policy '%s' failed to evaluate: %s", name, exc)
+            logger.error("check_access: Policy '%s' failed to evaluate: %s", name, exc, exc_info=True)
             reasons.append(f"Policy '{name}' failed to evaluate.")
             if require_all:
                 return False, "; ".join(reasons), None

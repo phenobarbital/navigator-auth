@@ -138,7 +138,7 @@ The same table is also exposed through a generic model handler
 - **Vault-managed columns are read-only here** (`400`): tokens, `key_version`,
   `provider_user_id`, `token_type`, `expires_at`, `refreshed_at`, `scopes`.
   Token renewal lives on the vault surface (`PUT /api/v1/user/identities/{id}`).
-- **`?_filter=<column>=<prefix>`** is parameterized (`$1`), limited to public
+- **`?_filter=<column>=<prefix>`** (returns only that column's values, as upstream) is parameterized (`$1`), limited to public
   columns (anything else is `400`, with the same message for unknown columns)
   and, for non-superusers, ANDed with `user_id = <you>`.
 - A `DELETE` must carry the id in the URL; body-driven deletes are refused.

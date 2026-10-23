@@ -52,7 +52,7 @@ class OwnerOrSuperuserGuard:
     owner_column: Optional[str] = "user_id"
     credential_columns: frozenset[str] = frozenset()
     public_columns: frozenset[str] = frozenset()
-    policy_name: str = None
+    policy_name: Optional[str] = None
     superuser_actions: frozenset[str] = frozenset({"read", "revoke", "delete"})
 
     # ------------------------------------------------------------------
@@ -142,7 +142,7 @@ class OwnerOrSuperuserGuard:
             return True
         if not is_superuser:
             await self.audit_decision(
-                action, False, owner_id, f"user {user_id} is not the owner " "and not a superuser"
+                action, False, owner_id, f"user {user_id} is not the owner and not a superuser"
             )
             self._refuse(not_found_on_deny)
         if action not in self.superuser_actions:
@@ -225,7 +225,7 @@ class OwnerOrSuperuserGuard:
             expr: The raw ``_filter`` query-parameter value.
 
         Returns:
-            The matching rows (list of dicts), already restricted to the
+            The matching values as ``[{column: value}]``, already restricted to the
             acting user when the caller is not a superuser.
 
         Raises:
@@ -241,8 +241,9 @@ class OwnerOrSuperuserGuard:
         # public_columns FIRST, one message for both failures: no oracle.
         if column not in self.public_columns or column not in model.get_columns():
             self.error(response={"error": _BAD_FILTER}, status=400)
-        cols = [c for c in sorted(self.public_columns) if c in model.get_columns()]
-        selected = ", ".join(f'"{c}"' for c in cols)
+        # Same shape as upstream's autocomplete filter: only the filtered
+        # (public) column is selected and returned, never the whole row.
+        selected = f'"{column}"'
         table = model.Meta.name
         schema = getattr(model.Meta, "schema", None)
         qualified = f'"{schema}"."{table}"' if schema else f'"{table}"'

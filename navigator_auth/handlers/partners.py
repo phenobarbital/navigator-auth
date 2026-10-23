@@ -8,7 +8,9 @@ from ..conf import AUTH_DB_SCHEMA, AUTH_TOKEN_ISSUER, AUTH_JWT_ALGORITHM, AUTH_T
 from ..exceptions import ConfigError
 from .model import ModelHandler
 from .guards import OwnerOrSuperuserGuard
-from .redaction import redact_row, redact_rows, redact_schema, safe_fields
+from .redaction import (
+    redact_rows, redact_schema, safe_fields, scrub_payload
+)
 
 
 class PartnerKey(Model):
@@ -94,23 +96,26 @@ class PartnerKeyHandler(OwnerOrSuperuserGuard, ModelHandler):
         return redact_rows(result, self.public_columns)
 
     def _scrub(self, result: Any) -> Any:
-        """Redact a decoded response body; message/error dicts pass through."""
-        if isinstance(result, (list, tuple)):
-            return [self._scrub(item) for item in result]
-        if isinstance(result, dict):
-            if set(result) & (self.public_columns | self.credential_columns):
-                return redact_row(result, self.public_columns)
-            return result
-        return result
+        """Redact a decoded response body (allowlist, recursive)."""
+        return scrub_payload(
+            result, self.public_columns, self.credential_columns
+        )
 
     def _redact_response(self, response):
-        """Rebuild a JSON response with its body redacted (same status)."""
+        """Rebuild a JSON response with its body redacted (same status).
+
+        Fails CLOSED: a body that cannot be decoded is never forwarded.
+        """
         try:
             body = response.body
             payload = json.loads(body.decode() if isinstance(body, bytes) else body)
         except (AttributeError, TypeError, ValueError):
-            return response
-        return self.json_response(self._scrub(payload), status=response.status)
+            self.error(
+                response={"error": "Unable to redact the response"}, status=500
+            )
+        return self.json_response(
+            self._scrub(payload), status=response.status
+        )
 
     def _meta_requested(self) -> bool:
         try:
@@ -145,17 +150,14 @@ class PartnerKeyHandler(OwnerOrSuperuserGuard, ModelHandler):
         The local base's single read-response hook; called on both the
         primary-key path and the list path. ``fields`` is applied here
         (intersected with the allowlist) and ``None`` is handed to ``super()``
-        so it never re-projects by ``getattr``.
+        so it never re-projects.
         """
         if not result:
-            return self.no_content()
+            return await super()._post_get(result, fields=None)
         safe = safe_fields(fields, self.public_columns)
-        # Not delegated to super(): the local base answers through
-        # ``json_response(content=...)``, a keyword the installed
-        # navigator-api (4.0.1) no longer accepts (its parameter is
-        # ``response``), and its ``fields`` branch reads from the wrong
-        # variable. The positional call works on both.
-        return self.json_response(redact_rows(result, self.public_columns, safe))
+        return await super()._post_get(
+            redact_rows(result, self.public_columns, safe), fields=None
+        )
 
     async def put(self):
         """Superuser-only create; the 201 carries ``token`` ONCE.

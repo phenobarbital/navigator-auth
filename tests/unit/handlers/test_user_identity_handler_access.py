@@ -677,13 +677,15 @@ class TestSafeFilterWiring:
         assert "$1" in sql and "git" in args[0]
 
     @pytest.mark.asyncio
-    async def test_filter_result_is_redacted(self):
+    async def test_filter_result_is_single_column_and_redacted(self):
+        """Upstream's autocomplete shape: only the filtered column is selected."""
         conn = _FConn()
         h = _fh(conn)
-        cap = _Capture()
-        with _patch_sessions(_session()), patch("navigator.views.ModelView._model_response", new=cap):
-            await h._filtering({"_filter": "auth_provider=git"})
-        assert not (set(cap.payload[0]) & set(CREDENTIALS))
+        with _patch_sessions(_session()):
+            resp = await h._filtering({"_filter": "auth_provider=git"})
+        sql, _ = conn.calls[0]
+        assert sql.startswith('SELECT "auth_provider" FROM')
+        assert not any(c in resp.text for c in CREDENTIALS)
 
     @pytest.mark.asyncio
     async def test_filtering_returns_none_without_the_parameter(self):
