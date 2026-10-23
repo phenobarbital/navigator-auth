@@ -75,29 +75,53 @@ every partner's bearer token, and `PartnerKey` has **no `user_id` column at
 all**, so there is no owner to fall back on: this surface has no legitimate
 non-admin use.
 
-On top of the missing authorization, the upstream response layer is actively
-hostile on surfaces A and B:
+On top of the missing authorization, the upstream response layer offers no
+protection on surfaces A and B. The four facts below were re-verified by
+executing `datamodel` 0.10.21 directly on 2026-10-23, which **corrected**
+rev 0.1 of this spec: the mechanism is not what the code reads like.
 
-- **The `_hidden` whitelist inversion.** `ModelView._get_model()` collects
-  every `repr=False` column into `self._hidden`
-  (`.venv/.../navigator/views/model.py:144-148`), and `_model_response()` then
-  uses `_hidden` as the **whitelist of fields to return** (`:178-179`,
+- **No projection happens at all today, so the full row ships.**
+  `ModelView._get_model()` tries to collect hidden columns with
+  `field.metadata["repr"] is False`
+  (`.venv/.../navigator/views/model.py:145-150`), but `repr` is **not** a
+  `field.metadata` key — datamodel exposes it as the dataclass `Field.repr`
+  attribute, and `metadata` carries only `required, nullable, primary,
+  validator, alias, widget, encoder, decoder, readonly` plus `secret` when
+  declared. The lookup therefore raises `KeyError` on every column and is
+  swallowed, so `_hidden` is **always `[]`**. In `_model_response` that makes
+  `_fields` falsy and `result = response` — **the entire model row is
+  serialized**, ciphered `access_token` / `refresh_token` / `id_token` bytes
+  included. That is the live leak on `/api/v1/user_identity`.
+- **A latent whitelist inversion sits behind it.** `_model_response()` uses
+  `_hidden` as the **whitelist of fields to return** (`:178-179`,
   `_fields = self._hidden`), not as an exclusion list. For `UserIdentity` the
-  `repr=False` columns are *exactly* the credential set.
+  `repr=False` columns are *exactly* the credential set, so "fixing" the
+  metadata key alone would have flipped the endpoint from returning
+  everything to returning **only** the credential columns. It also leaves
+  `_fields` unbound (→ `UnboundLocalError`) when `_hidden` is `None`.
 - **Shared class-level state.** `_required` / `_primaries` / `_hidden` are
   class attributes of `ModelView` (`:77-79`) mutated in place via
-  `self._hidden.append(...)`, so they are shared by every subclass in the
-  process and the effective projection depends on which handler was
-  instantiated first. Either branch leaks credential columns; which one you
-  get is non-deterministic.
+  `self._hidden.append(...)`, and the derivation is guarded by
+  `if not self._primaries`. So the first View instantiated in a process fills
+  them for every other subclass, and every later subclass skips derivation
+  entirely — one handler's column metadata driving an unrelated handler's
+  response projection.
 - **`?fields=` projects anything.** `get_parameters()`
   (`.venv/.../navigator/views/abstract.py:434-447`) passes the caller's list
-  straight into `_model_response(..., fields=...)`.
-- **`?_filter=` is a raw-SQL sink.** `_filtering()`
-  (`.venv/.../navigator/views/model.py:419-447`) interpolates **unvalidated**
-  `field` and `value` into
+  straight into `_model_response(..., fields=...)`, which honours it
+  verbatim. This one **is** live: `?fields=access_token,refresh_token`
+  returns those columns.
+- **`?_filter=` is a latent raw-SQL sink, currently unreachable.**
+  `_filtering()` (`.venv/.../navigator/views/model.py:419-447`) interpolates
+  **unvalidated** `field` and `value` into
   `SELECT {field} FROM {schema}.{table} WHERE {field} LIKE '{value}%'` — a
   column-projection oracle *and* an injection point on the credential table.
+  It never reaches the database today because the line above it,
+  `ftype = self.get_model.column(field)`, calls an **instance** method on the
+  Model **class**, binding `field` to `self`; that raises `TypeError`, which
+  `get()` catches (`:494-499`) and answers **406**. The sink is one unrelated
+  bug-fix away from being exploitable, and `filter_param.split('=')` raises
+  `ValueError` on a malformed parameter.
 
 The business rule the product wants is simple and is written nowhere:
 **querying, editing and managing these rows is the user's own prerogative over
@@ -156,24 +180,46 @@ their own rows, or a `superuser`'s — and a superuser never sees credentials.**
 
 ## 2. Architectural Design
 
-### Prerequisite: fix `ModelView` in the `navigator` repository first
+### Prerequisite: `ModelView` fixed in the `navigator` repository — DONE
 
-Per §8 Q8, the three upstream defects are repaired **first** in
-`/home/jesuslara/proyectos/navigator/navigator` (`navigator/views/model.py`,
-whose working copy is byte-identical to the installed `navigator-api` 3.2.2):
+Per §8 Q8 the upstream defects were repaired **first**, in
+`phenobarbital/navigator` at `/home/jesuslara/proyectos/navigator/navigator`,
+on branch `fix/modelview-response-projection-and-filtering` (cut from
+`origin/dev`), commit **`7bc5896`** — committed locally, not yet pushed or
+released. What landed there:
 
-1. `_model_response()` must treat `_hidden` as an **exclusion** list, not a
-   whitelist (`:176-182`).
-2. `_required` / `_primaries` / `_hidden` must be per-instance (or per-class)
-   state, not mutated class attributes of `ModelView` (`:77-79`, `:140-152`).
-3. `_filtering()` must not interpolate caller input into SQL (`:419-447`).
+1. `_hidden` is derived from `secret=True` columns (the `metadata["repr"]`
+   lookup never worked — see §1), and `repr=False` is deliberately **not**
+   treated as a serialization rule, because Models commonly declare their
+   primary key that way.
+2. `_model_response()` treats `_hidden` as an **exclusion** list; an explicit
+   `?fields=` request cannot name a hidden column; `dict` rows project by key;
+   the `UnboundLocalError` path is gone.
+3. `_required` / `_primaries` / `_hidden` are per-instance, with an explicit
+   class-level declaration still winning.
+4. `_filtering()` validates the column against the Model (400 otherwise),
+   binds the value as `$1`, quotes the identifiers, and answers 400 on a
+   malformed parameter instead of raising.
 
-**This spec does not depend on that fix.** `pyproject.toml:53` pins
-`navigator-api>=0.5.0`, so navigator-auth must stay safe on any installed
-navigator, and a security property that only holds on the newest upstream
-release is not a security property. The local hardening below therefore ships
-regardless, as defense in depth — it simply stops being the *only* line of
-defense once the upstream fix lands.
+Evidence: 18 new unit tests in
+`tests/test_modelview_projection_and_filtering.py`; suite 378 passed, with
+the 3 `tests/utils/test_file_web.py` errors and the 2 `navigator_eventbus`
+collection errors confirmed pre-existing by re-running against the stashed
+change.
+
+**This spec still does not depend on that fix, and the local hardening below
+is not reduced because of it.** Three reasons:
+
+- `pyproject.toml:53` pins `navigator-api>=0.5.0`, so navigator-auth installs
+  against any navigator; a security property that holds only on the newest
+  upstream release is not a security property.
+- The fix is unreleased. Until a navigator version ships and the floor is
+  raised (§8 Q9), nothing guarantees the deployed copy has it.
+- Even with it, it does **not** redact these surfaces: upstream derives
+  `_hidden` from `secret=True`, and neither `UserIdentity.access_token`
+  (`models.py:104-106`) nor `PartnerKey.token` (`handlers/partners.py:24`)
+  is declared `secret=True`. Only this feature's explicit allowlist hides
+  them.
 
 ### Overview
 
@@ -825,7 +871,7 @@ def recording_conn():     # captures (sql, *args) so parameterization is asserta
 - [ ] All six routes still exist with the same paths and verbs — no client-visible breakage beyond the removal of credential columns, the 403s on the partner surface and the 400 on a non-allowlisted `_filter` (G4).
 - [ ] `documentation/identity-vault.md` and `documentation/pdp.md` document the rule, the redacted admin view, the three policy names and the partner return-once token.
 - [ ] `ruff check navigator_auth/handlers/ navigator_auth/decorators.py` is clean.
-- [ ] **Prerequisite, verified separately**: the three `ModelView` defects are fixed in `/home/jesuslara/proyectos/navigator/navigator` (§2 Prerequisite). FEAT-105's own criteria must pass against the *currently installed* `navigator-api` 3.2.2 as well — the local hardening may not depend on the upstream fix.
+- [x] **Prerequisite, done separately**: the `ModelView` defects are fixed in `/home/jesuslara/proyectos/navigator/navigator` (`7bc5896`, §2 Prerequisite). Unchanged obligation: every criterion above must also pass against the *currently installed* `navigator-api` 3.2.2 — the local hardening may not depend on the upstream fix, which is unreleased and does not redact these columns anyway.
 
 ---
 
@@ -879,19 +925,23 @@ def recording_conn():     # captures (sql, *args) so parameterization is asserta
 | Handler test pattern | `tests/unit/identity/test_identity_handlers.py:1-67` | `make_mocked_request` + `FakeSession` + `patch("navigator_auth.decorators.get_session")` **and** the handler module's own `get_session` |
 | `_check_superuser` tests | `tests/test_check_superuser.py:1-45` | existing type-confusion cases to keep green |
 
-### Exists — upstream `navigator` (read; repaired in its own repo, see §2 Prerequisite)
+### Exists — upstream `navigator` (the behaviour to defend against)
 
-> `/home/jesuslara/proyectos/navigator/navigator/navigator/views/model.py` is
-> **byte-identical** to the installed `navigator-api` 3.2.2 copy (verified by
-> `diff`), so these line numbers hold in both places.
+> The facts below describe the **installed** `navigator-api` 3.2.2 copy under
+> `.venv/`, which is what a deployment runs. The `navigator` working copy was
+> byte-identical to it (verified by `diff`) until the §2 Prerequisite fix
+> (`7bc5896`, unreleased), so these line numbers describe both the installed
+> copy and that fix's "before" state. **Implement against the installed
+> behaviour**, not against the fix.
 
 | Symbol | Location | Fact |
 |---|---|---|
 | `ModelView` | `navigator/views/model.py:57` | `_required/_primaries/_hidden` declared as **class** attributes (`:77-79`) |
-| `ModelView._get_model` | `…/model.py:130-152` | appends `repr=False` columns to `self._hidden` **in place**, guarded by `if not self._primaries` — shared across subclasses |
-| `ModelView._model_response` | `…/model.py:158-213` | `elif self._hidden is not None: _fields = self._hidden`, then projects **only** `_fields` — the whitelist inversion |
+| `ModelView._get_model` | `…/model.py:130-152` | derives column metadata only `if not self._primaries`, appending to the **shared class lists** in place. The hidden-column branch tests `field.metadata["repr"]`, and `repr` is **not** a metadata key (it is the dataclass `Field.repr` attribute) — verified by running `datamodel` 0.10.21: `metadata` holds `required, nullable, primary, validator, alias, widget, encoder, decoder, readonly` (+ `secret` when declared). So the lookup always raises `KeyError` and **`_hidden` is always `[]`** |
+| `ModelView._model_response` | `…/model.py:158-213` | `elif self._hidden is not None: _fields = self._hidden`, then projects **only** `_fields` — a whitelist, latent while `_hidden` is empty. With `_hidden == []` and no `?fields=`, `_fields` is falsy ⇒ `result = response` ⇒ **the full row is serialized**. `_fields` is left unbound when `_hidden` is `None` |
 | `ModelView._get_data` | `…/model.py:317-418` | calls every `_filter_<column>` hook, then `get(**{**_filter, **args})` on the PK path and `filter(**qp, **_filter)` on the query path (duplicate key ⇒ `TypeError`) |
-| `ModelView._filtering` | `…/model.py:419-447` | `SELECT {field} FROM {schema}.{table} WHERE {field} LIKE '{value}%'` from the unvalidated `_filter` query param |
+| `ModelView._filtering` | `…/model.py:419-447` | `SELECT {field} FROM {schema}.{table} WHERE {field} LIKE '{value}%'` from the unvalidated `_filter` param — but **unreachable**: the preceding `ftype = self.get_model.column(field)` calls an instance method on the Model class, raising `TypeError` (verified: `ModelMixin.column() missing 1 required positional argument: 'name'`), which `get()` catches (`:494-499`) and answers **406**. `filter_param.split('=')` would raise `ValueError` on a malformed value |
+| `datamodel` field introspection | `datamodel/models.py:102-156` (0.10.21) | `get_columns()` / `get_column(name)` are **classmethods**; `column(name)`, `columns()`, `get_fields()`, `to_dict()` are **instance** methods; `secret=True` lands in `field.metadata["secret"]`, `repr=False` on `Field.repr` |
 | `ModelView` verbs | `…/model.py:449, 907, 691, 1062, 1400` | each decorated `@service_auth` (`:106-117`): session + `self._userid`, then `_post_auth` |
 | `AbstractModel._pre_*` | `navigator/views/abstract.py:553-571` | `_pre_get/_pre_patch/_pre_put/_pre_post/_pre_delete`, all `async (*args, **kwargs) -> True` |
 | `AbstractModel.get_parameters` | `navigator/views/abstract.py:434` | returns `[args, meta, qp, fields]`, popping `fields` out of `qp` |
@@ -953,14 +1003,26 @@ def recording_conn():     # captures (sql, *args) so parameterization is asserta
 
 ### Known Risks / Gotchas
 
-- **Upstream `_hidden` whitelist inversion** — the highest-risk item.
-  Mitigation: never rely on `_hidden`; declare per-subclass empty lists and
-  redact in an overridden `_model_response`. A task must *reproduce* the
-  current behaviour first and record it, because the projection depends on
-  instantiation order across the whole process.
+- **The installed `ModelView` performs no projection** — `_hidden` is always
+  empty (`metadata["repr"]` never resolves), so today the full row ships.
+  Mitigation: never rely on `_hidden` at all; redact in an overridden
+  `_model_response` from this feature's own allowlist. A task should
+  *reproduce* the current response first and record it in the task notes.
+- **A latent whitelist inversion** — if the deployed navigator is ever
+  upgraded to a version that populates `_hidden` *without* the exclusion fix,
+  the same endpoint would return **only** the credential columns. The
+  override removes both outcomes; do not "improve" it by delegating back to
+  the parent projection.
 - **Shared class-level `_required`/`_primaries`/`_hidden`** — mutated in place
-  by `_get_model()`; another handler can change this one's behaviour. Hence
-  the per-subclass copies and the test that asserts their identity.
+  by `_get_model()`, whose derivation is skipped entirely once any sibling has
+  filled `_primaries`; another handler can therefore change this one's
+  behaviour. Hence the per-subclass copies and the test that asserts their
+  identity.
+- **`?_filter=` answers 406 today, not a filtered result** — the sink is
+  guarded by an unrelated `TypeError`. Clients cannot be relying on it, so
+  replacing it with the parameterized `safe_filter()` is not a behaviour
+  regression; and the guard must not be removed before the replacement is in
+  place.
 - **Duplicate-keyword 500** — `filter(**qp, **_filter)` raises `TypeError`
   when the caller passes `?user_id=`. Sanitize `qp` *before* the hook runs.
 - **Two different handler bases** — surfaces A/B get hooks, surface C does
@@ -1004,7 +1066,7 @@ def recording_conn():     # captures (sql, *args) so parameterization is asserta
 
 | Repo | Path | Work |
 |---|---|---|
-| `phenobarbital/navigator` | `/home/jesuslara/proyectos/navigator/navigator` → `navigator/views/model.py` | Fix the three `ModelView` defects (§2 Prerequisite). Done **first** (§8 Q8), tracked in that repo, not in this spec's task list. The working copy is currently on branch `hotfix/windows-cp313-cibw-test-skip` @ `9cffd10` with a clean tree. |
+| `phenobarbital/navigator` | `/home/jesuslara/proyectos/navigator/navigator` → `navigator/views/model.py` | **Done** (§2 Prerequisite): branch `fix/modelview-response-projection-and-filtering` off `origin/dev`, commit `7bc5896`, 18 new tests, suite 378 passed. Local only — not pushed, not released, so the `navigator-api>=0.5.0` floor is unchanged (§8 Q9). Tracked in that repo, not in this spec's task list. |
 
 ---
 
@@ -1048,13 +1110,16 @@ sections named after each one.
   generic-CRUD handlers (`UserManager`, groups, permissions, policies) stay
   out of scope and are listed as audited-and-deferred. → §1 Problem Statement
   A/B/C + Non-Goals, §3 Modules 4/5/6, §5 criteria 3/4/6.
-- [x] **Q8 — The three `ModelView` defects are in your own `navigator`
-  repo.** *Resolved*: **fix `ModelView` there first**, in
-  `/home/jesuslara/proyectos/navigator/navigator`. The local hardening still
-  ships as defense in depth, because `pyproject.toml:53` allows
-  `navigator-api>=0.5.0` and a property that holds only on the newest upstream
-  release is not a security property. → §2 Prerequisite, §7 Cross-repository
-  prerequisite, §5 last criterion.
+- [x] **Q8 — The `ModelView` defects are in your own `navigator` repo.**
+  *Resolved*: **fix `ModelView` there first** — and it is now **done**
+  (`fix/modelview-response-projection-and-filtering` @ `7bc5896`, local,
+  unreleased). The local hardening still ships as defense in depth, because
+  `pyproject.toml:53` allows `navigator-api>=0.5.0`, the fix is unreleased,
+  and upstream `_hidden` is derived from `secret=True` — which neither
+  `UserIdentity.access_token` nor `PartnerKey.token` declares. Doing the
+  upstream fix first also surfaced that rev 0.1 of this spec described the
+  wrong mechanism (see §1, corrected in rev 0.3). → §2 Prerequisite, §7
+  Cross-repository prerequisite, §5 last criterion.
 - [ ] **Q9 — Should `pyproject.toml` raise the `navigator-api>=0.5.0` floor
   once the upstream fix is released?** Non-blocking; nothing in FEAT-105
   depends on it. Recommendation: **no** — keep the loose pin and keep the
@@ -1103,3 +1168,4 @@ proposal to review; `sdd/templates/design_research.prompt.md` and
 |---|---|---|---|
 | 0.1 | 2026-10-23 | Jesus Lara | Initial draft — owner-or-superuser ABAC ownership and redaction for `auth.user_identities` (Q1–Q4 resolved up front) |
 | 0.2 | 2026-10-23 | Jesus Lara | Resolved Q5–Q8: safe parameterized `_filter`; `auth_data` kept; scope widened to `user_accounts` and `partner_keys` (plaintext JWT, superuser-only, return-once token) under one reusable `OwnerOrSuperuserGuard`; `ModelView` repaired upstream first while local hardening stays defense-in-depth. Redaction module moved to `handlers/redaction.py`; added G7–G9 and the `_set_address` injection fix |
+| 0.3 | 2026-10-23 | Jesus Lara | **Corrected §1 and §6** after executing `datamodel` 0.10.21 and the upstream fix: `_hidden` is always empty (`repr` is not a `metadata` key), so the full row ships today and the whitelist inversion is latent; `?_filter=` answers 406 because `get_model.column(field)` raises `TypeError` first, so the SQL sink is unreachable rather than live. Recorded the navigator `ModelView` fix as done (`7bc5896`, unreleased) and why it does not reduce the local hardening |
