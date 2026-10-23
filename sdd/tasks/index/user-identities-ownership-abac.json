@@ -208,7 +208,7 @@
       "feature_id": "FEAT-105",
       "feature": "user-identities-ownership-abac",
       "spec": "sdd/specs/user-identities-ownership-abac.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -220,8 +220,8 @@
       "parallelism_notes": "Spec Modules 8 (integration tests) and 9 (documentation), bundled because both are cross-surface and both require all three handlers to be hardened. Touches only tests/integration/ and documentation/ — no file under navigator_auth/ — so it cannot conflict with anything, but it is last in the graph by dependency.",
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-128-integration-tests-and-docs.md"
+      "completed_at": "2026-10-23T23:02:59+00:00",
+      "file": "sdd/tasks/completed/TASK-128-integration-tests-and-docs.md"
     }
   ]
 }
