@@ -14,7 +14,7 @@
       "feature_id": "FEAT-105",
       "feature": "user-identities-ownership-abac",
       "spec": "sdd/specs/user-identities-ownership-abac.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
@@ -22,8 +22,8 @@
       "parallelism_notes": "Spec Module 1. Creates navigator_auth/handlers/redaction.py plus tests/unit/handlers/test_model_redaction.py — disjoint from TASK-119 (decorators.py) and TASK-120 (default_policies YAML). Shares only tests/unit/handlers/__init__.py with TASK-120/121, which all three create as an identical empty file (idempotent, documented in each task).",
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-118-generic-redaction-allowlist.md"
+      "completed_at": "2026-10-23T22:49:25+00:00",
+      "file": "sdd/tasks/completed/TASK-118-generic-redaction-allowlist.md"
     },
     {
       "id": "TASK-119",
