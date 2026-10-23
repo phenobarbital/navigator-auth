@@ -502,8 +502,8 @@ async def token_claims(
                 "usable for Q1: this token was issued by this process"
                 if fresh
                 else "NOT usable for Q1: token predates this process — Entra "
-                "served a cached token; re-login with prompt=login or a fresh "
-                "IdP session before recording a result"
+                "served a cached token; re-login with AZURE_LOGIN_PROMPT=login "
+                "or a fresh IdP session before recording a result"
             ),
             "reference": "spec §6 samples: 419 s with max_age=120, 5457 s (arm unknown)",
             "claims": present,
@@ -513,6 +513,7 @@ async def token_claims(
                 key: session.get(key)
                 for key in (
                     "external_expires_at",
+                    "external_issued_at",
                     "has_refresh_token",
                     "external_provider_user_id",
                 )

@@ -546,6 +546,84 @@ class ExternalAuth(BaseAuthBackend):
             )
             return False
 
+    async def ensure_fresh_login_grant(
+        self,
+        token: Optional["TokenResponse"],
+        *,
+        leeway: Optional[int] = None,
+    ) -> Optional["TokenResponse"]:
+        """Return a login grant that is not already inside the refresh leeway.
+
+        A login does not always yield a NEWLY ISSUED provider token. When the
+        IdP's own SSO session is still alive — Navigator's ``logout`` ends
+        only the Navigator session — the authorization-code round-trip is
+        silent and the provider may serve the access token it already holds:
+        same ``iat``, same ``exp``, with ``expires_in`` reporting only what is
+        LEFT of its lifetime. A brand-new session can therefore start out
+        holding a credential that is seconds from expiry
+        (issue:3fd80396c685). Backends call this on the login path, BEFORE
+        publishing the grant, so the session copy honours the same freshness
+        contract ``get_live_provider_token`` enforces afterwards.
+
+        Args:
+            token: The grant captured during the login negotiation.
+            leeway: Refresh when the grant expires within this many seconds.
+                Defaults to ``IDENTITY_REFRESH_LEEWAY`` — the same threshold
+                ``get_live_provider_token`` uses.
+
+        Returns:
+            The rotated credential when a refresh was needed and succeeded;
+            otherwise *token* itself, unchanged. NEVER ``None`` for a non-None
+            input: a login must not fail because the provider handed back an
+            aged credential, and an aged token still beats no token.
+        """
+        from ..conf import IDENTITY_REFRESH_LEEWAY
+
+        if token is None:
+            return None
+        if leeway is None:
+            leeway = IDENTITY_REFRESH_LEEWAY
+        if not token.is_expiring(leeway):
+            return token
+        age = token.age_seconds()
+        aged = f" (issued {int(age)}s ago)" if age is not None else ""
+        self.logger.warning(
+            f"{self._service_name}: the login grant is already within the "
+            f"{leeway}s refresh leeway{aged} — the provider served a cached "
+            "token; refreshing it before it reaches the session."
+        )
+        try:
+            refreshed = await self.refresh_provider_tokens(token)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(
+                f"{self._service_name}: login-grant refresh failed: {err}"
+            )
+            refreshed = None
+        if refreshed is None:
+            # Best-effort, exactly like the vaulting below it: publish what
+            # the provider gave us and let get_live_provider_token deal with
+            # the expiry on the first call that needs the credential.
+            self.logger.warning(
+                f"{self._service_name}: could not refresh the login grant; "
+                "publishing the provider credential as received."
+            )
+            return token
+        # The refresh describes the CREDENTIAL, not the account: whatever the
+        # rotation omitted stays as the login established it.
+        if not refreshed.provider_user_id:
+            refreshed.provider_user_id = token.provider_user_id
+        if not refreshed.id_token:
+            refreshed.id_token = token.id_token
+        if not refreshed.scopes:
+            refreshed.scopes = list(token.scopes or [])
+        if refreshed.is_expiring(leeway):
+            self.logger.warning(
+                f"{self._service_name}: the refreshed login grant is STILL "
+                f"within the {leeway}s leeway; the provider is reusing a "
+                "cached token for this account."
+            )
+        return refreshed
+
     async def capture_login_credential(
         self,
         request: web.Request,
@@ -849,6 +927,10 @@ class ExternalAuth(BaseAuthBackend):
                     session["external_expires_at"] = (
                         refreshed.expires_at.isoformat()
                     )
+                if refreshed.issued_at is not None:
+                    session["external_issued_at"] = (
+                        refreshed.issued_at.isoformat()
+                    )
                 if refreshed.id_token:
                     # build_user_info published the login id_token under this
                     # key; leaving it in place would advertise an OIDC token
@@ -944,6 +1026,7 @@ class ExternalAuth(BaseAuthBackend):
         id_token: Optional[str] = None,
         refresh_token: Optional[str] = None,
         expires_at: Optional[datetime] = None,
+        issued_at: Optional[datetime] = None,
         provider_user_id: Optional[str] = None,
     ) -> tuple:
         """build_user_info.
@@ -960,6 +1043,12 @@ class ExternalAuth(BaseAuthBackend):
                 (FEAT-103 Module 2). Keyword-only.
             expires_at (datetime, optional): Real expiry of ``token``, published
                 as the ISO-8601 string ``external_expires_at``. Keyword-only.
+            issued_at (datetime, optional): When the provider ISSUED ``token``
+                (its ``iat``), published as the ISO-8601 string
+                ``external_issued_at``. Makes a reused provider token
+                observable: an ``issued_at`` well before this login means the
+                provider served a cached credential (issue:3fd80396c685).
+                Keyword-only.
             provider_user_id (str, optional): Verified external account id,
                 published as ``external_provider_user_id`` and used by
                 ``get_live_provider_token`` to bind a session to exactly one
@@ -971,7 +1060,7 @@ class ExternalAuth(BaseAuthBackend):
             ValueError: User doesn't have username attributes.
 
         Note:
-            All four capture arguments default to ``None`` and each new key is
+            All five capture arguments default to ``None`` and each new key is
             written only when its argument was supplied, so the existing
             3-argument call sites produce byte-identical output.
         """
@@ -1001,6 +1090,8 @@ class ExternalAuth(BaseAuthBackend):
             userdata["id_token"] = id_token
         if expires_at is not None:
             userdata["external_expires_at"] = expires_at.isoformat()
+        if issued_at is not None:
+            userdata["external_issued_at"] = issued_at.isoformat()
         if refresh_token is not None:
             userdata["has_refresh_token"] = bool(refresh_token)
         if provider_user_id is not None:

@@ -1094,6 +1094,18 @@ Callers that MUST keep working with the unchanged 3-arg signature:
   main checkout; `navigator-session` is also a local editable path
   (`/home/jesuslara/proyectos/navigator-session`). Never `uv sync` inside a
   worktree.
+- **A login does not always issue a NEW provider token.** `logout` ends the
+  Navigator session only; the IdP's SSO session survives, the next round-trip
+  is silent, and Entra replays the access token it already holds — same `iat`,
+  same `exp`, `expires_in` carrying only the remainder
+  (`issue:3fd80396c685`, measured 2026-10-23: a 5457 s token vaulted with
+  5155 s left). Mitigated, not removed: backends run the captured grant
+  through `ExternalAuth.ensure_fresh_login_grant` before publishing it (the
+  same `IDENTITY_REFRESH_LEEWAY` rule Module 4 applies later), the session
+  carries `external_issued_at` so the reuse is observable, and
+  `AZURE_LOGIN_PROMPT=login` forces a re-issue where one is genuinely
+  required. Never infer a token *lifetime* from `expires_in` — only
+  `exp - iat` is the lifetime (B1 still holds: `expires_in` is seconds).
 
 ### External Dependencies
 
@@ -1162,6 +1174,17 @@ Callers that MUST keep working with the unchanged 3-arg signature:
       these fields, including the freshness check in (1), so the next attempt
       needs no raw token handling. Never paste a live access token to record a
       result.
+
+      **Instrumented since attempt 1** (`issue:3fd80396c685`, fixed): point (2)
+      now has a supported lever — `AZURE_LOGIN_PROMPT=login` makes Entra
+      re-authenticate instead of serving its cached token — and point (1) no
+      longer needs the raw token, because the login publishes
+      `session["external_issued_at"]` (the access token's own `iat`) beside
+      `external_expires_at`. Note that the login path now refreshes a grant
+      that arrives inside `IDENTITY_REFRESH_LEEWAY`, so a reading taken after
+      that refresh describes the ROTATED credential: for arm A/B comparison,
+      read `iat`/`exp` from the token the attempt actually publishes and
+      record whether a login-path refresh fired (it logs a warning).
 - [x] **Q2** — Should `expires_in` change in place or be deprecated over a
       release? — *Resolved, 2026-10-22, by in-repo precedent rather than by
       preference*: **change it in place.** This was never an open product

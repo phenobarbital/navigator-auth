@@ -130,8 +130,8 @@ def _patched(session_obj, store):
 # Module 1 — build_user_info
 # ---------------------------------------------------------------------------
 _NEW_KEYS = {
-    "id_token", "external_expires_at", "has_refresh_token",
-    "external_provider_user_id",
+    "id_token", "external_expires_at", "external_issued_at",
+    "has_refresh_token", "external_provider_user_id",
 }
 
 
@@ -164,6 +164,26 @@ class TestBuildUserInfoCapture:
         assert isinstance(userdata["external_expires_at"], str)
         assert datetime.fromisoformat(userdata["external_expires_at"]) == expires_at
         assert userdata["external_provider_user_id"] == "acct-A"
+
+    def test_build_user_info_publishes_external_issued_at(self):
+        """issue:3fd80396c685 — the session says WHEN the grant was issued,
+        so a provider-cached token is observable instead of silent."""
+        backend = _make()
+        issued_at = datetime.now(timezone.utc) - timedelta(seconds=302)
+        userdata, _ = backend.build_user_info(
+            userdata={"id": "u1", "email": "a@b.c"},
+            token="AT",
+            mapping={"id": "id", "email": "email"},
+            issued_at=issued_at,
+        )
+        assert datetime.fromisoformat(userdata["external_issued_at"]) == issued_at
+        # and it stays absent when the backend cannot determine it
+        plain, _ = backend.build_user_info(
+            userdata={"id": "u1", "email": "a@b.c"},
+            token="AT",
+            mapping={"id": "id", "email": "email"},
+        )
+        assert "external_issued_at" not in plain
 
     def test_build_user_info_never_writes_refresh_token(self):
         backend = _make()
@@ -894,3 +914,151 @@ class TestCaptureMarker:
         with _patched(session, store):
             await backend.capture_login_credential(request_with_db, full_grant)
         assert request_with_db.get(CAPTURED_LOGIN_GRANT, False) is False
+
+
+
+# ---------------------------------------------------------------------------
+# issue:3fd80396c685 — a login does not always mean a newly ISSUED token
+# ---------------------------------------------------------------------------
+class TestStaleLoginGrant:
+    """Entra serves its cached access token on a silent re-login (same iat,
+    same exp, expires_in reporting only what is LEFT). The login path must
+    apply the same freshness rule get_live_provider_token applies later."""
+
+    @pytest.mark.asyncio
+    async def test_fresh_login_grant_is_published_unchanged(self, full_grant):
+        backend = _make()
+        backend.refresh_provider_tokens = AsyncMock()
+        grant = await backend.ensure_fresh_login_grant(full_grant, leeway=120)
+        assert grant is full_grant
+        backend.refresh_provider_tokens.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_aged_login_grant_is_refreshed_before_publishing(self):
+        """The measured case: a 5457s token handed over with 302s already
+        spent, arriving inside the refresh leeway."""
+        backend = _make()
+        cached = TokenResponse(
+            access_token="AT.cached",
+            refresh_token="RT.secret",
+            id_token="ID.jwt",
+            expires_in=60,  # all that is left of it
+            scopes=["User.Read", "Mail.Read"],
+            provider_user_id="acct-A",
+        )
+        rotated = TokenResponse(
+            access_token="AT.new", refresh_token="RT.rotated", expires_in=5457
+        )
+        backend.refresh_provider_tokens = AsyncMock(return_value=rotated)
+        grant = await backend.ensure_fresh_login_grant(cached, leeway=120)
+        assert grant is rotated
+        backend.refresh_provider_tokens.assert_awaited_once_with(cached)
+        # the rotation describes the credential, not the account
+        assert grant.provider_user_id == "acct-A"
+        assert grant.id_token == "ID.jwt"
+        assert grant.scopes == ["User.Read", "Mail.Read"]
+
+    @pytest.mark.asyncio
+    async def test_refresh_result_keeps_its_own_values(self):
+        backend = _make()
+        cached = TokenResponse(
+            access_token="AT.cached", refresh_token="RT.secret",
+            id_token="ID.old", expires_in=60, scopes=["User.Read"],
+            provider_user_id="acct-A",
+        )
+        rotated = TokenResponse(
+            access_token="AT.new", refresh_token="RT.rotated", expires_in=3600,
+            id_token="ID.new", scopes=["Mail.Read"], provider_user_id="acct-B",
+        )
+        backend.refresh_provider_tokens = AsyncMock(return_value=rotated)
+        grant = await backend.ensure_fresh_login_grant(cached, leeway=120)
+        assert (grant.id_token, grant.scopes, grant.provider_user_id) == (
+            "ID.new", ["Mail.Read"], "acct-B"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "refresh",
+        [
+            AsyncMock(return_value=None),
+            AsyncMock(side_effect=RuntimeError("invalid_grant")),
+        ],
+        ids=["refresh-declined", "refresh-raised"],
+    )
+    async def test_login_is_never_broken_by_a_failed_refresh(self, refresh):
+        """An aged credential still beats no credential: the login proceeds
+        with exactly what the provider returned."""
+        backend = _make()
+        cached = TokenResponse(
+            access_token="AT.cached", refresh_token=None, expires_in=30,
+            provider_user_id="acct-A",
+        )
+        backend.refresh_provider_tokens = refresh
+        grant = await backend.ensure_fresh_login_grant(cached, leeway=120)
+        assert grant is cached
+
+    @pytest.mark.asyncio
+    async def test_none_grant_is_passed_through(self):
+        backend = _make()
+        backend.refresh_provider_tokens = AsyncMock()
+        assert await backend.ensure_fresh_login_grant(None) is None
+        backend.refresh_provider_tokens.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_leeway_defaults_to_the_identity_refresh_leeway(self):
+        """The login path and get_live_provider_token share one threshold."""
+        from navigator_auth.conf import IDENTITY_REFRESH_LEEWAY
+
+        backend = _make()
+        rotated = TokenResponse(access_token="AT.new", expires_in=3600)
+        backend.refresh_provider_tokens = AsyncMock(return_value=rotated)
+        inside = TokenResponse(
+            access_token="AT.cached", refresh_token="RT.secret",
+            expires_in=IDENTITY_REFRESH_LEEWAY - 10,
+        )
+        outside = TokenResponse(
+            access_token="AT.cached", refresh_token="RT.secret",
+            expires_in=IDENTITY_REFRESH_LEEWAY + 60,
+        )
+        assert await backend.ensure_fresh_login_grant(inside) is rotated
+        assert await backend.ensure_fresh_login_grant(outside) is outside
+
+    @pytest.mark.asyncio
+    async def test_the_refreshed_grant_is_what_gets_vaulted(
+        self, request_with_db, session
+    ):
+        """End of the login path: the vault holds the rotation, not the
+        cached token the provider replayed."""
+        backend = _make()
+        cached = TokenResponse(
+            access_token="AT.cached", refresh_token="RT.secret",
+            expires_in=30, provider_user_id="acct-A",
+        )
+        rotated = TokenResponse(
+            access_token="AT.new", refresh_token="RT.rotated", expires_in=3600
+        )
+        backend.refresh_provider_tokens = AsyncMock(return_value=rotated)
+        store = _store_double()
+        grant = await backend.ensure_fresh_login_grant(cached, leeway=120)
+        with _patched(session, store):
+            await backend.capture_login_credential(request_with_db, grant)
+        assert store.save_linked_identity.await_args.args[2] is rotated
+        assert request_with_db.get(CAPTURED_LOGIN_GRANT) is True
+
+    @pytest.mark.asyncio
+    async def test_refresh_republishes_external_issued_at(
+        self, request_with_db, session
+    ):
+        backend = _make()
+        stored = _stored(expires_in=30)
+        rotated = TokenResponse(
+            access_token="AT.new", refresh_token="RT.rotated", expires_in=3600,
+            issued_at=datetime.now(timezone.utc),
+        )
+        backend.refresh_provider_tokens = AsyncMock(return_value=rotated)
+        store = _store_double(decrypt_credential=MagicMock(return_value=stored))
+        with _patched(session, store):
+            await backend.get_live_provider_token(
+                request_with_db, 35, leeway=120
+            )
+        assert session["external_issued_at"] == rotated.issued_at.isoformat()

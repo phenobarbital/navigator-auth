@@ -1,5 +1,21 @@
 # Unreleased
 
+- **A login no longer publishes an already-aged provider token (FEAT-103,
+  `issue:3fd80396c685`).** Navigator's `logout` ends only the Navigator
+  session, so the next external login is silent at the IdP and Entra answers
+  it with the access token it already issued — same `iat`/`exp`, with
+  `expires_in` reporting only the remainder. Backends now pass the captured
+  grant through the new `ExternalAuth.ensure_fresh_login_grant`, which applies
+  the same `IDENTITY_REFRESH_LEEWAY` rule as `get_live_provider_token` and
+  refreshes before the grant reaches the Graph call, the session and the
+  vault. It never fails a login: when the refresh is impossible the provider's
+  credential is published as received, with a warning. The session gains
+  `external_issued_at` (the access token's `iat`, when it is a JWT) beside
+  `external_expires_at`, and `TokenResponse` gains `issued_at` /
+  `age_seconds()`. New opt-in setting `AZURE_LOGIN_PROMPT` (empty by default)
+  sends the OIDC `prompt` on the login authorization request; `login` makes
+  Entra re-authenticate and issue a new token instead of serving its cache.
+
 - **`expires_in` is now seconds-remaining; new `expires_at` (FEAT-103,
   client-visible behaviour change).** Login, refresh, ephemeral-token and
   external-callback responses published the absolute expiry epoch (a float)

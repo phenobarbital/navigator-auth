@@ -1,7 +1,42 @@
 """Normalized token payload returned by every backend's identity flow."""
+import base64
+import json
 from typing import Any, Optional
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
+
+
+def jwt_issued_at(token: Optional[str]) -> Optional[datetime]:
+    """Best-effort ``iat`` of a JWT, as an aware UTC datetime.
+
+    The claim is read WITHOUT verifying the signature, and is used only as an
+    observability signal: how old a provider grant already was by the time it
+    reached us (issue:3fd80396c685). Never gate a security decision on it —
+    the verified path is ``AzureAuth.verify_external_token``.
+
+    Args:
+        token: A compact-serialization JWT, or any other string.
+
+    Returns:
+        The ``iat`` claim as an aware UTC datetime, or ``None`` when the value
+        is not a JWT, carries no usable ``iat``, or cannot be decoded. An
+        opaque provider access token is the common ``None`` case.
+    """
+    if not token or not isinstance(token, str):
+        return None
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+        iat = claims.get("iat")
+        if iat is None:
+            return None
+        return datetime.fromtimestamp(int(iat), tz=timezone.utc)
+    except Exception:  # pylint: disable=W0703
+        return None
 
 
 @dataclass
@@ -19,6 +54,11 @@ class TokenResponse:
     id_token: Optional[str] = None
     expires_in: Optional[int] = None
     expires_at: Optional[datetime] = None
+    #: When the provider ISSUED this token, read from the access token's own
+    #: ``iat`` claim. Observability only: a provider that serves a cached
+    #: token on a silent re-login (Entra does) hands back a grant whose
+    #: ``issued_at`` predates this login — see ``age_seconds``.
+    issued_at: Optional[datetime] = None
     scopes: list = field(default_factory=list)
     provider_user_id: Optional[str] = None
     raw: dict = field(default_factory=dict)
@@ -28,6 +68,19 @@ class TokenResponse:
             self.expires_at = datetime.now(timezone.utc) + timedelta(
                 seconds=int(self.expires_in)
             )
+        if self.issued_at is None:
+            self.issued_at = jwt_issued_at(self.access_token)
+
+    def age_seconds(self) -> Optional[float]:
+        """Seconds since the provider issued this token, when knowable.
+
+        ``None`` for an opaque access token (no ``iat`` to read). A value well
+        above the time this login took means the provider served a token it
+        had already issued, rather than a new one.
+        """
+        if self.issued_at is None:
+            return None
+        return (datetime.now(timezone.utc) - self.issued_at).total_seconds()
 
     def is_expiring(self, leeway: int = 0) -> bool:
         """True when the token is expired or expires within *leeway* seconds."""
