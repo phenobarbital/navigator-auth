@@ -40,6 +40,12 @@ can see exactly what got mounted.
 stored credential and calls the provider's API with it (Microsoft Graph,
 GitHub, Odoo userinfo, Google userinfo).
 
+**Reading the login credential** — ``GET /api/v1/me`` adds an
+``authorization`` block when the session came from an external (SSO)
+login: the provider bearer token of *that* login, refreshed from the vault
+when the grant captured at login has expired. For a Basic or OAuth2
+(local) login there is no such token and the block is absent.
+
 Run it **from the repository root**::
 
     mkdir -p env/dev && touch env/dev/.env    # navconfig needs this once
@@ -304,22 +310,91 @@ async def example_config(request: web.Request) -> web.StreamResponse:
     )
 
 
+async def provider_authorization(
+    request: web.Request, session, user, auth_method: str
+) -> dict:
+    """The provider credential this session was logged in with, if any.
+
+    Only external (SSO) logins have one: a Basic or navigator-auth OAuth2
+    login is local, so there is no upstream bearer token to hand out.
+
+    The session's own ``auth_token`` is the raw grant captured at login and
+    is a *minutes*-long credential inside a 100-hour session (FEAT-103 §1b),
+    so this asks the backend for a live one first
+    (:meth:`ExternalAuth.get_live_provider_token` refreshes it from the vault
+    when it is expiring) and only falls back to the session value when the
+    vault has nothing to refresh from — a legacy session, a grant Entra
+    returned without a refresh token, or a provider that cannot refresh.
+
+    Args:
+        request: The authenticated request.
+        session: The Navigator session (``user_session()``).
+        user: The session user, for the local ``user_id``.
+        auth_method: The backend slug that created the session, e.g. ``azure``.
+
+    Returns:
+        ``{"token": ..., "type": "Bearer", "provider": ..., "expires_at": ...,
+        "source": "vault"|"session"}``, or ``{}`` for a local login or when no
+        provider credential is available.
+
+    Warning:
+        Example-only: the library deliberately masks ``auth_token`` in the
+        bodies it serves itself (``check_credentials``, FEAT-103 G6). Serving
+        the clear token to a browser makes the page as sensitive as the token
+        — do it only for a consumer that really must call the provider
+        client-side, and never include a refresh token (the vault never hands
+        one out here).
+    """
+    if not auth_method:
+        return {}
+    backend = request.app["auth"].get_external_backend(auth_method)
+    if backend is None or not hasattr(backend, "get_live_provider_token"):
+        return {}  # local login: Basic, or this app's own OAuth2 provider
+    user_id = getattr(user, "user_id", None) or getattr(user, "id", None)
+    token = await backend.get_live_provider_token(request, user_id)
+    if token is not None:
+        return {
+            "token": token.access_token,
+            "type": token.token_type or "Bearer",
+            "provider": auth_method,
+            "expires_at": (
+                token.expires_at.isoformat() if token.expires_at else None
+            ),
+            "scopes": list(token.scopes or []),
+            "source": "vault",
+        }
+    access_token = session.get("auth_token") if session else None
+    if not access_token:
+        return {}
+    return {
+        "token": access_token,
+        "type": session.get("token_type") or "Bearer",
+        "provider": auth_method,
+        "expires_at": session.get("external_expires_at"),
+        "scopes": [],
+        "source": "session",
+    }
+
+
 @is_authenticated()
 @user_session()
 async def me(request: web.Request, *, session=None, user=None) -> web.StreamResponse:
     """Who is logged in, and how — works for every login mechanism above."""
     userdata = request.get("userdata") or {}
-    return web.json_response(
-        {
-            "user_id": getattr(user, "user_id", None) or getattr(user, "id", None),
-            "username": getattr(user, "username", None),
-            "email": getattr(user, "email", None),
-            "display_name": getattr(user, "display_name", None),
-            "auth_method": userdata.get("auth_method")
-            or getattr(user, "auth_method", None),
-            "session_id": getattr(session, "session_id", None),
-        }
-    )
+    auth_method = userdata.get("auth_method") or getattr(user, "auth_method", None)
+    payload = {
+        "user_id": getattr(user, "user_id", None) or getattr(user, "id", None),
+        "username": getattr(user, "username", None),
+        "email": getattr(user, "email", None),
+        "display_name": getattr(user, "display_name", None),
+        "auth_method": auth_method,
+        "session_id": getattr(session, "session_id", None),
+    }
+    if authorization := await provider_authorization(
+        request, session, user, auth_method
+    ):
+        payload["authorization"] = authorization
+    return web.json_response(payload)
 
 
 @is_authenticated()
