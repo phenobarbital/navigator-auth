@@ -125,6 +125,7 @@ import json  # noqa: E402
 import logging  # noqa: E402
 import secrets  # noqa: E402
 from pathlib import Path  # noqa: E402
+from typing import Any  # noqa: E402
 
 import aiohttp  # noqa: E402
 from aiohttp import web  # noqa: E402
@@ -134,6 +135,7 @@ from navigator_auth import AuthHandler  # noqa: E402
 from navigator_auth.backends.idp import IdentityProvider  # noqa: E402
 from navigator_auth.conf import (  # noqa: E402
     AUTH_EXCLUDE_LIST_KEY,
+    AUTH_SESSION_OBJECT,
     ODOO_DOMAIN,
     ODOO_USERINFO_PATH,
     default_dsn,
@@ -310,6 +312,45 @@ async def example_config(request: web.Request) -> web.StreamResponse:
     )
 
 
+def local_user_id(user, session) -> Any:
+    """The LOCAL ``auth.users.user_id`` of the session user.
+
+    Everything in the Identity Vault is keyed on this integer. It is NOT
+    ``user.id``: for an external (SSO) login the session user's ``id`` is the
+    *provider's* account id — a GUID on Entra — so asking the vault with it
+    fails on the integer ``user_identities.user_id`` column::
+
+        invalid input for query argument $1: '4e2aa0ea-...'
+        ('str' object cannot be interpreted as an integer)
+
+    Resolution order is the library's own (``handlers.user_identities.
+    BaseIdentityView._user_id``): the user object first, then the session —
+    the session fallback keeps sessions created before the local ``user_id``
+    was published on the session user working.
+
+    Args:
+        user: The session user from ``user_session()``.
+        session: The Navigator session, used as the fallback source.
+
+    Returns:
+        The local ``user_id``, or ``None`` when neither source carries one.
+    """
+    if isinstance(user, dict):
+        user_id = user.get("user_id")
+    else:
+        user_id = getattr(user, "user_id", None)
+    if user_id:
+        return user_id
+    if not session:
+        return None
+    try:
+        return session.get("user_id") or (
+            session.get(AUTH_SESSION_OBJECT) or {}
+        ).get("user_id")
+    except (TypeError, KeyError):
+        return None
+
+
 async def provider_authorization(
     request: web.Request, session, user, auth_method: str
 ) -> dict:
@@ -350,7 +391,7 @@ async def provider_authorization(
     backend = request.app["auth"].get_external_backend(auth_method)
     if backend is None or not hasattr(backend, "get_live_provider_token"):
         return {}  # local login: Basic, or this app's own OAuth2 provider
-    user_id = getattr(user, "user_id", None) or getattr(user, "id", None)
+    user_id = local_user_id(user, session)
     token = await backend.get_live_provider_token(request, user_id)
     if token is not None:
         return {
@@ -383,7 +424,7 @@ async def me(request: web.Request, *, session=None, user=None) -> web.StreamResp
     userdata = request.get("userdata") or {}
     auth_method = userdata.get("auth_method") or getattr(user, "auth_method", None)
     payload = {
-        "user_id": getattr(user, "user_id", None) or getattr(user, "id", None),
+        "user_id": local_user_id(user, session),
         "username": getattr(user, "username", None),
         "email": getattr(user, "email", None),
         "display_name": getattr(user, "display_name", None),
@@ -409,7 +450,12 @@ async def provider_whoami(
     the identity was linked (refreshing it if it expired) and uses it.
     """
     provider = request.match_info["provider"]
-    user_id = getattr(user, "user_id", None) or getattr(user, "id", None)
+    user_id = local_user_id(user, session)
+    if not user_id:
+        raise web.HTTPUnauthorized(
+            text=json.dumps({"error": "no local user_id in this session"}),
+            content_type="application/json",
+        )
     idp = request.app["auth"]._idp
     try:
         credential = await idp.get_user_identity_credential(user_id, provider)

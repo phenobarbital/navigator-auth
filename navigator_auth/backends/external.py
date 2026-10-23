@@ -962,15 +962,23 @@ class ExternalAuth(BaseAuthBackend):
             userinfo = self.get_userdata(user=user, mapping=USER_MAPPING)
             ### merging userdata and userinfo:
             userinfo = {**userinfo, **userdata}
+            # The LOCAL auth.users.user_id, resolved BEFORE the session user is
+            # built: `userdata` comes from the provider, so its `id` is the
+            # provider's account id (a GUID on Entra, an int on GitHub).
+            # Without this key the session user carries no local id at all, so
+            # a consumer doing `getattr(user, "user_id", None)` gets None — or
+            # falls back to `user.id` and asks the Identity Vault with the
+            # provider's id, which the integer `user_identities.user_id`
+            # column rejects outright.
+            uid = userinfo[AUTH_SESSION_OBJECT].get("user_id", user_id)
+            userinfo["user_id"] = uid
             user = await self.create_user(userinfo)
             try:
                 user.username = userdata[self.username_attribute]
             except KeyError:
                 user.username = user_id
             user.token = token  # issued token:
-            uid = userinfo[AUTH_SESSION_OBJECT].get("user_id", user_id)
             username = userdata.get("username")
-            userinfo["user_id"] = uid
             # saving Auth data.
             session = await self.remember(request, user_id, userinfo, user)
             payload = {
