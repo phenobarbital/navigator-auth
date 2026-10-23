@@ -23,6 +23,7 @@ from navigator_session import AUTH_SESSION_OBJECT
 from ..identities import AuthUser
 from ..libs.json import json_decoder
 from ..libs.redirect import safe_redirect_url
+from ..libs.sanitize import header_safe
 from ..exceptions import UserNotFound, AuthException, InvalidAuth
 from ..identity.flow_store import IdentityFlowStore
 from ..identity.types import TokenResponse
@@ -345,9 +346,17 @@ class ExternalAuth(BaseAuthBackend):
         return redirect_url
 
     def failed_redirect(self, request: web.Request, error: str = "ERROR_UNKNOWN", message: str = "ERROR_UNKNOWN"):
+        """Redirect the browser to the failed-redirect URL.
+
+        Both ``error`` and ``message`` may originate from a provider
+        response, a query parameter or an exception string, so both are
+        passed through :func:`header_safe` before reaching a header.
+        """
         url = self.get_failed_redirect_url(request)
-        headers = {"x-message": message, "x-error": str(error)}
-        params = {"error": error, "message": message}
+        safe_error = header_safe(error)
+        safe_message = header_safe(message)
+        headers = {"x-message": safe_message, "x-error": safe_error}
+        params = {"error": safe_error, "message": safe_message}
         url = self.prepare_url(url, params)
         return web.HTTPFound(url, headers=headers)
 
