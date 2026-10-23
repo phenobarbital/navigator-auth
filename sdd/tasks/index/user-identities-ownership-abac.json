@@ -5,7 +5,7 @@
   "type": "feature",
   "base_branch": "dev",
   "created_at": "2026-10-24T00:00:00-04:00",
-  "completed_at": null,
+  "completed_at": "2026-10-23T23:48:00+00:00",
   "tasks": [
     {
       "id": "TASK-118",
@@ -23,7 +23,8 @@
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
       "completed_at": "2026-10-23T22:49:25+00:00",
-      "file": "sdd/tasks/completed/TASK-118-generic-redaction-allowlist.md"
+      "file": "sdd/tasks/completed/TASK-118-generic-redaction-allowlist.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-119",
@@ -41,7 +42,8 @@
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
       "completed_at": "2026-10-23T22:50:01+00:00",
-      "file": "sdd/tasks/completed/TASK-119-policy-allows-public-api.md"
+      "file": "sdd/tasks/completed/TASK-119-policy-allows-public-api.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-120",
@@ -59,7 +61,8 @@
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
       "completed_at": "2026-10-23T22:50:15+00:00",
-      "file": "sdd/tasks/completed/TASK-120-auth-model-policy-pack.md"
+      "file": "sdd/tasks/completed/TASK-120-auth-model-policy-pack.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-121",
@@ -77,7 +80,8 @@
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
       "completed_at": "2026-10-23T22:50:49+00:00",
-      "file": "sdd/tasks/completed/TASK-121-parameterize-set-address.md"
+      "file": "sdd/tasks/completed/TASK-121-parameterize-set-address.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-122",
@@ -98,7 +102,8 @@
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
       "completed_at": "2026-10-23T22:52:11+00:00",
-      "file": "sdd/tasks/completed/TASK-122-owner-or-superuser-guard.md"
+      "file": "sdd/tasks/completed/TASK-122-owner-or-superuser-guard.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-123",
@@ -118,7 +123,8 @@
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
       "completed_at": "2026-10-23T22:54:00+00:00",
-      "file": "sdd/tasks/completed/TASK-123-identity-handler-read-path.md"
+      "file": "sdd/tasks/completed/TASK-123-identity-handler-read-path.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-124",
@@ -138,7 +144,8 @@
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
       "completed_at": "2026-10-23T22:55:48+00:00",
-      "file": "sdd/tasks/completed/TASK-124-identity-handler-write-path.md"
+      "file": "sdd/tasks/completed/TASK-124-identity-handler-write-path.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-125",
@@ -158,7 +165,8 @@
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
       "completed_at": "2026-10-23T22:57:23+00:00",
-      "file": "sdd/tasks/completed/TASK-125-identity-handler-redaction.md"
+      "file": "sdd/tasks/completed/TASK-125-identity-handler-redaction.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-126",
@@ -179,7 +187,8 @@
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
       "completed_at": "2026-10-23T22:59:16+00:00",
-      "file": "sdd/tasks/completed/TASK-126-account-handler-guard.md"
+      "file": "sdd/tasks/completed/TASK-126-account-handler-guard.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-127",
@@ -199,7 +208,8 @@
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
       "completed_at": "2026-10-23T23:01:19+00:00",
-      "file": "sdd/tasks/completed/TASK-127-partner-key-superuser-only.md"
+      "file": "sdd/tasks/completed/TASK-127-partner-key-superuser-only.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-128",
@@ -221,7 +231,8 @@
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
       "completed_at": "2026-10-23T23:02:59+00:00",
-      "file": "sdd/tasks/completed/TASK-128-integration-tests-and-docs.md"
+      "file": "sdd/tasks/completed/TASK-128-integration-tests-and-docs.md",
+      "verification": "verified"
     }
   ]
 }
