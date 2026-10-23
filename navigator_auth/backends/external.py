@@ -791,6 +791,64 @@ class ExternalAuth(BaseAuthBackend):
             if guard.users <= 0:
                 guards.pop(key, None)
 
+    async def _live_token_binding(self, request: web.Request, user_id: Any) -> Optional[tuple]:
+        """Resolve the session a live provider token may be served to.
+
+        Args:
+            request: The authenticated request.
+            user_id: Local Navigator user id the caller claims.
+
+        Returns:
+            ``(session, session_user, provider_user_id)``, or ``None`` when
+            the session was not created by this backend, does not belong to
+            *user_id*, or carries no external account binding. Every ``None``
+            is logged — the caller only has to propagate it.
+        """
+        from navigator_session import get_session
+
+        session = await get_session(request, new=False)
+        if not session:
+            return None
+        if session.get("auth_method") != self._service_name:
+            self.logger.warning(
+                f"{self._service_name}: get_live_provider_token called on a "
+                f"session authenticated by {session.get('auth_method')!r}."
+            )
+            return None
+        session_user = session.get("user_id")
+        if session_user is None:
+            session_obj = session.get(AUTH_SESSION_OBJECT) or {}
+            session_user = session_obj.get("user_id")
+        if session_user is None or str(session_user) != str(user_id):
+            self.logger.warning(f"{self._service_name}: user_id does not match the session.")
+            return None
+        provider_user_id = session.get("external_provider_user_id")
+        if not provider_user_id:
+            # A legacy session predating FEAT-103 carries no binding.
+            # Guessing an account is worse than requiring a re-login.
+            self.logger.warning(f"{self._service_name}: session has no external account binding; re-login required.")
+            return None
+        return session, session_user, provider_user_id
+
+    def _publish_refreshed(self, session: Any, refreshed: "TokenResponse") -> None:
+        """Publish a rotated credential's non-secret markers into the session.
+
+        The vault is the system of record, so the caller persists the rotation
+        BEFORE calling this — a failed write must never leave the session
+        advertising a credential the vault does not hold.
+        """
+        session["auth_token"] = refreshed.access_token
+        if refreshed.expires_at is not None:
+            session["external_expires_at"] = refreshed.expires_at.isoformat()
+        if refreshed.issued_at is not None:
+            session["external_issued_at"] = refreshed.issued_at.isoformat()
+        if refreshed.id_token:
+            # build_user_info published the login id_token under this key;
+            # leaving it in place would advertise an OIDC token older than
+            # the access token beside it (issue:d73106586c38).
+            session["id_token"] = refreshed.id_token
+        session["has_refresh_token"] = bool(refreshed.refresh_token)
+
     async def get_live_provider_token(
         self,
         request: web.Request,
@@ -822,37 +880,16 @@ class ExternalAuth(BaseAuthBackend):
             linked or refreshed — ``get_by_provider``'s newest-wins selection
             is deliberately NOT used here.
         """
-        from navigator_session import get_session
         from ..identity.store import IdentityStore
         from ..conf import IDENTITY_REFRESH_LEEWAY
 
         if leeway is None:
             leeway = IDENTITY_REFRESH_LEEWAY
         try:
-            session = await get_session(request, new=False)
-            if not session:
+            binding = await self._live_token_binding(request, user_id)
+            if binding is None:
                 return None
-            if session.get("auth_method") != self._service_name:
-                self.logger.warning(
-                    f"{self._service_name}: get_live_provider_token called on a "
-                    f"session authenticated by {session.get('auth_method')!r}."
-                )
-                return None
-            session_user = session.get("user_id")
-            if session_user is None:
-                session_obj = session.get(AUTH_SESSION_OBJECT) or {}
-                session_user = session_obj.get("user_id")
-            if session_user is None or str(session_user) != str(user_id):
-                self.logger.warning(f"{self._service_name}: user_id does not match the session.")
-                return None
-            provider_user_id = session.get("external_provider_user_id")
-            if not provider_user_id:
-                # A legacy session predating FEAT-103 carries no binding.
-                # Guessing an account is worse than requiring a re-login.
-                self.logger.warning(
-                    f"{self._service_name}: session has no external account " "binding; re-login required."
-                )
-                return None
+            session, session_user, provider_user_id = binding
             store = IdentityStore(request.app["authdb"])
             identity = await store.get_for_provider_account(session_user, self._service_name, provider_user_id)
             if identity is None:
@@ -889,18 +926,7 @@ class ExternalAuth(BaseAuthBackend):
                 # to the session, so a failed write never leaves the session
                 # advertising a credential the vault does not hold.
                 await store.update_tokens(identity, refreshed)
-                session["auth_token"] = refreshed.access_token
-                if refreshed.expires_at is not None:
-                    session["external_expires_at"] = refreshed.expires_at.isoformat()
-                if refreshed.issued_at is not None:
-                    session["external_issued_at"] = refreshed.issued_at.isoformat()
-                if refreshed.id_token:
-                    # build_user_info published the login id_token under this
-                    # key; leaving it in place would advertise an OIDC token
-                    # older than the access token beside it
-                    # (issue:d73106586c38).
-                    session["id_token"] = refreshed.id_token
-                session["has_refresh_token"] = bool(refreshed.refresh_token)
+                self._publish_refreshed(session, refreshed)
                 return refreshed
         except Exception as err:  # pylint: disable=W0703
             self.logger.warning(f"{self._service_name}: cannot obtain a live provider token: {err}")
