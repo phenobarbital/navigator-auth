@@ -188,7 +188,7 @@
       "feature_id": "FEAT-105",
       "feature": "user-identities-ownership-abac",
       "spec": "sdd/specs/user-identities-ownership-abac.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -198,8 +198,8 @@
       "parallelism_notes": "Spec Module 6. Edits navigator_auth/handlers/partners.py — a DIFFERENT file from the two userattrs.py surfaces, so it could in principle run in a worktree concurrently with TASK-123..126 once TASK-122 lands. Kept parallel:false because the spec's Worktree Strategy chooses per-spec isolation (Modules 4-6 converge on one guard contract and one behaviour table) and because it appends to the shared tests/unit/handlers package.",
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-127-partner-key-superuser-only.md"
+      "completed_at": "2026-10-23T23:01:19+00:00",
+      "file": "sdd/tasks/completed/TASK-127-partner-key-superuser-only.md"
     },
     {
       "id": "TASK-128",
