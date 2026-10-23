@@ -83,6 +83,12 @@ class RaisingHandler(DemoHandler):
     model = RaisingModel
 
 
+class ListPkHandler(DemoHandler):
+    """Composite PK, so a request without ``id`` reaches the no-PK branches."""
+
+    pk = ["demo_id"]
+
+
 def _handler(
     method: str = "GET",
     path: str = "/demo",
@@ -164,6 +170,29 @@ async def test_patch_no_data_found_is_no_content():
     response = await handler.patch()
     assert response.status == 204
     assert response.headers["x-error"] == "Demo was not Found"
+
+
+@pytest.mark.asyncio
+async def test_post_invalid_payload_reports_the_error():
+    """``exception=<dict>`` rendered nothing; the client got a bare "406: Not Acceptable"."""
+    handler = _handler("POST", "/demo", handler_cls=ListPkHandler)
+    with pytest.raises(web.HTTPNotAcceptable) as excinfo:
+        await handler.post()
+    assert b"Invalid payload for Demo" in (excinfo.value.body or b"")
+
+
+def test_every_error_call_names_its_payload():
+    """``error()`` renders ``reason``/``response``; a dict passed as ``exception`` is dropped."""
+    tree = ast.parse(MODEL_HANDLER_SOURCE.read_text())
+    unnamed = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "error"
+        and not {kw.arg for kw in node.keywords} & {"reason", "response"}
+    ]
+    assert not unnamed, f"error() without reason=/response= at lines {unnamed}"
 
 
 def test_no_response_helper_result_is_discarded():

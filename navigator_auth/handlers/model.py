@@ -440,7 +440,7 @@ class ModelHandler(BaseView):
                     "error": f"Invalid payload for {self.name}",
                     "payload": str(ex),
                 }
-                return self.error(exception=error, status=406)
+                return self.error(reason=error, status=406)
 
     async def delete(self):
         """Delete a Client."""
