@@ -84,11 +84,7 @@ async def ensure_identity_columns(db_pool: Any) -> None:
             failures.append(filename)
             if first_error is None:
                 first_error = err
-            logger.error(
-                "Identity migration %s failed: %s — continuing with the remaining migrations.",
-                filename,
-                err,
-            )
+            logger.error(f"Identity migration {filename} failed: {err} — continuing with the remaining migrations.")
 
     if failures:
         raise RuntimeError(
@@ -108,4 +104,4 @@ async def setup_identity_columns(db_pool: Any) -> None:
     try:
         await ensure_identity_columns(db_pool)
     except Exception as err:  # pylint: disable=W0703
-        logger.error("Failed to ensure identity credential columns: %s", err)
+        logger.error(f"Failed to ensure identity credential columns: {err}")
