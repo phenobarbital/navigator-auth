@@ -336,10 +336,10 @@ class ModelHandler(BaseView):
                     return self.error(reason=error, status=400)
                 except NoDataFound:
                     headers = {"x-error": f"{self.name} was not Found"}
-                    self.no_content(headers=headers)
+                    return self.no_content(headers=headers)
                 if not result:
                     headers = {"x-error": f"{self.name} was not Found"}
-                    self.no_content(headers=headers)
+                    return self.no_content(headers=headers)
                 ## saved with new changes:
                 for key, val in data.items():
                     if key in result.get_fields():

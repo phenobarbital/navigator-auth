@@ -1,10 +1,15 @@
-"""ModelHandler response helpers — regression for ledger issue:7164a1f421ce.
+"""ModelHandler response helpers — regression for ledger issues 7164a1f421ce
+and 8aa576e356c6.
 
 ``navigator.views.BaseHandler.json_response`` takes the payload as its first
 positional argument (``response``); it has never accepted ``content=``. Every
 call site in ``ModelHandler`` used the keyword, so PUT/POST answered 406 after
 the row was already inserted (the ``TypeError`` was swallowed by the insert
 except-block) and PATCH/DELETE raised 500.
+
+``no_content()`` returns its response rather than raising it (unlike ``error()``
+and ``critical()``), so ``patch()`` fell through both of its not-found branches
+and crashed instead of answering 204.
 """
 
 import ast
@@ -16,6 +21,7 @@ from types import SimpleNamespace
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
+from asyncdb.exceptions import NoDataFound
 from navigator.views import BaseView
 
 from navigator_auth.handlers import model as model_module
@@ -54,6 +60,14 @@ class DemoModel:
         return None
 
 
+class RaisingModel(DemoModel):
+    """Model whose ``get()`` reports the miss by raising, as asyncdb does."""
+
+    @classmethod
+    async def get(cls, **kwargs):
+        raise NoDataFound("demo")
+
+
 class DemoHandler(ModelHandler):
     model = DemoModel
     name = "Demo"
@@ -65,11 +79,20 @@ class DemoHandler(ModelHandler):
         return {}
 
 
-def _handler(method: str = "GET", path: str = "/demo", **match_info) -> DemoHandler:
+class RaisingHandler(DemoHandler):
+    model = RaisingModel
+
+
+def _handler(
+    method: str = "GET",
+    path: str = "/demo",
+    handler_cls: type = DemoHandler,
+    **match_info,
+) -> ModelHandler:
     app = web.Application()
     app["authdb"] = FakeDB()
     request = make_mocked_request(method, path, match_info=match_info, app=app)
-    return DemoHandler(request)
+    return handler_cls(request)
 
 
 def test_json_response_has_no_content_keyword():
@@ -123,3 +146,36 @@ async def test_delete_missing_row_is_not_found():
     handler = _handler("DELETE", "/demo/1", id="1")
     with pytest.raises(web.HTTPNotFound):
         await handler.delete()
+
+
+@pytest.mark.asyncio
+async def test_patch_missing_row_is_no_content():
+    """Used to fall through and call ``get_fields()`` on None."""
+    handler = _handler("PATCH", "/demo/1", id="1")
+    response = await handler.patch()
+    assert response.status == 204
+    assert response.headers["x-error"] == "Demo was not Found"
+
+
+@pytest.mark.asyncio
+async def test_patch_no_data_found_is_no_content():
+    """Used to fall through to ``if not result`` with ``result`` unbound."""
+    handler = _handler("PATCH", "/demo/1", handler_cls=RaisingHandler, id="1")
+    response = await handler.patch()
+    assert response.status == 204
+    assert response.headers["x-error"] == "Demo was not Found"
+
+
+def test_no_response_helper_result_is_discarded():
+    """``no_content()``/``json_response()``/``response()`` return — they never raise."""
+    tree = ast.parse(MODEL_HANDLER_SOURCE.read_text())
+    returning = {"no_content", "json_response", "response"}
+    discarded = [
+        f"{node.value.func.attr}:{node.lineno}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and node.value.func.attr in returning
+    ]
+    assert not discarded, f"response discarded at {discarded}"
