@@ -104,10 +104,10 @@ class ModelHandler(BaseView):
                     result = new
                 else:
                     ## filtering result to returning only fields asked:
-                    result = {}
-                    for field in fields:
-                        result[field] = getattr(result, field, None)
-            return self.json_response(content=result)
+                    result = {
+                        field: getattr(result, field, None) for field in fields
+                    }
+            return self.json_response(result)
 
     async def session(self):
         self._session = None
@@ -149,7 +149,7 @@ class ModelHandler(BaseView):
             if params["meta"] == ":meta":
                 # returning JSON schema of Model:
                 response = self.model.schema(as_dict=True)
-                return self.json_response(content=response)
+                return self.json_response(response)
         except KeyError:
             pass
         ## validate directly with model:
@@ -254,7 +254,7 @@ class ModelHandler(BaseView):
             async with await db.acquire() as conn:
                 resultset.Meta.connection = conn
                 result = await resultset.insert()
-                return self.json_response(content=result, status=201)
+                return self.json_response(result, status=201)
         except ModelError as ex:
             error = {
                 "error": f"Missing Info for Model {self.name}",
@@ -290,7 +290,7 @@ class ModelHandler(BaseView):
             if params["meta"] == ":meta":
                 ## returning the columns on Model:
                 fields = self.model.__fields__
-                return self.json_response(content=fields)
+                return self.json_response(fields)
         except KeyError:
             pass
         ### get session Data:
@@ -345,7 +345,7 @@ class ModelHandler(BaseView):
                     if key in result.get_fields():
                         result.set(key, val)
                 data = await result.update()
-                return self.json_response(content=data, status=202)
+                return self.json_response(data, status=202)
         else:
             self.error(reason=f"Invalid {self.name} Data to Patch", status=400)
 
@@ -396,7 +396,7 @@ class ModelHandler(BaseView):
                     try:
                         resultset = self.model(**data)  # pylint: disable=E1102
                         result = await resultset.insert()
-                        return self.json_response(content=result, status=201)
+                        return self.json_response(result, status=201)
                     except ModelError as ex:
                         error = {
                             "error": f"Missing Info for Model {self.name}",
@@ -414,7 +414,7 @@ class ModelHandler(BaseView):
                     if key in result.get_fields():
                         result.set(key, val)
                 data = await result.update()
-                return self.json_response(content=data, status=202)
+                return self.json_response(data, status=202)
         else:
             # create a new client based on data:
             try:
@@ -422,7 +422,7 @@ class ModelHandler(BaseView):
                 async with await db.acquire() as conn:
                     resultset.Meta.connection = conn
                     result = await resultset.insert()  # TODO: migrate to use save()
-                    return self.json_response(content=result, status=201)
+                    return self.json_response(result, status=201)
             except ModelError as ex:
                 error = {
                     "error": f"Missing Info for Model {self.name}",
@@ -487,9 +487,9 @@ class ModelHandler(BaseView):
                 # look for this client, after, save changes
                 result = await self.model.get(**args)
                 if not result:
-                    self.error(reason=f"{self.name} was Not Found", status=204)
+                    self.error(reason=f"{self.name} was Not Found", status=404)
                 # Delete them this Client
                 data = await result.delete()
-                return self.json_response(content=data, status=202)
+                return self.json_response(data, status=202)
         else:
-            self.error(reason=f"Cannot Delete an Empty {self.name}", status=204)
+            self.error(reason=f"Cannot Delete an Empty {self.name}", status=400)
