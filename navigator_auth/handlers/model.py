@@ -1,18 +1,13 @@
 """
 Model Handler: Abstract Model for managing Model with Views.
 """
+
 from typing import Union, Optional, Any
 import importlib
 from aiohttp import web
 from datamodel import BaseModel
 from datamodel.exceptions import ValidationError
-from asyncdb.exceptions import (
-    DriverError,
-    ProviderError,
-    NoDataFound,
-    StatementError,
-    ModelError
-)
+from asyncdb.exceptions import DriverError, ProviderError, NoDataFound, StatementError, ModelError
 from navigator_session import get_session
 from navigator.views import BaseView
 from ..exceptions import AuthException
@@ -47,15 +42,12 @@ class ModelHandler(BaseView):
             ## Using fallback Model
             return self.model
 
-    async def get_userid(self, session, idx: str = 'user_id') -> int:
+    async def get_userid(self, session, idx: str = "user_id") -> int:
         if not session:
-            self.error(
-                reason="Unauthorized",
-                status=403
-            )
+            self.error(reason="Unauthorized", status=403)
         try:
-            if 'session' in session:
-                return session['session'][idx]
+            if "session" in session:
+                return session["session"][idx]
             else:
                 return session[idx]
         except KeyError:
@@ -72,17 +64,11 @@ class ModelHandler(BaseView):
             for name, column in self.model.get_columns().items():
                 ### if a function with name _get_{column name} exists
                 ### then that function is called for getting the field value
-                if hasattr(self, f'_get_{name}'):
-                    fn = getattr(self, f'_get_{name}')
-                    data[name] = await fn(
-                        value=data.get(name, None),
-                        column=column,
-                        data=data
-                    )
+                if hasattr(self, f"_get_{name}"):
+                    fn = getattr(self, f"_get_{name}")
+                    data[name] = await fn(value=data.get(name, None), column=column, data=data)
         except (TypeError, ValueError, AttributeError):
-            self.error(
-                reason=f"Invalid {self.name} Data", status=400
-            )
+            self.error(reason=f"Invalid {self.name} Data", status=400)
         return data
 
     async def _post_get(self, result: Any, fields: list[str] = None) -> web.Response:
@@ -104,9 +90,7 @@ class ModelHandler(BaseView):
                     result = new
                 else:
                     ## filtering result to returning only fields asked:
-                    result = {
-                        field: getattr(result, field, None) for field in fields
-                    }
+                    result = {field: getattr(result, field, None) for field in fields}
             return self.json_response(result)
 
     async def session(self):
@@ -114,14 +98,9 @@ class ModelHandler(BaseView):
         try:
             self._session = await get_session(self.request)
         except (ValueError, RuntimeError) as err:
-            return self.critical(
-                reason="Error Decoding Session", request=self.request, exception=err
-            )
+            return self.critical(reason="Error Decoding Session", request=self.request, exception=err)
         if not self._session:
-            self.error(
-                reason={"message": "Unauthorized"},
-                status=403
-            )
+            self.error(response={"message": "Unauthorized"}, status=403)
         return self._session
 
     async def head(self):
@@ -158,8 +137,8 @@ class ModelHandler(BaseView):
         args = {}
         qp = self.query_parameters(request=self.request)
         try:
-            fields = qp['fields'].split(',')
-            del qp['fields']
+            fields = qp["fields"].split(",")
+            del qp["fields"]
         except KeyError:
             fields = None
         if isinstance(self.pk, str):
@@ -186,9 +165,7 @@ class ModelHandler(BaseView):
             except KeyError:
                 pass
         else:
-            return self.error(
-                reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410
-            )
+            return self.error(reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410)
         if args:
             # get data for specific client:
             async with await db.acquire() as conn:
@@ -198,15 +175,12 @@ class ModelHandler(BaseView):
                 try:
                     result = await self.model.get(**args)
                 except ModelError as ex:
-                    error = {
-                        "error": f"Missing Info for Model {self.name}",
-                        "payload": str(ex)
-                    }
-                    return self.error(reason=error, status=400)
+                    error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
+                    return self.error(response=error, status=400)
                 except NoDataFound:
-                    self.error(reason=error, status=404)
+                    self.error(response=error, status=404)
                 if not result:
-                    self.error(reason=error, status=404)
+                    self.error(response=error, status=404)
                 return await self._post_get(result, fields=fields)
         else:
             try:
@@ -218,11 +192,8 @@ class ModelHandler(BaseView):
                         result = await self.model.all()
                     return await self._post_get(result, fields=fields)
             except ModelError as ex:
-                error = {
-                    "error": f"Missing Info for Model {self.name}",
-                    "payload": str(ex)
-                }
-                return self.error(reason=error, status=400)
+                error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
+                return self.error(response=error, status=400)
             except ValidationError as ex:
                 error = {
                     "error": f"Unable to load {self.name} info from Database",
@@ -234,7 +205,7 @@ class ModelHandler(BaseView):
                     "error": f"Invalid payload for {self.name}",
                     "payload": str(ex),
                 }
-                return self.error(reason=error, status=406)
+                return self.error(response=error, status=406)
             except (DriverError, ProviderError, RuntimeError) as ex:
                 error = {
                     "error": "Database Error",
@@ -256,30 +227,27 @@ class ModelHandler(BaseView):
                 result = await resultset.insert()
                 return self.json_response(result, status=201)
         except ModelError as ex:
-            error = {
-                "error": f"Missing Info for Model {self.name}",
-                "payload": str(ex)
-            }
-            return self.error(reason=error, status=400)
+            error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
+            return self.error(response=error, status=400)
         except ValidationError as ex:
             error = {
                 "error": f"Unable to insert {self.name} info",
                 "payload": ex.payload,
             }
-            return self.error(reason=error, status=406)
+            return self.error(response=error, status=406)
         except StatementError as ex:
             # UniqueViolation, already exists:
             error = {
                 "error": f"Record already exists for {self.name}",
                 "payload": str(ex),
             }
-            return self.error(reason=error, status=412)
+            return self.error(response=error, status=412)
         except (TypeError, AttributeError, ValueError) as ex:
             error = {
                 "error": f"Invalid payload for {self.name}",
                 "payload": str(ex),
             }
-            return self.error(reason=error, status=406)
+            return self.error(response=error, status=406)
 
     async def patch(self):
         """Patch an existing Client or retrieve the column names."""
@@ -318,9 +286,7 @@ class ModelHandler(BaseView):
             except KeyError:
                 pass
         else:
-            return self.error(
-                reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410
-            )
+            return self.error(reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410)
         db = self.request.app["authdb"]
         if args:
             ## getting client
@@ -329,11 +295,8 @@ class ModelHandler(BaseView):
                 try:
                     result = await self.model.get(**args)
                 except ModelError as ex:
-                    error = {
-                        "error": f"Missing Info for Model {self.name}",
-                        "payload": str(ex)
-                    }
-                    return self.error(reason=error, status=400)
+                    error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
+                    return self.error(response=error, status=400)
                 except NoDataFound:
                     headers = {"x-error": f"{self.name} was not Found"}
                     return self.no_content(headers=headers)
@@ -378,9 +341,7 @@ class ModelHandler(BaseView):
             except KeyError:
                 pass
         else:
-            return self.error(
-                reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410
-            )
+            return self.error(reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410)
         db = self.request.app["authdb"]
         if args:
             async with await db.acquire() as conn:
@@ -398,17 +359,14 @@ class ModelHandler(BaseView):
                         result = await resultset.insert()
                         return self.json_response(result, status=201)
                     except ModelError as ex:
-                        error = {
-                            "error": f"Missing Info for Model {self.name}",
-                            "payload": str(ex)
-                        }
-                        return self.error(reason=error, status=400)
+                        error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
+                        return self.error(response=error, status=400)
                     except ValidationError as ex:
                         error = {
                             "error": f"Unable to insert {self.name} info",
                             "payload": ex.payload,
                         }
-                        return self.error(reason=error, status=406)
+                        return self.error(response=error, status=406)
                 ## saved with new changes:
                 for key, val in data.items():
                     if key in result.get_fields():
@@ -424,23 +382,20 @@ class ModelHandler(BaseView):
                     result = await resultset.insert()  # TODO: migrate to use save()
                     return self.json_response(result, status=201)
             except ModelError as ex:
-                error = {
-                    "error": f"Missing Info for Model {self.name}",
-                    "payload": str(ex)
-                }
-                return self.error(reason=error, status=400)
+                error = {"error": f"Missing Info for Model {self.name}", "payload": str(ex)}
+                return self.error(response=error, status=400)
             except ValidationError as ex:
                 error = {
                     "error": f"Unable to insert {self.name} info",
                     "payload": ex.payload,
                 }
-                return self.error(reason=error, status=406)
+                return self.error(response=error, status=406)
             except (TypeError, AttributeError, ValueError) as ex:
                 error = {
                     "error": f"Invalid payload for {self.name}",
                     "payload": str(ex),
                 }
-                return self.error(reason=error, status=406)
+                return self.error(response=error, status=406)
 
     async def delete(self):
         """Delete a Client."""
@@ -452,9 +407,7 @@ class ModelHandler(BaseView):
         except AuthException:
             data = None
         except (TypeError, ValueError):
-            self.error(
-                reason=f"Invalid {self.name} Data", status=406
-            )
+            self.error(reason=f"Invalid {self.name} Data", status=406)
         ## getting first the id from params or data:
         args = {}
         if isinstance(self.pk, str):
@@ -477,9 +430,7 @@ class ModelHandler(BaseView):
             except KeyError:
                 pass
         else:
-            return self.error(
-                reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410
-            )
+            return self.error(reason=f"Invalid PK definition for {self.name}: {self.pk}", status=410)
         db = self.request.app["authdb"]
         if args:
             async with await db.acquire() as conn:
