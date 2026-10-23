@@ -2,6 +2,7 @@
 
 The mixin is driven through a synthetic host so no handler is involved.
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,9 +12,7 @@ from aiohttp.test_utils import make_mocked_request
 from navigator_auth.abac.policies import Policy, PolicyEffect
 from navigator_auth.handlers.guards import OwnerOrSuperuserGuard
 
-pytestmark = pytest.mark.filterwarnings(
-    "ignore::aiohttp.web_exceptions.NotAppKeyWarning"
-)
+pytestmark = pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning")
 
 PUBLIC = frozenset({"identity_id", "user_id", "email", "auth_provider"})
 CREDENTIALS = frozenset({"access_token", "refresh_token", "id_token", "key_version"})
@@ -64,10 +63,13 @@ class Host(OwnerOrSuperuserGuard):
     def error(self, response=None, status=400, **kwargs):
         """Mirror BaseHandler.error(): RAISE, never return."""
         cls = {
-            400: web.HTTPBadRequest, 401: web.HTTPUnauthorized,
-            403: web.HTTPForbidden, 404: web.HTTPNotFound,
+            400: web.HTTPBadRequest,
+            401: web.HTTPUnauthorized,
+            403: web.HTTPForbidden,
+            404: web.HTTPNotFound,
         }.get(status, web.HTTPBadRequest)
         import json
+
         raise cls(text=json.dumps(response or {}), content_type="application/json")
 
 
@@ -102,8 +104,12 @@ class ExplodingPolicy:
 
 def _policy(actions=("identity:read", "identity:revoke", "identity:delete", "identity:refresh")):
     return Policy(
-        POLICY, description="d", effect=PolicyEffect.ALLOW,
-        actions=list(actions), groups=["superuser"], priority=1,
+        POLICY,
+        description="d",
+        effect=PolicyEffect.ALLOW,
+        actions=list(actions),
+        groups=["superuser"],
+        priority=1,
     )
 
 
@@ -196,8 +202,11 @@ class TestAuthorizeRow:
 
     @pytest.mark.asyncio
     async def test_owner_writes_no_audit_record(self):
-        with S(_session()), patch("navigator_auth.handlers.guards.AuditLog") as AL, \
-                patch("navigator_auth.handlers.guards.policy_allows") as pa:
+        with (
+            S(_session()),
+            patch("navigator_auth.handlers.guards.AuditLog") as AL,
+            patch("navigator_auth.handlers.guards.policy_allows") as pa,
+        ):
             await Host(_request()).authorize_row("identity:read", 42)
         AL.assert_not_called()
         pa.assert_not_called()
@@ -217,9 +226,7 @@ class TestAuthorizeRow:
     async def test_foreign_row_refused_404_when_asked(self):
         with S(_session()), patch("navigator_auth.handlers.guards.AuditLog"):
             with pytest.raises(web.HTTPNotFound):
-                await Host(_request()).authorize_row(
-                    "identity:read", 7, not_found_on_deny=True
-                )
+                await Host(_request()).authorize_row("identity:read", 7, not_found_on_deny=True)
 
     @pytest.mark.asyncio
     async def test_deny_body_leaks_no_row_data(self):
@@ -304,9 +311,7 @@ class TestSanitizeQuery:
     @pytest.mark.asyncio
     async def test_fields_intersected_with_allowlist(self):
         with S(_session()):
-            _, fields = await Host(_request()).sanitize_query(
-                {}, ["access_token", "email"]
-            )
+            _, fields = await Host(_request()).sanitize_query({}, ["access_token", "email"])
         assert fields == ["email"]
 
     @pytest.mark.asyncio
@@ -330,9 +335,7 @@ class TestSanitizeQuery:
     async def test_credential_qp_key_dropped_for_everyone(self):
         for groups in (["users"], ["superuser"]):
             with S(_session(groups=groups)):
-                qp, _ = await Host(_request()).sanitize_query(
-                    {"access_token": "x", "email": "e"}, None
-                )
+                qp, _ = await Host(_request()).sanitize_query({"access_token": "x", "email": "e"}, None)
             assert qp == {"email": "e"}
 
 

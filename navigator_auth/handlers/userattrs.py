@@ -1,20 +1,12 @@
 from datetime import datetime, timezone
 from typing import Any
 from aiohttp import web
-from asyncdb.exceptions import (
-    NoDataFound
-)
+from asyncdb.exceptions import NoDataFound
 from asyncdb.exceptions import DriverError
-from navigator_session import (
-    get_session,
-    AUTH_SESSION_OBJECT
-)
-from ..models import (
-    UserAccount, UserIdentity, VwUserIdentity
-)
-from ..conf import (
-    AUTH_USER_IDENTITY_MODEL
-)
+from navigator_session import get_session, AUTH_SESSION_OBJECT
+from ..models import UserAccount, UserIdentity, VwUserIdentity
+from ..conf import AUTH_USER_IDENTITY_MODEL
+
 # from .model import ModelHandler
 from .handler import ModelHandler
 from .guards import OwnerOrSuperuserGuard
@@ -29,19 +21,16 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
     projection is a plain allowlist.
     """
 
-    model: Any = UserAccount                    # verified: navigator_auth/models.py:297
+    model: Any = UserAccount  # verified: navigator_auth/models.py:297
     name: str = "User Account"
     pk: str = "account_id"
 
     owner_column: str = "user_id"
     #: No token material on this model — see spec §2 Data Models.
     credential_columns = frozenset()
-    public_columns = frozenset({
-        "account_id", "user_id", "provider", "uid", "address", "account",
-        "created_at"})
+    public_columns = frozenset({"account_id", "user_id", "provider", "uid", "address", "account", "created_at"})
     policy_name: str = "user_accounts_admin_access"
-    superuser_actions = frozenset({
-        "account:read", "account:revoke", "account:delete"})
+    superuser_actions = frozenset({"account:read", "account:revoke", "account:delete"})
 
     # Per-subclass copies (see UserIdentityHandler). Never RELY on _hidden:
     # no column on UserAccount declares secret=True.
@@ -51,31 +40,24 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
     #: G9: the provider is bound as $1, never interpolated. The previous form
     #: inlined it inside a quoted literal, so a provider of ``x' OR 1=1 --``
     #: rewrote the statement.
-    social_network: str = (
-        "SELECT social_url FROM auth.social_networks "
-        "WHERE social_network = $1"
-    )
+    social_network: str = "SELECT social_url FROM auth.social_networks " "WHERE social_network = $1"
 
     async def _set_user_id(self, value, column, data):
         return await self.get_userid(session=self._session)
 
     async def _set_address(self, value, column, data):
         try:
-            userid = data['uid']
+            userid = data["uid"]
         except KeyError:
-            return self.error(
-                reason=f"Invalid User ID for {self.name}", status=410
-            )
+            return self.error(reason=f"Invalid User ID for {self.name}", status=410)
         try:
-            provider = data['provider']
+            provider = data["provider"]
         except KeyError:
             provider = None
         if provider:
             try:
                 async with await self.handler(request=self.request) as conn:
-                    result = await conn.fetchval(
-                        self.social_network, provider, column='social_url'
-                    )
+                    result = await conn.fetchval(self.social_network, provider, column="social_url")
                     if result:
                         return result.format(uid=userid)
             except DriverError:
@@ -145,13 +127,8 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
                 self.error(response={"error": "Not Found"}, status=404)
             if widen:
                 for row in rows:
-                    owner = (
-                        row.get(owner_col) if isinstance(row, dict)
-                        else getattr(row, owner_col, None)
-                    )
-                    await self.authorize_row(
-                        "account:read", owner, not_found_on_deny=True
-                    )
+                    owner = row.get(owner_col) if isinstance(row, dict) else getattr(row, owner_col, None)
+                    await self.authorize_row("account:read", owner, not_found_on_deny=True)
         return result
 
     async def _pre_write(self) -> bool:
@@ -234,8 +211,7 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
         if owner_id is None or str(owner_id) != str(user_id):
             if is_superuser:
                 await self.audit_decision(
-                    "account:revoke", False, owner_id,
-                    "cross-user write: user_accounts has no revocation column"
+                    "account:revoke", False, owner_id, "cross-user write: user_accounts has no revocation column"
                 )
                 self.error(response={"error": "Forbidden"}, status=403)
             await self.authorize_row("account:revoke", owner_id)
@@ -261,9 +237,7 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
         except Exception:  # noqa: BLE001 - missing/invalid id => no owner
             row = None
         owner_id = getattr(row, self.owner_column, None) if row else None
-        await self.authorize_row(
-            "account:delete", owner_id, not_found_on_deny=True
-        )
+        await self.authorize_row("account:delete", owner_id, not_found_on_deny=True)
         return objid
 
     def _scrub(self, result: Any) -> Any:
@@ -286,15 +260,11 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
 
     async def _post_response(self, result, status: int = 200, fields: list = None):
         """Project the POST response body."""
-        return await super()._post_response(
-            self._scrub(result), status=status, fields=None
-        )
+        return await super()._post_response(self._scrub(result), status=status, fields=None)
 
     async def _put_response(self, result, status: int = 200, fields: list = None):
         """Project the PUT response body."""
-        return await super()._put_response(
-            self._scrub(result), status=status, fields=None
-        )
+        return await super()._put_response(self._scrub(result), status=status, fields=None)
 
     async def _delete_response(self, result, status: int = 200):
         """Project the DELETE response body."""
@@ -315,14 +285,10 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
         row (and any column added to the model later).
         """
         if not response:
-            return await super()._model_response(
-                response, fields=None, headers=headers, status=status
-            )
+            return await super()._model_response(response, fields=None, headers=headers, status=status)
         safe = safe_fields(fields, self.public_columns)
         redacted = redact_rows(response, self.public_columns, safe)
-        return await super()._model_response(
-            redacted, fields=None, headers=headers, status=status
-        )
+        return await super()._model_response(redacted, fields=None, headers=headers, status=status)
 
     async def _get_meta_info(self, meta: str, fields: list):
         """Serve ``:meta`` / ``:sample`` / ``:info`` bounded to ``public_columns``.
@@ -383,30 +349,55 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
     ``credential_columns`` and the redaction in ``_model_response``.
     """
 
-    model: Any = UserIdentity                   # verified: navigator_auth/models.py:77
+    model: Any = UserIdentity  # verified: navigator_auth/models.py:77
     model_name: str = AUTH_USER_IDENTITY_MODEL  # verified: navigator_auth/conf.py:150
     name: str = "User Identity"
     pk: str = "identity_id"
 
     owner_column: str = "user_id"
-    credential_columns = frozenset({
-        "access_token", "refresh_token", "id_token", "key_version"})
-    public_columns = frozenset({
-        "identity_id", "user_id", "display_name", "title", "nickname",
-        "email", "phone", "short_bio", "avatar", "auth_provider",
-        "provider_user_id", "scopes", "token_type", "expires_at",
-        "refreshed_at", "created_at", "enabled", "auth_data", "attributes"})
+    credential_columns = frozenset({"access_token", "refresh_token", "id_token", "key_version"})
+    public_columns = frozenset(
+        {
+            "identity_id",
+            "user_id",
+            "display_name",
+            "title",
+            "nickname",
+            "email",
+            "phone",
+            "short_bio",
+            "avatar",
+            "auth_provider",
+            "provider_user_id",
+            "scopes",
+            "token_type",
+            "expires_at",
+            "refreshed_at",
+            "created_at",
+            "enabled",
+            "auth_data",
+            "attributes",
+        }
+    )
     policy_name: str = "user_identities_admin_access"
-    superuser_actions = frozenset({
-        "identity:read", "identity:revoke", "identity:delete"})
+    superuser_actions = frozenset({"identity:read", "identity:revoke", "identity:delete"})
 
     #: Vault-managed columns: never writable through the model surface. The
     #: only legitimate writer is IdentityStore.update_tokens
     #: (verified: navigator_auth/identity/store.py:409). Enforced in TASK-124.
-    readonly_columns = frozenset({
-        "access_token", "refresh_token", "id_token", "key_version",
-        "provider_user_id", "token_type", "expires_at", "refreshed_at",
-        "scopes"})
+    readonly_columns = frozenset(
+        {
+            "access_token",
+            "refresh_token",
+            "id_token",
+            "key_version",
+            "provider_user_id",
+            "token_type",
+            "expires_at",
+            "refreshed_at",
+            "scopes",
+        }
+    )
 
     # Per-subclass copies. Harmless on navigator-api 4.0.1 (which already
     # keeps them per instance and derives _hidden from secret=True) and
@@ -491,13 +482,8 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
         if is_superuser:
             if primary is not None:
                 widen = True  # authorized against the fetched row below
-            elif (
-                owner_col in qp
-                and str(qp[owner_col]) != str(user_id)
-            ):
-                await self.authorize_row(
-                    "identity:read", owner_id=qp[owner_col]
-                )
+            elif owner_col in qp and str(qp[owner_col]) != str(user_id):
+                await self.authorize_row("identity:read", owner_id=qp[owner_col])
                 widen = True
         if not widen:
             qp = {k: v for k, v in qp.items() if k != owner_col}
@@ -519,13 +505,8 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
                 self.error(response={"error": "Not Found"}, status=404)
             if widen:
                 for row in rows:
-                    owner = (
-                        row.get(owner_col) if isinstance(row, dict)
-                        else getattr(row, owner_col, None)
-                    )
-                    await self.authorize_row(
-                        "identity:read", owner, not_found_on_deny=True
-                    )
+                    owner = row.get(owner_col) if isinstance(row, dict) else getattr(row, owner_col, None)
+                    await self.authorize_row("identity:read", owner, not_found_on_deny=True)
         return result
 
     # ------------------------------------------------------------------
@@ -592,20 +573,21 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
             web.HTTPBadRequest: a ``readonly_columns`` member is present.
         """
         elements = data if isinstance(data, list) else [data]
-        refused = sorted({
-            key
-            for element in elements if isinstance(element, dict)
-            for key in element if key in self.readonly_columns
-        })
+        refused = sorted(
+            {
+                key
+                for element in elements
+                if isinstance(element, dict)
+                for key in element
+                if key in self.readonly_columns
+            }
+        )
         if refused:
             self.error(
                 response={
                     "error": "Vault-managed columns cannot be written here",
                     "columns": refused,
-                    "hint": (
-                        "Tokens are managed by IdentityStore.update_tokens "
-                        "(/api/v1/user/identities/...)."
-                    ),
+                    "hint": ("Tokens are managed by IdentityStore.update_tokens " "(/api/v1/user/identities/...)."),
                 },
                 status=400,
             )
@@ -651,9 +633,7 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
             # authorized again against the fetched row in _set_update).
             extra = set(element) - {owner_col, self.pk, "enabled"}
             is_revoke = (
-                is_superuser and not extra
-                and element.get("enabled") is False
-                and element.get(self.pk) is not None
+                is_superuser and not extra and element.get("enabled") is False and element.get(self.pk) is not None
             )
             if not is_revoke:
                 self.error(response={"error": "Forbidden"}, status=403)
@@ -695,8 +675,7 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
                 extra = set(data) - {owner_col, self.pk, "enabled"}
                 if extra or data.get("enabled") is not False:
                     await self.audit_decision(
-                        "identity:revoke", False, owner_id,
-                        "cross-user write outside the revoke envelope"
+                        "identity:revoke", False, owner_id, "cross-user write outside the revoke envelope"
                     )
                     self.error(response={"error": "Forbidden"}, status=403)
             await self.authorize_row("identity:revoke", owner_id)
@@ -736,9 +715,7 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
         except Exception:  # noqa: BLE001 - missing/invalid id => no owner
             row = None
         owner_id = getattr(row, self.owner_column, None) if row else None
-        await self.authorize_row(
-            "identity:delete", owner_id, not_found_on_deny=True
-        )
+        await self.authorize_row("identity:delete", owner_id, not_found_on_deny=True)
         return objid
 
     # ------------------------------------------------------------------
@@ -771,10 +748,7 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
         expires_at = out.get("expires_at")
         expired = False
         if isinstance(expires_at, datetime):
-            aware = (
-                expires_at.replace(tzinfo=timezone.utc)
-                if expires_at.tzinfo is None else expires_at
-            )
+            aware = expires_at.replace(tzinfo=timezone.utc) if expires_at.tzinfo is None else expires_at
             expired = aware <= datetime.now(timezone.utc)
         out["expired"] = expired
         if out.get("identity_id") is not None:
@@ -814,21 +788,15 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
             The upstream response, built from redacted rows.
         """
         if not response:
-            return await super()._model_response(
-                response, fields=None, headers=headers, status=status
-            )
+            return await super()._model_response(response, fields=None, headers=headers, status=status)
         safe = safe_fields(fields, self.public_columns)
         redacted = redact_rows(response, self.public_columns, safe)
         if safe is None:
             if isinstance(response, (list, tuple)):
-                redacted = [
-                    self._masked_shape(r, o) for r, o in zip(redacted, response)
-                ]
+                redacted = [self._masked_shape(r, o) for r, o in zip(redacted, response)]
             else:
                 redacted = self._masked_shape(redacted, response)
-        return await super()._model_response(
-            redacted, fields=None, headers=headers, status=status
-        )
+        return await super()._model_response(redacted, fields=None, headers=headers, status=status)
 
     def _scrub(self, result: Any) -> Any:
         """Redact the body of a write/delete response.
@@ -857,15 +825,11 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
 
     async def _post_response(self, result, status: int = 200, fields: list = None):
         """Redact the POST response body."""
-        return await super()._post_response(
-            self._scrub(result), status=status, fields=None
-        )
+        return await super()._post_response(self._scrub(result), status=status, fields=None)
 
     async def _put_response(self, result, status: int = 200, fields: list = None):
         """Redact the PUT response body."""
-        return await super()._put_response(
-            self._scrub(result), status=status, fields=None
-        )
+        return await super()._put_response(self._scrub(result), status=status, fields=None)
 
     async def _delete_response(self, result, status: int = 200):
         """Redact the DELETE response body."""
@@ -889,17 +853,12 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
         """
         if meta == ":meta":
             # redact_schema copies: schema(as_dict=True) is a cached, shared dict.
-            schema = redact_schema(
-                self.get_model.schema(as_dict=True), self.credential_columns
-            )
+            schema = redact_schema(self.get_model.schema(as_dict=True), self.credential_columns)
             return self.json_response(schema)
         if meta == ":sample":
             sample = self.get_model.sample()
             if isinstance(sample, dict):
-                sample = {
-                    k: v for k, v in sample.items()
-                    if k not in self.credential_columns
-                }
+                sample = {k: v for k, v in sample.items() if k not in self.credential_columns}
             return self.json_response(sample)
         if meta == ":info":
             info = {}
@@ -921,9 +880,7 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
         any role, and a HEAD response's headers are a response.
         """
         response = await super().head()
-        schema = redact_schema(
-            self.get_model.schema(as_dict=True), self.credential_columns
-        )
+        schema = redact_schema(self.get_model.schema(as_dict=True), self.credential_columns)
         response.headers["X-Columns"] = f"{list(schema['properties'])!r}"
         return response
 

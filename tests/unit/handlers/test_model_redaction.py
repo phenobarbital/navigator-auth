@@ -1,4 +1,5 @@
 """Unit tests for the allowlist redaction primitives (FEAT-105, TASK-118)."""
+
 from navigator_auth.handlers.redaction import (
     redact_row,
     redact_rows,
@@ -6,15 +7,37 @@ from navigator_auth.handlers.redaction import (
     safe_fields,
 )
 
-IDENTITY_PUBLIC = frozenset({
-    "identity_id", "user_id", "display_name", "title", "nickname", "email",
-    "phone", "short_bio", "avatar", "auth_provider", "provider_user_id",
-    "scopes", "token_type", "expires_at", "refreshed_at", "created_at",
-    "enabled", "auth_data", "attributes",
-})
-IDENTITY_CREDENTIALS = frozenset({
-    "access_token", "refresh_token", "id_token", "key_version",
-})
+IDENTITY_PUBLIC = frozenset(
+    {
+        "identity_id",
+        "user_id",
+        "display_name",
+        "title",
+        "nickname",
+        "email",
+        "phone",
+        "short_bio",
+        "avatar",
+        "auth_provider",
+        "provider_user_id",
+        "scopes",
+        "token_type",
+        "expires_at",
+        "refreshed_at",
+        "created_at",
+        "enabled",
+        "auth_data",
+        "attributes",
+    }
+)
+IDENTITY_CREDENTIALS = frozenset(
+    {
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "key_version",
+    }
+)
 
 
 class _Row:
@@ -83,17 +106,18 @@ class TestRedactRows:
 class TestRedactSchema:
     def test_strips_credential_columns(self):
         from navigator_auth.models import UserIdentity
+
         out = redact_schema(UserIdentity.schema(as_dict=True), IDENTITY_CREDENTIALS)
         assert not (set(out["properties"]) & IDENTITY_CREDENTIALS)
         assert "email" in out["properties"]
 
     def test_strips_credentials_from_required(self):
-        schema = {"properties": {"a": {}, "access_token": {}},
-                  "required": ["a", "access_token"]}
+        schema = {"properties": {"a": {}, "access_token": {}}, "required": ["a", "access_token"]}
         assert redact_schema(schema, IDENTITY_CREDENTIALS)["required"] == ["a"]
 
     def test_does_not_mutate_the_cached_schema(self):
         from navigator_auth.models import UserIdentity
+
         redact_schema(UserIdentity.schema(as_dict=True), IDENTITY_CREDENTIALS)
         assert "access_token" in UserIdentity.schema(as_dict=True)["properties"]
 

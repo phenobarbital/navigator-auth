@@ -10,6 +10,7 @@ matching ``web.HTTPException`` (verified: navigator/views/base.py:201-243), so
 a deny reaches the client with its own status. Returning a falsy value from a
 ``_pre_*`` hook would instead produce a fixed 412 (navigator/views/model.py:553).
 """
+
 import logging
 from typing import Any, Optional
 
@@ -137,32 +138,23 @@ class OwnerOrSuperuserGuard:
             web.HTTPUnauthorized: no session.
         """
         user_id, is_superuser = await self.acting_user()
-        if (
-            self.owner_column is not None
-            and owner_id is not None
-            and str(owner_id) == str(user_id)
-        ):
+        if self.owner_column is not None and owner_id is not None and str(owner_id) == str(user_id):
             return True
         if not is_superuser:
             await self.audit_decision(
-                action, False, owner_id, f"user {user_id} is not the owner "
-                "and not a superuser"
+                action, False, owner_id, f"user {user_id} is not the owner " "and not a superuser"
             )
             self._refuse(not_found_on_deny)
         if action not in self.superuser_actions:
-            await self.audit_decision(
-                action, False, owner_id,
-                f"action '{action}' is outside superuser_actions"
-            )
+            await self.audit_decision(action, False, owner_id, f"action '{action}' is outside superuser_actions")
             self._refuse(not_found_on_deny)
         if not self.policy_name:
-            await self.audit_decision(
-                action, False, owner_id,
-                "handler has no policy_name: cross-user access disabled"
-            )
+            await self.audit_decision(action, False, owner_id, "handler has no policy_name: cross-user access disabled")
             self._refuse(not_found_on_deny)
         allowed, reason, _ = await policy_allows(
-            self.policy_name, self.request, action=action,
+            self.policy_name,
+            self.request,
+            action=action,
             resource=self.request.path,
         )
         await self.audit_decision(action, bool(allowed), owner_id, reason)
@@ -249,17 +241,12 @@ class OwnerOrSuperuserGuard:
         # public_columns FIRST, one message for both failures: no oracle.
         if column not in self.public_columns or column not in model.get_columns():
             self.error(response={"error": _BAD_FILTER}, status=400)
-        cols = [
-            c for c in sorted(self.public_columns) if c in model.get_columns()
-        ]
+        cols = [c for c in sorted(self.public_columns) if c in model.get_columns()]
         selected = ", ".join(f'"{c}"' for c in cols)
         table = model.Meta.name
         schema = getattr(model.Meta, "schema", None)
         qualified = f'"{schema}"."{table}"' if schema else f'"{table}"'
-        sql = (
-            f'SELECT {selected} FROM {qualified} '
-            f'WHERE "{column}"::text LIKE $1'
-        )
+        sql = f"SELECT {selected} FROM {qualified} " f'WHERE "{column}"::text LIKE $1'
         args: list = [f"{value}%"]
         if not is_superuser and self.owner_column:
             sql += f' AND "{self.owner_column}" = $2'
@@ -267,9 +254,7 @@ class OwnerOrSuperuserGuard:
         async with await self.handler(request=self.request) as conn:
             rows = await conn.fetch_all(sql, *args)
         if is_superuser:
-            await self.audit_decision(
-                "read", True, None, f"superuser filter on '{column}'"
-            )
+            await self.audit_decision("read", True, None, f"superuser filter on '{column}'")
         return [dict(r) for r in (rows or [])]
 
     # ------------------------------------------------------------------
@@ -312,8 +297,6 @@ class OwnerOrSuperuserGuard:
             app = self.request.app
             pdp = app.get("abac") or getattr(app.get("security"), "pdp", None)
             auditlog = getattr(pdp, "_auditlog", None) or AuditLog()
-            await auditlog.log(
-                answer, "ALLOW" if allowed else "DENY", user or actor
-            )
+            await auditlog.log(answer, "ALLOW" if allowed else "DENY", user or actor)
         except Exception as exc:  # noqa: BLE001 - audit must never break a request
             logger.warning("Error saving guard audit record: %s", exc)

@@ -3,6 +3,7 @@
 This handler sits on the LOCAL handlers/model.py base, which has no _pre_*
 hooks — so these tests drive the VERBS.
 """
+
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,16 +16,23 @@ from navigator_auth.abac.policies import Policy, PolicyEffect
 from navigator_auth.handlers.model import ModelHandler as LocalBase
 from navigator_auth.handlers.partners import PartnerKey, PartnerKeyHandler
 
-pytestmark = pytest.mark.filterwarnings(
-    "ignore::aiohttp.web_exceptions.NotAppKeyWarning"
-)
+pytestmark = pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning")
 
 SENTINEL_JWT = "eyJhbGciOiJIUzI1NiJ9.SENTINEL.signature"
 POLICY = "partner_keys_admin_access"
-PUBLIC = frozenset({
-    "partner_id", "name", "partner", "issuer", "created_at", "revoked",
-    "enabled", "grants", "programs",
-})
+PUBLIC = frozenset(
+    {
+        "partner_id",
+        "name",
+        "partner",
+        "issuer",
+        "created_at",
+        "revoked",
+        "enabled",
+        "grants",
+        "programs",
+    }
+)
 VERBS = ["get", "put", "patch", "post", "delete", "head"]
 
 
@@ -34,17 +42,14 @@ class FakeSession(dict):
 
 
 def _session(user_id=7, groups=("users",)):
-    return FakeSession({"session": {
-        "user_id": user_id, "username": "u", "groups": list(groups)}})
+    return FakeSession({"session": {"user_id": user_id, "username": "u", "groups": list(groups)}})
 
 
 class _Patches:
     def __init__(self, session):
         self.ps = [
-            patch("navigator_auth.decorators.get_session",
-                  new=AsyncMock(return_value=session)),
-            patch("navigator_auth.handlers.guards.get_session",
-                  new=AsyncMock(return_value=session)),
+            patch("navigator_auth.decorators.get_session", new=AsyncMock(return_value=session)),
+            patch("navigator_auth.handlers.guards.get_session", new=AsyncMock(return_value=session)),
         ]
 
     def __enter__(self):
@@ -85,9 +90,12 @@ def _permissive_pdp():
     audit = MagicMock()
     audit.log = AsyncMock()
     pol = Policy(
-        POLICY, description="d", effect=PolicyEffect.ALLOW,
+        POLICY,
+        description="d",
+        effect=PolicyEffect.ALLOW,
         actions=["partner:read", "partner:create", "partner:revoke", "partner:delete"],
-        groups=["superuser"], priority=1,
+        groups=["superuser"],
+        priority=1,
     )
     return FakePDP([pol], audit), audit
 
@@ -109,9 +117,16 @@ def _handler(pdp=None, meta=None):
 
 def _partner_row(token=SENTINEL_JWT):
     return {
-        "partner_id": "p1", "name": "n", "partner": "x", "issuer": "navigator",
-        "token": token, "created_at": None, "revoked": False, "enabled": True,
-        "grants": {}, "programs": [],
+        "partner_id": "p1",
+        "name": "n",
+        "partner": "x",
+        "issuer": "navigator",
+        "token": token,
+        "created_at": None,
+        "revoked": False,
+        "enabled": True,
+        "grants": {},
+        "programs": [],
     }
 
 
@@ -120,14 +135,13 @@ def _su():
 
 
 def _json_resp(payload, status=200):
-    return web.Response(
-        text=json.dumps(payload), status=status, content_type="application/json"
-    )
+    return web.Response(text=json.dumps(payload), status=status, content_type="application/json")
 
 
 class TestConfiguration:
     def test_guard_precedes_the_base_in_the_mro(self):
         from navigator_auth.handlers.guards import OwnerOrSuperuserGuard
+
         mro = PartnerKeyHandler.__mro__
         assert mro.index(OwnerOrSuperuserGuard) < mro.index(LocalBase)
 
@@ -141,7 +155,8 @@ class TestConfiguration:
     def test_policy_name_and_four_actions_match_the_pack(self):
         assert PartnerKeyHandler.policy_name == POLICY
         assert PartnerKeyHandler.superuser_actions == frozenset(
-            {"partner:read", "partner:create", "partner:revoke", "partner:delete"})
+            {"partner:read", "partner:create", "partner:revoke", "partner:delete"}
+        )
 
     def test_partner_pk_is_list(self):
         assert PartnerKeyHandler.pk == ["partner_id"]
@@ -184,8 +199,9 @@ class TestSuperuserOnly:
         for verb, status in [("get", 200), ("delete", 202), ("patch", 202)]:
             pdp, audit = _permissive_pdp()
             h = _handler(pdp)
-            with _patch_sessions(_su()), patch.object(
-                LocalBase, verb, new=AsyncMock(return_value=_json_resp({}, status))
+            with (
+                _patch_sessions(_su()),
+                patch.object(LocalBase, verb, new=AsyncMock(return_value=_json_resp({}, status))),
             ):
                 await getattr(h, verb)()
             audit.log.assert_awaited_once()
@@ -237,9 +253,13 @@ class TestTokenRedaction:
     @pytest.mark.asyncio
     async def test_head_x_columns_has_no_token(self):
         pdp, _ = _permissive_pdp()
-        with _patch_sessions(_su()), patch.object(
-            LocalBase, "head",
-            new=AsyncMock(return_value=web.Response(headers={"X-Columns": "all"})),
+        with (
+            _patch_sessions(_su()),
+            patch.object(
+                LocalBase,
+                "head",
+                new=AsyncMock(return_value=web.Response(headers={"X-Columns": "all"})),
+            ),
         ):
             resp = await _handler(pdp).head()
         assert "token" not in resp.headers["X-Columns"]
@@ -248,9 +268,13 @@ class TestTokenRedaction:
     @pytest.mark.asyncio
     async def test_delete_response_has_no_token(self):
         pdp, _ = _permissive_pdp()
-        with _patch_sessions(_su()), patch.object(
-            LocalBase, "delete",
-            new=AsyncMock(return_value=_json_resp(_partner_row(), 202)),
+        with (
+            _patch_sessions(_su()),
+            patch.object(
+                LocalBase,
+                "delete",
+                new=AsyncMock(return_value=_json_resp(_partner_row(), 202)),
+            ),
         ):
             resp = await _handler(pdp).delete()
         assert resp.status == 202 and SENTINEL_JWT not in resp.text
@@ -274,9 +298,13 @@ class TestReturnOnceToken:
     @pytest.mark.asyncio
     async def test_put_create_returns_the_token(self):
         pdp, _ = _permissive_pdp()
-        with _patch_sessions(_su()), patch.object(
-            LocalBase, "put",
-            new=AsyncMock(return_value=_json_resp(_partner_row(), 201)),
+        with (
+            _patch_sessions(_su()),
+            patch.object(
+                LocalBase,
+                "put",
+                new=AsyncMock(return_value=_json_resp(_partner_row(), 201)),
+            ),
         ):
             resp = await _handler(pdp).put()
         assert resp.status == 201 and SENTINEL_JWT in resp.text
@@ -284,9 +312,13 @@ class TestReturnOnceToken:
     @pytest.mark.asyncio
     async def test_post_that_creates_returns_the_token(self):
         pdp, _ = _permissive_pdp()
-        with _patch_sessions(_su()), patch.object(
-            LocalBase, "post",
-            new=AsyncMock(return_value=_json_resp(_partner_row(), 201)),
+        with (
+            _patch_sessions(_su()),
+            patch.object(
+                LocalBase,
+                "post",
+                new=AsyncMock(return_value=_json_resp(_partner_row(), 201)),
+            ),
         ):
             resp = await _handler(pdp).post()
         assert SENTINEL_JWT in resp.text
@@ -294,9 +326,13 @@ class TestReturnOnceToken:
     @pytest.mark.asyncio
     async def test_post_that_updates_does_not_echo_the_token(self):
         pdp, _ = _permissive_pdp()
-        with _patch_sessions(_su()), patch.object(
-            LocalBase, "post",
-            new=AsyncMock(return_value=_json_resp(_partner_row(), 202)),
+        with (
+            _patch_sessions(_su()),
+            patch.object(
+                LocalBase,
+                "post",
+                new=AsyncMock(return_value=_json_resp(_partner_row(), 202)),
+            ),
         ):
             resp = await _handler(pdp).post()
         assert resp.status == 202 and SENTINEL_JWT not in resp.text
@@ -305,13 +341,18 @@ class TestReturnOnceToken:
     async def test_post_requires_create_and_revoke(self):
         audit = MagicMock(log=AsyncMock())
         pol = Policy(
-            POLICY, description="d", effect=PolicyEffect.ALLOW,
-            actions=["partner:create"], groups=["superuser"], priority=1,
+            POLICY,
+            description="d",
+            effect=PolicyEffect.ALLOW,
+            actions=["partner:create"],
+            groups=["superuser"],
+            priority=1,
         )
         h = _handler(FakePDP([pol], audit))
-        with _patch_sessions(_su()), patch.object(
-            LocalBase, "post", new=AsyncMock(return_value=_json_resp({}, 201))
-        ) as sup:
+        with (
+            _patch_sessions(_su()),
+            patch.object(LocalBase, "post", new=AsyncMock(return_value=_json_resp({}, 201))) as sup,
+        ):
             with pytest.raises(web.HTTPForbidden):
                 await h.post()
         sup.assert_not_awaited()
@@ -319,9 +360,13 @@ class TestReturnOnceToken:
     @pytest.mark.asyncio
     async def test_patch_does_not_echo_the_token(self):
         pdp, _ = _permissive_pdp()
-        with _patch_sessions(_su()), patch.object(
-            LocalBase, "patch",
-            new=AsyncMock(return_value=_json_resp(_partner_row(), 202)),
+        with (
+            _patch_sessions(_su()),
+            patch.object(
+                LocalBase,
+                "patch",
+                new=AsyncMock(return_value=_json_resp(_partner_row(), 202)),
+            ),
         ):
             resp = await _handler(pdp).patch()
         assert SENTINEL_JWT not in resp.text
@@ -330,9 +375,13 @@ class TestReturnOnceToken:
     async def test_created_token_is_not_readable_afterwards(self):
         pdp, _ = _permissive_pdp()
         h = _handler(pdp)
-        with _patch_sessions(_su()), patch.object(
-            LocalBase, "put",
-            new=AsyncMock(return_value=_json_resp(_partner_row(), 201)),
+        with (
+            _patch_sessions(_su()),
+            patch.object(
+                LocalBase,
+                "put",
+                new=AsyncMock(return_value=_json_resp(_partner_row(), 201)),
+            ),
         ):
             created = await h.put()
         assert SENTINEL_JWT in created.text

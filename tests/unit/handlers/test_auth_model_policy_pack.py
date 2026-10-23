@@ -4,6 +4,7 @@ Contract test between a YAML file and three handler classes: if either side
 renames a policy or an action, the superuser path silently dies, because
 ``policy_allows()`` fails closed on a policy it cannot find by name.
 """
+
 from pathlib import Path
 
 import pytest
@@ -20,13 +21,20 @@ PACK = (
 
 EXPECTED_ACTIONS = {
     "user_identities_admin_access": {
-        "identity:read", "identity:revoke", "identity:delete",
+        "identity:read",
+        "identity:revoke",
+        "identity:delete",
     },
     "user_accounts_admin_access": {
-        "account:read", "account:revoke", "account:delete",
+        "account:read",
+        "account:revoke",
+        "account:delete",
     },
     "partner_keys_admin_access": {
-        "partner:read", "partner:create", "partner:revoke", "partner:delete",
+        "partner:read",
+        "partner:create",
+        "partner:revoke",
+        "partner:delete",
     },
 }
 EXPECTED_RESOURCE = {

@@ -4,6 +4,7 @@ Covers the fail-closed cases from spec §4: no PDP, a PDP without the named
 policy, a policy that raises while evaluating, and the allow path (a
 ``superuser``-group subject).
 """
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from aiohttp import web
@@ -12,9 +13,7 @@ from aiohttp.test_utils import make_mocked_request
 from navigator_auth.decorators import policy_allows
 from navigator_auth.abac.policies import Policy, PolicyEffect
 
-pytestmark = pytest.mark.filterwarnings(
-    "ignore::aiohttp.web_exceptions.NotAppKeyWarning"
-)
+pytestmark = pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning")
 
 POLICY = "user_identities_admin_access"
 
@@ -101,9 +100,7 @@ async def test_policy_allows_denies_undeclared_policy():
 async def test_policy_allows_denies_on_evaluation_error():
     request = _make_request(pdp=FakePDP([ExplodingPolicy()]))
     with _patch_session(_session(["superuser"])):
-        allowed, reason, _ = await policy_allows(
-            POLICY, request, action="identity:read"
-        )
+        allowed, reason, _ = await policy_allows(POLICY, request, action="identity:read")
     assert allowed is False
     assert reason
 
@@ -112,9 +109,7 @@ async def test_policy_allows_denies_on_evaluation_error():
 async def test_policy_allows_grants_for_superuser_group():
     request = _make_request(pdp=FakePDP([_admin_policy()]))
     with _patch_session(_session(["superuser"])):
-        allowed, reason, response = await policy_allows(
-            POLICY, request, action="identity:read"
-        )
+        allowed, reason, response = await policy_allows(POLICY, request, action="identity:read")
     assert allowed is True
     assert response is not None
 

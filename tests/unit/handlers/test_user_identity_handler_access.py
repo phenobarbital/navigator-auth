@@ -2,6 +2,7 @@
 
 Response CONTENTS (redaction, :meta, _filter) are TASK-125's tests.
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,9 +13,7 @@ from datamodel.parsers.json import JSONContent
 from navigator_auth.abac.policies import Policy, PolicyEffect
 from navigator_auth.handlers.userattrs import UserIdentityHandler
 
-pytestmark = pytest.mark.filterwarnings(
-    "ignore::aiohttp.web_exceptions.NotAppKeyWarning"
-)
+pytestmark = pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning")
 
 OWNER_ID = 42
 OTHER_ID = 99
@@ -27,17 +26,14 @@ class FakeSession(dict):
 
 
 def _session(user_id=OWNER_ID, groups=("users",)):
-    return FakeSession({"session": {
-        "user_id": user_id, "username": "u", "groups": list(groups)}})
+    return FakeSession({"session": {"user_id": user_id, "username": "u", "groups": list(groups)}})
 
 
 class _Patches:
     def __init__(self, session):
         self.ps = [
-            patch("navigator_auth.decorators.get_session",
-                  new=AsyncMock(return_value=session)),
-            patch("navigator_auth.handlers.guards.get_session",
-                  new=AsyncMock(return_value=session)),
+            patch("navigator_auth.decorators.get_session", new=AsyncMock(return_value=session)),
+            patch("navigator_auth.handlers.guards.get_session", new=AsyncMock(return_value=session)),
         ]
 
     def __enter__(self):
@@ -66,8 +62,12 @@ class FakePDP:
 
 def _allow_policy():
     return Policy(
-        POLICY, description="d", effect=PolicyEffect.ALLOW,
-        actions=["identity:read"], groups=["superuser"], priority=1,
+        POLICY,
+        description="d",
+        effect=PolicyEffect.ALLOW,
+        actions=["identity:read"],
+        groups=["superuser"],
+        priority=1,
     )
 
 
@@ -111,8 +111,7 @@ class FakeConn:
         return False
 
 
-def _handler(path="/api/v1/user_identity/abc", query="", model=None,
-             pdp=None, match_info=None):
+def _handler(path="/api/v1/user_identity/abc", query="", model=None, pdp=None, match_info=None):
     app = {"auth": MagicMock(), "authdb": MagicMock(), "redis": MagicMock()}
     if pdp is not None:
         app["abac"] = pdp
@@ -251,6 +250,7 @@ class TestReadPathOwnership:
 class TestMetadataLists:
     def test_hidden_lists_are_per_subclass(self):
         from navigator.views import ModelView
+
         assert UserIdentityHandler._hidden is not ModelView._hidden
         assert UserIdentityHandler._required is not ModelView._required
         assert UserIdentityHandler._primaries is not ModelView._primaries
@@ -281,9 +281,12 @@ def _audit_pdp():
 
 def _allow_policy_all():
     return Policy(
-        POLICY, description="d", effect=PolicyEffect.ALLOW,
+        POLICY,
+        description="d",
+        effect=PolicyEffect.ALLOW,
         actions=["identity:read", "identity:revoke", "identity:delete"],
-        groups=["superuser"], priority=1,
+        groups=["superuser"],
+        priority=1,
     )
 
 
@@ -327,9 +330,7 @@ class TestReadonlyColumns:
     async def test_writable_column_still_accepted(self):
         h = _wh()
         h._reject_readonly({"display_name": "n"})
-        with _patch_sessions(_session()), patch(
-            "navigator.views.ModelView._set_update", new=AsyncMock()
-        ) as up:
+        with _patch_sessions(_session()), patch("navigator.views.ModelView._set_update", new=AsyncMock()) as up:
             await h._set_update(_Row(), {"display_name": "n"})
         up.assert_awaited_once()
 
@@ -338,9 +339,12 @@ class TestWriteOwnership:
     @pytest.mark.asyncio
     async def test_put_forces_owner(self):
         h = _wh(body={"email": "a@b"})
-        with _patch_sessions(_session()), patch(
-            "navigator.views.ModelView._post_data",
-            new=AsyncMock(return_value={"email": "a@b"}),
+        with (
+            _patch_sessions(_session()),
+            patch(
+                "navigator.views.ModelView._post_data",
+                new=AsyncMock(return_value={"email": "a@b"}),
+            ),
         ):
             data = await h._post_data()
         assert data["user_id"] == OWNER_ID
@@ -368,9 +372,7 @@ class TestWriteOwnership:
     @pytest.mark.asyncio
     async def test_owner_patch_needs_no_policy(self):
         h = _wh()
-        with _patch_sessions(_session()), patch(
-            "navigator.views.ModelView._set_update", new=AsyncMock()
-        ):
+        with _patch_sessions(_session()), patch("navigator.views.ModelView._set_update", new=AsyncMock()):
             await h._set_update(_Row(), {"display_name": "x"})
 
     @pytest.mark.asyncio
@@ -383,9 +385,7 @@ class TestWriteOwnership:
     async def test_patch_null_owner_is_dropped(self):
         h = _wh()
         data = {"display_name": "x", "user_id": None}
-        with _patch_sessions(_session()), patch(
-            "navigator.views.ModelView._set_update", new=AsyncMock()
-        ):
+        with _patch_sessions(_session()), patch("navigator.views.ModelView._set_update", new=AsyncMock()):
             await h._set_update(_Row(), data)
         assert "user_id" not in data
 
@@ -395,9 +395,10 @@ class TestSuperuserWriteEnvelope:
     async def test_superuser_may_revoke_a_foreign_row(self):
         pdp, audit = _audit_pdp()
         h = _wh(pdp=pdp)
-        with _patch_sessions(_session(groups=["superuser"])), patch(
-            "navigator.views.ModelView._set_update", new=AsyncMock()
-        ) as up:
+        with (
+            _patch_sessions(_session(groups=["superuser"])),
+            patch("navigator.views.ModelView._set_update", new=AsyncMock()) as up,
+        ):
             await h._set_update(_Row(OTHER_ID), {"enabled": False})
         up.assert_awaited_once()
         audit.log.assert_awaited_once()
@@ -413,13 +414,12 @@ class TestSuperuserWriteEnvelope:
     async def test_superuser_cannot_smuggle_a_column_alongside_the_revoke(self):
         pdp, _ = _audit_pdp()
         h = _wh(pdp=pdp)
-        with _patch_sessions(_session(groups=["superuser"])), patch(
-            "navigator.views.ModelView._set_update", new=AsyncMock()
-        ) as up:
+        with (
+            _patch_sessions(_session(groups=["superuser"])),
+            patch("navigator.views.ModelView._set_update", new=AsyncMock()) as up,
+        ):
             with pytest.raises(web.HTTPForbidden):
-                await h._set_update(
-                    _Row(OTHER_ID), {"enabled": False, "email": "a@x"}
-                )
+                await h._set_update(_Row(OTHER_ID), {"enabled": False, "email": "a@x"})
         up.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -441,6 +441,7 @@ class _DelModel(FakeModel):
         self.calls.append(("get", kw))
         if not self.rows:
             from asyncdb.exceptions import NoDataFound
+
             raise NoDataFound("none")
         return _Row(self.rows[0]["user_id"])
 
@@ -500,10 +501,17 @@ SENTINEL = b"SENTINEL-TOKEN-BYTES"
 
 def _full_row(owner=OWNER_ID):
     return {
-        "identity_id": "abc", "user_id": owner, "email": "e@x",
-        "auth_provider": "git", "auth_data": {"n": 1}, "scopes": ["s"],
-        "access_token": SENTINEL, "refresh_token": b"rt", "id_token": b"it",
-        "key_version": 3, "enabled": True,
+        "identity_id": "abc",
+        "user_id": owner,
+        "email": "e@x",
+        "auth_provider": "git",
+        "auth_data": {"n": 1},
+        "scopes": ["s"],
+        "access_token": SENTINEL,
+        "refresh_token": b"rt",
+        "id_token": b"it",
+        "key_version": 3,
+        "enabled": True,
     }
 
 
@@ -574,6 +582,7 @@ class TestMetaRedaction:
     @pytest.mark.asyncio
     async def test_meta_strips_credential_columns(self):
         from navigator_auth.models import UserIdentity
+
         h = _handler()
         h.get_model = UserIdentity
         resp = await h._get_meta_info(":meta", None)
@@ -592,6 +601,7 @@ class TestMetaRedaction:
     @pytest.mark.asyncio
     async def test_meta_does_not_mutate_the_cached_schema(self):
         from navigator_auth.models import UserIdentity
+
         h = _handler()
         h.get_model = UserIdentity
         await h._get_meta_info(":meta", None)
@@ -604,6 +614,7 @@ class TestMetaRedaction:
     @pytest.mark.asyncio
     async def test_head_x_columns_has_no_credentials(self):
         from navigator_auth.models import UserIdentity
+
         h = _handler()
         h.get_model = UserIdentity
         with patch(
@@ -617,8 +628,11 @@ class TestMetaRedaction:
 
 class _FilterModel(FakeModel):
     columns = {
-        "identity_id": None, "user_id": None, "email": None,
-        "auth_provider": None, "access_token": None,
+        "identity_id": None,
+        "user_id": None,
+        "email": None,
+        "auth_provider": None,
+        "access_token": None,
     }
 
 
@@ -667,9 +681,7 @@ class TestSafeFilterWiring:
         conn = _FConn()
         h = _fh(conn)
         cap = _Capture()
-        with _patch_sessions(_session()), patch(
-            "navigator.views.ModelView._model_response", new=cap
-        ):
+        with _patch_sessions(_session()), patch("navigator.views.ModelView._model_response", new=cap):
             await h._filtering({"_filter": "auth_provider=git"})
         assert not (set(cap.payload[0]) & set(CREDENTIALS))
 
@@ -682,8 +694,6 @@ class TestSafeFilterWiring:
         conn = _FConn()
         h = _fh(conn)
         boom = MagicMock(side_effect=AssertionError("upstream _filtering called"))
-        with _patch_sessions(_session()), patch(
-            "navigator.views.ModelView._filtering", new=boom
-        ):
+        with _patch_sessions(_session()), patch("navigator.views.ModelView._filtering", new=boom):
             await h._filtering({"_filter": "auth_provider=git"})
         boom.assert_not_called()

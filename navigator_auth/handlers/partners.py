@@ -4,27 +4,18 @@ from uuid import UUID
 from datetime import datetime
 import jwt
 from asyncdb.models import Model, Column
-from ..conf import (
-    AUTH_DB_SCHEMA,
-    AUTH_TOKEN_ISSUER,
-    AUTH_JWT_ALGORITHM,
-    AUTH_TOKEN_SECRET
-)
+from ..conf import AUTH_DB_SCHEMA, AUTH_TOKEN_ISSUER, AUTH_JWT_ALGORITHM, AUTH_TOKEN_SECRET
 from ..exceptions import ConfigError
 from .model import ModelHandler
 from .guards import OwnerOrSuperuserGuard
 from .redaction import redact_row, redact_rows, redact_schema, safe_fields
 
+
 class PartnerKey(Model):
-    partner_id: UUID = Column(
-        required=True,
-        primary_key=True,
-        db_default="auto",
-        repr=False
-    )
+    partner_id: UUID = Column(required=True, primary_key=True, db_default="auto", repr=False)
     name: str = Column(required=True)
     partner: str = Column(required=True)
-    issuer: str = Column(required=True, default='navigator')
+    issuer: str = Column(required=True, default="navigator")
     token: str = Column(required=True)
     created_at: datetime = Column(required=False, default=datetime.now)
     revoked: bool = Column(default=False)
@@ -33,7 +24,7 @@ class PartnerKey(Model):
     programs: list = Column(default_factory=list)
 
     class Meta:
-        name = 'partner_keys'
+        name = "partner_keys"
         schema = AUTH_DB_SCHEMA
         strict = True
         connection = None
@@ -51,46 +42,36 @@ class PartnerKeyHandler(OwnerOrSuperuserGuard, ModelHandler):
     top of each verb below, not through a pre-hook.
     """
 
-    model: Any = PartnerKey                     # verified: partners.py:15
+    model: Any = PartnerKey  # verified: partners.py:15
     name: str = "Partner Key Authentication"
-    pk: list[str] = ["partner_id"]              # NOTE: a list, not a str
+    pk: list[str] = ["partner_id"]  # NOTE: a list, not a str
 
     #: No owner column exists on PartnerKey -> the superuser path is the only
     #: path, for every verb (spec G8).
     owner_column: Optional[str] = None
     credential_columns = frozenset({"token"})
-    public_columns = frozenset({
-        "partner_id", "name", "partner", "issuer", "created_at", "revoked",
-        "enabled", "grants", "programs"})
+    public_columns = frozenset(
+        {"partner_id", "name", "partner", "issuer", "created_at", "revoked", "enabled", "grants", "programs"}
+    )
     policy_name: str = "partner_keys_admin_access"
-    superuser_actions = frozenset({
-        "partner:read", "partner:create", "partner:revoke", "partner:delete"})
+    superuser_actions = frozenset({"partner:read", "partner:create", "partner:revoke", "partner:delete"})
 
     async def _get_token(self, value, column, data):
         """
         Generate the Token using data.
         """
         try:
-            payload = {
-                'name': data['name'],
-                'partner': data['partner'],
-                'issuer': AUTH_TOKEN_ISSUER
-            }
+            payload = {"name": data["name"], "partner": data["partner"], "issuer": AUTH_TOKEN_ISSUER}
         except KeyError as exc:
-            raise ConfigError(
-                f"Invalid Data for Partner Token Creation: {exc}"
-            ) from exc
+            raise ConfigError(f"Invalid Data for Partner Token Creation: {exc}") from exc
         try:
             return jwt.encode(
                 payload=payload,
                 key=AUTH_TOKEN_SECRET,
                 algorithm=AUTH_JWT_ALGORITHM,
-
             )
         except Exception as exc:
-            raise RuntimeError(
-                f"Unable to generate Token: {exc}"
-            ) from exc
+            raise RuntimeError(f"Unable to generate Token: {exc}") from exc
 
     async def _require_superuser(self, action: str) -> None:
         """Refuse unless the caller is a policy-approved superuser.
@@ -129,9 +110,7 @@ class PartnerKeyHandler(OwnerOrSuperuserGuard, ModelHandler):
             payload = json.loads(body.decode() if isinstance(body, bytes) else body)
         except (AttributeError, TypeError, ValueError):
             return response
-        return self.json_response(
-            self._scrub(payload), status=response.status
-        )
+        return self.json_response(self._scrub(payload), status=response.status)
 
     def _meta_requested(self) -> bool:
         try:
@@ -143,9 +122,7 @@ class PartnerKeyHandler(OwnerOrSuperuserGuard, ModelHandler):
         """Superuser-only; ``X-Columns`` must not enumerate ``token``."""
         await self._require_superuser("partner:read")
         response = await super().head()
-        schema = redact_schema(
-            self.model.schema(as_dict=True), self.credential_columns
-        )
+        schema = redact_schema(self.model.schema(as_dict=True), self.credential_columns)
         response.headers["X-Columns"] = f"{list(schema['properties'])!r}"
         return response
 
@@ -158,9 +135,7 @@ class PartnerKeyHandler(OwnerOrSuperuserGuard, ModelHandler):
         await self._require_superuser("partner:read")
         if self._meta_requested():
             # redact_schema copies: schema(as_dict=True) is a cached dict.
-            schema = redact_schema(
-                self.model.schema(as_dict=True), self.credential_columns
-            )
+            schema = redact_schema(self.model.schema(as_dict=True), self.credential_columns)
             return self.json_response(schema)
         return await super().get()
 
@@ -180,9 +155,7 @@ class PartnerKeyHandler(OwnerOrSuperuserGuard, ModelHandler):
         # navigator-api (4.0.1) no longer accepts (its parameter is
         # ``response``), and its ``fields`` branch reads from the wrong
         # variable. The positional call works on both.
-        return self.json_response(
-            redact_rows(result, self.public_columns, safe)
-        )
+        return self.json_response(redact_rows(result, self.public_columns, safe))
 
     async def put(self):
         """Superuser-only create; the 201 carries ``token`` ONCE.
@@ -203,10 +176,7 @@ class PartnerKeyHandler(OwnerOrSuperuserGuard, ModelHandler):
         if self._meta_requested():
             fields = self.model.__fields__
             if isinstance(fields, dict):
-                fields = {
-                    k: v for k, v in fields.items()
-                    if k not in self.credential_columns
-                }
+                fields = {k: v for k, v in fields.items() if k not in self.credential_columns}
             else:
                 fields = [f for f in fields if f not in self.credential_columns]
             return self.json_response(fields)

@@ -2,6 +2,7 @@
 
 Spec §4 row `test_identity_projection_matches_masked`, spec §8 Q6.
 """
+
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -10,22 +11,50 @@ from navigator_auth.handlers.redaction import redact_row
 from navigator_auth.handlers.userattrs import UserIdentityHandler
 from navigator_auth.identity.store import IdentityStore
 
-MASKED_KEYS = frozenset({
-    "expired", "identity_id", "auth_provider", "provider_user_id", "scopes",
-    "token_type", "expires_at", "refreshed_at", "created_at", "enabled",
-    "has_refresh_token", "has_id_token", "profile",
-})
+MASKED_KEYS = frozenset(
+    {
+        "expired",
+        "identity_id",
+        "auth_provider",
+        "provider_user_id",
+        "scopes",
+        "token_type",
+        "expires_at",
+        "refreshed_at",
+        "created_at",
+        "enabled",
+        "has_refresh_token",
+        "has_id_token",
+        "profile",
+    }
+)
 CREDS = ("access_token", "refresh_token", "id_token", "key_version")
 
 
 def _identity(**kw):
     base = dict(
-        identity_id=uuid4(), user_id=42, auth_provider="git",
-        provider_user_id="p1", scopes=["a"], token_type="Bearer",
-        expires_at=None, refreshed_at=None, created_at=datetime.now(timezone.utc),
-        enabled=True, access_token=b"at", refresh_token=b"rt", id_token=None,
-        key_version=1, auth_data={"k": "v"}, display_name="n", title=None,
-        nickname=None, email="e@x", phone=None, short_bio=None, avatar=None,
+        identity_id=uuid4(),
+        user_id=42,
+        auth_provider="git",
+        provider_user_id="p1",
+        scopes=["a"],
+        token_type="Bearer",
+        expires_at=None,
+        refreshed_at=None,
+        created_at=datetime.now(timezone.utc),
+        enabled=True,
+        access_token=b"at",
+        refresh_token=b"rt",
+        id_token=None,
+        key_version=1,
+        auth_data={"k": "v"},
+        display_name="n",
+        title=None,
+        nickname=None,
+        email="e@x",
+        phone=None,
+        short_bio=None,
+        avatar=None,
         attributes={},
     )
     base.update(kw)

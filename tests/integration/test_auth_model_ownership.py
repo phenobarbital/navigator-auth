@@ -9,6 +9,7 @@ The ABAC pack is the SHIPPED auth_model_admin_access.yaml, parsed with
 YAMLStorage and turned into real ResourcePolicy objects, so the policy names,
 actions and resource patterns are exercised against the guard for real.
 """
+
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,9 +27,7 @@ from navigator_auth.handlers.partners import PartnerKeyHandler
 from navigator_auth.handlers.userattrs import UserAccountHandler, UserIdentityHandler
 from navigator_auth.identity.store import IdentityStore
 
-pytestmark = pytest.mark.filterwarnings(
-    "ignore::aiohttp.web_exceptions.NotAppKeyWarning"
-)
+pytestmark = pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning")
 
 OWNER_ID = 42
 SUPERUSER_ID = 7
@@ -41,7 +40,9 @@ SENTINELS = ("SENTINEL-ACCESS", "SENTINEL-REFRESH", "SENTINEL-PARTNER")
 
 PACK = (
     Path(__file__).resolve().parents[2]
-    / "navigator_auth" / "abac" / "default_policies"
+    / "navigator_auth"
+    / "abac"
+    / "default_policies"
     / "auth_model_admin_access.yaml"
 )
 
@@ -87,13 +88,13 @@ class FakeModel:
             if all(r.get(k) == v for k, v in want.items()):
                 return _Obj(r)
         from asyncdb.exceptions import NoDataFound
+
         raise NoDataFound("none")
 
     async def filter(self, **kw):
         self.calls.append(("filter", kw))
         return [
-            MagicMock(to_dict=MagicMock(return_value=r)) for r in self.rows
-            if all(r.get(k) == v for k, v in kw.items())
+            MagicMock(to_dict=MagicMock(return_value=r)) for r in self.rows if all(r.get(k) == v for k, v in kw.items())
         ]
 
 
@@ -122,14 +123,12 @@ class FakeConn:
 
 @pytest.fixture
 def owner_session():
-    return FakeSession({"session": {
-        "user_id": OWNER_ID, "username": "owner", "groups": ["users"]}})
+    return FakeSession({"session": {"user_id": OWNER_ID, "username": "owner", "groups": ["users"]}})
 
 
 @pytest.fixture
 def superuser_session():
-    return FakeSession({"session": {
-        "user_id": SUPERUSER_ID, "username": "root", "groups": ["superuser"]}})
+    return FakeSession({"session": {"user_id": SUPERUSER_ID, "username": "root", "groups": ["superuser"]}})
 
 
 @pytest.fixture
@@ -137,22 +136,40 @@ def identity_row():
     """UserIdentity row dict: ciphered token columns, PII, foreign owner."""
     return {
         "identity_id": "11111111-1111-1111-1111-111111111111",
-        "user_id": OTHER_ID, "display_name": "D", "title": None,
-        "nickname": None, "email": "o@x", "phone": None, "short_bio": None,
-        "avatar": None, "auth_provider": "git", "provider_user_id": "p1",
-        "scopes": ["repo"], "token_type": "Bearer", "expires_at": None,
-        "refreshed_at": None, "created_at": None, "enabled": True,
-        "auth_data": {"login": "octo"}, "attributes": {},
-        "access_token": SENTINEL_ACCESS, "refresh_token": SENTINEL_REFRESH,
-        "id_token": None, "key_version": 1,
+        "user_id": OTHER_ID,
+        "display_name": "D",
+        "title": None,
+        "nickname": None,
+        "email": "o@x",
+        "phone": None,
+        "short_bio": None,
+        "avatar": None,
+        "auth_provider": "git",
+        "provider_user_id": "p1",
+        "scopes": ["repo"],
+        "token_type": "Bearer",
+        "expires_at": None,
+        "refreshed_at": None,
+        "created_at": None,
+        "enabled": True,
+        "auth_data": {"login": "octo"},
+        "attributes": {},
+        "access_token": SENTINEL_ACCESS,
+        "refresh_token": SENTINEL_REFRESH,
+        "id_token": None,
+        "key_version": 1,
     }
 
 
 @pytest.fixture
 def account_row():
     return {
-        "account_id": "a1", "user_id": OWNER_ID, "provider": "git",
-        "uid": "octo", "address": "https://x/octo", "account": {},
+        "account_id": "a1",
+        "user_id": OWNER_ID,
+        "provider": "git",
+        "uid": "octo",
+        "address": "https://x/octo",
+        "account": {},
         "created_at": None,
     }
 
@@ -160,9 +177,16 @@ def account_row():
 @pytest.fixture
 def partner_row():
     return {
-        "partner_id": "p1", "name": "n", "partner": "x", "issuer": "navigator",
-        "token": SENTINEL_JWT, "created_at": None, "revoked": False,
-        "enabled": True, "grants": {}, "programs": [],
+        "partner_id": "p1",
+        "name": "n",
+        "partner": "x",
+        "issuer": "navigator",
+        "token": SENTINEL_JWT,
+        "created_at": None,
+        "revoked": False,
+        "enabled": True,
+        "grants": {},
+        "programs": [],
     }
 
 
@@ -184,22 +208,26 @@ def pdp_with_pack(audit):
     assert PACK.exists(), f"policy pack missing: {PACK}"
     policies = []
     for d in YAMLStorage._parse_file(PACK):
-        policies.append(ResourcePolicy(
-            name=d["name"], effect=PolicyEffect.ALLOW,
-            description=d.get("description"), resources=d["resources"],
-            actions=d["actions"], subjects=d["subjects"],
-            priority=d["priority"], enforcing=d["enforcing"],
-        ))
+        policies.append(
+            ResourcePolicy(
+                name=d["name"],
+                effect=PolicyEffect.ALLOW,
+                description=d.get("description"),
+                resources=d["resources"],
+                actions=d["actions"],
+                subjects=d["subjects"],
+                priority=d["priority"],
+                enforcing=d["enforcing"],
+            )
+        )
     return FakePDP(policies, audit)
 
 
 class _Sessions:
     def __init__(self, session):
         self.ps = [
-            patch("navigator_auth.decorators.get_session",
-                  new=AsyncMock(return_value=session)),
-            patch("navigator_auth.handlers.guards.get_session",
-                  new=AsyncMock(return_value=session)),
+            patch("navigator_auth.decorators.get_session", new=AsyncMock(return_value=session)),
+            patch("navigator_auth.handlers.guards.get_session", new=AsyncMock(return_value=session)),
         ]
 
     def __enter__(self):
@@ -239,12 +267,34 @@ def _crud(cls, path, model, pdp=None, query="", meta=None, body=None):
     return h
 
 
-IDENTITY_COLUMNS = {c: None for c in (
-    "identity_id", "user_id", "display_name", "title", "nickname", "email",
-    "phone", "short_bio", "avatar", "auth_provider", "provider_user_id",
-    "scopes", "token_type", "expires_at", "refreshed_at", "created_at",
-    "enabled", "auth_data", "attributes", "access_token", "refresh_token",
-    "id_token", "key_version")}
+IDENTITY_COLUMNS = {
+    c: None
+    for c in (
+        "identity_id",
+        "user_id",
+        "display_name",
+        "title",
+        "nickname",
+        "email",
+        "phone",
+        "short_bio",
+        "avatar",
+        "auth_provider",
+        "provider_user_id",
+        "scopes",
+        "token_type",
+        "expires_at",
+        "refreshed_at",
+        "created_at",
+        "enabled",
+        "auth_data",
+        "attributes",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "key_version",
+    )
+}
 IDENTITY_PATH = "/api/v1/user_identity/11111111-1111-1111-1111-111111111111"
 
 
@@ -274,18 +324,14 @@ async def _serialize(h, data, fields=None):
 
 class TestIdentitySurfaceOwner:
     @pytest.mark.asyncio
-    async def test_identity_surface_end_to_end_owner(
-        self, owner_session, identity_row, pdp_with_pack
-    ):
+    async def test_identity_surface_end_to_end_owner(self, owner_session, identity_row, pdp_with_pack):
         """Owner reads own identity: metadata present, zero token bytes."""
         identity_row["user_id"] = OWNER_ID
         model = FakeModel(IDENTITY_COLUMNS, [identity_row])
         h = _crud(UserIdentityHandler, IDENTITY_PATH, model, pdp_with_pack)
         with _patch_sessions(owner_session):
             await h._pre_get()
-            data = await h._get_data(
-                {}, {"identity_id": identity_row["identity_id"]}
-            )
+            data = await h._get_data({}, {"identity_id": identity_row["identity_id"]})
         text, payload = await _serialize(h, data.to_dict())
         for s in SENTINELS:
             assert s not in text
@@ -293,14 +339,11 @@ class TestIdentitySurfaceOwner:
         # vault surface (store.masked) and CRUD surface agree on the
         # credential-related keys.
         vault = IdentityStore.masked(None, _Obj(identity_row))
-        for key in ("has_refresh_token", "has_id_token", "expired",
-                    "profile", "scopes", "token_type"):
+        for key in ("has_refresh_token", "has_id_token", "expired", "profile", "scopes", "token_type"):
             assert payload[key] == vault[key], key
 
     @pytest.mark.asyncio
-    async def test_owner_cannot_reach_a_foreign_identity_by_any_route(
-        self, owner_session, identity_row, pdp_with_pack
-    ):
+    async def test_owner_cannot_reach_a_foreign_identity_by_any_route(self, owner_session, identity_row, pdp_with_pack):
         """PK, list, ?user_id=, ?_filter= and :meta refuse or exclude."""
         model = FakeModel(IDENTITY_COLUMNS, [identity_row])  # owned by OTHER
         with _patch_sessions(owner_session):
@@ -311,12 +354,12 @@ class TestIdentitySurfaceOwner:
             # list: only own rows (none exist)
             h = _crud(UserIdentityHandler, "/api/v1/user_identity", model, pdp_with_pack)
             from asyncdb.exceptions import NoDataFound
+
             with pytest.raises(NoDataFound):
                 await h._get_data({}, {})
             assert model.calls[-1] == ("filter", {"user_id": OWNER_ID})
             # ?user_id=
-            h = _crud(UserIdentityHandler, "/api/v1/user_identity", model,
-                      pdp_with_pack, query=f"?user_id={OTHER_ID}")
+            h = _crud(UserIdentityHandler, "/api/v1/user_identity", model, pdp_with_pack, query=f"?user_id={OTHER_ID}")
             with pytest.raises(web.HTTPForbidden):
                 await h._pre_get()
             # ?_filter= on a credential
@@ -328,6 +371,7 @@ class TestIdentitySurfaceOwner:
             assert conn.calls == []
             # :meta
             from navigator_auth.models import UserIdentity
+
             h.get_model = UserIdentity
             meta = json.loads((await h._get_meta_info(":meta", None)).text)
             assert "access_token" not in meta["properties"]
@@ -335,9 +379,7 @@ class TestIdentitySurfaceOwner:
 
 class TestIdentitySurfaceSuperuser:
     @pytest.mark.asyncio
-    async def test_identity_surface_end_to_end_superuser(
-        self, superuser_session, identity_row, pdp_with_pack, audit
-    ):
+    async def test_identity_surface_end_to_end_superuser(self, superuser_session, identity_row, pdp_with_pack, audit):
         """Read, revoke, delete a foreign identity; PUT refresh is refused."""
         pk = identity_row["identity_id"]
         model = FakeModel(IDENTITY_COLUMNS, [identity_row])
@@ -354,8 +396,13 @@ class TestIdentitySurfaceSuperuser:
                 await h._set_update(_Obj(identity_row), {"enabled": False})
             assert audit.log.await_count == 2
             # 3. PUT (refresh path) naming the foreign owner -> 403
-            h_put = _crud(UserIdentityHandler, IDENTITY_PATH, model, pdp_with_pack,
-                          body={"user_id": OTHER_ID, "access_token": "x"})
+            h_put = _crud(
+                UserIdentityHandler,
+                IDENTITY_PATH,
+                model,
+                pdp_with_pack,
+                body={"user_id": OTHER_ID, "access_token": "x"},
+            )
             with pytest.raises(web.HTTPForbidden):
                 await h_put._pre_put()
             # 4. PATCH other column -> 403
@@ -373,15 +420,11 @@ class TestIdentitySurfaceSuperuser:
             assert answer.response and answer.rule == "user_identities_admin_access"
 
     @pytest.mark.asyncio
-    async def test_superuser_is_fully_denied_without_the_pack(
-        self, superuser_session, owner_session, identity_row
-    ):
+    async def test_superuser_is_fully_denied_without_the_pack(self, superuser_session, owner_session, identity_row):
         """No PDP => the admin path is closed; the owner path still open."""
         pk = identity_row["identity_id"]
         model = FakeModel(IDENTITY_COLUMNS, [identity_row])
-        with _patch_sessions(superuser_session), patch(
-            "navigator_auth.handlers.guards.AuditLog"
-        ):
+        with _patch_sessions(superuser_session), patch("navigator_auth.handlers.guards.AuditLog"):
             h = _crud(UserIdentityHandler, IDENTITY_PATH, model)
             with pytest.raises(web.HTTPNotFound):
                 await h._get_data({}, {"identity_id": pk})
@@ -423,9 +466,7 @@ class TestAccountSurface:
 
 
 def _json_resp(payload, status=200):
-    return web.Response(
-        text=json.dumps(payload), status=status, content_type="application/json"
-    )
+    return web.Response(text=json.dumps(payload), status=status, content_type="application/json")
 
 
 def _partner(pdp=None, meta=None):
@@ -438,13 +479,10 @@ def _partner(pdp=None, meta=None):
 
 class TestPartnerKeyLifecycle:
     @pytest.mark.asyncio
-    async def test_partner_key_lifecycle_superuser_only(
-        self, superuser_session, partner_row, pdp_with_pack, audit
-    ):
+    async def test_partner_key_lifecycle_superuser_only(self, superuser_session, partner_row, pdp_with_pack, audit):
         """Create (token once), list (no token), revoke, delete."""
         with _patch_sessions(superuser_session):
-            with patch.object(LocalBase, "put", new=AsyncMock(
-                    return_value=_json_resp(partner_row, 201))):
+            with patch.object(LocalBase, "put", new=AsyncMock(return_value=_json_resp(partner_row, 201))):
                 created = await _partner(pdp_with_pack).put()
             assert created.status == 201 and SENTINEL_JWT in created.text
             h = _partner(pdp_with_pack)
@@ -456,24 +494,18 @@ class TestPartnerKeyLifecycle:
             meta_patch = await _partner(pdp_with_pack, meta=":meta").patch()
             assert "token" not in json.loads(meta_get.text)["properties"]
             assert "token" not in json.loads(meta_patch.text)
-            with patch.object(LocalBase, "patch", new=AsyncMock(
-                    return_value=_json_resp(partner_row, 202))):
+            with patch.object(LocalBase, "patch", new=AsyncMock(return_value=_json_resp(partner_row, 202))):
                 revoked = await _partner(pdp_with_pack).patch()
             assert revoked.status == 202 and SENTINEL_JWT not in revoked.text
-            with patch.object(LocalBase, "delete", new=AsyncMock(
-                    return_value=_json_resp(partner_row, 202))):
+            with patch.object(LocalBase, "delete", new=AsyncMock(return_value=_json_resp(partner_row, 202))):
                 deleted = await _partner(pdp_with_pack).delete()
             assert SENTINEL_JWT not in deleted.text
         # put, get(:meta), patch(:meta), patch, delete => 5 audited verbs
         assert audit.log.await_count == 5
 
     @pytest.mark.asyncio
-    async def test_regular_user_is_refused_at_every_step(
-        self, owner_session, partner_row, pdp_with_pack
-    ):
-        with _patch_sessions(owner_session), patch(
-            "navigator_auth.handlers.guards.AuditLog"
-        ):
+    async def test_regular_user_is_refused_at_every_step(self, owner_session, partner_row, pdp_with_pack):
+        with _patch_sessions(owner_session), patch("navigator_auth.handlers.guards.AuditLog"):
             for verb in ("get", "put", "patch", "post", "delete", "head"):
                 with pytest.raises(web.HTTPForbidden):
                     await getattr(_partner(pdp_with_pack), verb)()
@@ -484,15 +516,20 @@ class TestRoutesStillExist:
         """Spec G4: the paths and verbs are unchanged by this feature."""
         import inspect
         import navigator_auth.handlers as handlers
+
         src = inspect.getsource(handlers)
         for name in (
-            "api_auth_useridentity_id", "api_auth_useridentity",
-            "api_auth_useraccount_id", "api_auth_useraccount",
-            "api_auth_partnerkey_id", "api_auth_partnerkey",
+            "api_auth_useridentity_id",
+            "api_auth_useridentity",
+            "api_auth_useraccount_id",
+            "api_auth_useraccount",
+            "api_auth_partnerkey_id",
+            "api_auth_partnerkey",
         ):
             assert f'name="{name}"' in src
         for path in (
-            "/api/v1/user_identity/{id:.*}", "/api/v1/user_accounts/{id:.*}",
+            "/api/v1/user_identity/{id:.*}",
+            "/api/v1/user_accounts/{id:.*}",
             "/api/v1/partner/tokens/{id:.*}",
         ):
             assert path in src

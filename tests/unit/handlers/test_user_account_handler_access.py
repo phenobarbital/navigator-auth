@@ -2,6 +2,7 @@
 
 `_set_address`'s parameterization is TASK-121's (test_user_account_set_address.py).
 """
+
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,17 +15,22 @@ from navigator_auth.abac.policies import Policy, PolicyEffect
 from navigator_auth.handlers.userattrs import UserAccountHandler
 from navigator_auth.models import UserAccount
 
-pytestmark = pytest.mark.filterwarnings(
-    "ignore::aiohttp.web_exceptions.NotAppKeyWarning"
-)
+pytestmark = pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning")
 
 OWNER_ID = 42
 OTHER_ID = 99
 POLICY = "user_accounts_admin_access"
-PUBLIC = frozenset({
-    "account_id", "user_id", "provider", "uid", "address", "account",
-    "created_at",
-})
+PUBLIC = frozenset(
+    {
+        "account_id",
+        "user_id",
+        "provider",
+        "uid",
+        "address",
+        "account",
+        "created_at",
+    }
+)
 
 
 class FakeSession(dict):
@@ -33,17 +39,14 @@ class FakeSession(dict):
 
 
 def _session(user_id=OWNER_ID, groups=("users",)):
-    return FakeSession({"session": {
-        "user_id": user_id, "username": "u", "groups": list(groups)}})
+    return FakeSession({"session": {"user_id": user_id, "username": "u", "groups": list(groups)}})
 
 
 class _Patches:
     def __init__(self, session):
         self.ps = [
-            patch("navigator_auth.decorators.get_session",
-                  new=AsyncMock(return_value=session)),
-            patch("navigator_auth.handlers.guards.get_session",
-                  new=AsyncMock(return_value=session)),
+            patch("navigator_auth.decorators.get_session", new=AsyncMock(return_value=session)),
+            patch("navigator_auth.handlers.guards.get_session", new=AsyncMock(return_value=session)),
         ]
 
     def __enter__(self):
@@ -74,9 +77,12 @@ def _pdp():
     audit = MagicMock()
     audit.log = AsyncMock()
     pol = Policy(
-        POLICY, description="d", effect=PolicyEffect.ALLOW,
+        POLICY,
+        description="d",
+        effect=PolicyEffect.ALLOW,
         actions=["account:read", "account:revoke", "account:delete"],
-        groups=["superuser"], priority=1,
+        groups=["superuser"],
+        priority=1,
     )
     return FakePDP([pol], audit), audit
 
@@ -100,6 +106,7 @@ class FakeModel:
         self.calls.append(("get", kw))
         if not self.rows:
             from asyncdb.exceptions import NoDataFound
+
             raise NoDataFound("none")
         return self.rows[0]
 
@@ -122,8 +129,7 @@ class FakeConn:
         return False
 
 
-def _handler(path="/api/v1/user_accounts/abc", query="", model=None, pdp=None,
-             body=None):
+def _handler(path="/api/v1/user_accounts/abc", query="", model=None, pdp=None, body=None):
     app = {"auth": MagicMock(), "authdb": MagicMock(), "redis": MagicMock()}
     if pdp is not None:
         app["abac"] = pdp
@@ -144,6 +150,7 @@ class TestConfiguration:
     def test_guard_precedes_the_base_in_the_mro(self):
         from navigator.views import ModelView
         from navigator_auth.handlers.guards import OwnerOrSuperuserGuard
+
         mro = UserAccountHandler.__mro__
         assert mro.index(OwnerOrSuperuserGuard) < mro.index(ModelView)
 
@@ -156,11 +163,11 @@ class TestConfiguration:
 
     def test_policy_name_and_actions_match_the_pack(self):
         assert UserAccountHandler.policy_name == POLICY
-        assert UserAccountHandler.superuser_actions == frozenset(
-            {"account:read", "account:revoke", "account:delete"})
+        assert UserAccountHandler.superuser_actions == frozenset({"account:read", "account:revoke", "account:delete"})
 
     def test_hidden_lists_are_per_subclass(self):
         from navigator.views import ModelView
+
         assert UserAccountHandler._hidden is not ModelView._hidden
 
 
@@ -225,9 +232,12 @@ class TestWritePath:
     @pytest.mark.asyncio
     async def test_put_forces_owner(self):
         h = _handler()
-        with _patch_sessions(_session()), patch(
-            "navigator.views.ModelView._post_data",
-            new=AsyncMock(return_value={"provider": "x"}),
+        with (
+            _patch_sessions(_session()),
+            patch(
+                "navigator.views.ModelView._post_data",
+                new=AsyncMock(return_value={"provider": "x"}),
+            ),
         ):
             data = await h._post_data()
         assert data["user_id"] == OWNER_ID
@@ -242,9 +252,7 @@ class TestWritePath:
     async def test_post_data_delegates_to_super(self):
         h = _handler()
         sup = AsyncMock(return_value={"provider": "x", "user_id": OWNER_ID})
-        with _patch_sessions(_session()), patch(
-            "navigator.views.ModelView._post_data", new=sup
-        ):
+        with _patch_sessions(_session()), patch("navigator.views.ModelView._post_data", new=sup):
             await h._post_data()
         sup.assert_awaited_once()
 
@@ -270,9 +278,7 @@ class TestWritePath:
     @pytest.mark.asyncio
     async def test_owner_patch_needs_no_policy(self):
         h = _handler()
-        with _patch_sessions(_session()), patch(
-            "navigator.views.ModelView._set_update", new=AsyncMock()
-        ) as up:
+        with _patch_sessions(_session()), patch("navigator.views.ModelView._set_update", new=AsyncMock()) as up:
             await h._set_update(_Row(), {"provider": "x"})
         up.assert_awaited_once()
 
@@ -341,9 +347,7 @@ class TestProjectionAndFilter:
         h = _handler()
         cap = _Capture()
         with patch("navigator.views.ModelView._model_response", new=cap):
-            await h._model_response(
-                {"provider": "x", "secret_extra": "S"}, ["provider", "secret_extra"]
-            )
+            await h._model_response({"provider": "x", "secret_extra": "S"}, ["provider", "secret_extra"])
         assert cap.payload == {"provider": "x"}
 
     @pytest.mark.asyncio
@@ -394,8 +398,6 @@ class TestProjectionAndFilter:
         h = _handler()
         h.handler = AsyncMock(return_value=conn)
         boom = MagicMock(side_effect=AssertionError("upstream called"))
-        with _patch_sessions(_session()), patch(
-            "navigator.views.ModelView._filtering", new=boom
-        ):
+        with _patch_sessions(_session()), patch("navigator.views.ModelView._filtering", new=boom):
             await h._filtering({"_filter": "provider=git"})
         boom.assert_not_called()

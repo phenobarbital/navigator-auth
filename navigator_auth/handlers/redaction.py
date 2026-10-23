@@ -11,6 +11,7 @@ to a response, which is what makes "a credential cannot be reached through
 any parameter combination" (spec G3) a property of construction rather than
 of review.
 """
+
 from typing import Any, Optional, Union
 
 from datamodel import BaseModel
@@ -128,9 +129,7 @@ def redact_schema(
     result = dict(schema)
     props = schema.get("properties")
     if isinstance(props, dict):
-        result["properties"] = {
-            k: v for k, v in props.items() if k not in credential_columns
-        }
+        result["properties"] = {k: v for k, v in props.items() if k not in credential_columns}
     required = schema.get("required")
     if isinstance(required, (list, tuple)):
         result["required"] = [c for c in required if c not in credential_columns]

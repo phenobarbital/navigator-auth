@@ -1213,9 +1213,7 @@ async def policy_allows(
     names = [policy] if isinstance(policy, str) else list(policy)
     if not names:
         raise ValueError("policy_allows requires at least one ABAC Policy name.")
-    return await _check_policies(
-        request, names, action, resource, resource_type, require_all
-    )
+    return await _check_policies(request, names, action, resource, resource_type, require_all)
 
 
 def check_access(
