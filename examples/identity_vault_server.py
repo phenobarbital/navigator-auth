@@ -40,6 +40,19 @@ can see exactly what got mounted.
 stored credential and calls the provider's API with it (Microsoft Graph,
 GitHub, Odoo userinfo, Google userinfo).
 
+**Reading the login credential** — ``GET /api/v1/me`` adds an
+``authorization`` block when the session came from an external (SSO)
+login: the provider bearer token of *that* login, refreshed from the vault
+when the grant captured at login has expired. For a Basic or OAuth2
+(local) login there is no such token and the block is absent.
+
+**Measuring the login token** — ``GET /api/v1/demo/token-claims`` decodes
+the *timing* claims of ``session["auth_token"]`` (``exp - iat``, plus
+``acrs`` / ``xms_pftexp``) and returns only those, never the token. It is
+the instrument for the FEAT-103 §8 Q1 experiment; the library's own
+``GET /api/v2/user/session`` dumps the whole session payload instead,
+raw ``auth_token`` and ``id_token`` included.
+
 Run it **from the repository root**::
 
     mkdir -p env/dev && touch env/dev/.env    # navconfig needs this once
@@ -118,7 +131,9 @@ import base64  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
 import secrets  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
+from typing import Any  # noqa: E402
 
 import aiohttp  # noqa: E402
 from aiohttp import web  # noqa: E402
@@ -128,6 +143,8 @@ from navigator_auth import AuthHandler  # noqa: E402
 from navigator_auth.backends.idp import IdentityProvider  # noqa: E402
 from navigator_auth.conf import (  # noqa: E402
     AUTH_EXCLUDE_LIST_KEY,
+    AUTH_SESSION_OBJECT,
+    AZURE_SESSION_TIMEOUT,
     ODOO_DOMAIN,
     ODOO_USERINFO_PATH,
     default_dsn,
@@ -304,22 +321,128 @@ async def example_config(request: web.Request) -> web.StreamResponse:
     )
 
 
+def local_user_id(user, session) -> Any:
+    """The LOCAL ``auth.users.user_id`` of the session user.
+
+    Everything in the Identity Vault is keyed on this integer. It is NOT
+    ``user.id``: for an external (SSO) login the session user's ``id`` is the
+    *provider's* account id — a GUID on Entra — so asking the vault with it
+    fails on the integer ``user_identities.user_id`` column::
+
+        invalid input for query argument $1: '4e2aa0ea-...'
+        ('str' object cannot be interpreted as an integer)
+
+    Resolution order is the library's own (``handlers.user_identities.
+    BaseIdentityView._user_id``): the user object first, then the session —
+    the session fallback keeps sessions created before the local ``user_id``
+    was published on the session user working.
+
+    Args:
+        user: The session user from ``user_session()``.
+        session: The Navigator session, used as the fallback source.
+
+    Returns:
+        The local ``user_id``, or ``None`` when neither source carries one.
+    """
+    if isinstance(user, dict):
+        user_id = user.get("user_id")
+    else:
+        user_id = getattr(user, "user_id", None)
+    if user_id:
+        return user_id
+    if not session:
+        return None
+    try:
+        return session.get("user_id") or (session.get(AUTH_SESSION_OBJECT) or {}).get("user_id")
+    except (TypeError, KeyError):
+        return None
+
+
+async def provider_authorization(
+    request: web.Request, session, user, auth_method: str
+) -> dict:
+    """The provider credential this session was logged in with, if any.
+
+    Only external (SSO) logins have one: a Basic or navigator-auth OAuth2
+    login is local, so there is no upstream bearer token to hand out.
+
+    The session's own ``auth_token`` is the raw grant captured at login and
+    is a *minutes*-long credential inside a 100-hour session (FEAT-103 §1b),
+    so this asks the backend for a live one first
+    (:meth:`ExternalAuth.get_live_provider_token` refreshes it from the vault
+    when it is expiring) and only falls back to the session value when the
+    vault has nothing to refresh from — a legacy session, a grant Entra
+    returned without a refresh token, or a provider that cannot refresh.
+
+    Args:
+        request: The authenticated request.
+        session: The Navigator session (``user_session()``).
+        user: The session user, for the local ``user_id``.
+        auth_method: The backend slug that created the session, e.g. ``azure``.
+
+    Returns:
+        ``{"token": ..., "type": "Bearer", "provider": ..., "expires_at": ...,
+        "source": "vault"|"session"}``, or ``{}`` for a local login or when no
+        provider credential is available.
+
+    Warning:
+        Example-only: the library deliberately masks ``auth_token`` in the
+        bodies it serves itself (``check_credentials``, FEAT-103 G6). Serving
+        the clear token to a browser makes the page as sensitive as the token
+        — do it only for a consumer that really must call the provider
+        client-side, and never include a refresh token (the vault never hands
+        one out here).
+    """
+    if not auth_method:
+        return {}
+    backend = request.app["auth"].get_external_backend(auth_method)
+    if backend is None or not hasattr(backend, "get_live_provider_token"):
+        return {}  # local login: Basic, or this app's own OAuth2 provider
+    user_id = local_user_id(user, session)
+    token = await backend.get_live_provider_token(request, user_id)
+    if token is not None:
+        return {
+            "token": token.access_token,
+            "type": token.token_type or "Bearer",
+            "provider": auth_method,
+            "expires_at": (
+                token.expires_at.isoformat() if token.expires_at else None
+            ),
+            "scopes": list(token.scopes or []),
+            "source": "vault",
+        }
+    access_token = session.get("auth_token") if session else None
+    if not access_token:
+        return {}
+    return {
+        "token": access_token,
+        "type": session.get("token_type") or "Bearer",
+        "provider": auth_method,
+        "expires_at": session.get("external_expires_at"),
+        "scopes": [],
+        "source": "session",
+    }
+
+
 @is_authenticated()
 @user_session()
 async def me(request: web.Request, *, session=None, user=None) -> web.StreamResponse:
     """Who is logged in, and how — works for every login mechanism above."""
     userdata = request.get("userdata") or {}
-    return web.json_response(
-        {
-            "user_id": getattr(user, "user_id", None) or getattr(user, "id", None),
-            "username": getattr(user, "username", None),
-            "email": getattr(user, "email", None),
-            "display_name": getattr(user, "display_name", None),
-            "auth_method": userdata.get("auth_method")
-            or getattr(user, "auth_method", None),
-            "session_id": getattr(session, "session_id", None),
-        }
-    )
+    auth_method = userdata.get("auth_method") or getattr(user, "auth_method", None)
+    payload = {
+        "user_id": local_user_id(user, session),
+        "username": getattr(user, "username", None),
+        "email": getattr(user, "email", None),
+        "display_name": getattr(user, "display_name", None),
+        "auth_method": auth_method,
+        "session_id": getattr(session, "session_id", None),
+    }
+    if authorization := await provider_authorization(
+        request, session, user, auth_method
+    ):
+        payload["authorization"] = authorization
+    return web.json_response(payload)
 
 
 @is_authenticated()
@@ -334,7 +457,12 @@ async def provider_whoami(
     the identity was linked (refreshing it if it expired) and uses it.
     """
     provider = request.match_info["provider"]
-    user_id = getattr(user, "user_id", None) or getattr(user, "id", None)
+    user_id = local_user_id(user, session)
+    if not user_id:
+        raise web.HTTPUnauthorized(
+            text=json.dumps({"error": "no local user_id in this session"}),
+            content_type="application/json",
+        )
     idp = request.app["auth"]._idp
     try:
         credential = await idp.get_user_identity_credential(user_id, provider)
@@ -377,6 +505,139 @@ async def provider_whoami(
             "response": body,
         },
         status=200 if status < 400 else 502,
+    )
+
+
+#: Claims the FEAT-103 §8 Q1 experiment is about: the lifetime (``exp - iat``)
+#: plus the freshness claims the spec's *unverified* hypothesis rests on
+#: (``acrs``, ``xms_pftexp``). Everything else in the token is left alone.
+Q1_CLAIMS = ("iat", "exp", "nbf", "auth_time", "acrs", "xms_pftexp", "aud", "appid")
+
+#: When this process started. A token whose ``iat`` predates it was issued by
+#: an earlier run — Entra reuses its cached token across logins
+#: (``issue:3fd80396c685``), which is what made Q1 attempt 1 inconclusive. Any
+#: reading that fails this check measures the previous process's grant, under
+#: whatever settings *that* one had, and must not be attributed to this arm.
+PROCESS_STARTED = datetime.now(timezone.utc)
+
+
+def _jwt_claims(token: str) -> dict:
+    """Decode a JWT payload WITHOUT verifying it — a local read, claims only.
+
+    Args:
+        token: A JWT. Signature and audience are deliberately NOT checked:
+            this reads timing claims out of a token the server already holds,
+            it does not accept one from a caller.
+
+    Returns:
+        The decoded payload.
+
+    Raises:
+        ValueError: The string is not a JWT (an opaque provider token).
+    """
+    parts = token.split(".")
+    if len(parts) < 2:
+        raise ValueError("not a JWT: no payload segment")
+    payload = parts[1] + "=" * (-len(parts[1]) % 4)  # restore base64 padding
+    return json.loads(base64.urlsafe_b64decode(payload))
+
+
+@is_authenticated()
+@user_session()
+async def token_claims(
+    request: web.Request, *, session=None, user=None
+) -> web.StreamResponse:
+    """Timing claims of the session's provider access token — never the token.
+
+    The instrument for the FEAT-103 §8 Q1 experiment: *does ``max_age``
+    change the Graph access-token lifetime?* Log in, read
+    ``lifetime_seconds`` here, then log in again with a different
+    ``AZURE_SESSION_TIMEOUT`` and compare::
+
+        AZURE_SESSION_TIMEOUT=36000 PYTHONPATH=$PWD \\
+            python examples/identity_vault_server.py
+
+    A changed lifetime means ``max_age`` is the lever; an unchanged one
+    means the short lifetime is tenant policy. Either way it is a one-line
+    note in spec §7.
+
+    Unlike ``/api/v2/user/session`` — which returns the whole session
+    payload, raw ``auth_token`` and ``id_token`` included — this returns
+    only decoded timing claims, so nothing secret reaches the browser.
+    """
+    if session is None or not (token := session.get("auth_token")):
+        raise web.HTTPNotFound(
+            text=json.dumps(
+                {
+                    "error": "no provider access token in this session",
+                    "hint": "log in through an external provider (Azure) first; "
+                    "a Basic or OAuth2 login has no provider token",
+                }
+            ),
+            content_type="application/json",
+        )
+    try:
+        claims = _jwt_claims(token)
+    except ValueError as err:
+        raise web.HTTPUnprocessableEntity(
+            text=json.dumps(
+                {
+                    "error": str(err),
+                    "hint": "this provider issues opaque access tokens "
+                    "(GitHub does); only a JWT carries iat/exp",
+                }
+            ),
+            content_type="application/json",
+        )
+
+    iat, exp = claims.get("iat"), claims.get("exp")
+    lifetime = exp - iat if isinstance(iat, int) and isinstance(exp, int) else None
+    present = {name: claims[name] for name in Q1_CLAIMS if name in claims}
+    readable = {
+        name: datetime.fromtimestamp(value, timezone.utc).isoformat()
+        for name, value in present.items()
+        if name in ("iat", "exp", "nbf", "auth_time", "xms_pftexp")
+        and isinstance(value, int)
+    }
+    userdata = request.get("userdata") or {}
+    now = datetime.now(timezone.utc)
+    # Protocol step 1 (spec §8 Q1): a reading is only attributable to THIS
+    # arm when the token was issued after this process started.
+    fresh = isinstance(iat, int) and iat > PROCESS_STARTED.timestamp()
+    return web.json_response(
+        {
+            # The arm of the experiment this reading belongs to.
+            "max_age": AZURE_SESSION_TIMEOUT,
+            "auth_method": userdata.get("auth_method"),
+            "lifetime_seconds": lifetime,
+            "lifetime_minutes": round(lifetime / 60, 1) if lifetime else None,
+            # Freshness: without this, Entra's reuse silently invalidates the
+            # measurement (issue:3fd80396c685).
+            "issued_after_process_start": fresh,
+            "process_started": PROCESS_STARTED.isoformat(),
+            "token_age_seconds": round(now.timestamp() - iat) if isinstance(iat, int) else None,
+            "remaining_seconds": round(exp - now.timestamp()) if isinstance(exp, int) else None,
+            "verdict": (
+                "usable for Q1: this token was issued by this process"
+                if fresh
+                else "NOT usable for Q1: token predates this process — Entra "
+                "served a cached token; re-login with AZURE_LOGIN_PROMPT=login "
+                "or a fresh IdP session before recording a result"
+            ),
+            "reference": "spec §6 samples: 419 s with max_age=120, 5457 s (arm unknown)",
+            "claims": present,
+            "claims_utc": readable,
+            # Cross-check against what build_user_info published (FEAT-103).
+            "session_markers": {
+                key: session.get(key)
+                for key in (
+                    "external_expires_at",
+                    "external_issued_at",
+                    "has_refresh_token",
+                    "external_provider_user_id",
+                )
+            },
+        }
     )
 
 
@@ -476,6 +737,9 @@ def make_app() -> web.Application:
         r"/api/v1/demo/whoami/{provider:[a-z0-9_]+}",
         provider_whoami,
         name="demo_whoami",
+    )
+    app.router.add_get(
+        "/api/v1/demo/token-claims", token_claims, name="demo_token_claims"
     )
 
     # the page shell and its configuration are public; everything else is not.

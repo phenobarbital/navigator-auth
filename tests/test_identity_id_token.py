@@ -98,7 +98,6 @@ class FakeUserIdentity:
     Meta = FakeMeta
     # Configured per-test: None (miss) or a FakeUserIdentity instance (hit).
     _existing = None
-    _filter_result = None
 
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
@@ -111,12 +110,6 @@ class FakeUserIdentity:
             return cls._existing
         raise NoDataFound("no row")
 
-    @classmethod
-    async def filter(cls, **kwargs):
-        if cls._filter_result is None:
-            raise NoDataFound("no rows")
-        return cls._filter_result
-
     async def insert(self):
         return self
 
@@ -127,10 +120,8 @@ class FakeUserIdentity:
 @pytest.fixture(autouse=True)
 def _reset_fake_model():
     FakeUserIdentity._existing = None
-    FakeUserIdentity._filter_result = None
     yield
     FakeUserIdentity._existing = None
-    FakeUserIdentity._filter_result = None
 
 
 # ---------------------------------------------------------------------------
@@ -233,23 +224,26 @@ async def test_resave_with_new_refresh_overwrites_existing():
 async def test_find_user_by_provider_account_hit_miss_disabled():
     store = _store()
 
+    def _rows(rows):
+        return patch(
+            "navigator_auth.identity.store._filter_identities",
+            AsyncMock(return_value=rows),
+        )
+
     # Hit
     row = FakeUserIdentity(user_id=42, auth_provider="azure", provider_user_id="u1", enabled=True)
-    FakeUserIdentity._filter_result = [row]
-    with patch("navigator_auth.identity.store.UserIdentity", FakeUserIdentity):
+    with _rows([row]):
         user_id = await store.find_user_by_provider_account("azure", "u1")
     assert user_id == 42
 
-    # Miss (NoDataFound)
-    FakeUserIdentity._filter_result = None
-    with patch("navigator_auth.identity.store.UserIdentity", FakeUserIdentity):
+    # Miss
+    with _rows([]):
         user_id = await store.find_user_by_provider_account("azure", "unknown")
     assert user_id is None
 
     # Disabled row is ignored
     disabled_row = FakeUserIdentity(user_id=99, auth_provider="azure", provider_user_id="u2", enabled=False)
-    FakeUserIdentity._filter_result = [disabled_row]
-    with patch("navigator_auth.identity.store.UserIdentity", FakeUserIdentity):
+    with _rows([disabled_row]):
         user_id = await store.find_user_by_provider_account("azure", "u2")
     assert user_id is None
 
@@ -279,10 +273,15 @@ async def test_migration_runs_002_after_001():
             return FakeCtx()
 
     await migrations.ensure_identity_columns(FakePool())
-    assert len(executed_sql) == 3
+    assert len(executed_sql) == 6
     assert "provider_user_id" in executed_sql[0]
     assert "id_token" in executed_sql[1]
     assert "key_version TYPE INTEGER" in executed_sql[2]
+    # FEAT-103 TASK-102: 004 (base columns), 005 (legacy uid default).
+    assert "identity_id" in executed_sql[3]
+    assert "ALTER COLUMN uid SET DEFAULT" in executed_sql[4]
+    # FEAT-104: 006 drops that legacy column, after 005 and never before it.
+    assert "DROP COLUMN uid" in executed_sql[5]
 
 
 @pytest.mark.asyncio

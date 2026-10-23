@@ -1,4 +1,5 @@
 """Unit tests for the identity-link flow (generic + Azure override)."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,18 +24,13 @@ class TestAuthorizeIdentity:
     @pytest.mark.asyncio
     async def test_redirect_url_and_stored_flow(self, flow_store):
         backend = _generic_backend(flow_store)
-        backend.get_redirect_uri = MagicMock(
-            return_value="https://app/auth/github/callback/"
-        )
-        with patch(
-            "navigator_auth.backends.github.GITHUB_CLIENT_ID", "cid"
-        ), patch("navigator_auth.backends.github.GITHUB_CLIENT_SECRET", "cs"):
-            request = make_mocked_request(
-                "GET", "/api/v1/user/identities/link/github"
-            )
-            response = await backend.authorize_identity(
-                request, user_id=42, finish_redirect="/manage"
-            )
+        backend.get_redirect_uri = MagicMock(return_value="https://app/auth/github/callback/")
+        with (
+            patch("navigator_auth.backends.github.GITHUB_CLIENT_ID", "cid"),
+            patch("navigator_auth.backends.github.GITHUB_CLIENT_SECRET", "cs"),
+        ):
+            request = make_mocked_request("GET", "/api/v1/user/identities/link/github")
+            response = await backend.authorize_identity(request, user_id=42, finish_redirect="/manage")
         url = response.location
         assert url.startswith("https://github.com/login/oauth/authorize")
         assert "client_id=cid" in url
@@ -55,9 +51,7 @@ class TestAuthorizeIdentity:
 
         backend = _generic_backend(flow_store)
         backend.get_redirect_uri = MagicMock(return_value="https://app/cb")
-        backend.get_identity_client = MagicMock(
-            side_effect=AuthException("nope")
-        )
+        backend.get_identity_client = MagicMock(side_effect=AuthException("nope"))
         request = make_mocked_request("GET", "/x")
         with pytest.raises(AuthException):
             await backend.authorize_identity(request, 1, "/")
@@ -75,13 +69,12 @@ class TestExchangeAndRefresh:
                 "expires_in": 28800,
             }
         )
-        with patch(
-            "navigator_auth.backends.github.GITHUB_CLIENT_ID", "cid"
-        ), patch("navigator_auth.backends.github.GITHUB_CLIENT_SECRET", "cs"):
+        with (
+            patch("navigator_auth.backends.github.GITHUB_CLIENT_ID", "cid"),
+            patch("navigator_auth.backends.github.GITHUB_CLIENT_SECRET", "cs"),
+        ):
             request = make_mocked_request("GET", "/cb?code=c0de&state=s")
-            token = await backend.exchange_code_for_tokens(
-                request, {"redirect_uri": "https://app/cb"}
-            )
+            token = await backend.exchange_code_for_tokens(request, {"redirect_uri": "https://app/cb"})
         assert isinstance(token, TokenResponse)
         assert token.access_token == "at"
         assert token.refresh_token == "rt"
@@ -93,12 +86,11 @@ class TestExchangeAndRefresh:
     @pytest.mark.asyncio
     async def test_generic_refresh_keeps_unrotated_token(self, flow_store):
         backend = _generic_backend(flow_store)
-        backend.token_request = AsyncMock(
-            return_value={"access_token": "new_at", "expires_in": 3600}
-        )
-        with patch(
-            "navigator_auth.backends.github.GITHUB_CLIENT_ID", "cid"
-        ), patch("navigator_auth.backends.github.GITHUB_CLIENT_SECRET", "cs"):
+        backend.token_request = AsyncMock(return_value={"access_token": "new_at", "expires_in": 3600})
+        with (
+            patch("navigator_auth.backends.github.GITHUB_CLIENT_ID", "cid"),
+            patch("navigator_auth.backends.github.GITHUB_CLIENT_SECRET", "cs"),
+        ):
             token = await backend.refresh_identity_tokens("old_rt")
         assert token.access_token == "new_at"
         assert token.refresh_token == "old_rt"
@@ -122,21 +114,21 @@ class TestFinishIdentityLink:
         backend = _generic_backend(flow_store)
         token = TokenResponse(access_token="at", refresh_token="rt")
         backend.exchange_code_for_tokens = AsyncMock(return_value=token)
-        backend.get_identity_userinfo = AsyncMock(
-            return_value={"id": 99, "login": "octo"}
-        )
+        backend.get_identity_userinfo = AsyncMock(return_value={"id": 99, "login": "octo"})
         store = MagicMock()
         store.save_linked_identity = AsyncMock()
         request = make_mocked_request(
-            "GET", "/auth/github/callback/?code=c&state=s",
+            "GET",
+            "/auth/github/callback/?code=c&state=s",
             headers={"Host": "app"},
         )
         request.app["authdb"] = MagicMock()
-        with patch(
-            "navigator_auth.identity.store.IdentityStore", return_value=store
-        ), patch(
-            "navigator_session.get_session",
-            new=AsyncMock(return_value=None),
+        with (
+            patch("navigator_auth.identity.store.IdentityStore", return_value=store),
+            patch(
+                "navigator_session.get_session",
+                new=AsyncMock(return_value=None),
+            ),
         ):
             response = await backend.finish_identity_link(request, self._flow())
         assert response.status == 302
@@ -152,29 +144,51 @@ class TestFinishIdentityLink:
     async def test_provider_error_redirects_to_failure(self, flow_store):
         backend = _generic_backend(flow_store)
         backend.failed_redirect = MagicMock(return_value="FAILED")
-        request = make_mocked_request(
-            "GET", "/auth/github/callback/?error=access_denied&state=s"
-        )
+        request = make_mocked_request("GET", "/auth/github/callback/?error=access_denied&state=s")
         result = await backend.finish_identity_link(request, self._flow())
         assert result == "FAILED"
-        assert (
-            backend.failed_redirect.call_args.kwargs["error"]
-            == "IDENTITY_LINK_DENIED"
-        )
+        assert backend.failed_redirect.call_args.kwargs["error"] == "IDENTITY_LINK_DENIED"
 
     @pytest.mark.asyncio
     async def test_exchange_failure_redirects_to_failure(self, flow_store):
         backend = _generic_backend(flow_store)
-        backend.exchange_code_for_tokens = AsyncMock(
-            side_effect=AuthException("bad code")
-        )
+        backend.exchange_code_for_tokens = AsyncMock(side_effect=AuthException("bad code"))
         backend.failed_redirect = MagicMock(return_value="FAILED")
-        request = make_mocked_request(
-            "GET", "/auth/github/callback/?code=c&state=s"
-        )
+        request = make_mocked_request("GET", "/auth/github/callback/?code=c&state=s")
         request.app["authdb"] = MagicMock()
         result = await backend.finish_identity_link(request, self._flow())
         assert result == "FAILED"
+
+    @pytest.mark.asyncio
+    async def test_denied_message_leaks_no_query_input(self, flow_store):
+        """?error_description is attacker-controlled and must not be echoed."""
+        backend = _generic_backend(flow_store)
+        backend.failed_redirect = MagicMock(return_value="FAILED")
+        request = make_mocked_request(
+            "GET",
+            "/auth/github/callback/?error=access_denied" "&error_description=PWNED123&state=s",
+        )
+        await backend.finish_identity_link(request, self._flow())
+        kwargs = backend.failed_redirect.call_args.kwargs
+        assert kwargs["error"] == "IDENTITY_LINK_DENIED"
+        assert "PWNED123" not in kwargs["message"]
+        assert "access_denied" not in kwargs["message"]
+
+    @pytest.mark.asyncio
+    async def test_failed_message_leaks_no_exception_text(self, flow_store):
+        """The FEAT-104 case: a ValidationError's text must not reach the user."""
+        backend = _generic_backend(flow_store)
+        backend.failed_redirect = MagicMock(return_value="FAILED")
+        backend.exchange_code_for_tokens = AsyncMock(
+            side_effect=AuthException("LEAKED_DETAIL\nHint: payload attribute")
+        )
+        request = make_mocked_request("GET", "/auth/github/callback/?code=c&state=s")
+        request.app["authdb"] = MagicMock()
+        await backend.finish_identity_link(request, self._flow())
+        kwargs = backend.failed_redirect.call_args.kwargs
+        assert kwargs["error"] == "IDENTITY_LINK_FAILED"
+        assert "LEAKED_DETAIL" not in kwargs["message"]
+        assert "payload" not in kwargs["message"]
 
 
 class TestAzureIdentityLink:
@@ -218,18 +232,12 @@ class TestAzureIdentityLink:
             }
         )
         backend.get_msal_app = MagicMock(return_value=msal_app)
-        with patch.object(
-            msal_mod, "SerializableTokenCache"
-        ) as cache_cls:
+        with patch.object(msal_mod, "SerializableTokenCache") as cache_cls:
             cache = MagicMock()
-            cache.find = MagicMock(
-                return_value=[{"secret": "az_rt", "home_account_id": "h"}]
-            )
+            cache.find = MagicMock(return_value=[{"secret": "az_rt", "home_account_id": "h"}])
             cache_cls.return_value = cache
             request = make_mocked_request("GET", "/cb?code=c&state=s")
-            token = await backend.exchange_code_for_tokens(
-                request, {"extra": {"msal_flow": {"state": "s"}}}
-            )
+            token = await backend.exchange_code_for_tokens(request, {"extra": {"msal_flow": {"state": "s"}}})
         assert token.access_token == "az_at"
         assert token.refresh_token == "az_rt"
         assert token.scopes == ["User.Read"]
@@ -246,9 +254,7 @@ class TestAzureIdentityLink:
         backend.get_msal_app = MagicMock(return_value=msal_app)
         request = make_mocked_request("GET", "/cb?code=c&state=s")
         with pytest.raises(AuthException):
-            await backend.exchange_code_for_tokens(
-                request, {"extra": {"msal_flow": {}}}
-            )
+            await backend.exchange_code_for_tokens(request, {"extra": {"msal_flow": {}}})
 
     @pytest.mark.asyncio
     async def test_refresh_keeps_unrotated_token(self, flow_store):

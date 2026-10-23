@@ -14,7 +14,7 @@ from aiohttp import web
 from navconfig.logging import logging
 from navigator_session import get_session
 from ..exceptions import AuthException, InvalidAuth, UserNotFound
-from ..identity.types import TokenResponse
+from ..identity.types import TokenResponse, mask_value
 from ..responses import JSONResponse
 from ..conf import (
     GITHUB_CLIENT_ID,
@@ -311,7 +311,16 @@ class GithubAuth(OauthAuth):
             session = await get_session(request)
             if not session:
                 session = {}
+            # FEAT-103 Module 6: never return the provider's tokens in the response
+            # body. `auth_token` is the provider ACCESS token (build_user_info) and
+            # `id_token` is the provider's OIDC token; both are secrets to the caller.
+            # The session keeps them (get_live_provider_token reads them) — this only
+            # redacts the HTTP body. `data["refresh_token"]` is NAVIGATOR's own refresh
+            # token (the caller's own credential) and is deliberately left as is.
             sessioninfo = {**data, **userdata}
+            for key in ("auth_token", "id_token"):
+                if key in sessioninfo:
+                    sessioninfo[key] = mask_value(sessioninfo[key])
             return JSONResponse(sessioninfo, status=200)
         except RuntimeError as err:
             response = {"message": "Session Error", "error": str(err)}

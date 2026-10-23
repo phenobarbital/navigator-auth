@@ -26,6 +26,7 @@ from ..conf import (
     AUTH_SUCCESSFUL_CALLBACKS,
     TROCTOKEN_REDIRECT_URI,
 )
+from ..libs.expiry import expiry_fields
 from .abstract import BaseAuthBackend
 from .basic import BasicUser
 
@@ -143,11 +144,13 @@ class TrocToken(BaseAuthBackend):
                     self.session_id_property: session.session_id,
                 }
                 token, refresh_token, exp, scheme = self._idp.create_token(data=payload)
+                _expiry = expiry_fields(exp)
                 usr.access_token = token
                 usr.token_type = scheme
-                usr.expires_in = exp
+                usr.expires_in = _expiry["expires_in"]
+                usr.expires_at = _expiry["expires_at"]
                 userdata["refresh_token"] = refresh_token
-                userdata["expires_in"] = exp
+                userdata.update(_expiry)
                 userdata["token_type"] = scheme
                 ### check if any callbacks exists:
                 try:

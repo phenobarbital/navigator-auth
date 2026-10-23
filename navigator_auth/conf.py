@@ -427,7 +427,26 @@ if ad_mapping is not None:
 ADFS_CLAIM_MAPPING = ad_mapping
 
 AZURE_AD_SERVER = config.get("AZURE_AD_SERVER", fallback="login.microsoftonline.com")
-AZURE_SESSION_TIMEOUT = config.get("AZURE_SESSION_TIMEOUT", fallback=120)
+# FEAT-103 Module 8 — two unrelated jobs, two settings.
+#
+# AZURE_SESSION_TIMEOUT is the OIDC `max_age` freshness requirement sent to
+# Entra and enforced by MSAL on the callback (with its own hardcoded 120s skew,
+# msal/oauth2cli/oidc.py). It is NOT a TTL.
+AZURE_SESSION_TIMEOUT = config.getint("AZURE_SESSION_TIMEOUT", fallback=120)
+# AZURE_FLOW_TTL is the Redis lifetime of the login-flow record written by
+# AzureAuth.authenticate. 600 matches every sibling flow TTL in this file
+# (AUTH_CODE_EXPIRATION, SAML_FLOW_TTL, IDENTITY_LINK_TTL, OAUTH_CODE_TTL,
+# OAUTH_DEVICE_CODE_TTL, OAUTH_UPSTREAM_FLOW_TTL); at the old shared 120s a
+# user who lingered on the Microsoft login screen lost the flow record and got
+# "Lost Authentication Flow, please try again."
+AZURE_FLOW_TTL = config.getint("AZURE_FLOW_TTL", fallback=600)
+# AZURE_LOGIN_PROMPT is the OIDC `prompt` sent on the login authorization
+# request. Empty (the default) keeps silent SSO: Entra reuses its own session
+# AND the access token it already issued for it, so a re-login can publish an
+# already-aged provider token (issue:3fd80396c685). Set it to `login` where a
+# genuinely newly-issued credential is required (or to measure token lifetime
+# across logins) — at the cost of a credential prompt on every login.
+AZURE_LOGIN_PROMPT = config.get("AZURE_LOGIN_PROMPT", fallback="").strip() or None
 
 # ADFS SAML Relay: When set, after OIDC login the user is redirected
 # to ADFS IdP-initiated SSO for this Relying Party (display name as

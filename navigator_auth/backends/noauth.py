@@ -10,6 +10,7 @@ from navigator_session import AUTH_SESSION_OBJECT
 
 # Authenticated Entity
 from ..identities import AuthUser, Guest
+from ..libs.expiry import expiry_fields
 from .abstract import BaseAuthBackend
 
 
@@ -66,14 +67,16 @@ class NoAuth(BaseAuthBackend):
         token, refresh_token, exp, scheme = self._idp.create_token(data=payload, expiration=3600)
         user.access_token = token
         user.token_type = scheme
-        user.expires_in = exp
+        _expiry = expiry_fields(exp)
+        user.expires_in = _expiry["expires_in"]
+        user.expires_at = _expiry["expires_at"]
         await self.remember(request, key, userdata, user)
         return {
             "token": token,
             "refresh_token": refresh_token,
             self.session_key_property: key,
             self.username_attribute: f"Anonymous {key}",
-            "expires_in": exp,
+            **_expiry,
             "token_type": scheme,
             **userdata,
         }
