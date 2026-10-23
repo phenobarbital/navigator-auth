@@ -51,31 +51,60 @@ class Organization(BaseModel):
         frozen = False
 
 
+#: Keys ``_coerce_organization`` reads off an incoming mapping. Anything else
+#: a SQL view happens to carry is ignored rather than fatal.
+_ORGANIZATION_FIELDS = ("org_id", "organization", "slug")
+
+#: Producer spellings accepted for ``Organization.organization``, in order of
+#: precedence. ``name`` is what ``auth.vw_users`` emits: it aggregates
+#: ``to_jsonb(organization_users.*) || jsonb_build_object('name',
+#: organizations.organization)``, so the organization's name arrives as
+#: ``name`` and never as ``organization``.
+_ORGANIZATION_NAME_KEYS = ("organization", "name")
+
+
 def _coerce_organization(org: Any) -> Organization:
     """Return *org* as an ``Organization``.
 
+    Tolerant by design (FEAT-102 §8 Q5, overridden 2026-10-23): organization
+    entries normally arrive as rows from a SQL view, which carry bookkeeping
+    columns the model does not declare (``user_id``, ``properties``,
+    ``created_at``, ``updated_at``, ``created_by``) and spell the name
+    ``name``. Rejecting those cost a ``403`` on every login for any user with
+    an organization, so unknown keys are now ignored and ``name`` is accepted
+    as a fallback for ``organization``. What makes an entry *invalid* is
+    unchanged: a missing or empty ``org_id`` / ``organization``.
+
     Args:
         org: An ``Organization`` instance (returned unchanged, same object) or a
-            ``Mapping`` with the model's fields (``org_id``, ``organization``,
-            optional ``slug``). The mapping is copied; the caller's object is
-            never mutated.
+            ``Mapping`` carrying ``org_id`` plus the organization's name under
+            either ``organization`` or ``name``, and optionally ``slug``. Keys
+            the model does not declare are ignored. The mapping is copied; the
+            caller's object is never mutated.
 
     Returns:
-        A valid ``Organization``.
+        A valid ``Organization``. ``slug`` is derived from the name when absent.
 
     Raises:
         TypeError: *org* is neither an ``Organization`` nor a ``Mapping``
             (this includes ``str`` — the former string shortcut is gone).
         ValueError: the mapping cannot build a valid ``Organization``
-            (missing required field, unknown key, model validation error),
-            or ``org_id`` / ``organization`` is empty or whitespace-only.
+            (missing required field, model validation error), or
+            ``org_id`` / ``organization`` is empty or whitespace-only.
             The original exception, when any, is chained.
     """
     if isinstance(org, Organization):
         result = org
     elif isinstance(org, Mapping):
+        payload = {key: org[key] for key in _ORGANIZATION_FIELDS if key in org}
+        if "organization" not in payload:
+            # `name` (auth.vw_users) and any future alias, first one wins.
+            for alias in _ORGANIZATION_NAME_KEYS:
+                if alias in org:
+                    payload["organization"] = org[alias]
+                    break
         try:
-            result = Organization(**dict(org))
+            result = Organization(**payload)
         except (ValueError, TypeError, ValidationError) as err:
             raise ValueError(f"Invalid organization entry {org!r}: {err}") from err
     else:

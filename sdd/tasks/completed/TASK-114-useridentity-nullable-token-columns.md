@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-104 — Identity-Link Failure: Non-Nullable Token Columns and Unsafe Error Headers
 **Spec**: `sdd/specs/bug-identity.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -379,8 +379,8 @@ from navigator_auth.models import UserIdentity   # the REAL model, never a stub
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: Optional[bytes] on 3 token columns; real-model tests + 2 store tests. 182 identity tests pass.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

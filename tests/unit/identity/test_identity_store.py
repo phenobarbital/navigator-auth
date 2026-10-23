@@ -1,4 +1,5 @@
 """Unit tests for IdentityStore and the vault-cache helpers."""
+
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,7 +16,6 @@ from navigator_auth.identity.store import (
     invalidate_cached,
 )
 from navigator_auth.models import UserIdentity
-
 
 MASTER_KEYS = {1: b"\x00" * 32}
 
@@ -40,9 +40,7 @@ def _store():
 
 
 def _enc(store, value, field, user_id=1, provider="github", puid="99"):
-    return store._cipher.encrypt(
-        value, user_id=user_id, auth_provider=provider, provider_user_id=puid, field=field
-    )
+    return store._cipher.encrypt(value, user_id=user_id, auth_provider=provider, provider_user_id=puid, field=field)
 
 
 class TestCipherRoundtripThroughStore:
@@ -127,9 +125,7 @@ class TestVaultCacheHelpers:
         vault.exists = AsyncMock(return_value=True)
         vault.get = AsyncMock(return_value={"access_token": "at"})
         session = self._session_with_vault(vault)
-        assert await cached_credential(session, "github") == {
-            "access_token": "at"
-        }
+        assert await cached_credential(session, "github") == {"access_token": "at"}
 
     @pytest.mark.asyncio
     async def test_cached_credential_none_without_vault(self):
@@ -142,9 +138,7 @@ class TestVaultCacheHelpers:
         vault.exists = AsyncMock(return_value=True)
         session = self._session_with_vault(vault)
         await invalidate_cached(session, "github")
-        vault.delete.assert_awaited_once_with(
-            IDENTITY_VAULT_KEY.format(provider="github")
-        )
+        vault.delete.assert_awaited_once_with(IDENTITY_VAULT_KEY.format(provider="github"))
 
     @pytest.mark.asyncio
     async def test_helpers_swallow_vault_errors(self):
@@ -213,6 +207,53 @@ class TestDuplicateRowOrdering:
         with _patch_filter([older, newer]):
             picked = await _store().get_by_provider(1, "github")
         assert picked is newer
+
+
+class TestSaveLinkedIdentityNullTokens:
+    @pytest.mark.asyncio
+    async def test_insert_without_refresh_or_id_token(self):
+        """The GitHub insert branch: no existing row, no refresh/id token."""
+        from asyncdb.exceptions import NoDataFound
+        from navigator_auth.identity.types import TokenResponse
+        from navigator_auth.models import UserIdentity
+
+        captured = []
+
+        async def _insert(self_):
+            captured.append(self_)
+            return self_
+
+        token = TokenResponse(access_token="at", refresh_token=None, id_token=None, provider_user_id="99")
+        with (
+            patch.object(UserIdentity, "get", new=AsyncMock(side_effect=NoDataFound("none"))),
+            patch.object(UserIdentity, "insert", new=_insert),
+        ):
+            await _store().save_linked_identity(1, "github", token)
+        assert len(captured) == 1
+        assert captured[0].access_token is not None
+        assert captured[0].refresh_token is None
+        assert captured[0].id_token is None
+
+    @pytest.mark.asyncio
+    async def test_update_keeps_previously_vaulted_tokens(self):
+        """Regression guard on store.py:179-193 — a re-save must not clobber."""
+        from navigator_auth.identity.types import TokenResponse
+        from navigator_auth.models import UserIdentity
+
+        store = _store()
+        existing = MagicMock()
+        existing.provider_user_id = "99"
+        existing.refresh_token = _enc(store, "old-rt", "refresh_token")
+        existing.id_token = _enc(store, "old-id", "id_token")
+        sealed_rt, sealed_id = existing.refresh_token, existing.id_token
+        existing.update = AsyncMock(return_value=existing)
+
+        token = TokenResponse(access_token="new-at", provider_user_id="99")
+        with patch.object(UserIdentity, "get", new=AsyncMock(return_value=existing)):
+            await store.save_linked_identity(1, "github", token)
+        assert existing.refresh_token == sealed_rt
+        assert existing.id_token == sealed_id
+        existing.update.assert_awaited_once()
 
 
 class TestFilterIdentitiesProjection:

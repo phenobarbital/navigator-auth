@@ -23,6 +23,7 @@ from navigator_session import AUTH_SESSION_OBJECT
 from ..identities import AuthUser
 from ..libs.json import json_decoder
 from ..libs.redirect import safe_redirect_url
+from ..libs.sanitize import header_safe
 from ..exceptions import UserNotFound, AuthException, InvalidAuth
 from ..identity.flow_store import IdentityFlowStore
 from ..identity.types import TokenResponse
@@ -186,9 +187,7 @@ class ExternalAuth(BaseAuthBackend):
         # Redis pool for per-request OAuth2 flow state (login and
         # identity-link); backends are singletons, so per-flow data
         # must live here instead of on the instance.
-        self._pool = aioredis.ConnectionPool.from_url(
-            REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
-        )
+        self._pool = aioredis.ConnectionPool.from_url(REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
         self._flow_store = IdentityFlowStore(self._pool)
 
     async def on_cleanup(self, app: web.Application):
@@ -264,9 +263,7 @@ class ExternalAuth(BaseAuthBackend):
             redirect_url = request.query["redirect_uri"]
         except (TypeError, KeyError):
             redirect_url = fallback
-        redirect_url = safe_redirect_url(
-            request, redirect_url, fallback=fallback, domain_url=domain_url
-        )
+        redirect_url = safe_redirect_url(request, redirect_url, fallback=fallback, domain_url=domain_url)
         self.logger.notice(f"Redirect URL: {redirect_url}")
         self.finish_redirect_url = redirect_url
         return redirect_url
@@ -345,9 +342,17 @@ class ExternalAuth(BaseAuthBackend):
         return redirect_url
 
     def failed_redirect(self, request: web.Request, error: str = "ERROR_UNKNOWN", message: str = "ERROR_UNKNOWN"):
+        """Redirect the browser to the failed-redirect URL.
+
+        Both ``error`` and ``message`` may originate from a provider
+        response, a query parameter or an exception string, so both are
+        passed through :func:`header_safe` before reaching a header.
+        """
         url = self.get_failed_redirect_url(request)
-        headers = {"x-message": message, "x-error": str(error)}
-        params = {"error": error, "message": message}
+        safe_error = header_safe(error)
+        safe_message = header_safe(message)
+        headers = {"x-message": safe_message, "x-error": safe_error}
+        params = {"error": safe_error, "message": safe_message}
         url = self.prepare_url(url, params)
         return web.HTTPFound(url, headers=headers)
 
@@ -394,9 +399,7 @@ class ExternalAuth(BaseAuthBackend):
         resume_flow_id = self._pending_oauth2_flow(request)
         response = await self.auth_callback(request)
         if resume_flow_id:
-            return await self._resume_oauth2_authorize(
-                request, resume_flow_id, response
-            )
+            return await self._resume_oauth2_authorize(request, resume_flow_id, response)
         return response
 
     # ------------------------------------------------------------------
@@ -421,9 +424,7 @@ class ExternalAuth(BaseAuthBackend):
             carried = None
         return carried or request.cookies.get(OAUTH2_RESUME_COOKIE) or None
 
-    async def _resume_oauth2_authorize(
-        self, request: web.Request, flow_id: str, response
-    ):
+    async def _resume_oauth2_authorize(self, request: web.Request, flow_id: str, response):
         """Send a freshly authenticated browser back into ``/oauth2/authorize``.
 
         The session cookie was already written by ``remember()`` during
@@ -435,8 +436,7 @@ class ExternalAuth(BaseAuthBackend):
         status = getattr(response, "status", 500)
         if status not in (301, 302, 303, 307, 308):
             self.logger.warning(
-                f"{self._service_name}: upstream login failed; "
-                "not resuming the OAuth2 authorize request."
+                f"{self._service_name}: upstream login failed; " "not resuming the OAuth2 authorize request."
             )
             return response
 
@@ -504,27 +504,20 @@ class ExternalAuth(BaseAuthBackend):
                 token = TokenResponse(
                     access_token=access_token,
                     token_type=session.get("token_type") or self.scheme,
-                    provider_user_id=str(
-                        session.get(self.userid_attribute) or ""
-                    ),
+                    provider_user_id=str(session.get(self.userid_attribute) or ""),
                 )
             if not token.provider_user_id:
                 # FEAT-103 Module 2: never persist an unbound login grant — a
                 # row without provider_user_id cannot be matched by
                 # get_for_provider_account and would disable refresh.
                 self.logger.warning(
-                    f"{self._service_name}: no verified external account id; "
-                    "skipping credential capture."
+                    f"{self._service_name}: no verified external account id; " "skipping credential capture."
                 )
                 return
             store = IdentityStore(request.app["authdb"])
-            await store.save_linked_identity(
-                user_id, self._service_name, token, {}
-            )
+            await store.save_linked_identity(user_id, self._service_name, token, {})
         except Exception as err:  # pylint: disable=W0703
-            self.logger.warning(
-                f"{self._service_name}: could not vault the upstream token: {err}"
-            )
+            self.logger.warning(f"{self._service_name}: could not vault the upstream token: {err}")
 
     async def capture_login_credential(
         self,
@@ -561,9 +554,7 @@ class ExternalAuth(BaseAuthBackend):
 
     def get_identity_client(self) -> tuple:
         """(client_id, client_secret) used by the generic identity flow."""
-        raise AuthException(
-            f"{self._service_name}: identity flow is not supported"
-        )
+        raise AuthException(f"{self._service_name}: identity flow is not supported")
 
     def get_identity_userid(self, userinfo: dict) -> Optional[str]:
         """Stable external account id from the provider's userinfo."""
@@ -573,9 +564,7 @@ class ExternalAuth(BaseAuthBackend):
                 return str(value)
         return None
 
-    async def authorize_identity(
-        self, request: web.Request, user_id: Any, finish_redirect: str
-    ):
+    async def authorize_identity(self, request: web.Request, user_id: Any, finish_redirect: str):
         """Start the identity-link authorization flow (302 to provider)."""
         from ..conf import IDENTITY_LINK_TTL
 
@@ -602,15 +591,11 @@ class ExternalAuth(BaseAuthBackend):
         }
         return self.redirect(self.prepare_url(self.authorize_uri, params))
 
-    async def exchange_code_for_tokens(
-        self, request: web.Request, flow: dict
-    ) -> "TokenResponse":
+    async def exchange_code_for_tokens(self, request: web.Request, flow: dict) -> "TokenResponse":
         """Generic authorization_code exchange for the identity flow."""
         code = request.rel_url.query.get("code")
         if not code:
-            raise AuthException(
-                f"{self._service_name}: no authorization code in callback"
-            )
+            raise AuthException(f"{self._service_name}: no authorization code in callback")
         client_id, client_secret = self.get_identity_client()
         payload = await self.token_request(
             self._token_uri,
@@ -622,13 +607,9 @@ class ExternalAuth(BaseAuthBackend):
                 "client_secret": client_secret,
             },
         )
-        return TokenResponse.from_oauth_response(
-            payload, scopes=self.identity_scopes()
-        )
+        return TokenResponse.from_oauth_response(payload, scopes=self.identity_scopes())
 
-    async def refresh_identity_tokens(
-        self, refresh_token: str
-    ) -> "TokenResponse":
+    async def refresh_identity_tokens(self, refresh_token: str) -> "TokenResponse":
         """Generic refresh_token grant; providers may rotate the token."""
         client_id, client_secret = self.get_identity_client()
         payload = await self.token_request(
@@ -646,9 +627,7 @@ class ExternalAuth(BaseAuthBackend):
             token.refresh_token = refresh_token
         return token
 
-    async def refresh_provider_tokens(
-        self, token: "TokenResponse"
-    ) -> Optional["TokenResponse"]:
+    async def refresh_provider_tokens(self, token: "TokenResponse") -> Optional["TokenResponse"]:
         """Refresh a LOGIN grant, preserving what that grant was issued for.
 
         Distinct from :meth:`refresh_identity_tokens`, which refreshes an
@@ -724,23 +703,18 @@ class ExternalAuth(BaseAuthBackend):
                 session_obj = session.get(AUTH_SESSION_OBJECT) or {}
                 session_user = session_obj.get("user_id")
             if session_user is None or str(session_user) != str(user_id):
-                self.logger.warning(
-                    f"{self._service_name}: user_id does not match the session."
-                )
+                self.logger.warning(f"{self._service_name}: user_id does not match the session.")
                 return None
             provider_user_id = session.get("external_provider_user_id")
             if not provider_user_id:
                 # A legacy session predating FEAT-103 carries no binding.
                 # Guessing an account is worse than requiring a re-login.
                 self.logger.warning(
-                    f"{self._service_name}: session has no external account "
-                    "binding; re-login required."
+                    f"{self._service_name}: session has no external account " "binding; re-login required."
                 )
                 return None
             store = IdentityStore(request.app["authdb"])
-            identity = await store.get_for_provider_account(
-                session_user, self._service_name, provider_user_id
-            )
+            identity = await store.get_for_provider_account(session_user, self._service_name, provider_user_id)
             if identity is None:
                 return None
             token = store.decrypt_credential(identity)
@@ -749,9 +723,7 @@ class ExternalAuth(BaseAuthBackend):
             try:
                 refreshed = await self.refresh_provider_tokens(token)
             except Exception as err:  # pylint: disable=W0703
-                self.logger.warning(
-                    f"{self._service_name}: provider token refresh failed: {err}"
-                )
+                self.logger.warning(f"{self._service_name}: provider token refresh failed: {err}")
                 refreshed = None
             if refreshed is None:
                 # "Expiring" (within leeway) is not "expired": a credential
@@ -770,9 +742,7 @@ class ExternalAuth(BaseAuthBackend):
             session["has_refresh_token"] = bool(refreshed.refresh_token)
             return refreshed
         except Exception as err:  # pylint: disable=W0703
-            self.logger.warning(
-                f"{self._service_name}: cannot obtain a live provider token: {err}"
-            )
+            self.logger.warning(f"{self._service_name}: cannot obtain a live provider token: {err}")
             return None
 
     async def get_identity_userinfo(self, token: "TokenResponse") -> dict:
@@ -785,9 +755,7 @@ class ExternalAuth(BaseAuthBackend):
             )
             return data or {}
         except Exception as err:  # pylint: disable=W0703
-            self.logger.warning(
-                f"{self._service_name}: cannot fetch identity userinfo: {err}"
-            )
+            self.logger.warning(f"{self._service_name}: cannot fetch identity userinfo: {err}")
             return {}
 
     async def finish_identity_link(self, request: web.Request, flow: dict):
@@ -797,8 +765,16 @@ class ExternalAuth(BaseAuthBackend):
 
         if error := request.rel_url.query.get("error"):
             desc = request.rel_url.query.get("error_description", "")
+            self.logger.warning(
+                "%s: identity link denied by provider: error=%r description=%r",
+                self._service_name,
+                error,
+                desc,
+            )
             return self.failed_redirect(
-                request, error="IDENTITY_LINK_DENIED", message=f"{error}: {desc}"
+                request,
+                error="IDENTITY_LINK_DENIED",
+                message="Identity link was denied by the provider.",
             )
         try:
             token = await self.exchange_code_for_tokens(request, flow)
@@ -806,17 +782,13 @@ class ExternalAuth(BaseAuthBackend):
             if not token.provider_user_id:
                 token.provider_user_id = self.get_identity_userid(userinfo)
             store = IdentityStore(request.app["authdb"])
-            await store.save_linked_identity(
-                flow["user_id"], self._service_name, token, userinfo
-            )
+            await store.save_linked_identity(flow["user_id"], self._service_name, token, userinfo)
         except Exception as err:  # pylint: disable=W0703
-            self.logger.exception(
-                f"{self._service_name}: identity link failed: {err}"
-            )
+            self.logger.exception(f"{self._service_name}: identity link failed: {err}")
             return self.failed_redirect(
                 request,
                 error="IDENTITY_LINK_FAILED",
-                message=f"Identity link failed: {err}",
+                message="Identity link failed.",
             )
         # best-effort: cache the decrypted credential in the session vault
         try:
@@ -824,9 +796,7 @@ class ExternalAuth(BaseAuthBackend):
 
             session = await get_session(request, new=False)
             if session:
-                await cache_credential(
-                    session, self._service_name, token.credential()
-                )
+                await cache_credential(session, self._service_name, token.credential())
         except Exception:  # pylint: disable=W0703
             pass
         # ``finish_redirect`` was captured from the query string when the
@@ -943,10 +913,8 @@ class ExternalAuth(BaseAuthBackend):
                 except UserNotFound as ex:
                     raise UserNotFound(f"Invalid Credentials for {login}") from ex
             else:
-                raise RuntimeError(
-                    f"Auth: Invalid config for AUTH_MISSING_ACCOUNT: \
-                    {AUTH_MISSING_ACCOUNT}"
-                ) from err
+                raise RuntimeError(f"Auth: Invalid config for AUTH_MISSING_ACCOUNT: \
+                    {AUTH_MISSING_ACCOUNT}") from err
         if user and self._callbacks:
             try:
                 # construir e invocar callbacks para actualizar data de usuario
@@ -1056,9 +1024,7 @@ class ExternalAuth(BaseAuthBackend):
                 that doesn't override this method) — callers map this to a
                 400 "unsupported provider" rather than a 401.
         """
-        raise NotImplementedError(
-            f"{self._service_name}: token exchange not supported"
-        )
+        raise NotImplementedError(f"{self._service_name}: token exchange not supported")
 
     async def _verify_jwt(
         self,
@@ -1096,9 +1062,7 @@ class ExternalAuth(BaseAuthBackend):
                 jwks_url,
             )
         except Exception as err:  # pylint: disable=W0703
-            self.logger.warning(
-                f"{self._service_name}: JWKS/public-key lookup failed: {err}"
-            )
+            self.logger.warning(f"{self._service_name}: JWKS/public-key lookup failed: {err}")
             raise InvalidAuth("bad_signature") from err
         issuers = issuer if isinstance(issuer, (list, tuple, set, frozenset)) else [issuer]
         try:
@@ -1116,9 +1080,7 @@ class ExternalAuth(BaseAuthBackend):
         except jwt.ExpiredSignatureError as err:
             raise InvalidAuth("expired") from err
         except jwt.InvalidAudienceError as err:
-            self.logger.warning(
-                f"{self._service_name}: JWT wrong audience (expected {audience})"
-            )
+            self.logger.warning(f"{self._service_name}: JWT wrong audience (expected {audience})")
             raise InvalidAuth("wrong_audience") from err
         except jwt.PyJWTError as err:
             self.logger.warning(f"{self._service_name}: JWT rejected: {err}")
@@ -1126,8 +1088,7 @@ class ExternalAuth(BaseAuthBackend):
         token_iss = claims.get("iss")
         if token_iss not in issuers:
             self.logger.warning(
-                f"{self._service_name}: JWT wrong issuer iss={token_iss!r} "
-                f"expected={list(issuers)!r}"
+                f"{self._service_name}: JWT wrong issuer iss={token_iss!r} " f"expected={list(issuers)!r}"
             )
             raise InvalidAuth("wrong_issuer")
         return claims
@@ -1243,16 +1204,11 @@ class ExternalAuth(BaseAuthBackend):
                     payload = json_decoder(raw)
                 except (ValueError, AuthException):
                     parsed = parse_qs(raw.decode("utf-8"))
-                    payload = {
-                        k: v[0] if len(v) == 1 else v
-                        for k, v in parsed.items()
-                    }
+                    payload = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
                 if not isinstance(payload, dict):
                     payload = {"response": payload}
                 if response.status >= 400 or "error" in payload:
-                    raise AuthException(
-                        f"{self._service_name}: Token request failed: {payload}"
-                    )
+                    raise AuthException(f"{self._service_name}: Token request failed: {payload}")
                 return payload
 
     async def create_external_user(self, userdata: dict) -> Callable:
