@@ -167,7 +167,7 @@
       "feature_id": "FEAT-105",
       "feature": "user-identities-ownership-abac",
       "spec": "sdd/specs/user-identities-ownership-abac.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -178,8 +178,8 @@
       "parallelism_notes": "Spec Module 5. Same file as TASK-121/123/124/125 (userattrs.py) and deliberately follows the full identity wiring, which it copies with a different column set — spec Module 5 is 'same pattern as Module 4'. Depends on TASK-121 so social_network/_set_address are already parameterized when this task re-reads the file.",
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-126-account-handler-guard.md"
+      "completed_at": "2026-10-23T22:59:16+00:00",
+      "file": "sdd/tasks/completed/TASK-126-account-handler-guard.md"
     },
     {
       "id": "TASK-127",
