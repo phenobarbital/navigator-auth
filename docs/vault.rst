@@ -71,6 +71,8 @@ it. The pieces are routed by sensitivity:
   ====================================  ====================================================
   ``id_token``                          Provider OIDC ``id_token``.
   ``external_expires_at``               ISO-8601 expiry of the provider access token.
+  ``external_issued_at``                ISO-8601 ``iat`` of the provider access token, when
+                                        it is a JWT. Present only when knowable.
   ``has_refresh_token``                 Boolean marker — a refresh token is vaulted. Never
                                         the token itself.
   ``external_provider_user_id``         Verified external account the login is bound to.
@@ -110,5 +112,32 @@ token for almost the whole session. Call
   published.
 * The ``check_credentials`` JSON response masks ``auth_token`` and ``id_token``.
 
-Azure settings: see ``AZURE_FLOW_TTL`` and ``AZURE_SESSION_TIMEOUT`` in
-:doc:`settings`.
+A login is not always a newly issued token
+-----------------------------------------
+
+Logging out of Navigator ends the **Navigator** session only; the provider's
+own SSO session survives. The next authorization-code round-trip is therefore
+silent at the IdP, and Entra answers it with the access token it already holds
+for that session — same ``iat``, same ``exp``, with ``expires_in`` reporting
+only the **remaining** lifetime. A brand-new session could start out holding a
+credential seconds from expiry (``issue:3fd80396c685``).
+
+Two consequences to keep in mind:
+
+* ``expires_in`` from a provider is time left, **not** the token's issued
+  lifetime. Only ``exp - iat`` is the lifetime.
+* Backends run the captured grant through
+  ``ExternalAuth.ensure_fresh_login_grant`` before publishing it, which applies
+  the same ``IDENTITY_REFRESH_LEEWAY`` check ``get_live_provider_token`` uses
+  later and refreshes an already-aged grant first. It never fails a login: when
+  the refresh is impossible, the provider's credential is published as received
+  and the warning says so.
+
+``external_issued_at`` makes the reuse visible without decoding the token.
+Where a genuinely newly-issued credential is required — or to measure token
+lifetime across logins — set ``AZURE_LOGIN_PROMPT=login`` so Entra
+re-authenticates instead of serving its cache; it is off by default because it
+costs a credential prompt on every login.
+
+Azure settings: see ``AZURE_FLOW_TTL``, ``AZURE_SESSION_TIMEOUT`` and
+``AZURE_LOGIN_PROMPT`` in :doc:`settings`.

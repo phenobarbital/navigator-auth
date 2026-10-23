@@ -390,6 +390,51 @@ class TestAuthCallbackCapture:
         assert spies.build.call_args.kwargs["provider_user_id"] is None
 
 
+class TestAuthCallbackFreshness:
+    """issue:3fd80396c685 — Entra answers a silent re-login with the access
+    token it already issued; the callback must not publish it as-is."""
+
+    @pytest.mark.asyncio
+    async def test_cached_entra_token_is_refreshed_before_the_session(
+        self, backend, msal_result_full, monkeypatch
+    ):
+        # what Entra returns on the second login: the same token, with only
+        # the remainder of its lifetime in expires_in
+        msal_result_full["expires_in"] = 45
+        backend.user_mapping = {"id": "id", "userPrincipalName": "username"}
+        backend.username_attribute = "username"
+        rotated = TokenResponse(
+            access_token="AT.fresh", refresh_token="RT.rotated",
+            expires_in=5457, scopes=["User.Read", "Mail.Read"],
+        )
+        backend.refresh_provider_tokens = AsyncMock(return_value=rotated)
+        spies = _wire_callback(backend, monkeypatch, msal_result_full)
+        request = make_mocked_request("GET", "/auth/azure/callback/?state=st1&code=c")
+        assert await backend.auth_callback(request) == "HOME"
+        backend.refresh_provider_tokens.assert_awaited_once()
+        # Graph, the session and the vault all see the rotated credential
+        backend.get.assert_awaited_once()
+        assert backend.get.await_args.kwargs["token"] == "AT.fresh"
+        assert spies.build.call_args.kwargs["token"] == "AT.fresh"
+        assert spies.build.call_args.kwargs["expires_at"] == rotated.expires_at
+        assert backend.capture_login_credential.await_args.args[1] is rotated
+        # the account binding survives the rotation
+        assert rotated.provider_user_id == "graph-oid-123"
+
+    @pytest.mark.asyncio
+    async def test_a_freshly_issued_token_is_not_refreshed(
+        self, backend, msal_result_full, monkeypatch
+    ):
+        backend.user_mapping = {"id": "id", "userPrincipalName": "username"}
+        backend.username_attribute = "username"
+        backend.refresh_provider_tokens = AsyncMock()
+        spies = _wire_callback(backend, monkeypatch, msal_result_full)
+        request = make_mocked_request("GET", "/auth/azure/callback/?state=st1&code=c")
+        await backend.auth_callback(request)
+        backend.refresh_provider_tokens.assert_not_awaited()
+        assert spies.build.call_args.kwargs["token"] == "AT.graph"
+
+
 class TestAzureRefreshScopes:
     @pytest.mark.asyncio
     async def test_azure_login_refresh_preserves_grant_scopes(self, backend):

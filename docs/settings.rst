@@ -174,3 +174,14 @@ Azure / Entra ID (FEAT-103)
    again."* Defaults to ``600``, matching the other flow-record TTLs in
    ``navigator_auth/conf.py``. Do not merge it back into
    ``AZURE_SESSION_TIMEOUT``.
+
+``AZURE_LOGIN_PROMPT``
+   String, empty by default. The OIDC ``prompt`` sent on the login
+   authorization request. Empty keeps silent SSO, which also means Entra may
+   answer with the access token it already issued for the surviving SSO
+   session instead of a new one (``issue:3fd80396c685``) — see
+   :doc:`vault`. Set it to ``login`` where a genuinely newly-issued provider
+   credential is required, or to measure token lifetime across logins;
+   it costs the user a credential prompt on every login. Other OIDC values
+   (``select_account``, ``consent``, ``none``) are passed through to MSAL
+   unchanged.
