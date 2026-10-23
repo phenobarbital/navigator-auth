@@ -248,13 +248,29 @@ class OwnerOrSuperuserGuard:
         qualified = f'"{schema}"."{table}"' if schema else f'"{table}"'
         sql = f"SELECT {selected} FROM {qualified} " f'WHERE "{column}"::text LIKE $1'
         args: list = [f"{value}%"]
-        if not is_superuser and self.owner_column:
+        # A superuser widens the filter ONLY when the named policy allows the
+        # read action; otherwise (no PDP, undeclared/raising policy) the
+        # owner predicate stays and they see their own rows like anyone.
+        widen = False
+        if is_superuser and self.policy_name:
+            action = next(
+                (a for a in sorted(self.superuser_actions) if a.endswith(":read")),
+                None,
+            )
+            if action:
+                allowed, reason, _ = await policy_allows(
+                    self.policy_name, self.request, action=action,
+                    resource=self.request.path,
+                )
+                await self.audit_decision(
+                    action, bool(allowed), None, f"filter on '{column}': {reason}"
+                )
+                widen = bool(allowed)
+        if not widen and self.owner_column:
             sql += f' AND "{self.owner_column}" = $2'
             args.append(user_id)
         async with await self.handler(request=self.request) as conn:
             rows = await conn.fetch_all(sql, *args)
-        if is_superuser:
-            await self.audit_decision("read", True, None, f"superuser filter on '{column}'")
         return [dict(r) for r in (rows or [])]
 
     # ------------------------------------------------------------------

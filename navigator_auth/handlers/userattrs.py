@@ -158,6 +158,31 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
         """Gate a partial update; row ownership is decided in `_set_update`."""
         return await self._pre_write()
 
+    def _require_structured_patch(self, data) -> None:
+        """Refuse the single-attribute PATCH form (non-JSON body).
+
+        Upstream ``patch()`` handles ``PATCH /<id>/<attribute>`` with a text
+        body by fetching the row and calling ``obj.set(...)`` directly —
+        never reaching ``_set_update``, so neither ownership nor the
+        vault-column check would apply. Only dict / list-of-dict payloads
+        are accepted.
+        """
+        ok = isinstance(data, dict) or (
+            isinstance(data, list) and all(isinstance(d, dict) for d in data)
+        )
+        if not ok:
+            self.error(
+                response={"error": "PATCH requires a JSON object body"},
+                status=400,
+            )
+
+    async def patch(self):
+        """Serve a redacted ``:meta`` (upstream returns ``__fields__`` raw)."""
+        if self.get_args().get("meta") == ":meta":
+            fields = [f for f in self.model.__fields__ if f in self.public_columns]
+            return self.json_response(fields)
+        return await super().patch()
+
     async def _pre_post(self, *args, **kwargs) -> bool:
         """Gate an upsert."""
         return await self._pre_write()
@@ -175,6 +200,12 @@ class UserAccountHandler(OwnerOrSuperuserGuard, ModelHandler):
     async def _patch_user_id(self, value, column, data):
         """Leave ``user_id`` as sent on PATCH (``_set_user_id`` would clobber)."""
         return value
+
+    async def _patch_data(self, *args, **kwargs):
+        """Refuse the single-attribute PATCH form (see identity handler)."""
+        data = await super()._patch_data(*args, **kwargs)
+        self._require_structured_patch(data)
+        return data
 
     async def _post_data(self, *args, **kwargs):
         """Bind the owner on insert/upsert. Covers PUT and POST.
@@ -533,6 +564,9 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
         await self._pre_write()
         user_id, _ = await self.acting_user()
         owner_col = self.owner_column
+        # Upstream merges the query string into the payload AFTER _post_data
+        # (data = {**qp, **data}), so vault columns could ride in on it.
+        self._reject_readonly(dict(self.query_parameters(self.request)))
         try:
             raw = await self.json_data()
         except Exception:  # noqa: BLE001 - malformed body is upstream's 400
@@ -549,6 +583,31 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
     async def _pre_patch(self, *args, **kwargs) -> bool:
         """Gate a partial update. Row ownership is decided in `_set_update`."""
         return await self._pre_write()
+
+    def _require_structured_patch(self, data) -> None:
+        """Refuse the single-attribute PATCH form (non-JSON body).
+
+        Upstream ``patch()`` handles ``PATCH /<id>/<attribute>`` with a text
+        body by fetching the row and calling ``obj.set(...)`` directly —
+        never reaching ``_set_update``, so neither ownership nor the
+        vault-column check would apply. Only dict / list-of-dict payloads
+        are accepted.
+        """
+        ok = isinstance(data, dict) or (
+            isinstance(data, list) and all(isinstance(d, dict) for d in data)
+        )
+        if not ok:
+            self.error(
+                response={"error": "PATCH requires a JSON object body"},
+                status=400,
+            )
+
+    async def patch(self):
+        """Serve a redacted ``:meta`` (upstream returns ``__fields__`` raw)."""
+        if self.get_args().get("meta") == ":meta":
+            fields = [f for f in self.model.__fields__ if f not in self.credential_columns]
+            return self.json_response(fields)
+        return await super().patch()
 
     async def _pre_post(self, *args, **kwargs) -> bool:
         """Gate an upsert. `POST` may insert OR update."""
@@ -642,6 +701,7 @@ class UserIdentityHandler(OwnerOrSuperuserGuard, ModelHandler):
     async def _patch_data(self, *args, **kwargs):
         """Reject vault columns on `PATCH` (navigator/views/model.py:756)."""
         data = await super()._patch_data(*args, **kwargs)
+        self._require_structured_patch(data)
         self._reject_readonly(data)
         return data
 

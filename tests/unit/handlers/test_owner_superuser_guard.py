@@ -383,9 +383,21 @@ class TestSafeFilter:
     @pytest.mark.asyncio
     async def test_superuser_filter_has_no_owner_predicate_and_is_audited(self):
         audit = _audit()
-        host = Host(_request(FakePDP([], audit)))
+        host = Host(_request(FakePDP([_policy()], audit)))
         with S(_session(groups=["superuser"])):
             await host.safe_filter("email=a")
         sql, args = host.conn.calls[0]
         assert "$2" not in sql and len(args) == 1
         audit.log.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_superuser_filter_without_policy_stays_owner_bound(self):
+        """No PDP / undeclared policy => the superuser is NOT widened."""
+        for pdp in (None, FakePDP([], _audit())):
+            host = Host(_request(pdp))
+            with S(_session(groups=["superuser"])), patch(
+                "navigator_auth.handlers.guards.AuditLog"
+            ):
+                await host.safe_filter("email=a")
+            sql, args = host.conn.calls[0]
+            assert '"user_id" = $2' in sql and 42 in args
