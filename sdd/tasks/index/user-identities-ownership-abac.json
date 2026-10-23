@@ -127,7 +127,7 @@
       "feature_id": "FEAT-105",
       "feature": "user-identities-ownership-abac",
       "spec": "sdd/specs/user-identities-ownership-abac.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -137,8 +137,8 @@
       "parallelism_notes": "Spec Module 4, part 2 of 3. Depends on TASK-123 for the guard configuration, _require_owner_column and readonly_columns declaration; same file and same class.",
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-124-identity-handler-write-path.md"
+      "completed_at": "2026-10-23T22:55:48+00:00",
+      "file": "sdd/tasks/completed/TASK-124-identity-handler-write-path.md"
     },
     {
       "id": "TASK-125",
