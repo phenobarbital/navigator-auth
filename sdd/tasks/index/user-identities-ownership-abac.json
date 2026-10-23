@@ -50,7 +50,7 @@
       "feature_id": "FEAT-105",
       "feature": "user-identities-ownership-abac",
       "spec": "sdd/specs/user-identities-ownership-abac.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [],
@@ -58,8 +58,8 @@
       "parallelism_notes": "Spec Module 7. One new YAML file in navigator_auth/abac/default_policies/ plus tests/unit/handlers/test_auth_model_policy_pack.py. No Python under navigator_auth/. Nothing in the codebase reads default_policies/, and the guards deny when a policy is absent, so no task depends on this one. Shares only the idempotent tests/unit/handlers/__init__.py.",
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-120-auth-model-policy-pack.md"
+      "completed_at": "2026-10-23T22:50:15+00:00",
+      "file": "sdd/tasks/completed/TASK-120-auth-model-policy-pack.md"
     },
     {
       "id": "TASK-121",
