@@ -8,7 +8,7 @@ base_branch: dev
 **Feature ID**: FEAT-104
 **Date**: 2026-10-23
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: next patch on `dev`
 
 ---
@@ -250,7 +250,9 @@ def header_safe(value: Any, max_length: int = 256) -> str:
 - **Path**: `navigator_auth/models.py` (lines 100-102)
 - **Responsibility**: Make the three ciphered credential columns accept
   `None`, so a provider that issues no refresh/id token can be linked and so
-  legacy rows with `NULL` columns can be hydrated.
+  legacy rows with `NULL` columns can be hydrated. **All three** columns are
+  widened — including `access_token` — because `auth.user_identities`
+  predates the vault and profile-only rows carry `NULL` there (§8 Q3).
 - **Depends on**: nothing.
 - **Delegation-eligible**: **Yes.** Mechanical, fully specified, three lines.
 
@@ -665,6 +667,20 @@ module — the implementation must add it.
 
 ### `navigator_auth/identity/sql/` — schema (no change)
 
+Five migrations exist, all additive and idempotent, applied in order at
+startup. None is modified by this feature:
+
+| File | Purpose |
+|---|---|
+| `001_identity_credentials.sql` | credential columns (`access_token`, `refresh_token`, …) onto the **pre-existing** table |
+| `002_identity_id_token.sql` | `id_token BYTEA` |
+| `003_identity_key_version_integer.sql` | widen `key_version` |
+| `004_identity_base_columns.sql` | FEAT-103: the model's **base** columns (`identity_id`, `display_name`, …) that legacy databases lack |
+| `005_identity_legacy_uid_default.sql` | FEAT-103: make the legacy `uid NOT NULL` column self-filling |
+
+That 001/002 use `ALTER TABLE … ADD COLUMN` — and that 004 had to exist at
+all — is the evidence that pre-vault rows with `NULL` token columns are real.
+
 ```sql
 -- 001_identity_credentials.sql:7-15
 ALTER TABLE IF EXISTS auth.user_identities
@@ -786,13 +802,21 @@ payload: {
       header sanitization, and removing the leaked internal detail from the
       user-visible error output. The user explicitly accepted the wider blast
       radius of the third item.
-- [ ] Should `access_token` really be widened to `Optional[bytes]` as well?
-      The spec says yes, because the DB column is nullable and legacy rows
-      predate FEAT-096, so hydration fails without it. The counter-argument is
-      that a linked identity with no access token is meaningless and the
-      model could usefully enforce that. If enforcement is wanted, it belongs
-      on the *write* path in `save_linked_identity`, not on the column type —
-      decide during implementation. *Owner: Jesus Lara*
+- [x] Should `access_token` really be widened to `Optional[bytes]` as well? —
+      *Resolved by user (2026-10-23)*: **yes, widen all three; no write-path
+      guard.** `auth.user_identities` predates the Identity Vault entirely —
+      migrations `001`/`002` `ADD COLUMN` the credential columns onto an
+      existing table, and `004_identity_base_columns.sql` exists precisely
+      because legacy databases had the table without even the model's base
+      columns. Profile-only rows written before FEAT-096 therefore have
+      `NULL access_token`, and hydrating them through `UserIdentity.get()` /
+      `.filter()` raises the same `Cannot convert None to bytes` today —
+      breaking `list_for_user`, `get_one` and `get_by_provider` independently
+      of any link attempt. The model must match the nullable `BYTEA` schema
+      on all three columns. The accepted trade-off: nothing at the type level
+      prevents a credential row being written without an access token; a
+      `save_linked_identity` guard for that was considered and **declined**
+      as out of scope for this fix.
 - [ ] Does any frontend currently parse the free-text `?message=` value rather
       than the `?error=` code? If one does, Module 3 changes what it displays.
       No consumer was found in this repository
@@ -843,3 +867,4 @@ can be used on a future spec once an exploration document exists.)
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-10-23 | Jesus Lara | Initial draft — GitHub identity-link failure: non-nullable `UserIdentity` token columns, unsanitized error headers, leaked internal detail |
+| 0.2 | 2026-10-23 | Jesus Lara | Resolved §8 Q3 (widen all three columns, no write-path guard); corrected the migration inventory (`004`/`005` were missing); status → approved |
