@@ -751,10 +751,14 @@ class TestCodexReviewRegressions:
         pdp, _ = _audit_pdp()
         h = _wh(pdp=pdp, model=FakeModel([]))  # get() -> None: row missing
         body = {"identity_id": "new", "user_id": OTHER_ID, "enabled": False}
-        with _patch_sessions(_session(groups=["superuser"])), patch(
-            "navigator.views.ModelView._post_data",
-            new=AsyncMock(return_value=dict(body)),
-        ), pytest.raises(web.HTTPForbidden):
+        with (
+            _patch_sessions(_session(groups=["superuser"])),
+            patch(
+                "navigator.views.ModelView._post_data",
+                new=AsyncMock(return_value=dict(body)),
+            ),
+            pytest.raises(web.HTTPForbidden),
+        ):
             await h._post_data()
 
     @pytest.mark.asyncio
@@ -762,8 +766,11 @@ class TestCodexReviewRegressions:
         pdp, _ = _audit_pdp()
         h = _wh(pdp=pdp, model=_DelModel([_row(OTHER_ID)]))
         body = {"identity_id": "abc", "user_id": OTHER_ID, "enabled": False}
-        with _patch_sessions(_session(groups=["superuser"])), patch(
-            "navigator.views.ModelView._post_data",
-            new=AsyncMock(return_value=dict(body)),
+        with (
+            _patch_sessions(_session(groups=["superuser"])),
+            patch(
+                "navigator.views.ModelView._post_data",
+                new=AsyncMock(return_value=dict(body)),
+            ),
         ):
             assert (await h._post_data())["user_id"] == OTHER_ID
