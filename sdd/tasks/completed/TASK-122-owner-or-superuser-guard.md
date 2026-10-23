@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-105 — Owner-or-Superuser ABAC Ownership for the Auth Model CRUD Surfaces
 **Spec**: `sdd/specs/user-identities-ownership-abac.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-118, TASK-119
@@ -1092,10 +1092,8 @@ from navigator_auth.handlers.guards import OwnerOrSuperuserGuard
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-24
+**Notes**: 30 tests pass; regression gate green; ruff clean.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

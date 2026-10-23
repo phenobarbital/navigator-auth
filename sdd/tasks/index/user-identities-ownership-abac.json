@@ -86,7 +86,7 @@
       "feature_id": "FEAT-105",
       "feature": "user-identities-ownership-abac",
       "spec": "sdd/specs/user-identities-ownership-abac.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -97,8 +97,8 @@
       "parallelism_notes": "Spec Module 3 — the centre of the feature. Imports redaction.safe_fields (TASK-118) and decorators.policy_allows (TASK-119), so it cannot start before both. Every handler task depends on it, so it is the serialization point of the whole graph.",
       "assigned_to": null,
       "started_at": "2026-10-23T22:34:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-122-owner-or-superuser-guard.md"
+      "completed_at": "2026-10-23T22:52:11+00:00",
+      "file": "sdd/tasks/completed/TASK-122-owner-or-superuser-guard.md"
     },
     {
       "id": "TASK-123",
