@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-104 — Identity-Link Failure: Non-Nullable Token Columns and Unsafe Error Headers
 **Spec**: `sdd/specs/bug-identity.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-116
@@ -400,8 +400,8 @@ grep -nE 'failed_redirect\(|message=f"' -A2 \
 
 *(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
+**Completed by**: sdd-worker (sequential fallback)
+**Date**: 2026-10-23
+**Notes**: 6 call sites now use fixed messages, detail logged; 2 new tests. Full suite: 3 tests in tests/test_token_exchange_backend.py newly fail ONLY against the legacy dev DB (auth.user_identities has legacy 'uid' column): TASK-114 lets the insert succeed, then UserIdentity.filter() rejects the 'uid' column. Environment defect, out of scope; filed in ledger.
 
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none
