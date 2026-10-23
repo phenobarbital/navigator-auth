@@ -14,7 +14,7 @@
       "feature_id": "FEAT-104",
       "feature": "bug-identity",
       "spec": "sdd/specs/bug-identity.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
@@ -22,8 +22,8 @@
       "parallelism_notes": "Touches navigator_auth/models.py plus two test modules under tests/unit/identity/. Shares no file and no import with TASK-115/116/117, which are confined to navigator_auth/libs/sanitize.py and navigator_auth/backends/. Can run concurrently with TASK-115.",
       "assigned_to": null,
       "started_at": "2026-10-23T00:15:24+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-114-useridentity-nullable-token-columns.md"
+      "completed_at": "2026-10-23T00:23:03+00:00",
+      "file": "sdd/tasks/completed/TASK-114-useridentity-nullable-token-columns.md"
     },
     {
       "id": "TASK-115",
