@@ -15,9 +15,33 @@ concurrency:
 
 jobs:
   build-wheels:
-    name: Build wheels (linux x86_64)
-    runs-on: ubuntu-latest
+    name: Build wheels (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
+    strategy:
+      # A Windows failure must not discard an already-built macOS wheel.
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-latest
+            platform: linux
+            archs: x86_64
+            build: "cp3{10,11,12,13,14}-*"
+          # macos-15 runners are Apple Silicon (arm64).
+          - name: macos-arm64
+            runner: macos-15
+            platform: macos
+            archs: arm64
+            build: "cp3{10,11,12,13,14}-*"
+          # cp310 is excluded on Windows: navigator-api publishes no cp310
+          # win_amd64 wheel, so `pip install navigator-auth` would have to
+          # compile that dependency from sdist with MSVC.
+          - name: windows-amd64
+            runner: windows-2025
+            platform: windows
+            archs: AMD64
+            build: "cp3{11,12,13,14}-*"
     steps:
       - uses: actions/checkout@v7
 
@@ -27,27 +51,82 @@ jobs:
           version: "latest"
 
       # cibuildwheel 4.x requires Python >= 3.11 to run; the interpreters it
-      # builds against live inside the manylinux containers, not here.
+      # builds against live inside the manylinux containers / are fetched by
+      # cibuildwheel itself on macOS and Windows, not here.
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
+      # On Linux, Rust is installed inside each manylinux container by
+      # CIBW_BEFORE_BUILD_LINUX. On macOS and Windows the build runs directly
+      # on the runner, so pin the toolchain explicitly instead of relying on
+      # whatever the runner image happens to ship.
+      - name: Install Rust toolchain
+        if: matrix.platform != 'linux'
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Build wheels
         env:
-          CIBW_ARCHS: x86_64
-          CIBW_BUILD: "cp3{10,11,12,13,14}-*"
+          CIBW_ARCHS: ${{ matrix.archs }}
+          CIBW_BUILD: ${{ matrix.build }}
           CIBW_SKIP: "*-musllinux_*"
-          # Rust and the build deps are installed inside each manylinux container.
-          CIBW_BEFORE_BUILD: "curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal && pip install cython setuptools-rust"
-          CIBW_ENVIRONMENT: 'PATH=$HOME/.cargo/bin:$PATH'
+          CIBW_BUILD_VERBOSITY: 1
+          # Rust and the build deps are installed inside each manylinux
+          # container. This MUST stay Linux-scoped: a `curl | sh` would fail
+          # on the Windows runner.
+          CIBW_BEFORE_BUILD_LINUX: "curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal && pip install cython setuptools-rust"
+          CIBW_ENVIRONMENT_LINUX: 'PATH=$HOME/.cargo/bin:$PATH'
+          # Matches the macosx_11_0_arm64 tag of the asyncdb wheels.
+          CIBW_ENVIRONMENT_MACOS: 'MACOSX_DEPLOYMENT_TARGET=11.0'
+          # cargo hits the Windows MAX_PATH limit inside cibuildwheel's deep
+          # temporary build directories; build into a short path instead.
+          CIBW_ENVIRONMENT_WINDOWS: 'CARGO_TARGET_DIR=C:/cgt'
         run: |
-          uv tool run --from 'cibuildwheel>=4,<5' cibuildwheel --platform linux --output-dir dist
+          uv tool run --from 'cibuildwheel>=4,<5' cibuildwheel --platform ${{ matrix.platform }} --output-dir dist
+
+      # `import navigator_auth` cannot be used as a smoke test: __init__.py
+      # eagerly imports AuthHandler and pulls in the whole runtime dependency
+      # tree, which is not installable on every platform yet. Inspect the
+      # wheel contents instead.
+      - name: Verify wheel contents
+        shell: bash
+        run: |
+          python - <<'PY'
+          import glob
+          import sys
+          import zipfile
+
+          EXPECTED = [
+              "navigator_auth/rs_pep.",
+              "navigator_auth/libs/json.",
+              "navigator_auth/libs/cipher.",
+              "navigator_auth/libs/parser.",
+              "navigator_auth/libs/policy_eval.",
+          ]
+          wheels = sorted(glob.glob("dist/*.whl"))
+          if not wheels:
+              sys.exit("ERROR: no wheels were built")
+
+          failed = False
+          for wheel in wheels:
+              names = zipfile.ZipFile(wheel).namelist()
+              binaries = [n for n in names if n.endswith((".so", ".pyd", ".dylib"))]
+              missing = [
+                  prefix for prefix in EXPECTED
+                  if not any(n.startswith(prefix) for n in binaries)
+              ]
+              status = "MISSING " + ", ".join(missing) if missing else "ok"
+              print(f"{wheel}: {len(binaries)} binaries -> {status}")
+              failed = failed or bool(missing)
+
+          sys.exit(1 if failed else 0)
+          PY
 
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:
-          name: dist-wheels-linux-x86_64
+          name: dist-wheels-${{ matrix.name }}
           path: dist/*.whl
           if-no-files-found: error
 
