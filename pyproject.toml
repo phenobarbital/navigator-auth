@@ -22,6 +22,8 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
     "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
     "Environment :: Web Environment",
     "Topic :: Software Development :: Build Tools",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -58,7 +60,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-uvloop = ["uvloop>=0.20.0"]
+uvloop = ["uvloop>=0.20.0; sys_platform != 'win32'"]
 geoip = ["geoip2>=4.7.0"]
 passkey = ["webauthn>=2.0,<3"]
 
@@ -81,6 +83,12 @@ exclude = ["tests*", "docs*", "examples*", "navigator_auth.rs_pep", "navigator_a
 
 [tool.setuptools.exclude-package-data]
 navigator_auth = ["rs_pep/*.toml", "rs_pep/*.lock", "rs_pep/src/*", "rs_pep/src/**"]
+# `navigator_auth.libs` is its own package, so its data files hang off that
+# key, not off `navigator_auth`. `graft navigator_auth` in MANIFEST.in would
+# otherwise ship the Cython sources (and any locally built intermediates)
+# inside every wheel, since include-package-data defaults to true with a
+# [project] table. The sdist keeps them via MANIFEST.in.
+"navigator_auth.libs" = ["*.pyx", "*.cpp", "*.c"]
 
 [tool.setuptools.dynamic]
 version = {attr = "navigator_auth.version.__version__"}
