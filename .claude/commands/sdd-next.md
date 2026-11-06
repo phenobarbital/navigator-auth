@@ -8,6 +8,12 @@ Aggregate tasks across all per-spec indexes (`sdd/tasks/index/*.json`),
 identify unblocked tasks, and suggest assignments. Shows worktree context
 to help the user decide where to run each task.
 
+## Usage
+```
+/sdd-next
+/sdd-next --project <project> [--tag <tag>]     # FEAT-576 taxonomy filter
+```
+
 ## Guardrails
 - Only suggest tasks with status `"pending"` and all dependencies `"done"`.
 - If `sdd/tasks/index/` is empty or does not exist, inform the user and suggest running `/sdd-task` first.
@@ -25,12 +31,31 @@ the `tasks[]` arrays:
 TASKS=$(jq -s '[.[] | select(.feature != "_orphans") | .tasks[]]' sdd/tasks/index/*.json)
 ```
 
+If `--project` / `--tag` is given (FEAT-576), resolve the matching specs and
+keep only tasks whose index's `spec` is in the taxonomy list (AND across flags,
+OR within a repeated flag):
+
+```bash
+SPECS=$(parrot sdd docs list --kind spec --paths-only --project <p> --tag <t>)
+TASKS=$(jq -s --arg specs "$SPECS" '[.[] | select(.feature != "_orphans") | select(.spec as $s | ($specs | split("\n")) | index($s)) | .tasks[]]' sdd/tasks/index/*.json)
+```
+
 If no per-spec index files exist, suggest the user run `/sdd-task` first.
 
 ### 2. Detect Active Worktrees
 Run `git worktree list` to identify which feature worktrees are currently active.
 Map each active worktree to its feature ID by matching the worktree name pattern
 `feat-<FEAT-ID>-<slug>` or `task-<TASK-ID>-<slug>`.
+
+Additionally, call the worktree status library for richer data:
+```bash
+WT_REPORTS=$(parrot sdd worktree status --json 2>/dev/null || echo "[]")
+```
+Build a lookup from `feature_slug` → `WorktreeReport`. This provides task progress
+counts and `ready_for_done` flags that the bare `git worktree list` cannot give.
+
+Skip entries whose `flow_type` is `"non-sdd"` — they carry no `tasks[]` and no
+feature, so they can never be the source of a next-task suggestion.
 
 ### 3. Compute Unblocked Tasks
 For each task with `status: "pending"`:
@@ -44,6 +69,20 @@ Group unblocked tasks by feature. For each task, determine:
 - **Needs new worktree**: no active worktree for this feature → show the
   `git worktree add` command.
 - **Parallel task**: marked `parallel: true` → can use its own worktree.
+
+For features with a `WorktreeReport`:
+- If `ready_for_done: true`: do NOT suggest new tasks. Instead show:
+  ```
+  FEAT-550 — Token Budget Bedrock
+    ✅ All 14 tasks done — ready for /sdd-done FEAT-550
+  ```
+- If tasks are partially done: annotate the feature header with progress:
+  ```
+  FEAT-582 — SDD Status Worktrees  (3/5 done in worktree)
+    🟢 Active worktree: feat-FEAT-582-sdd-status-worktrees
+  ```
+
+The progress count comes from: `done_count = sum(1 for t in report.tasks if t.status in ("done", "done-with-issues"))`.
 
 ### 5. Sort and Present
 Sort unblocked tasks by priority, then effort. Output:
@@ -59,8 +98,8 @@ FEAT-007 — Ontological RAG
 
 FEAT-008 — MCP Security Layer
   🔵 No worktree — create one:
-     git worktree add -b feat-008-mcp-security .worktrees/feat-008-mcp-security HEAD
-     cd .worktrees/feat-008-mcp-security
+     git worktree add -b feat-008-mcp-security .claude/worktrees/feat-008-mcp-security HEAD
+     cd .claude/worktrees/feat-008-mcp-security
   2. TASK-010 — SecurityLayer base   [high / M]
      Depends-on: none
      → /sdd-start TASK-010
@@ -68,11 +107,11 @@ FEAT-008 — MCP Security Layer
 FEAT-009 — Security Toolkits
   ⚡ Parallel tasks (can run in separate worktrees):
   3. TASK-042 — Prowler Toolkit      [medium / S]
-     git worktree add -b task-042-prowler .worktrees/task-042-prowler HEAD
-     → cd .worktrees/task-042-prowler && /sdd-start TASK-042
+     git worktree add -b task-042-prowler .claude/worktrees/task-042-prowler HEAD
+     → cd .claude/worktrees/task-042-prowler && /sdd-start TASK-042
   4. TASK-043 — Trivy Toolkit        [medium / S]
-     git worktree add -b task-043-trivy .worktrees/task-043-trivy HEAD
-     → cd .worktrees/task-043-trivy && /sdd-start TASK-043
+     git worktree add -b task-043-trivy .claude/worktrees/task-043-trivy HEAD
+     → cd .claude/worktrees/task-043-trivy && /sdd-start TASK-043
 ```
 
 If no tasks are unblocked:
@@ -104,7 +143,7 @@ wikitoolkit ledger ready 2>/dev/null || true
 ```
 🗒  Ready ledger issues (not yet promoted to a task):
   issue:3f8a1c9e [major] Leak in connection pool (bug)
-     → /sdd-task --from-issue issue:3f8a1c9e <spec.md>  (promote, keeps ID/dependency discipline)
+     → /sdd-fix issue:3f8a1c9e        (plan-fix routes its group to the Fast or SDD lane; supersedes the deprecated --from-issue flow, FEAT-572)
 ```
 
 If the command prints nothing (or fails), omit this section entirely —
@@ -113,5 +152,5 @@ do not print an empty header.
 ## Reference
 - Per-spec index files: `sdd/tasks/index/*.json` (excluding `_orphans.json`)
 - Active worktrees: `git worktree list`
-- Worktree policy: `CLAUDE.md` (section "Worktree Policy")
+- Worktree policy: `sdd/WORKFLOW.md` (section "Git Configuration")
 - SDD methodology: `sdd/WORKFLOW.md`

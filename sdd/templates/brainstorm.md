@@ -1,3 +1,17 @@
+---
+# SDD flow type and base branch (FEAT-145).
+# - type: feature  (default)  → base_branch: the base_branch in sdd/config.json (or any non-hotfix branch)
+# - type: hotfix              → base_branch MUST be the hotfix_base in sdd/config.json
+type: feature
+base_branch: <base_branch>   # default: the base_branch in sdd/config.json
+# projects: parts of the codebase this doc concerns. Use the project areas of your
+#   repository (`sdd/CONVENTIONS.md` § Project areas, or the `projects` list in
+#   `sdd/config.json`). Unknown values warn, not fail.
+projects: []
+# tags: free-form kebab-case keywords for organizing specs (e.g. memory, mcp).
+tags: []
+---
+
 # Brainstorm: <Title>
 
 **Date**: YYYY-MM-DD
@@ -143,8 +157,72 @@
 
 ---
 
+## Code Context
+
+<!-- CRITICAL: This section preserves verified code references so they survive
+     the brainstorm → spec → task pipeline and prevent hallucinations during implementation.
+     Include ONLY code that has been verified to exist in the current codebase. -->
+
+### User-Provided Code
+<!-- Paste any code snippets the user provided during brainstorming.
+     Tag each with its source (file path if known, or "user-provided"). -->
+
+```python
+# Source: <file_path or "user-provided">
+# <paste code here>
+```
+
+### Verified Codebase References
+<!-- Actual signatures, imports, and attributes discovered during codebase research.
+     Each entry MUST include the file path and line number where it was verified. -->
+
+#### Classes & Signatures
+```python
+# From parrot/path/to/file.py:NN
+class ExistingClass(BaseClass):
+    attribute: Type  # line NN
+    async def method(self, param: Type) -> ReturnType:  # line NN
+        ...
+```
+
+#### Verified Imports
+```python
+# These imports have been confirmed to work:
+from parrot.module import ClassName  # parrot/module/__init__.py:NN
+```
+
+#### Key Attributes & Constants
+<!-- List attributes/constants that tasks will need to reference -->
+- `ClassName.attribute_name` → `Type` (parrot/path/file.py:NN)
+
+### Does NOT Exist (Anti-Hallucination)
+<!-- List things that might seem like they should exist but DO NOT.
+     This prevents implementing agents from assuming these are available. -->
+- ~~`parrot.module.NonExistentThing`~~ — does not exist
+- ~~`ClassName.phantom_attribute`~~ — not a real attribute
+
+---
+
+## Parallelism Assessment
+
+<!-- Evaluate the feature's decomposition potential for parallel development.
+     This informs sdd-spec's worktree strategy section. -->
+
+- **Internal parallelism**: <!-- Can this feature's tasks be split into independent worktrees? -->
+- **Cross-feature independence**: <!-- Does this feature conflict with any in-flight specs? List shared files or modules. -->
+- **Recommended isolation**: <!-- per-spec | mixed -->
+- **Rationale**: <!-- Brief explanation of why the recommended isolation makes sense. -->
+
+---
+
 ## Open Questions
 
-<!-- Anything unresolved. Each should have an owner if possible. -->
+<!-- Anything unresolved. Each should have an owner if possible.
+     Convention (important — consumed by /sdd-spec):
+       [ ] unresolved question — *Owner: name*
+       [x] resolved question — *Owner: name*: <answer text>
+     When you resolve a question, flip the checkbox to [x] and append the
+     answer after the final `:` on the owner line. /sdd-spec carries these
+     forward into the spec body instead of re-asking them. -->
 - [ ] Question 1 — *Owner: name*
 - [ ] Question 2 — *Owner: name*
