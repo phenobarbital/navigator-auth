@@ -1,0 +1,9 @@
+{
+  "model": "gpt-5.6-luna",
+  "codex_cli_version": "0.166.0",
+  "reasoning_effort": "high",
+  "timeout_s": 600,
+  "probe_output": "OK",
+  "started_at": "2026-11-06T02:13:44.327796+00:00",
+  "note": "templates sourced from commit 070b638 (parrot SDD toolkit 2.1.1), not present on dev"
+}

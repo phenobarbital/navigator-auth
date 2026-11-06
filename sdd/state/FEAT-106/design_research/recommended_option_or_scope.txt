@@ -1,0 +1,127 @@
+**Option A** is recommended.
+
+The decisive argument is a structural one, and it is the reason Option B loses
+despite its appeal: *a second factor must be incapable of minting a session.*
+Option A gets that for free, because the providers are plain objects that return
+a boolean and never touch `remember()` or `create_token()`. Option B inverts the
+order — it lets the session exist and then takes it back — which turns a property
+the type system can guarantee into a revocation path that must be correct at
+runtime, under failure, forever. For an authentication package, that trade is not
+worth the extensibility it buys.
+
+Option C is rejected on reach rather than on quality: the OAuth2 code flow *is* a
+better state machine than anything we would write, but it does not cover
+`POST /api/v1/login`, which is the dominant way `BasicAuth` is consumed. A design
+that needs a second implementation for the main caller is worse than one honest
+implementation.
+
+Option D is the one worth revisiting later. Its instinct is right — users should
+see one list of security methods, and we *will* duplicate some credential
+management by not doing it — but `user_credentials` is shaped for public keys, and
+putting a vault-sealed shared secret in it would make the schema lie about its
+most sensitive column. The cost of Option A's separate tables is some duplicated
+CRUD; the cost of Option D is a storage model that fights the data. We take the
+duplication and leave the unification as a follow-up once there are two strong
+factors to unify.
+
+**What Option A trades away, explicitly:**
+
+1. **A tenant's 2FA is only as strong as its mailboxes, until users upgrade.**
+   Email-as-floor is what makes enforcement cheap to roll out, and it is also the
+   ceiling. The per-user downgrade-closing rule bounds the blast radius but does
+   not raise the floor. Accepted deliberately: the alternative (enrolment-gated
+   enforcement) costs a lock-out window, a partial-session mode and an enrolment
+   grace module, and in practice delays MFA adoption by months.
+2. **Email OTP and password recovery share a channel.** A compromised mailbox
+   yields both factors *and* the reset path. Acceptable for a fallback factor;
+   documented as unacceptable as the only method for a privileged account.
+3. **Two new tables and a vault key**, so this ships with a migration rather than
+   as a pure code change.
+4. **Some credential-management duplication** versus Option D, as argued above.
+
+---
+
+### Recommended option body (Option A)
+
+`AbstractOTPProvider` owned by `BasicAuth`, with a two-tier factor model
+
+A new `navigator_auth/mfa/` package defines `AbstractOTPProvider` and two
+implementations, `TOTPProvider` and `EmailOTPProvider`. They are **not**
+authentication backends: `BasicAuth` owns them, builds them at `on_startup()`
+from the tenant policy, and consults them from `authenticate()`. Only
+`BasicAuth.open_session(extra={"mfa": True, "amr": [...]})` ever mints a session.
+
+The two providers are deliberately **asymmetric**, which is the core idea of this
+option:
+
+- **Email OTP is a floor, not a choice.** It needs no enrolment, because
+  `User.email` already exists. The moment a tenant is switched to `enforced`,
+  every user in it has a working second factor on their next login.
+- **TOTP is a voluntary upgrade.** Confirming it moves the user to a stronger
+  state and **closes the email path** for them, so the mailbox stops being the
+  ceiling on their account's security. The same applies symmetrically to a
+  registered passkey.
+
+Per-user state is therefore a three-state machine — `none → email → totp` — and
+the per-tenant policy lives in a new `auth.tenant_mfa_policy` table (data, not
+configuration), with `AUTH_BASIC_2FA_ENABLED` demoted to a global kill switch.
+
+✅ **Pros:**
+- The second factor is structurally incapable of opening a session: there is no
+  code path from a provider to `remember()` or `create_token()`.
+- Enforcement costs almost nothing to roll out. Because email is a zero-enrolment
+  floor, there is no user lock, no enrolment grace period, no partial session that
+  may only reach the enrolment endpoints — the three things that make "mandatory
+  MFA" expensive in most systems.
+- Reuses four tested FEAT-098 modules nearly verbatim (token store shape, rate
+  limiter, redacted notification payload, password-policy pattern) and the
+  FEAT-001 vault for the TOTP seed, which brings AAD binding and key rotation for
+  free.
+- Zero new dependencies, and the provisioning URI comes from the stdlib-adjacent
+  `cryptography` API rather than hand-rolled Base32 string building.
+- `mfa` / `amr` already flow to the JWT and to ABAC, so policies can require a
+  second factor on day one with no ABAC changes.
+- `TokenExchangeAuth` and `PasskeyAuth` are untouched by construction.
+
+❌ **Cons:**
+- The weakest factor is universally available in an enforced tenant, so a tenant's
+  2FA strength is bounded by its users' mailbox security until they upgrade to
+  TOTP. The downgrade-closing rule limits this per user but not tenant-wide.
+- A three-state machine with closing/reopening transitions is more logic than a
+  single "2FA on/off" flag, and each transition has its own invalidation duties.
+- Delivery is only as reliable as the operator's callback; a broken callback is
+  an outage for every `email`-state user in an enforced tenant.
+- Introduces two new tables plus a vault key, so it is not a code-only change.
+
+📊 **Effort:** Medium-High
+
+📦 **Libraries / Tools:**
+| Package | Purpose | Notes |
+|---|---|---|
+| `cryptography` | RFC 6238 TOTP + `otpauth://` provisioning URI | **already a hard dependency** (`>=41` declared; 46.0.7 installed). `hazmat.primitives.twofactor.totp.TOTP` + `get_provisioning_uri()`. No new dependency. |
+| `redis.asyncio` | challenge store, rate limiter, TOTP replay guard | already used package-wide (5.2.1) |
+| `navigator_session.vault` | seal/open the TOTP seed with AAD + `key_version` | already wired via `identity/crypto.py` |
+| `secrets` / `hashlib` / `hmac` (stdlib) | code generation, `sha256` keying, HMAC signing | — |
+| ~~`pyotp`~~ | — | **rejected**: redundant with `cryptography`, and absent from the environment |
+| ~~`qrcode`~~ | — | **rejected**: the QR is rendered client-side from the `otpauth://` URI |
+
+🔗 **Existing Code to Reuse:**
+- `navigator_auth/handlers/recovery/store.py:42` — `RecoveryTokenStore`: `sha256(token)`
+  as the only Redis key, HMAC-signed payloads, `setex` to write / `getdel` to
+  consume. The challenge store is this shape with a different namespace.
+- `navigator_auth/handlers/recovery/limiter.py:28` — `RateLimiter` fixed-window
+  counter (`INCR` + `EXPIRE` only on the first hit). Reused **with its fail-open
+  branch inverted** for verification.
+- `navigator_auth/handlers/recovery/types.py:33` — `NotificationPayload`'s redacted
+  `__repr__`, so a stray `repr()` can never put a live code in a log line.
+- `navigator_auth/identity/flow_store.py:18` — `IdentityFlowStore`: the pooled
+  `setex`/`get`/`getdel` wrapper pattern for short-lived per-request state.
+- `navigator_auth/identity/crypto.py` + `navigator_auth/vault/sql/001_create_vault_tables.sql`
+  — `auth.user_vault_secrets` as the encrypted home of the TOTP seed.
+- `navigator_auth/backends/basic.py` — `open_session(extra=...)` and
+  `_JWT_EXTRA_KEYS`; the integration point, unchanged in shape.
+- `navigator_auth/passkey/sql/001_passkey_credentials.sql` + `passkey/migrations.py`
+  — the migration-file pattern for the two new tables.
+- `navigator_auth/abac/context.py:29` — `_resolve_tenant()` for the user's tenant pair.
+
+---

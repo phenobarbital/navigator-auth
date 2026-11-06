@@ -1,0 +1,1569 @@
+---
+# SDD flow type and base branch (FEAT-145).
+type: feature
+base_branch: dev
+projects: [auth-backends, mfa, handlers, abac, models]
+tags: [2fa, otp, totp, email-otp, multi-tenant, security]
+docs:
+  policy: required
+  pages: []
+  api_modules: [navigator_auth.mfa]
+---
+
+# Feature Specification: 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
+
+**Feature ID**: FEAT-106
+**Date**: 2026-11-06
+**Author**: Jesus Lara
+**Status**: draft
+**Target version**: 0.30.0
+
+---
+
+## 1. Motivation & Business Requirements
+
+> Why does this feature exist? What problem does it solve?
+
+### Problem Statement
+
+`BasicAuth` is single-factor: a valid `user` + `password` pair goes straight from
+`validate_user()` to `open_session()` (`navigator_auth/backends/basic.py:307-315`),
+so a leaked or guessed password is a complete account takeover. Every stronger
+option navigator-auth offers today requires leaving username/password behind
+entirely — `PasskeyAuth` (passwordless WebAuthn) or an external IdP (Azure, Okta,
+Google, SAML) that enforces MFA on its own.
+
+Deployments that must keep username/password — because their users are not in an
+IdP, or because the tenant is not ready to roll out passkeys — have no way to add
+a second factor. There is no OTP, TOTP or MFA machinery anywhere in the package.
+
+**Who is affected**: end users of `BasicAuth` deployments (a second step at
+login), operators of multi-tenant installs (they need to require 2FA for one
+tenant without touching others), and integrators (a new `mfa_required` branch in
+the login response).
+
+**Why now**: the surrounding machinery landed over the last three features and is
+sitting unused for this purpose. `open_session()` already mirrors `mfa` and `amr`
+into the JWT (`basic.py:153`, FEAT-101), ABAC already exposes `auth_method` and
+`mfa` as first-class evaluation keys (`abac/context.py:137-138`, TASK-92), and
+FEAT-098 built a complete HMAC-signed, `sha256`-keyed, TTL'd Redis token store
+with a rate limiter and a notification-callback hand-off that an OTP challenge can
+reuse almost verbatim. The expensive half is already built and tested; what is
+missing is the factor itself.
+
+### Goals
+
+- **G1** — A second factor for `BasicAuth` via two OTP providers, TOTP
+  (Google-Authenticator-compatible) and e-mail, with **no new runtime dependency**.
+- **G2** — A second factor that is **structurally incapable of opening a session
+  on its own**: no code path from a provider to `remember()` or `create_token()`.
+- **G3** — Per-tenant enforcement that can be switched on **without locking
+  anybody out and without an enrolment grace period**, by making e-mail OTP a
+  zero-enrolment floor.
+- **G4** — A per-user upgrade path (TOTP, or a registered passkey) that **closes
+  the e-mail path**, so a user who hardens their account is no longer bounded by
+  their mailbox.
+- **G5** — Enforcement that never degrades the strongest method: a passkey
+  sign-in satisfies it with no OTP at all.
+- **G6** — Recovery that does not require handing an administrator the account:
+  backup codes first, and an administrative action scoped to *switching the OTP
+  off* and nothing else.
+- **G7** — Fail-closed throughout: a storage outage during verification refuses
+  the login.
+- **G8** — Zero behavioural change for tenants that do not opt in.
+
+### Non-Goals (explicitly out of scope)
+
+- **SMS OTP.** It requires an external provider that does not exist in this
+  environment (`twilio` is not installed and must not be added).
+- **Enforcement for external-IdP logins** (Azure, Okta, Google, SAML). Those
+  deployments delegate MFA to the IdP, which already works. v1 scopes enforcement
+  to `BasicAuth`.
+- **An HTTP admin API for the tenant policy.** v1 administers
+  `auth.tenant_mfa_policy` by SQL/migration; the API is a follow-up.
+- **E-mail verification** (an `email_verified` column and its flow). Accepted as
+  an explicit bound, not an oversight — see §7 Known Risks R4 and §8 Q18.
+- **Hardening `handlers/users/user.py` `UserManager`.** It is a generic
+  `ModelView` that permits editing `email` and setting a password, which weakens
+  the bounded administrative disenrolment described here. This is a **pre-existing**
+  gap that this feature merely exposes; migrating it off `ModelView` has its own
+  blast radius and gets its own spec. This feature documents the risk and does not
+  fix it (§7 R1, §8 Q17).
+- Folding TOTP and e-mail into the passkey `user_credentials` table for one
+  unified "security methods" surface — rejected in brainstorm Option D (that table
+  is modelled for public keys; a vault-sealed shared secret would make its most
+  sensitive column lie). Revisit once there are two strong factors to unify.
+- A post-authentication step-up middleware (brainstorm Option B) and an OAuth2
+  `acr_values` step-up (Option C). See `sdd/proposals/basicauth-otp-2fa.brainstorm.md`.
+
+---
+
+## Governing Decisions
+
+<!-- GENERATED by `parrot sdd spec consequences <spec> --render` — do not edit by hand. -->
+
+decision audit not configured in this repository
+
+---
+
+## 2. Architectural Design
+
+### Overview
+
+A new `navigator_auth/mfa/` package defines `AbstractOTPProvider` and two
+implementations, `TOTPProvider` and `EmailOTPProvider`. They are **not**
+authentication backends: `BasicAuth` owns them, builds them in `on_startup()`,
+and consults them from `authenticate()`. Only
+`BasicAuth.open_session(extra={"mfa": True, "amr": [...]})` ever mints a session.
+
+This is brainstorm **Option A**, chosen because the property that matters most —
+*a second factor must be incapable of minting a session* — is structural here
+rather than enforced at runtime. A provider is a plain object that returns a
+boolean; it has no reference to `remember()` or `create_token()`. The rejected
+Option B (post-auth middleware) would have let the session exist and then taken
+it back, converting a guarantee into a revocation path that must stay correct
+under failure forever.
+
+The two providers are deliberately **asymmetric**, and that asymmetry is the core
+idea:
+
+- **E-mail OTP is a floor, not a choice.** It needs no enrolment, because
+  `User.email` already exists. The moment a tenant is switched to `enforced`,
+  every user in it has a working second factor at their next login — which is why
+  enforcement needs no user lock, no enrolment grace period and no partial session
+  that may only reach the enrolment endpoints.
+- **TOTP is a voluntary upgrade.** Confirming it moves the user to a stronger
+  state and **closes the e-mail path** for them, so the mailbox stops being the
+  ceiling on their account. A registered passkey does the same, symmetrically.
+
+Per-user state is a three-state machine (`none → email → totp`). Per-tenant policy
+lives in a new `auth.tenant_mfa_policy` table — it is *data*, not configuration —
+with `AUTH_BASIC_2FA_ENABLED` demoted to a global kill switch. A user spanning
+several organizations gets the strictest policy.
+
+**The integration is a hook in `authenticate()`, never in `open_session()`.**
+`BasicAuth` has two subclasses that must not inherit the challenge:
+`TokenExchangeAuth` (`backends/exchange.py:31`, machine-to-machine) and
+`PasskeyAuth` (`backends/passkey.py:63`, already phishing-resistant). Both
+override `authenticate()` and call `open_session()` directly, so hooking
+`authenticate()` excludes them by construction while hooking `open_session()`
+would have broken both.
+
+**Signalling the challenge is ordering-sensitive, and this is the most
+dangerous part of the feature.** `authenticate()` must neither return the
+challenge envelope nor raise a plain `AuthException` — both are unsafe against the
+existing `auth.py` call sites (§7 R2). It raises a dedicated `MFARequired`
+exception that the three call sites catch **before** their generic handlers.
+
+### Component Diagram
+
+```
+POST /api/v1/login
+      │
+      ▼
+AuthHandler.api_login / _backend_auth / _login_token   (auth.py — 3 call sites)
+      │  catch MFARequired BEFORE the generic AuthException handlers
+      ▼
+BasicAuth.authenticate()                               (basic.py:296)
+      │ 1. validate_user()                             (basic.py:307)
+      │ 2. MfaPolicyResolver  ──→ auth.tenant_mfa_policy   (strictest org wins)
+      │ 3. MfaStateMachine    ──→ auth.user_mfa + passkey user_credentials
+      │ 4. TrustedDeviceStore ──→ auth.user_trusted_devices  (cookie, rotating)
+      │
+      ├── no factor owed ─────────────────→ open_session()          (basic.py:315)
+      │
+      └── factor owed → MfaChallengeStore.issue()  [Redis, sha256-keyed, HMAC]
+                │            │
+                │            └── EmailOTPProvider.challenge() → AUTH_OTP_EMAIL_CALLBACK
+                │
+                raise MFARequired(challenge, providers, preferred)
+                                 │
+                                 ▼
+                      POST /auth/mfa/verify
+                                 │
+                      MfaChallengeStore.consume()  (getdel, attempt budget)
+                                 │
+                      AbstractOTPProvider.verify()
+                         ├── TOTPProvider   (cryptography TOTP, ±1 step, replay guard)
+                         ├── EmailOTPProvider (sha256(code) compare)
+                         └── BackupCodeStore  (single-use hash)
+                                 │
+                                 ▼
+                      BasicAuth.open_session(extra={"mfa": True, "amr": [...]})
+                                 │
+                                 ▼
+                      JWT (mfa/amr already mirrored — basic.py:153) → ABAC
+```
+
+### Integration Points
+
+| Existing Component | Integration Type | Notes |
+|---|---|---|
+| `BasicAuth.authenticate()` | modifies | The hook. Gains the policy/state/trusted-device check and the `MFARequired` branch. Verified at `basic.py:296`. |
+| `BasicAuth.open_session()` | uses (unchanged) | Called with `extra={"mfa": True, "amr": [...]}` after verification. Signature untouched. Verified at `basic.py:170`. |
+| `BasicAuth.on_startup()` | modifies | Builds the provider set, the stores and runs the MFA table migration. Verified at `basic.py:65`. |
+| `BasicAuth._JWT_EXTRA_KEYS` | uses (unchanged) | Already contains `mfa` and `amr`; this feature only populates them. Verified at `basic.py:153`. |
+| `AuthHandler.api_login` | modifies | `except MFARequired` **before** `except (AuthException, …)`, else the loop silently tries the next backend. Verified at `auth.py:487`. |
+| `AuthHandler._backend_auth` | modifies | Same, before `except AuthException`. Verified at `auth.py:380`. |
+| `AuthHandler._login_token` | modifies | Same; token backends never raise it, but the bare `except Exception` would mask it. Verified at `auth.py:369`. |
+| `TokenExchangeAuth` | **unaffected by design** | Overrides `authenticate()`. A regression test must prove it never sees a challenge. `exchange.py:31`. |
+| `PasskeyAuth` | depends on | Passkey sign-in bypasses the challenge; a registered credential is a strong factor that closes the e-mail path. `passkey.py:63`. |
+| `PasskeyStore.list_credentials()` | uses | Read-only, to detect a registered strong factor. `passkey/store.py`. |
+| `auth.user_vault_secrets` | uses | Holds the sealed TOTP seed under key `mfa:totp`. No schema change. `vault/sql/001_create_vault_tables.sql:11`. |
+| `identity/crypto.py` vault kernel | uses | `seal_value`/`open_value` with AAD binding and `key_version`, so a seed copied to another user fails to open. |
+| `handlers/recovery/*` | pattern source | `store.py:42`, `limiter.py:28`, `types.py:33` are cloned in shape, **not** imported or modified — except the recovery-completion hook below. |
+| `handlers/recovery/handler.py` | modifies | Completing a recovery must revoke the user's trusted devices. |
+| `abac/context.py` | **unaffected** | `mfa` / `auth_method` keys already exist (`:137-138`). Only the `amr` *values* are new. |
+| `abac/default_policies/` | **new file** | Declares the `mfa:disenroll` action for a non-`superuser` group. |
+| `conf.py` | modifies | `AUTH_BASIC_2FA_ENABLED` plus the `AUTH_OTP_*` block, following the `AUTH_RECOVERY_*` convention at `:623-644`. |
+
+### Data Models
+
+```python
+# navigator_auth/mfa/types.py — frozen dataclasses, no I/O (recovery/types.py:33 pattern)
+
+class MfaState(str, Enum):
+    """Per-user second-factor state. The floor in an enforced tenant is EMAIL."""
+    NONE = "none"
+    EMAIL = "email"
+    TOTP = "totp"
+
+
+class MfaMode(str, Enum):
+    """Per-tenant policy mode. OFF is also the absence of a policy row."""
+    OFF = "off"
+    OPTIONAL = "optional"
+    ENFORCED = "enforced"
+
+
+@dataclass(frozen=True)
+class TenantMfaPolicy:
+    org_id: int
+    mode: MfaMode
+    remember_days: int            # 0 disables remember-me for the tenant
+    enforced_at: Optional[datetime]
+    enforced_by: Optional[str]
+
+
+@dataclass(frozen=True)
+class MfaChallenge:
+    """Redis-persisted challenge record. Keyed by sha256(token), never the token."""
+    user_id: int
+    username: str
+    providers: tuple[str, ...]    # what THIS user may use
+    preferred: str
+    issued_at: float
+    attempts: int
+    signature: str                # HMAC-SHA256 over the fields above
+
+
+@dataclass(frozen=True)
+class OtpNotificationPayload:
+    """Hand-off to AUTH_OTP_EMAIL_CALLBACK. The only place a live code appears."""
+    email: str
+    display_name: str
+    username: str
+    code: str                     # never in an HTTP response, never in a log
+    expires_at: datetime
+    found: bool                   # False => no such account; callback decides
+
+    def __repr__(self) -> str:
+        """Redacted — a stray repr() must never leak a live code."""
+
+
+@dataclass(frozen=True)
+class TrustedDevice:
+    user_id: int
+    token_hash: str               # sha256 of the cookie value
+    label: str
+    family_id: str                # rotation chain; replay revokes the family
+    expires_at: datetime
+    last_used_at: Optional[datetime]
+    revoked_at: Optional[datetime]
+```
+
+### New Public Interfaces
+
+```python
+# navigator_auth/mfa/__init__.py
+from .abstract import AbstractOTPProvider
+from .types import MfaState, MfaMode, TenantMfaPolicy
+from .exceptions import MFARequired
+
+# navigator_auth/exceptions.py (modifies) — see §3 Module 9 for why it cannot
+# subclass AuthException's handled set without an explicit, earlier except clause.
+class MFARequired(AuthException):
+    """Credentials were valid; a second factor is owed. Carries no session."""
+    def __init__(self, challenge: str, providers: list[str], preferred: str,
+                 expires_in: int): ...
+    def payload(self) -> dict:
+        """{'mfa_required': True, 'challenge': …, 'providers': […],
+        'preferred': …, 'expires_in': …} — never a token."""
+```
+
+---
+
+## 3. Module Breakdown
+
+> Define the discrete modules that will be implemented.
+> These directly map to Task Artifacts in Phase 2.
+
+#### Delegation-eligible modules
+
+| Module | Eligible? | Decided patterns / exact contracts | Why not (if no) |
+|---|---|---|---|
+| M1: types & config | yes | Dataclasses and enums fully specified in §2 Data Models; `AUTH_OTP_*` names and defaults fixed in M1 below. | — |
+| M2: challenge store & strict limiter | yes | Clone `recovery/store.py:42` shape (sha256 key, HMAC payload, setex/getdel) with the limiter's fail-open branch **inverted**. Key prefixes fixed below. | — |
+| M3: provider ABC & TOTP | yes | ABC signatures fixed below; TOTP params fixed (SHA1/6/30, ±1 step, Redis replay guard key fixed). | — |
+| M4: e-mail OTP provider | yes | Code length, hashing, callback contract and the anti-enumeration response are all fixed. | — |
+| M5: backup codes | yes | 10 codes × 8 alphanumeric chars, hashed, single-use, regeneration requires password re-auth. | — |
+| M6: trusted devices | yes | Rotation-with-replay-detection is a named, standard pattern; cookie attributes and the invalidation event list are enumerated below. | — |
+| M7: policy resolver & state machine | yes | "Strictest org wins" and the strong-factor predicate (TOTP confirmed OR passkey credential present) are decided. | — |
+| M8: migrations & DDL | yes | Four tables; column sets in §2; follows `passkey/migrations.py` verbatim. | — |
+| M9: `BasicAuth` hook & `MFARequired` | **no** | Touches the single most security-sensitive method in the package, and the correctness argument is about *exception ordering across three call sites* (§7 R2). A wrong edit silently makes 2FA bypassable rather than failing a test. Thinking model only. |
+| M10: `auth.py` call sites & MFA routes | **no** | Same reason as M9: the `except` clause must precede the generic handlers at all three sites, and the response must carry no token. |
+| M11: ABAC policy pack | yes | Exact YAML shape verified in §6; action string and priority fixed. Configuration only, no Python. |
+| M12: pre-flight script | yes | Both blocking conditions and the exit-code contract are fixed below. | — |
+| M13: docs & changelog | yes | Page list and required content fixed in §10. | — |
+
+### Module 1: MFA types and configuration
+- **Path**: `navigator_auth/mfa/types.py` (new), `navigator_auth/conf.py` (modifies)
+- **Responsibility**: The frozen dataclasses and enums of §2, plus the settings
+  block. No I/O.
+- **Depends on**: nothing.
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/mfa/types.py  (new)
+  # Enums and dataclasses exactly as declared in §2 Data Models.
+
+  # navigator_auth/conf.py  (modifies navigator_auth/conf.py:644 — append after
+  # the AUTH_RECOVERY_* block; AUTH_RECOVERY_SECRET verified: conf.py:623)
+  AUTH_BASIC_2FA_ENABLED = config.getboolean("AUTH_BASIC_2FA_ENABLED", fallback=False)
+  AUTH_OTP_SECRET = config.get("AUTH_OTP_SECRET")           # HMAC key; required when enabled
+  AUTH_OTP_CHALLENGE_TTL = config.getint("AUTH_OTP_CHALLENGE_TTL", fallback=300)
+  AUTH_OTP_MAX_ATTEMPTS = config.getint("AUTH_OTP_MAX_ATTEMPTS", fallback=5)
+  AUTH_OTP_CODE_LENGTH = config.getint("AUTH_OTP_CODE_LENGTH", fallback=6)
+  AUTH_OTP_RATE_USER = config.get("AUTH_OTP_RATE_USER", fallback="10/hour")
+  AUTH_OTP_RATE_IP = config.get("AUTH_OTP_RATE_IP", fallback="30/hour")
+  AUTH_OTP_EMAIL_CALLBACK = config.get("AUTH_OTP_EMAIL_CALLBACK")
+  AUTH_TOTP_ISSUER = config.get("AUTH_TOTP_ISSUER", fallback="Navigator")
+  AUTH_MFA_BACKUP_CODE_COUNT = config.getint("AUTH_MFA_BACKUP_CODE_COUNT", fallback=10)
+  AUTH_MFA_BACKUP_CODE_LENGTH = config.getint("AUTH_MFA_BACKUP_CODE_LENGTH", fallback=8)
+  ```
+
+### Module 2: Challenge store and fail-closed rate limiter
+- **Path**: `navigator_auth/mfa/store.py`, `navigator_auth/mfa/limiter.py` (new)
+- **Responsibility**: Issue, read and single-use-consume the challenge record;
+  count attempts; rate-limit per user and per IP. **Fail closed** on any storage
+  error — the inverse of the recovery limiter, which fails open on purpose for a
+  public endpoint.
+- **Depends on**: M1.
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/mfa/store.py  (new — shape cloned from handlers/recovery/store.py:42)
+  CHALLENGE_KEY_PREFIX = "auth:mfa:challenge:"
+  TOTP_REPLAY_PREFIX = "auth:mfa:totp:used:"
+
+  def _hash_token(token: str) -> str:
+      """sha256 hex digest — the only thing ever used as a Redis key."""
+
+  class MfaChallengeStore:
+      """HMAC-signed, TTL'd, single-use challenge records. Fails CLOSED."""
+      def __init__(self, pool: aioredis.ConnectionPool, secret: bytes): ...
+      async def issue(self, user: dict, providers: list[str], preferred: str) -> tuple[str, MfaChallenge]:
+          """Mint the challenge token; SETEX for AUTH_OTP_CHALLENGE_TTL.
+          Returns (raw token, record). The raw token is never logged."""
+      async def peek(self, token: str) -> Optional[MfaChallenge]:
+          """Read without consuming; verifies the HMAC. None when absent/invalid."""
+      async def consume(self, token: str) -> Optional[MfaChallenge]:
+          """GETDEL — single use. None when absent, expired or tampered."""
+      async def register_failure(self, token: str) -> int:
+          """Increment attempts; burns the challenge at AUTH_OTP_MAX_ATTEMPTS.
+          Returns attempts remaining."""
+      async def mark_totp_step(self, user_id: int, step: int, ttl: int) -> bool:
+          """False when this step was already accepted (replay). Anti-replay is
+          mandatory: without it a captured code is reusable inside its window."""
+
+  # navigator_auth/mfa/limiter.py  (new)
+  class StrictRateLimiter:
+      """Fixed-window counter that fails CLOSED.
+
+      Deliberately NOT a reuse of handlers/recovery/limiter.py:28, whose
+      `check()` returns True on a Redis error (verified: limiter.py docstring
+      'Fail-open by design'). For a second factor that is a security hole.
+      """
+      def __init__(self, pool: aioredis.ConnectionPool, spec: str, prefix: str): ...
+      async def check(self, key: str) -> bool:
+          """True when allowed. A storage error returns False."""
+  ```
+
+### Module 3: Provider contract and TOTP provider
+- **Path**: `navigator_auth/mfa/abstract.py`, `navigator_auth/mfa/totp.py` (new)
+- **Responsibility**: The `AbstractOTPProvider` contract, and the
+  Google-Authenticator-compatible TOTP implementation with its vault-sealed seed,
+  ±1-step skew window and replay guard.
+- **Depends on**: M1, M2.
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/mfa/abstract.py  (new)
+  class AbstractOTPProvider(ABC):
+      """A second factor. Deliberately NOT a BaseAuthBackend.
+
+      BaseAuthBackend.authenticate()'s contract is to mint a session
+      (verified: navigator_auth/backends/abstract.py:64), so a provider
+      registered as a backend would make the second factor sufficient on its
+      own. A provider only ever returns a bool; it holds no reference to
+      remember() or create_token().
+      """
+      _provider_name: str                      # "totp" | "email" | "backup"
+      _is_strong: bool                         # closes the e-mail path when enrolled
+
+      @abstractmethod
+      async def is_enrolled(self, user: dict) -> bool: ...
+      @abstractmethod
+      async def start_enrollment(self, user: dict) -> dict:
+          """Provider-specific enrolment payload (TOTP: the otpauth:// URI)."""
+      @abstractmethod
+      async def confirm_enrollment(self, user: dict, code: str) -> bool:
+          """Enrolment completes only on a working code."""
+      @abstractmethod
+      async def challenge(self, request: web.Request, user: dict) -> dict:
+          """Deliver/prepare. TOTP: a no-op. E-mail: hands off to the callback."""
+      @abstractmethod
+      async def verify(self, request: web.Request, user: dict, code: str) -> bool: ...
+      @abstractmethod
+      async def disenroll(self, user: dict) -> None: ...
+
+  # navigator_auth/mfa/totp.py  (new)
+  TOTP_VAULT_KEY = "mfa:totp"       # auth.user_vault_secrets key (vault sql:11)
+  TOTP_DIGITS, TOTP_PERIOD, TOTP_SKEW_STEPS = 6, 30, 1
+
+  class TOTPProvider(AbstractOTPProvider):
+      """RFC 6238 via `cryptography` — no new dependency.
+
+      Parameters are fixed at SHA1/6 digits/30 s because Google Authenticator
+      ignores anything else. The seed is sealed by the vault kernel
+      (identity/crypto.py) under TOTP_VAULT_KEY, AAD-bound to the user, so a
+      seed copied to another user fails to open. It is NEVER stored in
+      User.attributes, which is plaintext JSONB (verified: models.py:61).
+      """
+      _provider_name = "totp"
+      _is_strong = True
+
+      def _keyring(self, app) -> KeyRing:
+          """Resolve the vault KeyRing LAZILY, from app[VAULT_KEYRING_APP_KEY].
+
+          It MUST NOT be captured in on_startup(): auth_startup() runs every
+          backend's on_startup() BEFORE setup_vault_keyring(app)
+          (verified: auth.py:181 then :188), so at provider-construction time
+          the keyring does not exist yet.
+
+          And the seed MUST NOT be read through load_vault_for_session()
+          (vault/integration.py:50): it requires an existing session object —
+          which is precisely what does not exist during verification — and it
+          is fail-OPEN by contract ("Vault failure MUST NOT block login").
+          Use the seal_value/open_value primitives directly and fail CLOSED.
+          """
+      async def start_enrollment(self, user: dict) -> dict:
+          """{'uri': 'otpauth://totp/...', 'secret_b32': ...} from
+          TOTP.get_provisioning_uri(account_name, issuer). The QR is rendered
+          client-side — `qrcode` is not a dependency."""
+      async def verify(self, request, user: dict, code: str) -> bool:
+          """Walks steps t-1, t, t+1: cryptography's TOTP.verify() validates
+          exactly ONE step (verified by execution). Rejects a step already
+          accepted, via MfaChallengeStore.mark_totp_step()."""
+  ```
+
+### Module 4: E-mail OTP provider
+- **Path**: `navigator_auth/mfa/email_otp.py` (new)
+- **Responsibility**: The zero-enrolment floor. Generates a numeric code,
+  persists only its `sha256`, hands a redacted payload to the delivery callback,
+  and answers identically whether or not delivery happened.
+- **Depends on**: M1, M2.
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/mfa/email_otp.py  (new)
+  class EmailOTPProvider(AbstractOTPProvider):
+      """Zero-enrolment second factor over the address already on User.email
+      (verified: models.py:49 — note required=False, see §7 R3).
+
+      navigator-auth never sends e-mail (docs/password_recovery.rst:9): the
+      code is handed to AUTH_OTP_EMAIL_CALLBACK. Only sha256(code) is
+      persisted, inside the challenge record.
+      """
+      _provider_name = "email"
+      _is_strong = False
+
+      async def is_enrolled(self, user: dict) -> bool:
+          """True when the user has a usable address — enrolment is implicit."""
+      async def start_enrollment(self, user: dict) -> dict:
+          """No-op: there is nothing to enrol. Returns the masked address."""
+      async def challenge(self, request, user: dict) -> dict:
+          """Generate, hash, hand off. The caller's HTTP response is
+          byte-identical whether delivery succeeded, the address was unknown,
+          or the callback raised (anti-enumeration, as recovery step 1)."""
+  ```
+
+### Module 5: Backup codes
+- **Path**: `navigator_auth/mfa/backup_codes.py`, SQL in M8
+- **Responsibility**: Ten single-use recovery codes; the way back in when a TOTP
+  device is lost, so that administrative disenrolment stays exceptional.
+- **Depends on**: M1, M8.
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/mfa/backup_codes.py  (new)
+  class BackupCodeStore:
+      """10 x 8-char alphanumeric codes, shown exactly once, stored hashed."""
+      def __init__(self, db_pool: Any): ...
+      async def generate(self, user_id: int) -> list[str]:
+          """Invalidates any previous set and returns the new plaintext codes —
+          the only time they exist outside a hash. Caller must have re-checked
+          the password."""
+      async def consume(self, user_id: int, code: str) -> bool:
+          """Single-use: marks used_at. Constant-time compare against hashes."""
+      async def remaining(self, user_id: int) -> int: ...
+  ```
+
+### Module 6: Trusted devices ("remember me for N days")
+- **Path**: `navigator_auth/mfa/trusted_devices.py`, SQL in M8
+- **Responsibility**: Skip **only** the OTP challenge — never the password — for
+  a bounded window, for strong-factor users only.
+- **Depends on**: M1, M8.
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/mfa/trusted_devices.py  (new)
+  TRUSTED_COOKIE = "nav_mfa_device"   # HttpOnly, Secure, SameSite=Lax
+
+  class TrustedDeviceStore:
+      """Rotating bearer second factor with replay detection.
+
+      A stolen cookie is a 2FA bypass for its lifetime, so the token rotates on
+      every use and re-presenting an already-rotated token means the chain was
+      stolen => the whole family is revoked. Bound to user_id only: a
+      User-Agent hash is weak and an IP binding is too brittle on mobile, and
+      pretending otherwise would be security theatre.
+
+      Offered ONLY to strong-factor users (MfaState.TOTP or a registered
+      passkey) and only when the tenant's remember_days > 0.
+      """
+      def __init__(self, db_pool: Any): ...
+      async def issue(self, user_id: int, days: int, label: str) -> str:
+          """Returns the raw cookie value; only sha256 is stored."""
+      async def consume_and_rotate(self, raw_token: str) -> Optional[tuple[int, str]]:
+          """(user_id, new raw token) when valid. None when absent/expired.
+          A rotated-token replay revokes the family and returns None."""
+      async def revoke_all(self, user_id: int, reason: str) -> int:
+          """Invalidation events: password change, recovery completion, TOTP
+          enrol, TOTP disenrol, ADMIN disenrol, tenant hardening, global
+          logout. Admin disenrolment that does not revoke is useless against
+          an attacker who already holds a cookie."""
+      async def revoke_tenant(self, org_id: int, reason: str) -> int:
+          """Hardening a tenant revokes; relaxing it does not."""
+  ```
+
+### Module 7: Tenant policy resolver and per-user state machine
+- **Path**: `navigator_auth/mfa/policy.py`, `navigator_auth/mfa/state.py` (new)
+- **Responsibility**: Resolve the effective policy (strictest organization wins)
+  and the per-user state, including the strong-factor predicate that makes a
+  registered passkey close the e-mail path.
+- **Depends on**: M1, M8.
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/mfa/policy.py  (new)
+  class MfaPolicyResolver:
+      """Effective policy for a user. A user may belong to several
+      organizations (auth.vw_users aggregates organization_users; verified:
+      identities.py:39 Organization, :56 _ORGANIZATION_FIELDS), so the
+      STRICTEST mode wins and the SMALLEST remember_days wins.
+
+      The tenant is taken from the authenticated user record, which is why no
+      new tenant-resolution mechanism is needed: the password step has already
+      identified the user. (The passkey RP-ID blocker in
+      sdd/state/FEAT-101/findings/F015-tenant-resolution.md does not apply.)
+
+      MUST NOT call abac.context._resolve_tenant() (verified: context.py:29).
+      That resolver prioritizes explicit kwargs and X-Org-Id/X-Client-Id
+      headers over userinfo and falls back to the (1, 1) global sentinel — so
+      reusing it here would let a request header choose which tenant's MFA
+      policy applies, and would silently substitute a global policy when
+      membership is unclear. Read membership from the authenticated user
+      record and reject ambiguity instead.
+
+      The policy table is read ON EVERY LOGIN. This object is
+      process-lifetime (backends are built once in AuthHandler.__init__), but
+      it holds NO cached policy: the mode is mutable operational data, and a
+      snapshot taken at startup would keep enforcing a policy an operator has
+      already changed.
+      """
+      def __init__(self, db_pool: Any): ...
+      async def effective(self, user: dict) -> TenantMfaPolicy:
+          """Fresh read per call. Raises (fail-closed) on a storage error when
+          2FA is enabled — never degrades to MfaMode.OFF."""
+
+  # navigator_auth/mfa/state.py  (new)
+  class MfaStateMachine:
+      """none -> email -> totp, plus the strong-factor predicate."""
+      def __init__(self, db_pool: Any, passkey_store: Any = None): ...
+      async def state_of(self, user: dict, policy: TenantMfaPolicy) -> MfaState:
+          """OFF/OPTIONAL and not enrolled => NONE. ENFORCED => at least EMAIL."""
+      async def has_strong_factor(self, user: dict) -> bool:
+          """Confirmed TOTP OR >=1 registered passkey credential
+          (PasskeyStore.list_credentials, read-only).
+
+          The passkey half is DERIVED, not stored: user_credentials carries no
+          MFA state of its own, and PasskeyAuth maintains none. So this is
+          evaluated fresh on every login, and the consequence must be explicit
+          — deleting the LAST passkey REOPENS the e-mail path (a user whose
+          only strong factor is gone must not be locked out). Deletion is
+          therefore a downgrade and shares the disenrolment duties: notify,
+          audit, and revoke that user's trusted devices.
+          """
+      async def available_providers(self, user: dict, policy: TenantMfaPolicy) -> tuple[list[str], str]:
+          """(providers, preferred). A strong factor CLOSES 'email': it is not
+          offered, so the mailbox stops being the ceiling for that user."""
+      async def requires_strong_factor(self, user: dict, policy: TenantMfaPolicy) -> bool:
+          """True for is_superuser under ENFORCED (verified: models.py:54).
+          Checked by the pre-flight at activation, NOT at login, so hardening a
+          tenant can never lock out its own administrators."""
+  ```
+
+### Module 8: Migrations and DDL
+- **Path**: `navigator_auth/mfa/sql/001_mfa_tables.sql`,
+  `navigator_auth/mfa/migrations.py` (new)
+- **Responsibility**: The five new tables, created idempotently at startup, with a
+  usability flag rather than a swallowed failure.
+- **Depends on**: nothing (pure DDL).
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/mfa/migrations.py  (new — mirrors navigator_auth/passkey/migrations.py)
+  SQL_DIR = Path(__file__).parent / "sql"
+  _MIGRATION_FILES = ("001_mfa_tables.sql",)
+
+  def render_sql(sql: str) -> str:
+      """Substitute {schema} and {users_table}, as passkey/migrations.py does."""
+  async def ensure_mfa_tables(db_pool: Any) -> None: ...
+  async def setup_mfa_tables(db_pool: Any) -> bool:
+      """Startup wrapper. Returns True when the tables are present and usable.
+
+      DELIBERATELY NOT the swallow-everything shape of
+      setup_passkey_tables()/setup_vault_tables(), which log and continue. For
+      those, a missing table degrades a feature; for this one it would make
+      the second factor silently ABSENT, which is a bypass, not a degradation.
+
+      It still does not raise — hard-failing startup would turn a missing
+      table into a total outage for every tenant, including those with 2FA
+      switched off. Instead it reports failure, BasicAuth records that MFA is
+      unavailable, and every login that owes a factor is REFUSED while the
+      flag is false (fail closed, per G7).
+      """
+  ```
+  ```sql
+  -- navigator_auth/mfa/sql/001_mfa_tables.sql  (new)
+  -- auth.tenant_mfa_policy      (org_id PK, mode, remember_days, enforced_at, enforced_by)
+  -- auth.user_mfa               (user_id+provider PK, enabled, confirmed_at,
+  --                              created_at, last_used_at)
+  -- auth.user_mfa_backup_codes  (id PK, user_id FK, code_hash, used_at, created_at)
+  -- auth.user_trusted_devices   (id PK, user_id FK, token_hash UNIQUE, family_id,
+  --                              label, created_at, expires_at, last_used_at,
+  --                              revoked_at)
+  -- auth.user_mfa_audit         (id PK, occurred_at, actor_user_id, target_user_id,
+  --                              org_id, action, old_state, new_state, method,
+  --                              request_id, outcome, detail JSONB)
+  --   A durable, action-specific record of every factor-state transition.
+  --   It is NOT abac/audit.py's AuditLog: that is best-effort and records
+  --   authorization DECISIONS, not factor-state changes. The spec leans on
+  --   auditing as the mitigation for R1 (the UserManager takeover path), so a
+  --   best-effort record would make that mitigation weaker than it reads.
+  -- The TOTP seed is NOT here: it lives sealed in auth.user_vault_secrets.
+  ```
+
+### Module 9: `BasicAuth` hook and the `MFARequired` signal
+- **Path**: `navigator_auth/backends/basic.py`, `navigator_auth/exceptions.py`
+  (modifies)
+- **Responsibility**: The single integration point. Validate credentials, resolve
+  whether a factor is owed, and either proceed exactly as today or raise
+  `MFARequired` **without creating anything**.
+- **Depends on**: M1–M8.
+- **NOT delegation-eligible** (§7 R2).
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/exceptions.py  (modifies)
+  class MFARequired(AuthException):
+      """Credentials valid, second factor owed. Carries NO session material."""
+      def __init__(self, challenge: str, providers: list[str], preferred: str,
+                   expires_in: int, status: int = 401): ...
+      def payload(self) -> dict: ...
+
+  # navigator_auth/backends/basic.py  (modifies)
+  # anchor verified: `    async def on_startup(self, app: web.Application):`  basic.py:65
+  async def on_startup(self, app: web.Application):
+      """Also builds the MFA provider set, the stores and the policy resolver,
+      and runs setup_mfa_tables(app['authdb']) — but only when
+      AUTH_BASIC_2FA_ENABLED, so a deployment that never opts in pays nothing.
+
+      Two ordering constraints, both verified in auth_startup():
+        * backend.on_startup() runs BEFORE setup_vault_keyring(app)
+          (auth.py:181 then :188), so the vault KeyRing CANNOT be captured
+          here. The TOTP provider resolves it lazily (M3).
+        * setup_mfa_tables() returns a usability flag rather than swallowing
+          failure; store it on the backend. While it is false, every login
+          that owes a factor is refused (M8).
+      Nothing cached here is policy: the policy table is read per login (M7).
+      """
+
+  # anchor verified: `    async def authenticate(self, request):`  basic.py:296
+  # anchor verified: `        return await self.open_session(request, user)`  basic.py:315
+  async def authenticate(self, request):
+      """Unchanged up to and including validate_user() (basic.py:307).
+
+      Then, when 2FA is live for this user:
+        1. policy = MfaPolicyResolver.effective(user)
+        2. a valid, rotating trusted-device cookie => proceed with
+           amr=['pwd', 'trusted_device'] (mfa stays True so existing policies
+           keep working, but amr is honest so a policy can demand a FRESH
+           factor)
+        3. otherwise issue a challenge and `raise MFARequired(...)` — no
+           open_session(), no token, no jti, no cookie. Nothing is created
+           that would have to be retracted.
+
+      The hook lives HERE and not in open_session() because
+      TokenExchangeAuth (exchange.py:31) and PasskeyAuth (passkey.py:63)
+      override authenticate() and call open_session() directly: hooking
+      open_session() would demand an OTP from machine-to-machine flows and
+      stack an OTP on top of a passkey.
+      """
+  ```
+
+### Module 10: `auth.py` call sites and the MFA HTTP surface
+- **Path**: `navigator_auth/auth.py` (modifies), `navigator_auth/handlers/mfa.py` (new)
+- **Responsibility**: Make the three `authenticate()` call sites handle
+  `MFARequired` correctly, and expose the challenge/verify/enrolment endpoints.
+- **Depends on**: M9.
+- **NOT delegation-eligible** (§7 R2 — the `except` ordering is the whole
+  correctness argument).
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/auth.py  (modifies)
+  # anchor verified: `        router.add_route("GET", "/api/v1/login", self.api_login, name="api_login")`  auth.py:675
+  #
+  # api_login (auth.py:487) — the except clause MUST come first:
+  #     try:
+  #         userdata = await backend.authenticate(request)
+  #         if userdata: break
+  #     except MFARequired as err:              # <-- BEFORE the tuple below
+  #         return JSONResponse(err.payload(), status=401)
+  #     except (AuthException, UserNotFound, InvalidAuth, FailedAuth):
+  #         continue                            # would otherwise try the NEXT backend
+  #
+  # _backend_auth (auth.py:380) and _login_token (auth.py:369): same, placed
+  # before their `except AuthException` / bare `except Exception` handlers.
+
+  # navigator_auth/handlers/mfa.py  (new)
+  MFA_PREFIX = "/auth/mfa"
+  class MfaHandler:
+      """Challenge/verify plus enrolment management.
+
+      Only verify() reaches open_session(); every other route requires a live
+      session. The challenge/verify routes are added to AUTH_EXCLUDE_LIST_KEY
+      (pattern verified: basic.py:62), the enrolment routes are NOT.
+      """
+      async def challenge(self, request):   # POST /auth/mfa/challenge  (resend)
+          """Generic, identical response whether or not delivery happened."""
+      async def verify(self, request):      # POST /auth/mfa/verify
+          """{challenge, provider, code} -> consume, dispatch, then
+          open_session(extra={'mfa': True, 'amr': ['pwd', <provider>]}).
+          Sets the trusted-device cookie when asked AND allowed."""
+      async def enroll_totp(self, request):     # POST   /auth/mfa/totp/enroll
+      async def confirm_totp(self, request):    # POST   /auth/mfa/totp/confirm
+      async def disenroll_totp(self, request):  # DELETE /auth/mfa/totp
+          """Downgrade: re-auth password, notify the user, audit, revoke the
+          user's trusted devices."""
+      async def backup_codes(self, request):    # POST   /auth/mfa/backup-codes
+      async def admin_disenroll(self, request): # DELETE /auth/mfa/{user_id}
+          """Gated by the `mfa:disenroll` ABAC action (M11). Switches the OTP
+          off and NOTHING else: no password reset, no account edit. Revokes the
+          user's trusted devices and writes a durable auth.user_mfa_audit row.
+
+          Additionally enforces TENANT OWNERSHIP: the actor's organizations
+          must include the target's. Holding `mfa:disenroll` is not permission
+          to disable the second factor of a user in someone else's tenant, and
+          the ABAC action alone does not express that scoping.
+          """
+  ```
+
+### Module 11: ABAC policy pack for `mfa:disenroll`
+- **Path**: `navigator_auth/abac/default_policies/mfa_admin_access.yaml` (new)
+- **Responsibility**: Declare the administrative action as a *separate* permission
+  from user CRUD. Configuration only — no Python.
+- **Depends on**: M10 (names the action it calls).
+- **Interface Skeleton**:
+  ```yaml
+  # navigator_auth/abac/default_policies/mfa_admin_access.yaml  (new)
+  # Shape verified against auth_model_admin_access.yaml (FEAT-105 TASK-120).
+  # This is real separation of duties, not nominal: admin_full_access.yaml
+  # wildcards RESOURCES (uri:*) at priority 100 but ENUMERATES its actions with
+  # no wildcard, so `mfa:disenroll` falls outside it. And policy_allows() fails
+  # closed, so a deployment that never ships this file has NOBODY able to
+  # disenrol — the escape hatch is an explicit operator decision.
+  version: "1.0"
+  defaults:
+    effect: deny
+  policies:
+    - name: mfa_admin_access
+      effect: allow
+      description: >-
+        Switch a user's OTP off. Grants nothing else: no password reset, no
+        account edit. Deliberately NOT granted to `superuser`.
+      resources: ["uri:/auth/mfa/*"]
+      actions: ["mfa:disenroll"]
+      subjects:
+        groups: ["security_admin"]
+      priority: 90
+      enforcing: true
+  ```
+
+### Module 12: Enforcement pre-flight
+- **Path**: `scripts/preflight_mfa.py` (new)
+- **Responsibility**: Refuse to let an operator enforce a tenant that would break.
+- **Depends on**: M7.
+- **Interface Skeleton**:
+  ```python
+  # scripts/preflight_mfa.py  (new)
+  def main() -> int:
+      """`python -m scripts.preflight_mfa --org-id N`.
+
+      Exit 0 only when the tenant can be enforced. Exit non-zero, listing the
+      offenders, on EITHER blocking condition:
+        B1. users with no e-mail address -> they would have NO factor at all
+            (User.email is required=False; verified: models.py:49)
+        B2. is_superuser accounts with no strong factor -> they may not sit on
+            the e-mail floor, so enforcing would lock out the administrators
+
+      It cannot detect an address that is merely WRONG: no email_verified
+      state exists (§7 R4).
+      """
+  ```
+
+### Module 13: Documentation and changelog
+- **Path**: `docs/two_factor_auth.rst` (new), `CHANGELOG.md` (modifies)
+- **Responsibility**: The operator contract.
+- **Depends on**: all.
+- **Interface Skeleton**: see §10.
+
+---
+
+## 4. Test Specification
+
+### Unit Tests
+
+| Test | Module | Description |
+|---|---|---|
+| `test_challenge_keyed_by_hash_only` | M2 | Redis holds no raw challenge token; the key is `sha256`. |
+| `test_challenge_single_use` | M2 | A second `consume()` of the same token returns `None`. |
+| `test_challenge_hmac_tamper_rejected` | M2 | A mutated payload fails signature verification. |
+| `test_attempt_budget_burns_challenge` | M2 | `AUTH_OTP_MAX_ATTEMPTS` failures invalidate the challenge, not just the attempt. |
+| `test_strict_limiter_fails_closed` | M2 | A Redis error makes `check()` return `False` (the inverse of `recovery/limiter.py`). |
+| `test_totp_accepts_skew_window` | M3 | Codes for `t-30`, `t`, `t+30` all verify. |
+| `test_totp_rejects_outside_window` | M3 | `t-60` / `t+60` are rejected. |
+| `test_totp_replay_rejected` | M3 | The same code twice inside its window fails the second time. |
+| `test_totp_uri_is_google_authenticator_compatible` | M3 | `otpauth://` carries `algorithm=SHA1`, `digits=6`, `period=30` and the issuer. |
+| `test_totp_seed_sealed_and_aad_bound` | M3 | A seed resealed for another `user_id` fails to open. |
+| `test_totp_seed_never_in_user_attributes` | M3 | `User.attributes` stays untouched by enrolment. |
+| `test_email_otp_persists_only_hash` | M4 | The challenge record holds `sha256(code)`, never the code. |
+| `test_email_otp_response_identical_when_unknown` | M4 | Unknown address, delivery failure and success are byte-identical. |
+| `test_email_otp_callback_exception_is_contained` | M4 | A raising callback does not leak and does not 500. |
+| `test_notification_payload_repr_redacted` | M4 | `repr()` shows no code. |
+| `test_backup_codes_generate_count_and_shape` | M5 | 10 codes, 8 alphanumeric chars. |
+| `test_backup_code_single_use` | M5 | A consumed code fails on reuse. |
+| `test_backup_code_regeneration_invalidates_previous` | M5 | The old set stops working. |
+| `test_trusted_device_rotates_on_use` | M6 | The returned token differs and the old hash is retired. |
+| `test_trusted_device_replay_revokes_family` | M6 | Re-presenting a rotated token revokes the whole family. |
+| `test_trusted_device_stored_as_hash_only` | M6 | No raw cookie value in the table. |
+| `test_trusted_device_not_offered_to_email_state` | M6 | Only strong-factor users get the option. |
+| `test_policy_strictest_org_wins` | M7 | `enforced` + `optional` ⇒ `enforced`; smallest `remember_days` wins. |
+| `test_enforced_floor_is_email_without_enrolment` | M7 | An `enforced` tenant's un-enrolled user resolves to `EMAIL`. |
+| `test_strong_factor_closes_email` | M7 | Confirmed TOTP ⇒ `email` absent from `available_providers()`. |
+| `test_registered_passkey_closes_email` | M7 | A passkey credential does the same, symmetrically. |
+| `test_requires_strong_factor_for_superuser` | M7 | `is_superuser` + `ENFORCED` ⇒ `True`. |
+| `test_mfa_required_payload_has_no_token` | M9 | The payload carries no `token` / `refresh_token` / session id. |
+| `test_api_login_mfa_required_does_not_try_next_backend` | M10 | **Regression for R2**: the iteration stops and returns 401 + challenge. |
+| `test_api_login_mfa_required_creates_no_session` | M10 | `load_session` is never reached. |
+| `test_token_exchange_never_challenged` | M10 | `TokenExchangeAuth.authenticate()` is unaffected. |
+| `test_passkey_signin_never_challenged` | M10 | `PasskeyAuth` sign-in issues no challenge even when `enforced`. |
+| `test_admin_disenroll_requires_mfa_action` | M11 | A plain `superuser` (no `mfa:disenroll`) is denied. |
+| `test_admin_disenroll_revokes_trusted_devices` | M10 | The devices are gone after the call. |
+| `test_policy_pack_parses` | M11 | The YAML parses and yields the action, group and effect. |
+| `test_preflight_blocks_users_without_email` | M12 | Non-zero exit, offenders listed. |
+| `test_preflight_blocks_superuser_without_strong_factor` | M12 | Non-zero exit, offenders listed. |
+| `test_concurrent_verify_consumes_once` | M2 | Two simultaneous submissions of the same challenge: exactly one succeeds (`getdel` is the serialization point). |
+| `test_policy_read_is_per_login_not_cached` | M7 | Changing the row between two logins changes the second login's behaviour. |
+| `test_policy_read_failure_fails_closed` | M7 | A storage error refuses the login instead of degrading to `OFF`. |
+| `test_missing_mfa_tables_refuse_login` | M8 | With the tables absent and 2FA enabled, a login owing a factor is refused — and startup still succeeds. |
+| `test_resolver_ignores_tenant_headers` | M7 | `X-Org-Id`/`X-Client-Id` cannot select the policy; membership comes from the user record. |
+| `test_deleting_last_passkey_reopens_email` | M7 | The user is not left with no usable factor. |
+| `test_totp_seed_read_without_session` | M3 | The seed opens during verification, with no session in existence. |
+| `test_admin_disenroll_rejects_foreign_tenant` | M10 | Holding `mfa:disenroll` does not reach another tenant's user. |
+| `test_factor_transitions_write_durable_audit` | M8 | Enrol / disenrol / admin-disenrol / policy change each leave an `auth.user_mfa_audit` row. |
+
+### Integration Tests
+
+| Test | Description |
+|---|---|
+| `test_login_email_otp_end_to_end` | Password ⇒ 401 + challenge ⇒ code ⇒ session with `mfa=True`, `amr=['pwd','otp']`. |
+| `test_login_totp_end_to_end` | Enrol, confirm, log in with the app code; `amr=['pwd','totp']`. |
+| `test_enforce_tenant_no_lockout` | Switch a tenant to `enforced` with zero enrolled users; every user still logs in at the first attempt via e-mail. |
+| `test_totp_enrolment_closes_email_path` | After confirmation the e-mail provider is refused for that user. |
+| `test_remember_me_skips_otp_not_password` | Second login needs the password but no OTP; a wrong password still fails. |
+| `test_password_change_revokes_trusted_devices` | The cookie stops working. |
+| `test_recovery_completion_revokes_trusted_devices` | Same, through the FEAT-098 flow. |
+| `test_tenant_hardening_revokes_devices_relaxing_does_not` | Both directions. |
+| `test_abac_policy_can_require_fresh_factor` | A policy demanding `amr` contains `otp`/`totp` rejects a `trusted_device` session while `mfa` is still `True`. |
+| `test_cross_tenant_isolation` | Tenant A's user cannot satisfy enforcement with tenant B's policy, and a factor enrolled under one user never verifies for another. |
+
+### Validation Contract
+
+tests:
+- tests/test_mfa_challenge_store.py
+- tests/test_mfa_totp_provider.py
+- tests/test_mfa_email_provider.py
+- tests/test_mfa_backup_codes.py
+- tests/test_mfa_trusted_devices.py
+- tests/test_mfa_policy_state.py
+- tests/test_mfa_basic_auth_hook.py
+- tests/test_mfa_auth_login_integration.py
+- tests/test_mfa_admin_disenroll.py
+- tests/test_mfa_policy_pack.py
+- tests/test_mfa_preflight.py
+- tests/test_basic_auth.py
+- tests/test_eval_context_auth_method.py
+- tests/test_passkey_signin.py
+markers: none
+
+### Test Data / Fixtures
+
+```python
+# tests/fixtures/mfa.py — follows tests/fixtures/passkey.py
+@pytest.fixture
+def mfa_policy_enforced(): ...          # a TenantMfaPolicy in ENFORCED mode
+@pytest.fixture
+def totp_enrolled_user(): ...           # sealed seed in a fake vault + user_mfa row
+@pytest.fixture
+def frozen_totp_clock(): ...            # deterministic time steps for skew tests
+@pytest.fixture
+def otp_callback_spy(): ...             # captures OtpNotificationPayload, asserts redaction
+```
+
+---
+
+## 5. Acceptance Criteria
+
+> This feature is complete when ALL of the following are true:
+
+- [ ] **AC1** — All unit tests pass (`pytest tests/test_mfa_*.py -v`).
+- [ ] **AC2** — All integration tests in §4 pass.
+- [ ] **AC3** — `pytest tests/test_basic_auth.py tests/test_passkey_signin.py
+  tests/test_eval_context_auth_method.py -v` still pass unchanged (no regression
+  on the existing login paths).
+- [ ] **AC4** — **No new runtime dependency.** `pyproject.toml`'s `dependencies`
+  list is unchanged; TOTP comes from `cryptography`.
+- [ ] **AC5** — **No path from a provider to a session.** `grep -n
+  "remember\|create_token\|open_session" navigator_auth/mfa/` returns nothing.
+- [ ] **AC6** — A `BasicAuth` login owing a factor returns **no** token: the
+  response body has no `token`, `refresh_token` or session id, and no session is
+  stored.
+- [ ] **AC7** — `MFARequired` raised inside `api_login`'s backend loop does **not**
+  fall through to another backend (R2 regression test).
+- [ ] **AC8** — Switching a tenant to `enforced` with zero enrolled users locks
+  nobody out: every user with an address authenticates at the first attempt.
+- [ ] **AC9** — A confirmed TOTP enrolment, or a registered passkey, removes
+  `email` from that user's available providers.
+- [ ] **AC10** — A passkey sign-in in an `enforced` tenant issues no challenge.
+- [ ] **AC11** — `TokenExchangeAuth` is never challenged.
+- [ ] **AC12** — Verification **fails closed**: with Redis unreachable, no session
+  is created.
+- [ ] **AC13** — A TOTP code cannot be replayed inside its own 30 s window; skew
+  of ±1 step is accepted and ±2 is not.
+- [ ] **AC14** — No live code, raw challenge token, cookie value or TOTP seed
+  appears in Redis, in a table, in an HTTP response or in a log line at any level.
+- [ ] **AC15** — The pre-flight exits non-zero for a tenant with users lacking an
+  address **or** `is_superuser` accounts lacking a strong factor, and lists them.
+- [ ] **AC16** — Administrative disenrolment is denied to a `superuser` that lacks
+  `mfa:disenroll`, changes nothing but the OTP state, and revokes the user's
+  trusted devices.
+- [ ] **AC17** — Remember-me is offered only to strong-factor users and only when
+  `remember_days > 0`; it never skips the password.
+- [ ] **AC18** — Password change, recovery completion, TOTP enrol/disenrol, admin
+  disenrol and tenant hardening each revoke trusted devices; relaxing a tenant
+  policy does not.
+- [ ] **AC19** — A session established via a trusted device carries `mfa=True`
+  **and** `amr` containing `trusted_device` rather than `otp`/`totp`.
+- [ ] **AC20** — With `AUTH_BASIC_2FA_ENABLED=False` the login path is
+  byte-identical to today's.
+- [ ] **AC22** — The tenant policy is read **per login**, never cached at startup:
+  changing the row takes effect on the next login. The lookup ignores
+  `X-Org-Id`/`X-Client-Id` and never falls back to a global `(1,1)` policy.
+- [ ] **AC23** — Every factor-state transition (enrol, confirm, disenrol, admin
+  disenrol, policy change, device revocation) leaves a durable
+  `auth.user_mfa_audit` row with actor, target, org, old/new state and outcome.
+- [ ] **AC24** — With the MFA tables absent and `AUTH_BASIC_2FA_ENABLED=True`,
+  startup still succeeds **and** every login owing a factor is refused.
+- [ ] **AC25** — The TOTP seed is read during verification without any session in
+  existence, and a vault error refuses the login rather than skipping the factor.
+- [ ] **AC26** — Administrative disenrolment is refused across tenants even for a
+  principal holding `mfa:disenroll`.
+- [ ] **AC27** — Deleting a user's last passkey reopens the e-mail path, and is
+  audited and revokes their trusted devices like any other downgrade.
+- [ ] **AC21** — `docs/two_factor_auth.rst` documents the delivery-callback
+  contract, the state machine, the pre-flight, the shared-mailbox risk and the
+  `PASSKEY_USER_VERIFICATION` caveat. `CHANGELOG.md` updated.
+
+---
+
+## 6. Codebase Contract
+
+> **CRITICAL — Anti-Hallucination Anchor**
+> This section is the single source of truth for what exists in the codebase.
+> Implementation agents MUST NOT reference imports, attributes, or methods
+> not listed here without first verifying they exist via `grep` or `read`.
+
+**Verified against**: `6469bc4` (dev), 2026-11-06. Carried forward from
+`sdd/proposals/basicauth-otp-2fa.brainstorm.md` §Code Context and re-verified.
+
+### Verified Imports
+
+```python
+from cryptography.hazmat.primitives.twofactor.totp import TOTP   # cryptography 46.0.7
+from cryptography.hazmat.primitives.hashes import SHA1
+from navigator_auth.backends.abstract import BaseAuthBackend, user_is_active
+#   BaseAuthBackend verified: navigator_auth/backends/abstract.py:64
+#   user_is_active  verified: navigator_auth/backends/abstract.py:43
+from navigator_auth.backends.oauth2.dcr import parse_rate_limit  # verified: dcr.py:104
+from navigator_session.vault import KeyRing, VaultContext, open_value, seal_value
+#   guarded by VAULT_CRYPTO_AVAILABLE in navigator_auth/identity/crypto.py
+from navigator_session import AUTH_SESSION_OBJECT, SESSION_KEY, SESSION_ID
+#   verified in use: navigator_auth/backends/basic.py:11-12
+```
+
+> **Evidence note on the two `cryptography` imports.** Verified by *executing*
+> them in the project venv (importing `TOTP`, generating a code and a provisioning
+> URI, and confirming `verify()` rejects the adjacent step). A repository-scoped
+> contract probe reports them `module-missing` because it only inspects
+> git-tracked files and `cryptography` is an external package — that is not a
+> refutation. Check these by import execution, never by file lookup.
+
+### Existing Class Signatures
+
+```python
+# navigator_auth/backends/basic.py:44
+class BasicAuth(BaseAuthBackend):
+    user_attribute: str = "user"                                       # :47
+    pwd_atrribute: str = "password"                                    # :48  (sic — the typo is in the code)
+    _ident: AuthUser = BasicUser                                       # :49
+    _service_name: str = "basic"                                       # :51
+    _JWT_EXTRA_KEYS = ("auth_method", "auth_origin",
+                       "external_expires_at", "mfa", "amr")            # :153
+
+    async def on_startup(self, app: web.Application): ...              # :65
+    async def validate_user(self, login: str = None,
+                            password: str = None): ...                 # :86
+    async def open_session(self, request: web.Request, user: dict,
+                           extra: Optional[dict] = None,
+                           expiration: Optional[int] = None) -> dict: ...   # :170
+    async def authenticate(self, request): ...                         # :296
+```
+
+```python
+# navigator_auth/backends/exchange.py:31 — overrides authenticate(); must NOT inherit the challenge.
+class TokenExchangeAuth(BasicAuth):
+    async def authenticate(self, request: web.Request) -> Any: ...      # :125
+    #   calls open_session(request, user, extra=extra, expiration=cap)  # :216
+    def _verified_email(self, userinfo: dict) -> Optional[str]: ...     # :99
+    #   rejects a provider userinfo whose email_verified is explicitly falsy  # :110
+
+# navigator_auth/backends/passkey.py:63
+class PasskeyAuth(BasicAuth): ...
+```
+
+```python
+# navigator_auth/auth.py — the three authenticate() call sites.
+async def _login_token(self, request: web.Request): ...        # :366, calls authenticate at :369
+async def _backend_auth(self, request: web.Request, backend): ...  # :378, calls authenticate at :380
+#   except UserNotFound -> Unauthorized                        # :383
+#   except (InvalidAuth, Forbidden, FailedAuth) -> ForbiddenAccess  # :385
+#   except AuthException -> ForbiddenAccess                    # :388
+async def api_login(self, request: web.Request) -> web.Response: ...  # :470
+#   for _, backend in self.backends.items():                   # :484
+#       userdata = await backend.authenticate(request)         # :487
+#       except (AuthException, UserNotFound, InvalidAuth, FailedAuth): continue  # :490-491
+#   JSONResponse(userdata, status=200) + load_session(...)     # :497-499
+router.add_route("GET", "/api/v1/login", self.api_login, name="api_login")   # :675
+```
+
+```python
+# navigator_auth/models.py:39
+class User(Model):
+    email: str = Column(required=False, max=254, label="User's Email")   # :49  ← required=False
+    password: str = Column(required=False, max=255, secret=True, repr=False)  # :51
+    is_superuser: bool = Column(required=True, default=False)            # :54
+    is_active: bool = Column(required=True, default=True)                # :58
+    attributes: Optional[dict] = Column(required=False, default_factory=dict)  # :61  ← plaintext JSONB
+
+class UserDevices(Model): ...                                            # :143  ← do NOT reuse (see below)
+```
+
+```python
+# navigator_auth/handlers/recovery/store.py — the store shape to clone (NOT to import).
+def _hash_token(token: str) -> str: ...        # :37  sha256 hex; the only Redis key
+class RecoveryTokenStore:                      # :42
+    def __init__(self, pool: aioredis.ConnectionPool, secret: bytes): ...
+    def _sign(self, *parts: str) -> str: ...
+    async def issue_recovery(self, user) -> tuple[str, RecoveryPayload]: ...
+RECOVERY_KEY_PREFIX = "auth:recovery:"
+CONFIRM_KEY_PREFIX = "auth:recovery:confirm:"
+
+# navigator_auth/handlers/recovery/limiter.py
+class RateLimiter:                             # :28
+    async def check(self, key: str) -> bool: ...
+    # "Fail-open by design" — must be INVERTED for 2FA verification (§7 R5)
+RATE_KEY_PREFIX = "auth:recovery:rate:"
+
+# navigator_auth/handlers/recovery/types.py
+class NotificationPayload: ...                 # :33  redacted __repr__ pattern
+class PasswordPolicy: ...                      # policy.py:16
+
+# navigator_auth/identity/flow_store.py
+class IdentityFlowStore:                       # :18  pooled setex/get/getdel
+```
+
+```python
+# navigator_auth/abac/context.py
+def _resolve_tenant(request, userinfo, org_id, client_id) -> tuple[int, int]: ...  # :29
+class EvalContext(dict, MutableMapping): ...                                       # :82
+    self.store["auth_method"] = userinfo.get("auth_method")                        # :137
+    self.store["mfa"] = bool(userinfo.get("mfa", False))                           # :138
+
+# navigator_auth/identities.py
+class Organization(BaseModel): ...                                 # :39
+_ORGANIZATION_FIELDS = ("org_id", "organization", "slug")          # :56
+
+# navigator_auth/handlers/guards.py
+class OwnerOrSuperuserGuard: ...                                   # :31
+# navigator_auth/handlers/redaction.py
+def safe_fields(fields: Optional[list[str]],
+                public_columns: frozenset[str]) -> Optional[list[str]]: ...   # :36
+```
+
+```python
+# navigator_auth/passkey/migrations.py — the migration pattern to mirror verbatim.
+SQL_DIR = Path(__file__).parent / "sql"
+_MIGRATION_FILES = ("001_passkey_credentials.sql",)
+def render_sql(sql: str) -> str: ...                 # substitutes {schema}, {users_table}
+async def ensure_passkey_tables(db_pool: Any) -> None: ...
+async def setup_passkey_tables(db_pool: Any) -> None: ...   # logs, never raises
+```
+
+```yaml
+# navigator_auth/abac/default_policies/auth_model_admin_access.yaml — the pack shape (FEAT-105 TASK-120)
+version: "1.0"
+defaults:
+  effect: deny
+policies:
+  - name: user_identities_admin_access
+    effect: allow
+    resources: ["uri:/api/v1/user_identity*"]
+    actions: ["identity:read", "identity:revoke", "identity:delete"]
+    subjects:
+      groups: ["superuser"]
+    priority: 90
+    enforcing: true
+```
+
+**Key constants and facts**
+
+- `cryptography`'s `TOTP.get_provisioning_uri(account_name, issuer)` emits
+  `otpauth://totp/<issuer>:<account>?digits=6&secret=<b32>&algorithm=SHA1&issuer=<issuer>&period=30`
+  — exactly what Google Authenticator expects. No URI string-building needed.
+- `TOTP.verify(totp: bytes, time: int) -> None` raises `InvalidToken` and validates
+  **a single time step**. The ±1 skew window must be walked by the caller.
+- `auth.user_vault_secrets` — `(user_id, key, ciphertext_db, key_version, …)` with
+  a partial unique index on `(user_id, key) WHERE deleted_at IS NULL`
+  (`navigator_auth/vault/sql/001_create_vault_tables.sql:11`). The TOTP seed's home.
+- `PASSKEY_USER_VERIFICATION` default `"required"` (`navigator_auth/conf.py:611`) —
+  the premise of "a passkey satisfies enforcement" (§7 R6).
+- `AUTH_RECOVERY_SECRET` (`conf.py:623`), `AUTH_RECOVERY_TTL` (`:629`),
+  `AUTH_RECOVERY_CALLBACK` (`:634`) — the naming convention `AUTH_OTP_*` follows.
+- `admin_full_access.yaml` grants `superuser`/`admin` the resources
+  `tool:* kb:* vector:* agent:* mcp:* uri:*` at `priority: 100`, but its `actions:`
+  list is **enumerated with no wildcard** — which is what makes a new action string
+  genuinely exclusive (§2, M11).
+- `policy_allows()` **fails closed** when a named policy is absent (FEAT-105
+  TASK-119), so a missing pack can only remove admin access, never grant it.
+
+### Integration Points
+
+| New Component | Connects To | Via | Verified At |
+|---|---|---|---|
+| `MFARequired` | `AuthHandler.api_login` | `except MFARequired` placed **before** the `AuthException` tuple | `navigator_auth/auth.py:487-491` |
+| `MFARequired` | `AuthHandler._backend_auth` | same, before `except AuthException` | `navigator_auth/auth.py:380-388` |
+| `MFARequired` | `AuthHandler._login_token` | same, before the bare `except Exception` | `navigator_auth/auth.py:369-375` |
+| `MfaChallengeStore` | `BasicAuth.authenticate()` | issued after `validate_user()` | `navigator_auth/backends/basic.py:307` |
+| `MfaHandler.verify` | `BasicAuth.open_session()` | `extra={"mfa": True, "amr": [...]}` | `navigator_auth/backends/basic.py:170` |
+| provider set + stores | `BasicAuth.on_startup()` | built once per process | `navigator_auth/backends/basic.py:65` |
+| `setup_mfa_tables()` | `app["authdb"]` | startup migration, mirrors passkey | `navigator_auth/passkey/migrations.py` |
+| `TOTPProvider` seed | `auth.user_vault_secrets` | `seal_value`/`open_value`, key `mfa:totp` | `navigator_auth/vault/sql/001_create_vault_tables.sql:11` |
+| `MfaStateMachine.has_strong_factor` | `PasskeyStore.list_credentials()` | read-only | `navigator_auth/passkey/store.py` |
+| `MfaPolicyResolver` | user's organizations | strictest wins; read per login | `navigator_auth/identities.py:39,56` |
+| `MfaPolicyResolver` | ~~`abac.context._resolve_tenant()`~~ | **MUST NOT be used** — header-overridable and falls back to the `(1,1)` global sentinel (§7 R14) | `navigator_auth/abac/context.py:29` |
+| `TOTPProvider` keyring | `app[VAULT_KEYRING_APP_KEY]` | resolved **lazily**; absent during `on_startup()` | `navigator_auth/auth.py:181,188` |
+| `TOTPProvider` seed | ~~`load_vault_for_session()`~~ | **MUST NOT be used** — needs a session and is fail-open (§7 R12) | `navigator_auth/vault/integration.py:50` |
+| factor-state transitions | `auth.user_mfa_audit` | durable row per transition, not `AuditLog` | `navigator_auth/abac/audit.py` |
+| MFA routes | `AUTH_EXCLUDE_LIST_KEY` | challenge/verify excluded; enrolment not | `navigator_auth/backends/basic.py:62` |
+| trusted-device revocation | recovery completion | revoke on success | `navigator_auth/handlers/recovery/handler.py` |
+
+### Does NOT Exist (Anti-Hallucination)
+
+- ~~`navigator_auth/mfa/`~~ — no MFA package exists; this feature creates it.
+- ~~`AbstractOTPProvider`, `TOTPProvider`, `EmailOTPProvider`, `MFARequired`~~ —
+  none exist.
+- ~~`auth.tenant_mfa_policy`, `auth.user_mfa`, `auth.user_mfa_backup_codes`,
+  `auth.user_trusted_devices`~~ — none of these tables exist.
+- ~~`AUTH_OTP_*`, `AUTH_BASIC_2FA_ENABLED`, `AUTH_TOTP_ISSUER`~~ — no such settings
+  in `conf.py`.
+- ~~`User.email_verified`~~ — **no e-mail verification column on `User`**, which has
+  `is_new` and `is_active` only. Careful: the string `email_verified` *does* occur
+  in the package, but only as an external IdP **claim**, never as our own state —
+  `TokenExchangeAuth._verified_email()` (`backends/exchange.py:99-111`) and
+  `backends/external.py:1297` (`verified_key: str = "email_verified"`). An
+  IdP-provisioned identity was checked at login and the result discarded; a
+  `BasicAuth` user has never had their address verified by anyone.
+- ~~the `mfa:disenroll` ABAC action, and any policy declaring it~~ — neither exists.
+  `default_policies/` holds exactly seven files (`admin_full_access`,
+  `auth_model_admin_access`, `business_hours_only`, `deny_after_hours`,
+  `engineering_tools`, `mcp_services`, `readonly_agents`); this adds an eighth.
+- ~~a `security_admin` group~~ — not defined anywhere. The group that holds
+  `mfa:disenroll` is a deployment decision; M11 names a default but must not
+  assume it already exists.
+- ~~`UserDevices` as a usable trusted-device store~~ — the model exists
+  (`models.py:143`) but is **referenced nowhere in the package** except its own
+  definition, and is built for 1460-day device JWTs with a ciphered `api_key`. Do
+  not repurpose it.
+- ~~`pyotp`~~, ~~`qrcode`~~, ~~`aiosmtplib`~~, ~~`twilio`~~, ~~`sendgrid`~~ — not
+  installed and not to be added. `webauthn` is an optional extra and is **also not
+  installed** in this environment, so any passkey read must tolerate its absence.
+- ~~a pre-authentication tenant resolver~~ — does not exist
+  (`sdd/state/FEAT-101/findings/F015-tenant-resolution.md`). Not needed here: the
+  password step identifies the user before the policy is read.
+- ~~SMS / `AUTH_OTP_SMS_*`~~ — out of scope; no provider in the environment.
+
+### Edit Sites (Blueprint Anchors)
+
+> Verified against: `6469bc4`. Anchors go stale between spec time and task time —
+> `/sdd-task` MUST re-run the `grep -c` for every row it uses.
+
+| File | Action | Verbatim anchor line | Verified at | Occurrences |
+|---|---|---|---|---|
+| `navigator_auth/backends/basic.py` | MODIFY | `    async def authenticate(self, request):` | `basic.py:296` | 1 |
+| `navigator_auth/backends/basic.py` | MODIFY | `        return await self.open_session(request, user)` | `basic.py:315` | 1 |
+| `navigator_auth/backends/basic.py` | MODIFY | `    async def on_startup(self, app: web.Application):` | `basic.py:65` | 1 |
+| `navigator_auth/conf.py` | MODIFY | `AUTH_RECOVERY_SECRET = config.get("AUTH_RECOVERY_SECRET")` | `conf.py:623` | 1 |
+| `navigator_auth/auth.py` | MODIFY | `        router.add_route("GET", "/api/v1/login", self.api_login, name="api_login")` | `auth.py:675` | 1 |
+| `navigator_auth/auth.py` | MODIFY | `                except (AuthException, UserNotFound, InvalidAuth, FailedAuth):` | `auth.py:490` | 1 |
+| `navigator_auth/exceptions.py` | MODIFY | *(append a class; no anchor needed)* | — | — |
+| `navigator_auth/handlers/recovery/handler.py` | MODIFY | `(unverified — check before use)` | — | — |
+| `navigator_auth/mfa/__init__.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/types.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/exceptions.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/abstract.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/store.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/limiter.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/totp.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/email_otp.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/backup_codes.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/trusted_devices.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/policy.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/state.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/migrations.py` | CREATE | — | — | — |
+| `navigator_auth/mfa/sql/001_mfa_tables.sql` | CREATE | — | — | — |
+| `navigator_auth/handlers/mfa.py` | CREATE | — | — | — |
+| `navigator_auth/abac/default_policies/mfa_admin_access.yaml` | CREATE | — | — | — |
+| `scripts/preflight_mfa.py` | CREATE | — | — | — |
+| `docs/two_factor_auth.rst` | CREATE | — | — | — |
+
+---
+
+## 7. Implementation Notes & Constraints
+
+> Architecture decisions stay with the thinking model. A delegated
+> implementation may only express a decision already recorded here and in
+> the TASK's implementation blocks — it must never invent an API, choose a
+> file, or resolve an open design question.
+
+### Patterns to Follow
+
+- **Never import from `handlers/recovery/`** — clone the *shape*. The MFA stores
+  have a different key namespace, a different failure posture (closed, not open)
+  and a different lifetime. Subclassing would couple two features that must be
+  able to diverge.
+- The vault kernel for anything secret at rest (`identity/crypto.py`): AAD-bound,
+  `key_version`-rotatable. Never `User.attributes`.
+- `sha256` as the only Redis key and the only stored form of a code, token or
+  cookie value (`recovery/store.py:37`).
+- A redacted `__repr__` on any dataclass that transits a live secret
+  (`recovery/types.py:33`).
+- Google-style docstrings, strict type hints, `async`/`await` throughout,
+  `self.logger` never `print`.
+- Idempotent startup migrations mirroring `passkey/migrations.py`, run from
+  `on_startup` and gated on the feature being enabled.
+- Audit every security-relevant transition through the existing ABAC audit path
+  (`abac/audit.py` `AuditLog`, used by `handlers/guards.py`).
+
+### Known Risks / Gotchas
+
+- **R1 — `UserManager` makes bounded administrative disenrolment weaker than it
+  reads (accepted, not fixed).** `handlers/users/user.py:11` is a generic
+  `ModelView` over `User` that allows editing `email` (in `required_by_put`,
+  `:24`) and setting a password (`_set_password`, `_calculate_password`), and does
+  not use `OwnerOrSuperuserGuard`. That enables a takeover that never "resets a
+  password": switch a user's OTP off → they drop to the e-mail floor → change
+  their `email` → trigger password recovery → own the account. **Mitigation in
+  this feature**: `mfa:disenroll` is a separate permission from user CRUD and
+  deliberately not granted to `superuser`, so the two capabilities need two roles;
+  plus a **durable** `auth.user_mfa_audit` row on every disenrolment — not
+  `abac/audit.py`'s `AuditLog`, which is best-effort and records authorization
+  decisions rather than factor-state changes, and would therefore have made this
+  mitigation weaker than it reads. **Not mitigated**: a single principal holding
+  both capabilities. That is the follow-up spec (§8 Q17).
+- **R2 — the `MFARequired` signal is ordering-sensitive, and both naive designs
+  are unsafe.** This is the most dangerous part of the feature.
+  *(a) Returning the challenge envelope* from `authenticate()` is fatal:
+  `api_login` does `if userdata: break` (`auth.py:488`) and then
+  `JSONResponse(userdata, status=200)` + `load_session(request, userdata, …)`
+  (`:497-499`) — the envelope would be loaded as a real session, so the first
+  factor alone would authenticate.
+  *(b) Raising a plain `AuthException`* is also fatal, more subtly: the loop's
+  `except (AuthException, UserNotFound, InvalidAuth, FailedAuth): continue`
+  (`:490-491`) swallows it and tries the **next backend**, so a second backend
+  that accepts the same credentials would mint a session with no second factor —
+  2FA bypassable by backend iteration order.
+  **Mitigation**: `MFARequired` is caught by an `except` clause placed *before*
+  the generic handlers at all three call sites (`:369`, `:380`, `:487`), and AC7
+  is a regression test for exactly this. Reviewers must check clause order, not
+  just presence.
+- **R3 — `User.email` is `required=False` (`models.py:49`).** A user with no
+  address in an `enforced` tenant has *no* factor. Mitigation: the pre-flight
+  blocks activation (M12), and the login path fails closed for users created
+  afterwards.
+- **R4 — the e-mail floor is worth what the tenant's address hygiene is worth.**
+  There is no `email_verified` state, so a stale or mistyped address delivers the
+  second factor to the wrong mailbox, and the pre-flight cannot detect it. Accepted
+  bound for v1 (§8 Q18), documented for operators in §10.
+- **R5 — fail-open is the house style here, and every borrowed component carries
+  it.** This is broader than the limiter. `handlers/recovery/limiter.py:28` returns
+  `True` on a Redis error ("Fail-open by design" for a public recovery endpoint);
+  `vault/integration.py:50` documents "Vault failure MUST NOT block login — errors
+  are logged and None is returned"; `setup_vault_tables` / `setup_passkey_tables`
+  log DDL failures and continue. Each is correct for its own feature and **wrong
+  for a second factor**, where "component unavailable" must mean "login refused",
+  not "factor skipped". Every MFA dependency — challenge store, rate limiter,
+  policy read, seed read, replay check and table availability — needs its own
+  fail-closed path rather than a borrowed one. AC12 tests it.
+- **R12 — the session-scoped vault API cannot be used to read the TOTP seed.**
+  Verification happens *before* `open_session()`, but `load_vault_for_session()`
+  (`vault/integration.py:50`) takes a session object that "must have a
+  `session_id` attribute" — which does not exist yet — and is fail-open by
+  contract. Use the `seal_value`/`open_value` primitives with an explicitly
+  resolved `KeyRing` and fail closed. An implementer reaching for the familiar
+  session-vault helper would produce code that either cannot work or silently
+  skips the factor.
+- **R13 — startup ordering: the vault KeyRing does not exist when a backend
+  starts.** `auth_startup()` runs `await backend.on_startup(app)` for every
+  backend at `auth.py:181`, and only then `setup_vault_keyring(app)` at `:188`.
+  A TOTP provider that captures the keyring during construction gets `None`
+  forever. Resolve it lazily from `app[VAULT_KEYRING_APP_KEY]` at verification
+  time. Related: `setup_mfa_tables()` must report usability instead of swallowing
+  failure, because silently missing tables would mean a silently absent second
+  factor — but it must not hard-fail startup either, which would take the whole
+  service down for tenants that never enabled 2FA.
+- **R14 — do not reuse `_resolve_tenant()` for the MFA policy lookup.**
+  `abac/context.py:29` prioritizes explicit kwargs and the
+  `X-Org-Id`/`X-Client-Id` headers over `userinfo`, then falls back to the
+  `(1, 1)` global sentinel. Reusing it would let a request header choose which
+  tenant's 2FA policy applies, and would silently substitute a global policy when
+  membership is unclear — a policy-selection vulnerability in a security control.
+  Read organization membership from the authenticated user record and reject
+  ambiguity. (This is a *different* concern from F015, which was about resolving a
+  tenant *before* authentication; here the user is already identified.)
+- **R6 — "a passkey satisfies enforcement" rests on a setting that can be
+  lowered.** It holds because `PASSKEY_USER_VERIFICATION` defaults to `"required"`
+  (`conf.py:611`), which makes WebAuthn possession *plus* biometric/PIN. A
+  deployment that lowers it to `"discouraged"` makes its passkeys single-factor and
+  silently weakens this guarantee. Must be called out in the operator docs.
+- **R7 — e-mail OTP and password recovery share a channel.** A compromised mailbox
+  yields both factors and the reset path. Mitigation: `is_superuser` may not remain
+  on the floor in an `enforced` tenant, checked by the pre-flight. For everyone
+  else it is an accepted trade for a fallback factor.
+- **R8 — a trusted-device cookie is a bearer second factor.** Theft is a 2FA
+  bypass for the window. Mitigation: rotation on every use with family revocation
+  on replay, and an enumerated invalidation list (M6). The subtle one: **admin
+  disenrolment that does not revoke devices does nothing** against an attacker who
+  already holds a cookie.
+- **R9 — a broken delivery callback is an outage for every `email`-state user in
+  an enforced tenant**, and it must still not become an enumeration oracle: the
+  response stays identical and the failure is logged at WARNING only.
+- **R10 — `webauthn` is not installed here.** The strong-factor check reads the
+  passkey *table*, so it must not import `webauthn` at module scope or the MFA
+  package breaks wherever the optional extra is absent.
+- **R11 — the shared `.venv` is editable-installed against the main checkout.** A
+  bare `pytest` inside a worktree can import another branch's compiled extensions
+  (`navigator_auth_pep*.so`, `rs_pep*.so`). Rebuild in the worktree before
+  trusting a surprising result; never `uv sync` from inside one.
+
+### External Dependencies
+
+| Package | Version | Reason |
+|---|---|---|
+| `cryptography` | `>=41` (already declared; 46.0.7 installed) | RFC 6238 TOTP **and** the `otpauth://` provisioning URI. **No change to `pyproject.toml`.** |
+| `redis` (`redis.asyncio`) | already used package-wide (5.2.1) | Challenge store, strict limiter, TOTP replay guard. |
+| `navigator-session` (vault) | already declared | Seals the TOTP seed with AAD + `key_version`. |
+| `asyncdb` | already declared | The five new tables. |
+| ~~`pyotp`~~ | — | **Rejected**: redundant with `cryptography`, absent from the environment. |
+| ~~`qrcode`~~ | — | **Rejected**: the QR is rendered client-side from the URI. |
+| ~~`twilio`~~ / ~~`aiosmtplib`~~ | — | **Rejected**: SMS is out of scope; delivery is a callback. |
+
+---
+
+## Decisions
+
+<!-- OPTIONAL, authored. Omitted deliberately: this repository has no
+     decision-audit taxonomy configured (no `about:` subsystem ids to cite), and
+     inventing ids would be worse than omitting the block. The architectural
+     decisions this spec makes are recorded in §2 Overview, §7 Known Risks and
+     §8 (all 23 carried from the accepted brainstorm). -->
+
+## Decision Waivers
+
+<!-- None. -->
+
+## Consequences
+
+<!-- GENERATED by `parrot sdd spec consequences <spec> --render` — do not edit by hand. -->
+
+---
+
+## 8. Open Questions
+
+> All questions below were resolved with the user during
+> `/sdd-brainstorm` (`sdd/proposals/basicauth-otp-2fa.brainstorm.md`, Status:
+> accepted). They are carried forward for the decision trail, not re-opened.
+
+- [x] Flow type and base branch — *Resolved in brainstorm*: `type: feature`, `base_branch: dev`.
+- [x] Should the OTP providers be `BaseAuthBackend` subclasses? — *Resolved in brainstorm*: No. `authenticate()`'s contract is to mint a session, so a registered OTP backend would make the second factor sufficient on its own. They are `AbstractOTPProvider` objects owned by `BasicAuth`. → §2 Overview, M3, AC5.
+- [x] Are both providers active simultaneously? — *Resolved in brainstorm*: Yes, but asymmetrically — e-mail is a zero-enrolment floor, TOTP a voluntary upgrade. Per-user state `none → email → totp`. → §2, M7.
+- [x] Does enabling enforcement require locking a tenant's users? — *Resolved in brainstorm*: No. The e-mail floor means every user has a working factor at the first login after activation, so there is no lock-out window and no enrolment grace module. → AC8.
+- [x] Once TOTP is confirmed, is e-mail OTP still a valid login factor? — *Resolved in brainstorm*: No. A confirmed strong factor closes the e-mail path. Backup codes are the recovery path. → M7, AC9.
+- [x] Does a registered passkey close the e-mail path too? — *Resolved in brainstorm*: Yes, symmetrically with TOTP. → M7, AC9.
+- [x] Does a passkey sign-in satisfy tenant enforcement, or is an OTP still demanded? — *Resolved in brainstorm*: It satisfies it with no OTP, as Google and Microsoft do; WebAuthn with user verification is already possession plus biometric/PIN. → AC10, §7 R6.
+- [x] Does enforcement apply to external-IdP logins? — *Resolved in brainstorm*: Not in v1 — those deployments delegate MFA to the IdP. → §1 Non-Goals.
+- [x] Where does the per-tenant policy live? — *Resolved in brainstorm*: `auth.tenant_mfa_policy` (data, not configuration); `AUTH_BASIC_2FA_ENABLED` is demoted to a global kill switch; strictest-wins across a user's organizations. → M7, M8.
+- [x] How is the policy administered in v1? — *Resolved in brainstorm*: SQL/migration. The admin HTTP API is a follow-up. → §1 Non-Goals, M12.
+- [x] What does the pre-flight do when a tenant has users with no e-mail? — *Resolved in brainstorm*: Blocks the activation and reports them; a script under `scripts/` with a non-zero exit. → M12, AC15.
+- [x] And a user created *after* activation with no e-mail? — *Resolved in brainstorm*: Login fails closed. → §7 R3.
+- [x] Scope of administrative disenrolment? — *Resolved in brainstorm*: OTP only; no password reset, no account edit. Separate permission from user CRUD, audited, and it must revoke trusted devices. → M10, M11, AC16.
+- [x] Is "remember me for N days" in scope, and for whom? — *Resolved in brainstorm*: In scope, strong-factor users only; window per tenant, `0` disables. → M6, AC17.
+- [x] Are backup codes in v1? — *Resolved in brainstorm*: Yes. → M5.
+- [x] SMS? — *Resolved in brainstorm*: Out of scope; no provider in the environment. → §1 Non-Goals.
+- [x] **Q17** — `UserManager` is a generic `ModelView` that weakens bounded administrative disenrolment — *Resolved in brainstorm*: **a separate follow-up spec.** It is a pre-existing gap this feature merely exposes, and migrating it off `ModelView` has its own blast radius. This feature documents the risk and does not fix it. Reusable machinery for that follow-up: `handlers/guards.py:31` `OwnerOrSuperuserGuard`, `handlers/redaction.py:36` `safe_fields()`, and FEAT-105's write envelope. → §1 Non-Goals, §7 R1.
+- [x] **Q18** — E-mail verification — *Resolved in brainstorm*: **accepted unverified in v1**, documented as a known bound. Rejected for v1: persisting the IdP claim (adds schema without closing the gap for the population that matters) and gating enforcement on verification (pulls an entire send/token/resend feature inside this one). → §1 Non-Goals, §7 R4, §10.
+- [x] Shared-mailbox coupling — *Resolved in brainstorm*: a privileged account (`is_superuser`) may not remain on the e-mail floor in an `enforced` tenant. → M7, M12, §7 R7.
+- [x] Backup-code parameters — *Resolved in brainstorm*: 10 codes, 8 alphanumeric characters, shown exactly once, stored hashed; regeneration invalidates the previous set and requires password re-authentication. → M5.
+- [x] Which permission gates administrative OTP disenrolment? — *Resolved in brainstorm*: a new ABAC action `mfa:disenroll` in its own named policy, granted to a group that is **not** `superuser`. Verifiably exclusive because `admin_full_access.yaml` enumerates its actions with no wildcard, and `policy_allows()` fails closed. Caveat: an operator who adds `mfa:*` or `"*"` to `admin_full_access` collapses the separation. → M11, AC16, §10.
+- [x] Does a `mode` change revoke the tenant's trusted devices? — *Resolved in brainstorm*: hardening revokes, relaxing does not. → M6, AC18.
+- [x] How does a superuser with no strong factor get into a tenant being enforced? — *Resolved in brainstorm*: the pre-flight blocks on it too, listing the offenders; the administrator enrols TOTP first. Rejected: a grace session limited to enrolment endpoints, and a "strong factor required from the second login" window. → M12, AC15.
+
+---
+
+## 9. Design Research Cross-Check
+
+> Independent design opinion from the `codex` seat over the **accepted exploration
+> doc** (never over this spec). Model: `gpt-5.6-luna` (codex-cli 0.166.0,
+> `reasoning_effort=high`) · Status: completed · Transcript:
+> `sdd/state/FEAT-106/design_research/`
+> All 20 cited `affected_paths` passed repository containment and `test -e`. The
+> three load-bearing claims (S4, S5, S6) were independently spot-checked against
+> the source before adoption, per CLAUDE.md's "verify the reviewer's evidence".
+
+| # | Suggestion (kind) | Disposition | Reason | Landed in |
+|---|---|---|---|---|
+| S1 | Resolve MFA policy per request, not at backend startup (architecture) | CONFIRM (narrowed) | Right about the hazard; the design already resolved per login, but M9's "builds the policy resolver" could be read as caching a snapshot. Narrowed to: resolver is process-lifetime, the table read is per login, no caching. | §3 M7, M9 · AC22 |
+| S2 | Define an explicit non-session MFA challenge contract (api) | CONFIRM (corroboration) | Independently reached in §4 research, including the `if userdata: break` → `load_session()` path. Agreement, not new information. | §2 Overview, §7 R2, M9, M10 · AC6, AC7 |
+| S3 | Make every MFA dependency fail closed (risk) | CONFIRM (extended) | The limiter was already inverted; the reviewer correctly extends the posture to the vault read, the policy read and table availability. | §7 R5 · AC12 |
+| S4 | Do not use the session-scoped vault API before a session exists (architecture) | CONFIRM | **Verified**: `load_vault_for_session()` (`vault/integration.py:50`) requires a session object and is fail-open by contract. Verification runs before `open_session()`, so it is both unusable and wrong here. | §3 M3, §7 R12 · AC25 |
+| S5 | Treat MFA schema initialization as a required migration (architecture) | CONFIRM in part / **REJECT** in part | CONFIRM: swallowing DDL failure makes the factor silently absent — a bypass — so M8's "logs, never raises" contradicted G7 and logins must now fail closed. **REJECT the "prevent MFA-enabled startup" half**: hard-failing startup turns one missing table into a total outage for every tenant, including those with 2FA off. Fail the logins, not the process. | §3 M8, M9, §7 R13 · AC24 |
+| S6 | Protect tenant lookup from header and global-default confusion (risk) | CONFIRM | **Verified**: `_resolve_tenant()` (`context.py:29`) prefers trusted headers over `userinfo` and falls back to the `(1,1)` sentinel. The §6 row that cited it as the mechanism was actively misleading and is corrected to a prohibition. | §3 M7, §6 Integration Points, §7 R14 · AC22 |
+| S7 | Specify factor-state transitions independently from passkey credentials (architecture) | CONFIRM | Real gap: `user_credentials` carries no MFA state, and the spec never said what happens when the last passkey is deleted — the e-mail path must reopen or the user is locked out. | §3 M7 · AC27 |
+| S8 | Require reauthentication and explicit authorization for factor management (api) | CONFIRM in part | Re-auth on disenrol/regeneration and the `mfa:disenroll` gate were already specified. The genuinely missing piece is a **tenant-ownership check** on the admin route. | §3 M10 · AC26 |
+| S9 | Do not treat existing `UserDevices` as trusted MFA devices (risk) | CONFIRM (corroboration) | Already an explicit "Does NOT Exist" entry with the same reasoning. Agreement, not new. | §6 Does NOT Exist, §3 M6 |
+| S10 | Make security-transition audit records durable and action-specific (risk) | CONFIRM | The spec leaned on auditing as R1's mitigation, but `AuditLog` is best-effort and records authorization decisions, not factor-state changes — so the mitigation was weaker than claimed. Adds one table. | §3 M8, §7 R1 · AC23 |
+| S11 | Test invariants at the session boundary and under races (testing) | CONFIRM (extended) | Most invariants were already in §4; two were missing — exactly-once consumption under concurrency, and cross-tenant isolation. | §4 Unit + Integration |
+
+Summary: **11** confirmed (2 in part) · **0** rejected outright · **0** escalated.
+S5's rejected half is recorded above rather than dropped.
+
+**Note on the brief**: the shipped template describes the project as "ai-parrot, an
+async-first Python framework for AI agents", which is not this repository. Left
+verbatim per the §3b rule against editing the brief; the reviewer had read-only
+repository access and every citation it made is a navigator-auth path, so the
+boilerplate mismatch did not skew the result.
+
+---
+
+## 10. Documentation
+
+> Authored documentation this feature must deliver. This repository documents in
+> `docs/*.rst` (Sphinx), not a `wiki/` tree — `parrot sdd techwiki check` does not
+> apply here.
+
+- **Policy**: `required`
+- **Pages**:
+  - `docs/two_factor_auth.rst` — create. Must cover: the `AUTH_OTP_*` settings; the
+    `AUTH_OTP_EMAIL_CALLBACK` contract and the fact that navigator-auth never sends
+    e-mail; the `none → email → totp` state machine and what closes the e-mail path;
+    the per-tenant policy table and strictest-wins; how to run the pre-flight and
+    what each blocking condition means; the `mfa:disenroll` policy, the group it
+    must be granted to, and the warning that adding `mfa:*` to
+    `admin_full_access.yaml` collapses the separation of duties; the remember-me
+    invalidation list; and the two accepted bounds — the shared-mailbox risk (R7)
+    and the absence of e-mail verification (R4) — plus the
+    `PASSKEY_USER_VERIFICATION` caveat (R6).
+  - `CHANGELOG.md` — update.
+- **API modules**: `navigator_auth.mfa`
+
+---
+
+## Worktree Strategy
+
+- **Default isolation unit**: `per-spec` — all tasks run sequentially in one
+  worktree.
+- **Rationale**: the shared surface (`basic.py`, `conf.py`, `auth.py`, one
+  migration sequence) is exactly where concurrent edits collide, and the
+  security-critical ordering is sequential by nature: challenge store before
+  providers, providers before the `authenticate()` hook, the hook before the
+  `auth.py` call sites, and all of it before remember-me. M9 and M10 are
+  explicitly not delegation-eligible and must land in order.
+- **Parallelizable within the worktree** (worth separate tasks, not separate
+  trees): M3/M4 (the two providers) once M2 exists, M5 and M6 once M8 exists, and
+  M11/M12/M13 at any point after their contracts are named.
+- **Cross-feature dependencies**: none blocking. FEAT-098 (`handlers/recovery/`)
+  is a *pattern source*, not a dependency — only the "recovery completion revokes
+  trusted devices" hook touches it. FEAT-101 (`passkey/`) is consumed read-only.
+  The live consideration is operational, not merge-order: this repository's
+  compiled extensions are editable-installed against the main checkout, so the
+  worktree needs its native artifacts rebuilt rather than inherited (§7 R11).
+
+---
+
+## Revision History
+
+| Version | Date | Author | Change |
+|---|---|---|---|
+| 0.1 | 2026-11-06 | Jesus Lara | Initial draft from the accepted brainstorm (23 resolved questions carried forward). |
