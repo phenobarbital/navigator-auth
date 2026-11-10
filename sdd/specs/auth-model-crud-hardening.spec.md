@@ -15,7 +15,7 @@ docs:
 **Feature ID**: FEAT-107
 **Date**: 2026-11-06
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 0.30.0
 
 ---
