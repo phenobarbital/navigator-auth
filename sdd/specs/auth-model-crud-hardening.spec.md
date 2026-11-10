@@ -94,6 +94,14 @@ and it has two more routes than the one recorded there.
 - **G6** — Base-agnostic: the five handlers sit on **two different**
   `ModelHandler` classes, and both must be covered.
 - **G7** — No regression on FEAT-105's three already-guarded handlers.
+- **G8** — Membership of a **protected group** is a privilege grant and is
+  treated as one. Groups are matched by *name* everywhere authorization looks
+  at them, so joining `superuser` is equivalent to `is_superuser`
+  (`decorators.py:288-311`) and joining `security_admin` is equivalent to
+  holding `users:grant_role` and FEAT-106's `mfa:disenroll`. Adding a member to
+  a protected group, or renaming / deleting / re-activating one, needs
+  `users:grant_role` — never the plain `superuser` CRUD policy, never
+  self-service.
 
 ### Non-Goals (explicitly out of scope)
 
@@ -162,10 +170,25 @@ consequences drive the whole design:
    "the superuser path the only path for every verb" (`guards.py:39-41`). The
    accepted cost: a user cannot read their own memberships *through that
    handler* — the session already carries their groups.
+3. **A group is identified by its name, so the group CRUDs can grant
+   privilege too.** `_check_superuser()` treats membership of the group named
+   `SUPERUSER_GROUP = "superuser"` as superuser (`decorators.py:288-311`), and
+   every ABAC policy matches `subjects.groups` against the *names* in
+   `userinfo["groups"]` (`abac/policies/policy.py:22`). With only the
+   `superuser` CRUD policy on `UserGroupManager` and `GroupManager`, a plain
+   superuser could (a) add themselves to `security_admin` and inherit
+   `users:grant_role` — and FEAT-106's `mfa:disenroll` — or (b) add a member to
+   an ordinary group and then rename it to `security_admin` or `superuser`; and
+   adding anyone to the `superuser` group grants `is_superuser` without going
+   through the role endpoint (G5). The separation of duties both features rely
+   on would be nominal. Hence **protected groups** (M9): a configurable set,
+   always containing `superuser`, whose membership and definition can only be
+   changed by an actor holding `users:grant_role`, and never for oneself.
 
-So the design is: **one new guard capability plus five per-surface
-configurations plus one new endpoint** for the privileged grants that the CRUD
-will no longer accept.
+So the design is: **one new guard capability, five per-surface
+configurations, one new endpoint** for the privileged grants that the CRUD
+will no longer accept, **and protected groups** so the group CRUDs cannot
+become a back door to those same grants.
 
 ### Component Diagram
 
@@ -174,6 +197,7 @@ will no longer accept.
    existing, read-side:   public_columns · credential_columns
    existing, verb-side:   superuser_actions · policy_name · owner_column
    NEW, write-side:       writable_by_owner · writable_by_admin · privileged_columns
+   NEW, group-side:       authorize_protected_group()  ← AUTH_PROTECTED_GROUPS (conf.py)
                                      │
                                      │ enforced in the write hooks, on BOTH paths
                                      ▼
@@ -195,6 +219,10 @@ will no longer accept.
             privileged columns are writable by NO CRUD path, only by:
             POST /api/v1/users/{id}/role   → action `users:grant_role`
                                            → audited, ABAC policy pack
+
+            protected groups (superuser, security_admin, …): membership,
+            rename, delete, (de)activation only with `users:grant_role`,
+            never for oneself  → UserGroupManager, GroupManager (M9)
 ```
 
 ### Integration Points
@@ -214,6 +242,9 @@ will no longer accept.
 | `abac/default_policies/` | **new file(s)** | Policies for the five surfaces plus `users:grant_role`. |
 | `handlers/__init__.py` | modifies | `UserManager.configure(app, '/api/v1/users')` at `:38`; registers the new role endpoint. |
 | `abac/audit.py` `AuditLog` | uses | The guard already audits every decision via `audit_decision()` (`guards.py:158`). The role endpoint adds its own record. |
+| `navigator_auth/conf.py` | modifies | New setting `AUTH_PROTECTED_GROUPS` (M9), next to the ABAC settings. |
+| `decorators.SUPERUSER_GROUP` | uses | `decorators.py:288`. Always part of the effective protected set, whatever the setting says. |
+| `decorators.policy_allows()` | uses | Already called by `authorize_row()` with `resource=self.request.path` (`guards.py:151-156`); M9 calls it a second time with `users_grant_role` / `users:grant_role`. |
 
 ### Data Models
 
@@ -222,9 +253,19 @@ configuration per handler**, so the allowlists are the "data model":
 
 ```python
 # The new guard attributes (navigator_auth/handlers/guards.py)
-writable_by_owner: frozenset[str] = frozenset()   # owner may write these, nothing else
-writable_by_admin: frozenset[str] = frozenset()   # admin path may write these
+writable_by_owner: frozenset[str] = frozenset()   # owner may UPDATE these, nothing else
+writable_by_admin: frozenset[str] = frozenset()   # admin path may UPDATE these
+creatable_by_admin: Optional[frozenset[str]] = None  # admin path may CREATE with these;
+                                                  # None → same as writable_by_admin
 privileged_columns: frozenset[str] = frozenset()  # writable by NO CRUD path, ever
+                                                  # (create or update)
+
+# Protected groups (navigator_auth/conf.py) — M9
+AUTH_PROTECTED_GROUPS = [e.strip() for e in config.get(
+    "AUTH_PROTECTED_GROUPS", fallback="superuser,security_admin").split(",") if e.strip()]
+# Effective set = set(AUTH_PROTECTED_GROUPS) | {SUPERUSER_GROUP}: an operator
+# may ADD groups (any group named in a privileged policy) but can never
+# un-protect `superuser`, whose membership is is_superuser.
 
 # Per-surface configuration decided by this spec
 #
@@ -233,23 +274,32 @@ owner_column       = "user_id"
 writable_by_owner  = {"first_name", "last_name", "display_name", "title",
                       "avatar", "timezone"}
 writable_by_admin  = writable_by_owner | {"is_active", "email", "alt_email"}
+creatable_by_admin = writable_by_admin | {"username"}   # username set once, never updated
 privileged_columns = {"is_superuser", "user_role", "is_staff", "password",
                       "userid", "user_id", "created_at", "last_login"}
-superuser_actions  = {"read", "update", "delete"}
+superuser_actions  = {"read", "create", "update", "delete"}
 policy_name        = "users_admin_access"
+# Created users get the model defaults for every privileged column and NO
+# password; the initial password goes through UserSession.password_reset
+# (session.py:170), which also sets is_new=True (§8).
 
 # UserGroupManager → UserGroup (models.py:209) — a mapping table
 owner_column       = None          # ownership would be self-certifying (§2 Overview)
 writable_by_owner  = frozenset()
 writable_by_admin  = frozenset()   # rows are created/deleted whole, never edited
-privileged_columns = {"user_id", "group_id"}
+creatable_by_admin = {"user_id", "group_id"}   # the composite PK IS the row
+privileged_columns = frozenset()   # immutability comes from update ∉ superuser_actions
 superuser_actions  = {"read", "create", "delete"}
 policy_name        = "user_groups_admin_access"
+# + M9: create/delete of a row whose group is protected ALSO needs
+#   users:grant_role, refuses actor == row.user_id on create, and refuses a
+#   protected group the actor does not belong to.
 
 # GroupPermissionManager → GroupPermission (models.py:243) — a mapping table
 owner_column       = None
 writable_by_admin  = frozenset()
-privileged_columns = {"group_id", "permission_id"}
+creatable_by_admin = {"group_id", "permission_id"}
+privileged_columns = frozenset()
 superuser_actions  = {"read", "create", "delete"}
 policy_name        = "group_permissions_admin_access"
 
@@ -258,15 +308,23 @@ owner_column       = None
 writable_by_admin  = {"group_name", "description", "is_active", "client_id"}
 privileged_columns = {"group_id", "created_at", "created_by"}
 superuser_actions  = {"read", "create", "update", "delete"}
-policy_name        = "groups_admin_access"
+policy_name        = "groups_admin_access"      # superuser — adequate for ordinary groups
+# + M9: any create/update/delete whose OLD or NEW group_name is protected ALSO
+#   needs users:grant_role. Closes "add members to `sales`, then rename it to
+#   `security_admin`", and deleting / deactivating a protected group.
 
 # PermissionHandler → Permission (models.py:223)
 owner_column       = None
 writable_by_admin  = {"permission", "description"}
 privileged_columns = {"permission_id", "created_at"}
 superuser_actions  = {"read", "create", "update", "delete"}
-policy_name        = "permissions_admin_access"
+policy_name        = "permissions_admin_access" # superuser — adequate: no authorization
+                                                # path matches a permission by name
 ```
+
+`GroupPermissionManager` and `PermissionHandler` stay on the `superuser` policy
+(§8): nothing in the package authorizes by permission name, so they carry no
+equivalent of the group-name escalation.
 
 ### New Public Interfaces
 
@@ -280,9 +338,22 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
 
     Gated by the `users:grant_role` ABAC action, which is deliberately absent
     from `admin_full_access.yaml`'s enumerated action list, so a stock
-    superuser does not inherit it. Never self-service: an actor may not grant
-    themselves a flag they do not already hold.
+    superuser does not inherit it. Held by default by `security_admin` — the
+    same group FEAT-106 uses for `mfa:disenroll`. Never self-service: an actor
+    may not grant themselves a flag they do not already hold.
     """
+
+# navigator_auth/handlers/guards.py  (modifies) — M9
+class OwnerOrSuperuserGuard:
+    async def authorize_protected_group(
+        self, group_names: Iterable[str], *, member_id: Optional[int] = None
+    ) -> None:
+        """No-op unless one of `group_names` is protected. Otherwise refuse
+        unless policy_allows("users_grant_role", action="users:grant_role"),
+        refuse when member_id is the acting user (adding a member only), and
+        refuse a protected group the acting user does not belong to — the
+        group analogue of M5's "cannot grant what you do not hold". Raises;
+        never returns False. Audits through audit_decision()."""
 ```
 
 ---
@@ -301,6 +372,7 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
 | M6: ABAC policy pack | yes | Exact YAML shape verified in §6; names, actions and priority fixed. Configuration only. | — |
 | M7: regression tests | yes | The probe that proved the escalation is written and its expected inversion is unambiguous. | — |
 | M8: docs & changelog | yes | Breaking-change note and content fixed in §10. | — |
+| M9: protected groups | **no** | — | Decides who can make someone superuser or `security_admin` through the group tables. The self-add refusal, the old-*and*-new-name check on rename, and the "always includes `superuser`" rule are each a one-clause mistake away from re-opening G8. |
 
 ### Module 1: Write-column allowlist on `OwnerOrSuperuserGuard`
 - **Path**: `navigator_auth/handlers/guards.py` (modifies)
@@ -322,14 +394,24 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
       # NEW:
       writable_by_owner: frozenset[str] = frozenset()
       writable_by_admin: frozenset[str] = frozenset()
+      creatable_by_admin: Optional[frozenset[str]] = None   # None → writable_by_admin
       privileged_columns: frozenset[str] = frozenset()
 
-      async def authorize_columns(self, payload: dict, *, is_owner: bool) -> None:
+      async def authorize_columns(
+          self, payload: dict, *, is_owner: bool, creating: bool = False
+      ) -> None:
           """Refuse the request when the payload touches a column this path may
-          not write. Allowlist semantics: a key absent from the applicable
-          `writable_by_*` set is refused, so a column added to the model later
-          is closed by default (G3). A key in `privileged_columns` is refused on
-          every path, owner included.
+          not write. Allowlist semantics: a key absent from the applicable set
+          is refused, so a column added to the model later is closed by default
+          (G3). The applicable set is:
+
+              creating             → creatable_by_admin (or writable_by_admin)
+              updating, owner      → writable_by_owner
+              updating, admin path → writable_by_admin
+
+          A key in `privileged_columns` is refused on every path, owner
+          included, create included. There is no owner create path: a create
+          always goes through the superuser path of authorize_row().
 
           Raises web.HTTPForbidden, naming no column the caller may not see.
           """
@@ -380,19 +462,30 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
       # (session.py:119 — requires old_password and 403s when the session user
       # does not match the URL userid) or password_reset (:170). Keeping a CRUD
       # path would re-open privileged writes under a different name.
+      # This includes CREATE: a user created through POST has no password
+      # until a superuser calls password_reset, which also sets is_new=True.
 
       def required_by_put(self):
-          """MUST no longer include 'email'. verified anchor: user.py:24
+          """MUST become ['first_name', 'last_name', 'display_name'].
+          verified anchor: user.py:24
           `return ['first_name', 'last_name', 'display_name', 'username', 'email']`
+          Every required column must be writable on every path that can PUT,
+          or PUT becomes unusable: 'username' is in no writable_by_* set
+          (immutable after creation) and 'email' is not owner-writable.
           Required-field lists are not allowlists; writability is decided by
           writable_by_owner / writable_by_admin."""
+
+      def required_by_post(self):
+          """Replaces `required_by_post = required_by_put` (user.py:26):
+          ['first_name', 'last_name', 'username', 'email'] — a subset of
+          creatable_by_admin. POST is superuser-only (no owner create path)."""
   ```
 
 ### Module 3: Mapping handlers — `UserGroupManager`, `GroupPermissionManager`
 - **Path**: `navigator_auth/handlers/groups.py` (modifies)
 - **Responsibility**: Close the two escalation routes that go through the tables
   ABAC itself reads.
-- **Depends on**: M1, M6.
+- **Depends on**: M1, M6, M9 (protected-group check on create/delete).
 - **Interface Skeleton**:
   ```python
   # navigator_auth/handlers/groups.py  (modifies)
@@ -410,22 +503,29 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
 
       Accepted cost: a user cannot read their own memberships here. Their
       session already carries their groups.
+
+      The superuser path is enough for ordinary groups only. A row whose
+      group is protected is additionally gated by M9.
       """
 
   class GroupPermissionManager(OwnerOrSuperuserGuard, ModelHandler):
-      """Same reasoning; no owner column exists at all on this table."""
+      """Same reasoning; no owner column exists at all on this table.
+      Stays on the plain superuser policy: no authorization path matches a
+      permission by name (§2 Data Models)."""
   ```
 
 ### Module 4: Definition handlers — `GroupManager`, `PermissionHandler`
 - **Path**: `navigator_auth/handlers/groups.py`, `navigator_auth/handlers/permissions.py`
   (modifies)
 - **Responsibility**: Guard the group and permission definitions.
-- **Depends on**: M1, M6.
+- **Depends on**: M1, M6, M9 (`GroupManager` protected-name check).
 - **Interface Skeleton**:
   ```python
   # verified anchors: `class GroupManager(ModelHandler):`       groups.py:14
   #                   `class PermissionHandler(ModelHandler):`  permissions.py:7
-  class GroupManager(OwnerOrSuperuserGuard, ModelHandler): ...
+  class GroupManager(OwnerOrSuperuserGuard, ModelHandler):
+      """`superuser` policy for ordinary groups; a write touching a protected
+      group (by its old or new name) is additionally gated by M9."""
   class PermissionHandler(OwnerOrSuperuserGuard, ModelHandler):
       """NOTE: permissions.py imports ModelHandler from `.model`
       (handlers/model.py:16, over BaseView), NOT from `.handler`
@@ -455,6 +555,10 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
       Refuses a self-grant: the acting user may not raise their own flags, and
       may not grant a flag they do not themselves hold. Writes an audit record
       with actor, target, old and new value.
+
+      Consequence of the two rules together, by design: granting is_superuser
+      needs an actor who is BOTH superuser and holds users:grant_role
+      (by default, a superuser who is also in security_admin).
       """
   # navigator_auth/handlers/__init__.py  (modifies)
   # verified anchor: `    UserManager.configure(app, '/api/v1/users')`  __init__.py:38
@@ -467,7 +571,22 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
 - **Depends on**: nothing (names must match M2–M5).
 - **Interface Skeleton**: shape verified in §6; `priority: 90`,
   `defaults: {effect: deny}`, one policy per surface with its action set and
-  group, and `users_grant_role` granted to a group that is **not** `superuser`.
+  group (the five surface policies → `superuser`), plus:
+  ```yaml
+  - name: users_grant_role
+    effect: allow
+    description: >-
+      Change a user's privileged flags, and change membership or definition of
+      a protected group. Deliberately NOT granted to `superuser`.
+    # The guard passes resource=self.request.path (guards.py:151-156), so the
+    # policy must cover all three routes that check this action.
+    resources: ["uri:/api/v1/users*", "uri:/api/v1/user_groups*", "uri:/api/v1/groups*"]
+    actions: ["users:grant_role"]
+    subjects:
+      groups: ["security_admin"]   # shared with FEAT-106's mfa:disenroll (§8)
+    priority: 90
+    enforcing: true
+  ```
 
 ### Module 7: Regression tests
 - **Path**: `tests/test_auth_crud_write_envelope.py` (new)
@@ -482,6 +601,58 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
 - **Path**: `docs/auth_crud_authorization.rst` (new), `CHANGELOG.md` (modifies)
 - **Responsibility**: The breaking-change notice and the operator contract.
 - **Depends on**: all.
+
+### Module 9: Protected groups
+- **Path**: `navigator_auth/conf.py`, `navigator_auth/handlers/guards.py`,
+  `navigator_auth/handlers/groups.py` (modifies)
+- **Responsibility**: Stop the group CRUDs from granting what M5 reserves to
+  `users:grant_role` (G8, §2 Overview point 3).
+- **Depends on**: M1, M6. M3 and M4 call into it.
+- **NOT delegation-eligible.**
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/conf.py  (modifies) — next to ABAC_DEFAULT_EFFECT (:710)
+  AUTH_PROTECTED_GROUPS = [e.strip() for e in config.get(
+      "AUTH_PROTECTED_GROUPS", fallback="superuser,security_admin").split(",") if e.strip()]
+
+  # navigator_auth/handlers/guards.py  (modifies)
+  def protected_groups() -> frozenset[str]:
+      """set(AUTH_PROTECTED_GROUPS) | {SUPERUSER_GROUP}. An operator can add
+      to the set but cannot remove `superuser` from it."""
+
+  class OwnerOrSuperuserGuard:
+      async def authorize_protected_group(
+          self, group_names: Iterable[str], *, member_id: Optional[int] = None
+      ) -> None:
+          """Runs AFTER authorize_row() has already passed the superuser path.
+
+          1. No name in protected_groups() → return (ordinary group).
+          2. policy_allows("users_grant_role", self.request,
+                           action="users:grant_role",
+                           resource=self.request.path) must allow → else 403.
+          3. member_id is not None and str(member_id) == str(acting user) → 403
+             (no self-add; removing oneself is a de-escalation and allowed).
+          4. The acting user must belong to every protected group named —
+             for `superuser`, "belongs" means _check_superuser() is True
+             (flag OR group) — else 403. Same rule as M5's unheld flag.
+          Every outcome audited via audit_decision(); refusals raised.
+          """
+
+  # navigator_auth/handlers/groups.py  (modifies) — the call sites
+  # UserGroupManager, create & delete:
+  #     resolve row.group_id → Group.group_name at write time (never trust a
+  #     name from the payload), then
+  #     authorize_protected_group([name], member_id=row.user_id if create else None)
+  # GroupManager, create / update / delete:
+  #     authorize_protected_group({stored_name, payload.get("group_name")} - {None})
+  #     — BOTH the stored and the new name, so renaming INTO and OUT OF a
+  #     protected name are both gated, and so is (de)activating or deleting one.
+  ```
+- **Bootstrap**: with `users:grant_role` held only by `security_admin` and
+  self-add refused, nobody can add the *first* `security_admin` member through
+  the API. That is intended — it is seeded out-of-band (SQL or a deployment
+  script), exactly as FEAT-106's M11 leaves `mfa:disenroll` unusable until an
+  operator ships the policy. §10 documents it.
 
 ---
 
@@ -512,6 +683,22 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
 | `test_role_endpoint_audits` | M5 | Actor, target, old and new value recorded. |
 | `test_policy_pack_parses` | M6 | The YAML yields the six policies with the right actions, groups and effect. |
 | `test_grant_role_absent_from_admin_full_access` | M6 | Asserts the property the separation rests on: `admin_full_access.yaml` does not wildcard actions. |
+| `test_grant_role_held_by_security_admin` | M6 | `users_grant_role` names `security_admin`, not `superuser`, and covers `/api/v1/users*`, `/api/v1/user_groups*` and `/api/v1/groups*`. |
+| `test_create_uses_creatable_allowlist` | M1 | On create the payload is checked against `creatable_by_admin` (falling back to `writable_by_admin`); `privileged_columns` still refused. |
+| `test_mapping_row_create_allowed_for_admin` | M1, M3 | A superuser with the surface policy can create a `UserGroup` / `GroupPermission` row for an **ordinary** group (the PK columns are creatable, not privileged). |
+| `test_mapping_row_update_refused` | M3 | No path updates a mapping row: `update ∉ superuser_actions`, no owner column. |
+| `test_usermanager_create_without_password` | M2 | A superuser POST with the §2 creatable columns succeeds; the stored row has no password and default privileged flags. |
+| `test_usermanager_create_refuses_privileged_and_password` | M2 | A POST carrying `is_superuser` or `password` is refused, not silently dropped. |
+| `test_usermanager_required_lists_are_writable` | M2 | `required_by_put() ⊆ writable_by_owner` and `required_by_post() ⊆ creatable_by_admin`. |
+| `test_protected_groups_always_include_superuser` | M9 | `AUTH_PROTECTED_GROUPS=""` (or any list without it) still protects `superuser`. |
+| `test_superuser_cannot_add_member_to_protected_group` | M9 | A superuser holding `user_groups_admin_access` but not `users:grant_role` cannot add anyone to `superuser` or `security_admin`. |
+| `test_grantor_can_add_member_to_protected_group` | M9 | A superuser who holds `users:grant_role` and belongs to the group can add another user to it. |
+| `test_no_self_add_to_protected_group` | M9 | Even a holder of `users:grant_role` cannot add themselves to a protected group. |
+| `test_cannot_add_to_protected_group_not_held` | M9 | A `security_admin` member who is not superuser cannot add anyone to `superuser`. |
+| `test_protected_group_resolved_from_db_not_payload` | M9 | The protected check uses the stored `group_name` for the `group_id`, not a name supplied in the request. |
+| `test_rename_into_protected_name_refused` | M9 | Renaming an ordinary group to `security_admin` / `superuser` without `users:grant_role` is refused. |
+| `test_rename_out_of_protected_name_refused` | M9 | Renaming, deactivating or deleting a protected group without `users:grant_role` is refused. |
+| `test_ordinary_group_crud_needs_only_superuser` | M9 | Ordinary groups keep the plain superuser policy (no over-closing). |
 
 ### Integration Tests
 
@@ -524,6 +711,8 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
 | `test_user_can_still_edit_own_profile` | Owner profile edit still works. |
 | `test_password_change_still_works` | `UserSession.password_change` is unaffected by removing the CRUD hooks. |
 | `test_role_grant_end_to_end` | Authorized grant succeeds and is audited; unauthorized is refused. |
+| `test_superuser_cannot_escalate_via_security_admin_membership` | A plain superuser POSTs `/api/v1/user_groups` adding themselves to `security_admin` and gets 403; then tries the rename route (`PATCH /api/v1/groups/{id}` to `security_admin`) and gets 403. |
+| `test_admin_can_create_user_then_reset_password` | Superuser POST `/api/v1/users` (no password) → 201; `password_reset` sets the password and `is_new=True`. |
 
 ### Validation Contract
 
@@ -546,7 +735,9 @@ def ordinary_session(): ...     # authenticated, not superuser, no grant action
 @pytest.fixture
 def admin_session(): ...        # superuser WITH the surface's policy
 @pytest.fixture
-def grantor_session(): ...      # holds users:grant_role
+def grantor_session(): ...      # superuser AND in security_admin → holds users:grant_role
+@pytest.fixture
+def security_admin_only_session(): ...  # in security_admin, NOT superuser
 @pytest.fixture
 def escalation_payload():       # the §1 payload, verbatim
     return {"is_superuser": True, "is_staff": True, "user_role": 10,
@@ -590,6 +781,21 @@ def escalation_payload():       # the §1 payload, verbatim
   `audit_decision()` and discloses no column the caller may not see.
 - [ ] **AC15** — `docs/auth_crud_authorization.rst` and `CHANGELOG.md` document
   the breaking change (§10).
+- [ ] **AC16** — `users:grant_role` is held by `security_admin` in the shipped
+  pack — the same group as FEAT-106's `mfa:disenroll` — and by no policy that
+  names `superuser`.
+- [ ] **AC17** — Membership of a protected group can be added or removed, and a
+  protected group renamed (into or out of a protected name), deactivated or
+  deleted, **only** by an actor holding `users:grant_role` who belongs to that
+  group; nobody can add themselves. Ordinary groups need only the `superuser`
+  policy (G8).
+- [ ] **AC18** — The effective protected set always contains `superuser`,
+  whatever `AUTH_PROTECTED_GROUPS` says.
+- [ ] **AC19** — A superuser can still create a user through
+  `POST /api/v1/users`, limited to `creatable_by_admin`; the user is created
+  with no password and default privileged flags (G4).
+- [ ] **AC20** — The superuser path can create mapping rows for ordinary groups
+  (`creatable_by_admin` holds their PK columns) and can update none.
 
 ---
 
@@ -598,7 +804,10 @@ def escalation_payload():       # the §1 payload, verbatim
 > **CRITICAL — Anti-Hallucination Anchor**
 > This section is the single source of truth for what exists in the codebase.
 
-**Verified against**: `d820852` (dev), 2026-11-06.
+**Verified against**: `d820852` (dev), 2026-11-06. Rows added in revision 0.2
+(M9, `creatable_by_admin`, user creation) verified against `b10a3a3`
+(2026-11-11); `navigator_auth/` is unchanged between the two commits, so the
+original anchors still hold.
 
 ### Verified Imports
 
@@ -610,6 +819,8 @@ from navigator_auth.handlers.model import ModelHandler             # model.py:16
 from navigator_auth.models import User, Group, UserGroup, GroupPermission, Permission
 #   User:39 · Group:188 · UserGroup:209 · Permission:223 · GroupPermission:243
 from navigator_auth.decorators import policy_allows                # used by guards.py
+from navigator_auth.decorators import SUPERUSER_GROUP              # decorators.py:288 — "superuser"
+from navigator_auth.decorators import _check_superuser             # decorators.py:291 — flag OR group name
 from navigator.views.model import ModelView                        # site-packages
 ```
 
@@ -640,6 +851,7 @@ class OwnerOrSuperuserGuard:
 class UserManager(ModelView): ...                    # handlers/users/user.py:11
     def required_by_put(self):
         return ['first_name', 'last_name', 'display_name', 'username', 'email']   # :24
+    required_by_post = required_by_put                                  # :26 — POST creates users today
     async def _set_password(self, value, column, **kwargs): ...        # to be REMOVED
     async def _calculate_password(self, value, column, *a, **kw): ...  # to be REMOVED
 
@@ -719,7 +931,9 @@ class GroupPermission(Model):                           # :243
 class UserSession(BaseHandler):                         # handlers/users/session.py:18
     async def password_change(self, request): ...        # :119 requires old_password;
     #   403s when the URL userid != session user_id      # :145-148
-    async def password_reset(self, request): ...         # :170
+    async def password_reset(self, request): ...         # :170 any superuser, any userid;
+    #   works on a user with no password; sets is_new=True — the initial-password
+    #   path for users created through POST (§8)
     async def user_profile(self, request): ...           # :244
 def set_basic_password(password, token_num=6, iterations=80000, salt=None): ...
 def check_password(current_password, password): ...      # handlers/users/passwd.py
@@ -740,6 +954,17 @@ def check_password(current_password, password): ...      # handlers/users/passwd
 - `policy_allows()` fails closed when a named policy is absent (FEAT-105
   TASK-119), so shipping the pack is what *enables* admin access, never what
   grants escalation.
+- **Groups are identified by name in every authorization check.**
+  `_check_superuser()` returns True for membership of `SUPERUSER_GROUP`
+  (`decorators.py:288-311`, via `userinfo["groups"]` or `g.group` /
+  `g.group_name`), and ABAC policies match `subjects.groups` with
+  `set(ctx.userinfo["groups"]).isdisjoint(self.groups)`
+  (`abac/policies/policy.py:22`). Renaming a group therefore changes who holds
+  what — the basis of M9.
+- **No authorization path matches a permission by name.** `Permission.permission`
+  is only slugified on save (`models.py:232-233`); nothing in `decorators.py` or
+  `abac/` reads it. That is why `PermissionHandler` / `GroupPermissionManager`
+  stay on the plain `superuser` policy.
 - The FEAT-105 pack shape to copy, from
   `abac/default_policies/auth_model_admin_access.yaml`: `version: "1.0"`,
   `defaults: {effect: deny}`, then per policy `name` / `effect: allow` /
@@ -758,6 +983,11 @@ def check_password(current_password, password): ...      # handlers/users/passwd
 | `UserRoleHandler` | `users:grant_role` policy | `policy_allows()` via the guard | `navigator_auth/handlers/guards.py:151` |
 | new routes | `handlers/__init__.py` `setup_handlers` | registration | `navigator_auth/handlers/__init__.py:38` |
 | every refusal | `audit_decision()` | existing audit path | `navigator_auth/handlers/guards.py:282` |
+| `AUTH_PROTECTED_GROUPS` | `conf.py` | new setting after `ABAC_DEFAULT_EFFECT` | `navigator_auth/conf.py:710` |
+| `protected_groups()` | `SUPERUSER_GROUP` | always unioned in | `navigator_auth/decorators.py:288` |
+| `authorize_protected_group()` | `policy_allows()` | second call, `users_grant_role` / `users:grant_role`, `resource=self.request.path` | `navigator_auth/handlers/guards.py:151-156` |
+| `authorize_protected_group()` | `_check_superuser()` | "belongs to `superuser`" test | `navigator_auth/decorators.py:291` |
+| `UserManager.required_by_post` | own method | replaces the alias | `navigator_auth/handlers/users/user.py:26` |
 
 ### Does NOT Exist (Anti-Hallucination)
 
@@ -772,6 +1002,10 @@ def check_password(current_password, password): ...      # handlers/users/passwd
 - ~~an ABAC policy covering `/api/v1/users`, `/api/v1/groups`,
   `/api/v1/user_groups`, `/api/v1/permissions`~~ — none.
 - ~~`users:grant_role`~~ and ~~`UserRoleHandler`~~ — do not exist.
+- ~~`creatable_by_admin`, `authorize_protected_group()`, `protected_groups()`,
+  `AUTH_PROTECTED_GROUPS`~~ — none exist yet.
+- ~~a `security_admin` group~~ — not defined anywhere (FEAT-106 records the
+  same). The pack *names* it; nothing may assume a deployment has created it.
 - ~~a blanket authorization middleware~~ — `AUTHORIZATION_MIDDLEWARES = ()`
   (`conf.py:264`). Do not assume requests are authorized before reaching a
   handler.
@@ -792,6 +1026,8 @@ def check_password(current_password, password): ...      # handlers/users/passwd
 | `navigator_auth/handlers/guards.py` | MODIFY | `        if self.owner_column is not None and owner_id is not None and str(owner_id) == str(user_id):` | `guards.py:141` | 1 |
 | `navigator_auth/handlers/users/user.py` | MODIFY | `class UserManager(ModelView):` | `user.py:11` | 1 |
 | `navigator_auth/handlers/users/user.py` | MODIFY | `        return ['first_name', 'last_name', 'display_name', 'username', 'email']` | `user.py:24` | 1 |
+| `navigator_auth/handlers/users/user.py` | MODIFY | `    required_by_post = required_by_put` | `user.py:26` | 1 |
+| `navigator_auth/conf.py` | MODIFY | `ABAC_DEFAULT_EFFECT = config.get("ABAC_DEFAULT_EFFECT", fallback="deny")` | `conf.py:710` | 1 |
 | `navigator_auth/handlers/groups.py` | MODIFY | `class GroupManager(ModelHandler):` | `groups.py:14` | 1 |
 | `navigator_auth/handlers/groups.py` | MODIFY | `class UserGroupManager(ModelHandler):` | `groups.py:21` | 1 |
 | `navigator_auth/handlers/groups.py` | MODIFY | `class GroupPermissionManager(ModelHandler):` | `groups.py:28` | 1 |
@@ -828,7 +1064,11 @@ def check_password(current_password, password): ...      # handlers/users/passwd
   through the CRUD.** An admin UI that sets `is_superuser` via
   `PATCH /api/v1/users/{id}` will start getting 403 and must move to the role
   endpoint. That is the point of the feature, but it needs the changelog entry
-  and the migration note in §10, not a silent 403 in production.
+  and the migration note in §10, not a silent 403 in production. **Decided
+  (§8): ships directly in 0.30.0, no deprecation window and no compatibility
+  flag** — a transition period would keep the escalation open for its whole
+  duration. Callers that break are identifiable from the 403s the guard
+  already audits.
 - **R2 — the owner fast-path edit is the whole feature, and it is one line.**
   `guards.py:141` returns `True` before any check. Narrowing it incorrectly
   either leaves the hole open or locks every owner out of their own profile.
@@ -863,6 +1103,26 @@ def check_password(current_password, password): ...      # handlers/users/passwd
 - **R10 — the shared `.venv` is editable-installed against the main checkout**, so
   a bare `pytest` in a worktree can import another branch's compiled extensions.
   Rebuild before trusting a surprising result; never `uv sync` from a worktree.
+- **R11 — the protected set must list every group named by a privileged
+  policy.** An operator who moves `users:grant_role` or `mfa:disenroll` to a
+  group of their own, without adding that group to `AUTH_PROTECTED_GROUPS`,
+  re-opens G8 for it: a plain superuser can join it. §10 states this next to
+  the setting. Deriving the set from the policy pack automatically was
+  considered and rejected: it couples the guard to PDP internals, and a
+  configuration that is explicit and audited is easier to review.
+- **R12 — nobody can add the first `security_admin` member through the API.**
+  Intended (self-add refused, and nobody holds `users:grant_role` before the
+  first member exists). Seed it out-of-band. Until then the role endpoint and
+  protected-group changes are unusable — fail closed, as FEAT-106's
+  `mfa:disenroll` is.
+- **R13 — `password_reset` bounds the separation of duties.** It lets any
+  superuser set any user's password (`session.py:170-205`), including a
+  `security_admin` member's, and then sign in as them. Changing
+  `password_reset` is a Non-Goal here (§1), so the separation that `users:grant_role`
+  provides is only as strong as that endpoint. Mitigation available today:
+  FEAT-106's OTP enforcement on `security_admin` members, which a password reset
+  alone does not get past. Recommended follow-up: refuse `password_reset` on a
+  member of a protected group unless the actor holds `users:grant_role`.
 
 ### External Dependencies
 
@@ -896,9 +1156,10 @@ def check_password(current_password, password): ...      # handlers/users/passwd
 - [x] May a superuser UPDATE another user through the CRUD? — *Resolved with the user*: yes, but **only on a non-privileged allowlist**. `superuser_actions` gains `update`, bounded by `writable_by_admin`. → §2 Data Models, AC10.
 - [x] May a user edit their own row, and which columns? — *Resolved with the user*: a **profile allowlist** (`first_name`, `last_name`, `display_name`, `title`, `avatar`, `timezone`), never the privileged columns. This also closes the `TODO: Allow User editing own data` in `UserManager`'s own docstring. → §2, AC10.
 - [x] How do privileged flags get set legitimately? — *Resolved with the user*: a **dedicated endpoint with its own ABAC action** (`users:grant_role`), audited, never through the generic CRUD. → M5, AC11, AC12.
-- [ ] Which group should hold `users:grant_role` by default? FEAT-106 faces the same question for `mfa:disenroll` and named `security_admin` provisionally; neither group exists yet. Decide once for both, so a deployment does not end up with two bespoke groups. — *Owner: Jesus Lara*
-- [ ] Should `GroupManager` and `PermissionHandler` (the *definition* CRUDs, not the assignment ones) also require a non-`superuser` group, or is `superuser` adequate there? The escalation routes are the two mapping tables; these two are lower risk and stricter settings cost operability. — *Owner: Jesus Lara*
-- [ ] Does any existing deployment write privileged columns through the CRUD today? That determines whether R1's breaking change needs a deprecation window or can ship directly. — *Owner: Jesus Lara*
+- [x] Which group should hold `users:grant_role` by default? — *Resolved with the user (2026-11-11)*: **`security_admin`, shared with FEAT-106's `mfa:disenroll`** (FEAT-106 is approved with that group). One privileged group to provision and document, not two. Granting `is_superuser` therefore needs an actor who is both superuser and `security_admin` (M5's "cannot grant what you do not hold"). → M5, M6, AC16, §10.
+- [x] Should `GroupManager` and `PermissionHandler` require a non-`superuser` group? — *Resolved with the user (2026-11-11)*: **`superuser` is adequate for ordinary groups and for permissions, with protected groups on top.** Answering it showed that the question was framed too narrowly: groups are matched by *name* (`decorators.py:288-311`, `abac/policies/policy.py:22`), so with the `superuser` policy alone a superuser could join `security_admin`, or rename a group into it, and inherit `users:grant_role` and `mfa:disenroll`; and joining `superuser` is `is_superuser` without the role endpoint. Hence protected groups (`AUTH_PROTECTED_GROUPS`, default `superuser,security_admin`, `superuser` always included): adding or removing members, and renaming into or out of a protected name, deactivating or deleting the group, all need `users:grant_role`, the actor must belong to the group, and nobody can add themselves. `PermissionHandler` and `GroupPermissionManager` stay on `superuser`: nothing authorizes by permission name. → §2 Overview pt 3, G8, M9, AC17, AC18, R11–R13.
+- [x] Does any existing deployment write privileged columns through the CRUD today? — *Resolved with the user (2026-11-11)*: **ship directly in 0.30.0**, breaking change with a CHANGELOG notice and migration note, no deprecation window and no compatibility flag. → R1, §10.
+- [x] May a superuser still create users through `POST /api/v1/users`? — *Raised while resolving the above, resolved with the user (2026-11-11)*: the draft silently removed creation (`create ∉ superuser_actions` plus no password hooks), although `UserManager` creates users today (`required_by_post = required_by_put`, `user.py:26`). **Yes, the superuser creates, without a password**: `create` goes back into `superuser_actions`, the payload is bounded by the new `creatable_by_admin` (`writable_by_admin | {"username"}`), privileged columns are refused and keep their model defaults, and the initial password goes through `password_reset` (which also sets `is_new=True`). The same `creatable_by_admin` attribute fixes a contradiction in the draft: the mapping tables listed their PK columns as `privileged_columns` with an empty write set, so no row could ever be created. → M1, M2, §2 Data Models, AC19, AC20.
 
 ---
 
@@ -934,11 +1195,21 @@ Summary: **0** confirmed · **0** rejected · **0** escalated (not run).
     it needs; which group must hold it; the warning that widening
     `admin_full_access.yaml`'s `actions` collapses the separation; and that
     `AUTHORIZATION_MIDDLEWARES` is empty by default, so a custom handler that
-    does not use the guard is authorized by authentication alone.
-  - `CHANGELOG.md` — update, **with a breaking-change notice**: privileged
-    columns are no longer writable through `PATCH`/`PUT /api/v1/users/{id}`;
-    callers must use `POST /api/v1/users/{id}/role`. Passwords are no longer
-    settable through the user CRUD; use `password_change` / `password_reset`.
+    does not use the guard is authorized by authentication alone. Also:
+    protected groups and `AUTH_PROTECTED_GROUPS` — that it must list **every**
+    group a privileged policy names (R11) and that `superuser` is always
+    protected; that `security_admin` holds both `users:grant_role` and
+    FEAT-106's `mfa:disenroll`; how to seed the first `security_admin` member
+    out-of-band (R12); the `password_reset` caveat and the OTP mitigation (R13);
+    and the user-creation flow (POST without password, then `password_reset`).
+  - `CHANGELOG.md` — update, **with a breaking-change notice** (no deprecation
+    window, §8): privileged columns are no longer writable through
+    `PATCH`/`PUT`/`POST /api/v1/users`; callers must use
+    `POST /api/v1/users/{id}/role`. Passwords are no longer settable through the
+    user CRUD, including on create; use `password_change` / `password_reset`.
+    `username` is no longer updatable. Membership and definition of
+    `superuser` / `security_admin` now require `users:grant_role`. How to find
+    affected callers: the guard's audited 403s on these routes.
 - **API modules**: `navigator_auth.handlers`
 
 ---
@@ -952,13 +1223,16 @@ Summary: **0** confirmed · **0** rejected · **0** escalated (not run).
   that depends on the privileged columns being closed. M1, M2 and M5 are not
   delegation-eligible and must land in order.
 - **Parallelizable within the worktree**: M3 and M4 once M1 exists; M6 and M8 at
-  any point after the names are fixed.
-- **Cross-feature dependencies**: **FEAT-106 overlaps on policy conventions, not
-  on files.** It adds `mfa:disenroll` under the same `default_policies/`
-  convention and faces the identical "which group holds the privileged action"
-  question (§8). Merging both without deciding that once will produce two
-  bespoke groups. No file conflicts: FEAT-106 touches `basic.py`, `auth.py`,
-  `conf.py` and a new `mfa/` package; this touches `guards.py` and the handlers.
+  any point after the names are fixed. M9 after M1 and M6, before the M3/M4
+  tests that exercise protected groups.
+- **Cross-feature dependencies**: **FEAT-106 shares the `security_admin` group
+  (§8) and one file.** Both packs name `security_admin`, and M9 is what makes
+  FEAT-106's `mfa:disenroll` separation hold too: without it a plain superuser
+  could join `security_admin` through `/api/v1/user_groups`. The one shared
+  file is `conf.py` — FEAT-106 adds its MFA settings, this adds
+  `AUTH_PROTECTED_GROUPS` after `ABAC_DEFAULT_EFFECT` (`:710`); expect at most a
+  trivial textual conflict. Otherwise FEAT-106 touches `basic.py`, `auth.py`
+  and a new `mfa/` package; this touches `guards.py` and the handlers.
 
 ---
 
@@ -967,3 +1241,4 @@ Summary: **0** confirmed · **0** rejected · **0** escalated (not run).
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-11-06 | Jesus Lara | Initial draft. Escalation confirmed by execution; scope widened from `UserManager` to all five unguarded handlers after finding two further routes. |
+| 0.2 | 2026-11-11 | Jesus Lara | §8 resolved. `users:grant_role` → `security_admin` (shared with FEAT-106). New M9 protected groups (G8, AC17–18), after finding that name-matched groups let a superuser join or rename into `security_admin`/`superuser`. Ships directly, no deprecation window. User creation kept (superuser, no password) via new `creatable_by_admin`, which also fixes mapping-table creation. `required_by_put`/`required_by_post` made consistent with the write sets. R11–R13 added. |
