@@ -236,6 +236,29 @@ USERAGENT_SECURITY = config.getboolean("USERAGENT_SECURITY", fallback=False)
 # User-Agent and IP/host information. Default: False.
 AUTHZ_DEBUG = config.getboolean("AUTHZ_DEBUG", fallback=False)
 
+### Repeated unauthenticated probes (protected_paths_middleware):
+# When one client IP gets AUTH_PROBE_THRESHOLD unauthenticated requests
+# answered with a 4xx (blocked system path, failed authentication, unknown
+# route, refused by a handler) within AUTH_PROBE_WINDOW seconds, a single
+# security warning is logged on the "navigator_auth.security" logger. The same
+# host is not reported again until AUTH_PROBE_COOLDOWN seconds have passed. At
+# most AUTH_PROBE_MAX_HOSTS hosts are tracked in memory (per worker process).
+# The client IP honours ALLOWED_IP_TRUSTED_PROXIES. Threshold 0 disables it.
+AUTH_PROBE_THRESHOLD = config.getint("AUTH_PROBE_THRESHOLD", fallback=20)
+AUTH_PROBE_WINDOW = config.getint("AUTH_PROBE_WINDOW", fallback=60)
+AUTH_PROBE_COOLDOWN = config.getint("AUTH_PROBE_COOLDOWN", fallback=300)
+AUTH_PROBE_MAX_HOSTS = config.getint("AUTH_PROBE_MAX_HOSTS", fallback=10000)
+
+### Protected system paths (protected_paths_middleware):
+# Hidden files (/.env, /.git/...), the env/, etc/ and logs/ top-level
+# directories and config/key/log/backup/source files are always answered with
+# 404 before authentication or any ABAC/PBAC policy runs. That built-in list
+# cannot be turned off; AUTH_DENY_PATHS only ADDS fnmatch patterns
+# (comma-separated, case-insensitive), e.g. "/private/*,*.yaml".
+AUTH_DENY_PATHS = [
+    e.strip().lower() for e in config.get("AUTH_DENY_PATHS", fallback="").split(",") if e.strip()
+]
+
 ### ISO-3166 country codes allowed when USERAGENT_SECURITY is on:
 USERAGENT_ALLOWED_COUNTRIES = [
     e.strip().upper()

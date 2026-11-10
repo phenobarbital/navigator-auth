@@ -78,6 +78,7 @@ from .templates import TemplateParser
 from .middlewares.security import security_middleware
 from .middlewares.csrf import csrf_middleware
 from .middlewares.version import version_middleware
+from .middlewares.protected_paths import install_protected_paths
 from .abac.middleware import abac_middleware
 
 url = logging.getLogger("urllib3.connectionpool")
@@ -739,6 +740,9 @@ class AuthHandler:
         if abac_middleware in mdl:
             mdl.remove(abac_middleware)
             mdl.append(abac_middleware)
+        # Hard deny for system paths (/.env, /etc/, /logs/...): outermost, so
+        # no exclude list, authz backend or ABAC policy can open them.
+        install_protected_paths(self.app)
         return self.app
 
     async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:
