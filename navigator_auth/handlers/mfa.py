@@ -15,6 +15,7 @@ from typing import Any, Optional
 from aiohttp import web
 
 from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY, AUTH_OTP_CHALLENGE_TTL
+from navigator_auth.decorators import policy_allows
 from navigator_auth.exceptions import FailedAuth, InvalidAuth, MfaSignal, UserNotFound
 from navigator_auth.mfa.exceptions import MfaStorageError
 from navigator_auth.mfa.services import MfaServices, get_mfa_services
@@ -77,6 +78,8 @@ def setup_mfa_routes(app: web.Application, router: Any) -> None:
     router.add_post(f"{MFA_PREFIX}/totp/confirm", handler.confirm_totp, name="mfa_totp_confirm")
     router.add_delete(f"{MFA_PREFIX}/totp", handler.disenroll_totp, name="mfa_totp_disenroll")
     router.add_post(f"{MFA_PREFIX}/backup-codes", handler.backup_codes, name="mfa_backup_codes")
+    # Registered AFTER the literal /totp DELETE; NOT in AUTH_EXCLUDE_LIST_KEY.
+    router.add_delete(rf"{MFA_PREFIX}/{{user_id:\d+}}", handler.admin_disenroll, name="mfa_admin_disenroll")
 
 
 class MfaHandler:
@@ -459,6 +462,96 @@ class MfaHandler:
             return JSONResponse({"backup_codes": codes, "count": len(codes)}, status=201, headers=NO_STORE)
         except MfaStorageError:
             return _error("mfa_unavailable", 503)
+
+
+    async def _audit_denied(self, services: Any, actor_id: int, target_id: int, reason: str) -> None:
+        """Durable record of a refused admin disenrolment. Best effort: never changes the response."""
+        try:
+            async with services.security.user_lock(target_id) as conn:
+                await services.security.write_audit(
+                    conn,
+                    MfaAuditEntry(
+                        actor_user_id=actor_id,
+                        target_user_id=target_id,
+                        org_id=None,
+                        action="admin_disenroll",
+                        method="admin",
+                        outcome="denied",
+                        detail={"reason": reason},
+                    ),
+                )
+        except Exception as err:  # pylint: disable=W0718 -- a denial stays a 403.
+            logger.warning("MFA admin disenroll: denial audit not written: %s", type(err).__name__)
+
+    async def admin_disenroll(self, request: web.Request) -> web.Response:
+        """DELETE /auth/mfa/{user_id} -- switch a user's OTP off and nothing else (AC16, AC26).
+
+        Gated by ABAC ``mfa:disenroll`` (policy ``mfa_admin_access``) AND tenant
+        ownership. Disables TOTP, invalidates backup codes (D21), bumps the security
+        version, revokes trusted devices, audits, then notifies the target.
+        """
+        services, _, actor = await self._session_user(request)
+        actor_id = int(actor["user_id"] if isinstance(actor, dict) else getattr(actor, "user_id"))
+        target_id = int(request.match_info["user_id"])
+        if target_id == actor_id:
+            await self._audit_denied(services, actor_id, target_id, "self_target")
+            return _error("self_disenroll_forbidden", 403)
+        allowed, reason, _ = await policy_allows(
+            "mfa_admin_access", request, action="mfa:disenroll", resource=request.path
+        )
+        if not allowed:
+            await self._audit_denied(services, actor_id, target_id, f"abac: {reason}")
+            return _error("forbidden", 403)
+        try:
+            actor_orgs = set(await services.resolver.memberships(actor_id))
+            target_orgs = set(await services.resolver.memberships(target_id))
+        except MfaStorageError:
+            return _error("mfa_unavailable", 503)
+        if not target_orgs or not target_orgs <= actor_orgs:
+            await self._audit_denied(services, actor_id, target_id, "foreign_tenant")
+            return _error("forbidden", 403)
+        try:
+            record = await services.backend._idp.user_from_id(target_id)
+        except UserNotFound:
+            return _error("not_found", 404)
+        try:
+            async with services.security.user_lock(target_id) as conn:
+                old = "totp" if await services.state.totp_confirmed(target_id, conn=conn) else "none"
+                await services.providers[PROVIDER_TOTP].disenroll(record, conn=conn)
+                dropped = await services.backup_codes.invalidate_all(target_id, conn=conn)
+                await services.security.bump_version(conn, target_id)
+                revoked = await services.trusted_devices.revoke_all(target_id, "admin_disenroll", conn=conn)
+                await services.security.write_audit(
+                    conn,
+                    MfaAuditEntry(
+                        actor_user_id=actor_id,
+                        target_user_id=target_id,
+                        org_id=min(target_orgs),
+                        action="admin_disenroll",
+                        old_state=old,
+                        new_state="none",
+                        method="admin",
+                        outcome="success",
+                        detail={
+                            "orgs": sorted(target_orgs),
+                            "backup_codes_invalidated": dropped,
+                            "devices_revoked": revoked,
+                        },
+                    ),
+                )
+        except MfaStorageError:
+            return _error("mfa_unavailable", 503)
+        await notify_security_event(
+            MfaSecurityNotice(
+                email=usable_email(record),
+                display_name=str(getattr(record, "display_name", "") or ""),
+                username=str(getattr(record, "username", target_id)),
+                event="admin_disenrolled",
+                occurred_at=datetime.now(timezone.utc),
+                actor=str(getattr(actor, "username", actor_id)),
+            )
+        )
+        return JSONResponse({"status": "disenrolled", "user_id": target_id}, status=200, headers=NO_STORE)
 
 
 class _EnrollmentFailed(Exception):
