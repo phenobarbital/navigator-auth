@@ -98,6 +98,7 @@ def test_mfa_refused_payload_and_status():
 
 def test_abstract_provider_contract():
     """The provider ABC requires every factor operation."""
+
     class Provider(AbstractOTPProvider):
         _provider_name = "email"
         _is_strong = False
