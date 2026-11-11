@@ -13,6 +13,7 @@ from navigator_session import SESSION_KEY, SESSION_ID, SessionHandler, get_sessi
 from datamodel.exceptions import ValidationError
 
 # Authenticated Entity
+from .. import conf as auth_conf
 from ..conf import AUTH_EXCLUDE_LIST_KEY, BASIC_USER_MAPPING
 from .abstract import BaseAuthBackend, user_is_active
 from .oauth2.code_backend import AccessTokenStorage
@@ -22,10 +23,23 @@ from ..exceptions import (
     FailedAuth,
     UserNotFound,
     InvalidAuth,
+    MfaSignal,
+    MFARequired,
+    MFARefused,
 )
 from ..responses import JSONResponse
 from ..libs.expiry import expiry_fields
 from ..identities import AuthUser
+from ..mfa.services import MFA_APP_KEY, MfaServicesSlot, build_mfa_services, get_mfa_services
+from ..mfa.trusted_devices import may_offer_trusted_device
+from ..mfa.types import (
+    AMR_PASSWORD,
+    AMR_TRUSTED_DEVICE,
+    MFA_DEVICE_TOKEN_KEY,
+    PROVIDER_EMAIL,
+    TRUSTED_COOKIE,
+    MfaState,
+)
 
 # FEAT-098 — per-user index of live jti's, so a password reset (or any
 # future admin action) can find and revoke every outstanding JWT for a
@@ -60,6 +74,9 @@ class BasicAuth(BaseAuthBackend):
             name=f"{self._service_name}_check_credentials",
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(check_credentials)
+        # FEAT-106 (D12): register the MFA slot while the app is still mutable.
+        if self._owns_mfa() and MFA_APP_KEY not in app:
+            app[MFA_APP_KEY] = MfaServicesSlot()
         super().configure(app)
 
     async def on_startup(self, app: web.Application):
@@ -73,6 +90,10 @@ class BasicAuth(BaseAuthBackend):
             # self._user_model = self.get_authmodel(AUTH_USER_MODEL)
             self._user_model = self._idp.user_model
             self.get_successful_callbacks()
+        slot = app.get(MFA_APP_KEY)
+        if self._owns_mfa() and isinstance(slot, MfaServicesSlot) and slot.services is None:
+            slot.services = await build_mfa_services(app, self)
+            self._mfa_slot = slot
 
     async def on_cleanup(self, app: web.Application):
         """Used to cleanup and shutdown any db connection."""
@@ -82,6 +103,17 @@ class BasicAuth(BaseAuthBackend):
                 await storage.redis.aclose()
             except Exception as ex:  # pylint: disable=W0703
                 self.logger.warning(f"BasicAuth: error closing access_token_storage Redis: {ex}")
+        slot = getattr(self, "_mfa_slot", None)
+        if slot is not None and slot.services is not None:
+            try:
+                await slot.services.close()
+            except Exception as ex:  # pylint: disable=W0703
+                self.logger.warning(f"BasicAuth: error closing MFA services: {type(ex).__name__}")
+            slot.services = None
+
+    def _owns_mfa(self) -> bool:
+        """Return whether this backend executes the BasicAuth login path."""
+        return bool(auth_conf.AUTH_BASIC_2FA_ENABLED) and type(self).authenticate is BasicAuth.authenticate
 
     async def validate_user(self, login: str = None, password: str = None):
         # get the user based on Model
@@ -311,6 +343,10 @@ class BasicAuth(BaseAuthBackend):
                 raise InvalidAuth(str(err), status=401) from err
             except Exception as err:
                 raise AuthException(str(err), status=500) from err
+            if auth_conf.AUTH_BASIC_2FA_ENABLED:
+                session = await self._second_factor(request, user)
+                if session is not None:
+                    return session
             try:
                 return await self.open_session(request, user)
             except (FailedAuth, InvalidAuth):
@@ -318,6 +354,70 @@ class BasicAuth(BaseAuthBackend):
             except Exception as err:  # pylint: disable=W0703
                 self.logger.exception(f"BasicAuth: Authentication Error: {err}")
                 return False
+
+    async def _second_factor(self, request: web.Request, user) -> Optional[dict]:
+        """Decide whether this password login owes a second factor."""
+        if not user_is_active(user):
+            raise FailedAuth("User account is disabled", status=403)
+        services = get_mfa_services(request.app)
+        if services is None or not services.available:
+            raise MFARefused("mfa_unavailable", "Second factor is temporarily unavailable", status=503)
+        uid = user[self.userid_attribute]
+        try:
+            evaluation = await services.evaluate(user)
+            if evaluation.state == MfaState.NONE:
+                return None
+            device_token = await self._trusted_device(request, services, evaluation)
+            if device_token is not None:
+                extra = {"auth_method": "basic", "mfa": True, "amr": [AMR_PASSWORD, AMR_TRUSTED_DEVICE]}
+                result = await self.open_session(request, user, extra=extra)
+                result[MFA_DEVICE_TOKEN_KEY] = {
+                    "token": device_token,
+                    "max_age": evaluation.policy.remember_days * 86400,
+                }
+                return result
+            if not evaluation.providers:
+                raise MFARefused("no_factor_available", "No second factor is available for this account", status=403)
+            code_hash = None
+            if evaluation.preferred == PROVIDER_EMAIL:
+                issued = await services.providers[PROVIDER_EMAIL].challenge(request, user)
+                code_hash = issued.get("code_hash")
+            token, _record = await services.store.issue(
+                user,
+                list(evaluation.providers),
+                evaluation.preferred,
+                security_version=evaluation.security_version,
+                context_digest=evaluation.context_digest,
+                email_code_hash=code_hash,
+            )
+        except (MfaSignal, FailedAuth, InvalidAuth):
+            raise
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.error(f"BasicAuth: second factor unavailable for user {uid}: {type(err).__name__}")
+            raise MFARefused("mfa_unavailable", "Second factor is temporarily unavailable", status=503) from err
+        raise MFARequired(
+            challenge=token,
+            providers=list(evaluation.providers),
+            preferred=evaluation.preferred,
+            expires_in=auth_conf.AUTH_OTP_CHALLENGE_TTL,
+        )
+
+    async def _trusted_device(self, request: web.Request, services, evaluation) -> Optional[str]:
+        """Rotate a trusted-device cookie and return the replacement token."""
+        raw = request.cookies.get(TRUSTED_COOKIE)
+        if not raw or not may_offer_trusted_device(
+            has_strong_factor=evaluation.has_strong_factor,
+            remember_days=evaluation.policy.remember_days,
+        ):
+            return None
+        try:
+            rotated = await services.trusted_devices.consume_and_rotate(raw, evaluation.user_id)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"BasicAuth: trusted device unavailable: {type(err).__name__}")
+            return None
+        if rotated is None or rotated[0] != evaluation.user_id:
+            return None
+        return rotated[1]
 
     async def check_credentials(self, request):
         """Using for check the user credentials to the backend."""
