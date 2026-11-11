@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
 **Spec**: `sdd/specs/basicauth-otp-2fa.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-141
@@ -340,10 +340,8 @@ Spec §4 tests owned here: `test_admin_disenroll_requires_mfa_action`, `test_adm
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
+**Completed by**: sonnet (native), 1 attempt + worker fix
+**Date**: 2026-11-11
+**Notes**: Admin disenroll endpoint + 9 tests delivered. Task-tier validation caught 1 real red (admin notice username/actor read via getattr on a dict record -> fell back to numeric id); fixed in a5c7183 (dict-or-attr read). After fix: 9 passed against Postgres in the engine validator. Native-coder lesson (reading fields from dict-like user records with getattr) recorded as feedback.
 
 **Deviations from spec**: none | describe if any
