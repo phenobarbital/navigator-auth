@@ -129,7 +129,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -140,8 +140,9 @@
       "parallelism_notes": "Calls check_prerequisites/check_postconditions from TASK-161 (navigator_auth/migrations/checks.py) and validate_runtime_role/grant_runtime_access/verify_runtime_access from TASK-162 (navigator_auth/migrations/access.py); modifies runner.py and test_runner.py created by TASK-160 (ordered through TASK-161/162).",
       "assigned_to": null,
       "started_at": "2026-11-11T21:35:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-163-migration-upgrade.md"
+      "completed_at": "2026-11-11T21:57:51+00:00",
+      "file": "sdd/tasks/completed/TASK-163-migration-upgrade.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-164",
@@ -212,7 +213,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -222,8 +223,9 @@
       "parallelism_notes": "Creates the oauth2 set file under TASK-159's catalog (navigator_auth/migrations/sql/oauth2/) and tests it with set_dir/render_sql from TASK-159 (navigator_auth/migrations/catalog.py). Thinking-model task (spec M4 not delegation-eligible).",
       "assigned_to": null,
       "started_at": "2026-11-11T21:35:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-167-oauth2-migration-set.md"
+      "completed_at": "2026-11-11T21:57:51+00:00",
+      "file": "sdd/tasks/completed/TASK-167-oauth2-migration-set.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-168",
