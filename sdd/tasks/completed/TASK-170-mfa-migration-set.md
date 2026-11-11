@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-110 — navauth self upgrade database migration command
 **Spec**: `sdd/specs/new-command-migration.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-161, TASK-162, TASK-169
@@ -348,8 +348,8 @@ When you pick up this task:
 
 ## Completion Note
 
-**Completed by**: sdd-worker (NOT completed)
+**Completed by**: sdd-worker (codex gpt-5.6-terra · attempt 1 · 464s · tokens n/a)
 **Date**: 2026-11-11
-**Notes**: **BLOCKED: FEAT-106 review-fixes not on dev.** Gate step 0.1 fails: FEAT-106 itself is in this branch (PR #633) and `navigator_auth/mfa/` exists, but every task (18/18) in `sdd/tasks/index/basicauth-otp-2fa-review-fixes.json` (FEAT-114) is still `pending`, and those tasks change exactly what this task moves (`002_mfa_secrets.sql`, `_MIGRATION_FILES`/`MFA_TABLES`, MFA startup availability). Two codex deliveries returned empty (`empty_delivery`, ~30-40s each), consistent with the gate. Nothing was implemented or merged. Re-run once FEAT-114 is merged (or the user confirms it dropped) and the FEAT-110 branch has synced that `dev`.
+**Notes**: Initially BLOCKED (FEAT-114 not on dev); gate cleared after the dev sync (c3968cf), contract re-verified, then implemented. Both MFA SQL files moved byte-identical, mfa/migrations.py catalog-backed, startup flag via mfa_tables_present, checks/access/README/tests updated. Merge-tier: 163 passed, 5 skipped. Orchestrator review: no defects. Closed via `parrot sdd task close` (durable evidence root read-only in sandbox).
 
 **Deviations from spec**: none
