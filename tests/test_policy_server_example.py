@@ -1,5 +1,6 @@
 """The PBAC example registers cleanly and enforces its restrictions (FEAT-109 M5)."""
 
+import asyncio
 import importlib.util
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -13,6 +14,13 @@ from navigator_auth.abac.policies.evaluator import PolicyLoader
 from navigator_auth.abac.policies.resources import ResourceType
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_event_loop():
+    """pytest-asyncio leaves no current loop; legacy tests call get_event_loop()."""
+    yield
+    asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 @pytest.fixture(scope="module")
