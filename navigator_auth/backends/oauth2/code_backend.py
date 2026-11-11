@@ -90,25 +90,31 @@ class AuthorizationCodeStorage:
         """Consume a code atomically (B5 single-use enforcement).
 
         A ``SET NX`` marker decides the winner, so exactly one caller per code
-        gets ``True`` however many redeem it concurrently (FEAT-108). The record
-        then gets its ``used`` flag and ``used_at`` timestamp in place; the
-        caller must call delete_code() to purge it from Redis after marking.
+        gets ``True`` however many redeem it concurrently (FEAT-108). The marker
+        lives at least as long as the code, and the record update only rewrites
+        a key that still exists, so a late writer can never resurrect a code for
+        a second consumer. The record gets its ``used`` flag and ``used_at``
+        timestamp in place; the caller must call delete_code() afterwards.
 
         Returns:
             bool: ``True`` for the single caller that consumed the code;
             ``False`` when it was already consumed or no longer exists.
         """
-        # The marker outlives any code: a code is redeemable for OAUTH_CODE_TTL at most.
-        if not await self.redis.set(f"{self.prefix}used:{code}", "1", nx=True, ex=OAUTH_CODE_TTL):
-            return False
         obj = await self.get_code(code)
-        if not obj:
+        if not obj or obj.used:
+            return False
+        remaining = 0
+        if obj.expires_at:
+            remaining = int((obj.expires_at - _now()).total_seconds()) + 1
+        marker_ttl = max(OAUTH_CODE_TTL, remaining)
+        if not await self.redis.set(f"{self.prefix}used:{code}", "1", nx=True, ex=marker_ttl):
             return False
         obj.used = True
         obj.used_at = _now()
-        # Re-save with a very short TTL (5 s) to propagate state before deletion.
+        # Re-save with a very short TTL (5 s) to propagate state before deletion;
+        # ``xx`` writes only over a live key, never re-creating a deleted code.
         key = f"{self.prefix}{code}"
-        await self.redis.set(key, obj.model_dump_json(), ex=5)
+        await self.redis.set(key, obj.model_dump_json(), ex=5, xx=True)
         return True
 
     async def delete_code(self, code: str):

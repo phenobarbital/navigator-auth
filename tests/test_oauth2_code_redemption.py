@@ -41,10 +41,12 @@ class _InterleavingRedis:
         await asyncio.sleep(0)
         return self.data.get(key)
 
-    async def set(self, key, value, nx=False, ex=None):
+    async def set(self, key, value, nx=False, ex=None, xx=False):
         await asyncio.sleep(0)
         self.set_calls.append((key, nx, ex))
         if nx and key in self.data:
+            return None
+        if xx and key not in self.data:
             return None
         self.data[key] = value
         return True
@@ -123,6 +125,101 @@ class TestAtomicMarkUsed:
         storage = _storage()
 
         assert await storage.mark_used("never-issued") is False
+
+    @pytest.mark.asyncio
+    async def test_a_record_already_flagged_used_is_not_consumed_again(self):
+        code = _code()
+        code.used = True
+        redis = _InterleavingRedis()
+        storage = _storage(redis)
+        await storage.save_code(code)
+
+        assert await storage.mark_used(CODE) is False
+        assert f"oauth2:code:used:{CODE}" not in redis.data
+
+    @pytest.mark.asyncio
+    async def test_the_marker_outlives_a_code_longer_than_the_configured_ttl(self):
+        code = _code()
+        code.expires_at = datetime.now() + timedelta(seconds=3600)
+        redis = _InterleavingRedis()
+        storage = _storage(redis)
+        await storage.save_code(code)
+
+        with patch.object(code_backend, "OAUTH_CODE_TTL", 600):
+            await storage.mark_used(CODE)
+
+        ttl = next(ex for key, nx, ex in redis.set_calls if key == f"oauth2:code:used:{CODE}")
+        assert ttl >= 3600
+
+    @pytest.mark.asyncio
+    async def test_a_late_record_write_never_resurrects_a_deleted_code(self):
+        redis = _InterleavingRedis()
+        storage = _storage(redis)
+        await storage.save_code(_code())
+        real_set = redis.set
+
+        async def _delete_before_record_write(key, value, nx=False, ex=None, xx=False):
+            if xx:  # the record update: the code was purged meanwhile
+                redis.data.pop(f"oauth2:code:{CODE}", None)
+            return await real_set(key, value, nx=nx, ex=ex, xx=xx)
+
+        redis.set = _delete_before_record_write
+
+        assert await storage.mark_used(CODE) is True
+        assert f"oauth2:code:{CODE}" not in redis.data
+
+
+class _ClockRedis:
+    """Redis double with a virtual clock for key expiry and a gate on record writes."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.data: dict = {}
+        self.hold_record = None
+
+    def _live(self, key):
+        item = self.data.get(key)
+        if item is not None and item[1] is not None and item[1] <= self.now:
+            del self.data[key]
+            return None
+        return item
+
+    async def get(self, key):
+        item = self._live(key)
+        return item[0] if item else None
+
+    async def set(self, key, value, nx=False, ex=None, xx=False):
+        if self.hold_record is not None and key == f"oauth2:code:{CODE}":
+            await self.hold_record.wait()  # pause a consumer right before its record write
+        live = self._live(key)
+        if (nx and live) or (xx and not live):
+            return None
+        self.data[key] = (value, self.now + ex if ex else None)
+        return True
+
+    async def delete(self, key):
+        self.data.pop(key, None)
+
+
+class TestPausedConsumer:
+    """A consumer paused past every TTL cannot hand a second consumer the code."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("pause", [60, 10_000], ids=["code-still-live", "everything-expired"])
+    async def test_a_second_consumer_loses_after_a_paused_winner(self, pause):
+        redis = _ClockRedis()
+        storage = _storage(redis)
+        await storage.save_code(_code())  # expires ~120 s into the virtual clock
+        redis.hold_record = asyncio.Event()
+
+        with patch.object(code_backend, "OAUTH_CODE_TTL", 10):  # shorter than the code itself
+            first = asyncio.create_task(storage.mark_used(CODE))
+            await asyncio.sleep(0)  # A holds the marker, paused before its record write
+            redis.now += pause
+            redis.hold_record.set()
+            assert await first is True
+            redis.hold_record = None
+            assert await storage.mark_used(CODE) is False
 
 
 class TestClaimTtl:
@@ -268,6 +365,27 @@ class TestSessionAfterConsume:
         assert json.loads(response.body)["error_description"] == "Authorization code already used."
         assert log == ["claim", "resolve", "mark_used"]
         provider._create_user_session.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_session_store_failure_after_consume_still_issues_the_token(self):
+        # Codex review: the code is gone once consumed, so a session-store error
+        # must not cost the client its grant (device redemption shares this path).
+        log = []
+        provider = await _redeeming_provider(log)
+
+        async def _store_down(request, user, *args, **kwargs):
+            log.append("session")
+            raise ConnectionError("session store down")
+
+        provider._create_user_session = AsyncMock(side_effect=_store_down)
+
+        response = await provider._handle_authorization_code(_payload(), MagicMock())
+
+        assert response.status == 200
+        assert json.loads(response.body)["access_token"] == "tok"
+        assert log == ["claim", "resolve", "mark_used", "delete", "session"]
+        token_data = provider._idp.create_token.call_args.args[0]
+        assert "session_id" not in token_data
 
     @pytest.mark.asyncio
     async def test_token_session_claims_skips_the_lookup_for_a_resolved_owner(self):

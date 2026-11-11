@@ -2305,7 +2305,15 @@ class Oauth2Provider(BaseAuthBackend):
                 # Bind the session only once this request owns the code: the
                 # session is shared per identity, so a redeemer that lost
                 # mark_used must not have rewritten it (issue:42d67472eccd).
-                session_claims = await self._token_session_claims(request, user_id, conn=conn, user=owner)
+                try:
+                    session_claims = await self._token_session_claims(request, user_id, conn=conn, user=owner)
+                except Exception as exc:  # pylint: disable=W0703
+                    # The code is already consumed, so a session-store failure
+                    # must not cost the client its grant: issue the token
+                    # unbound, as when no session can be created; the next
+                    # refresh binds one. Class name only (DSN fragments).
+                    self.logger.error(f"Oauth2: cannot bind a session for user_id={user_id}: {type(exc).__name__}")
+                    session_claims = {}
 
                 scope = auth_code.scope
                 # TASK-027: mint jti.
