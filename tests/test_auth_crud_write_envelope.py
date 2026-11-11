@@ -675,7 +675,8 @@ class TestPasswordPathsUnchanged:
         )
 
     @pytest.mark.asyncio
-    async def test_password_change_still_works(self, db):
+    @pytest.mark.parametrize("row_present", [True, False])
+    async def test_password_change_still_works(self, db, row_present):
         from navigator_auth.handlers.users.passwd import check_password, set_basic_password
 
         old_hash = set_basic_password("oldpass-123")
@@ -687,16 +688,26 @@ class TestPasswordPathsUnchanged:
         handler.get_json = AsyncMock(return_value={"password": "newpass-456", "old_password": "oldpass-123"})
         request = self._request("/api/v2/user/set_password", {}, db)
         conn = FakeTransitionConn(stored=old_hash)
+        if not row_present:
+            conn.fetchval = AsyncMock(side_effect=[old_hash, None])
         with (
             patch("navigator_auth.handlers.users.session.get_session", new=AsyncMock(return_value=session)),
             patch.object(User, "get", new=AsyncMock(return_value=user)),
             patch.object(User, "update", new=AsyncMock(return_value=user)) as update,
             _password_transition(conn),
+            patch("navigator_auth.handlers.users.session.increment_generation", new=AsyncMock()) as generation,
+            patch("navigator_auth.handlers.users.session.PasswordRecoveryHandler.session_revoker") as revoker,
         ):
             response = await handler.password_change(request)
-        assert response.status == 202
+        generation.assert_not_awaited()
+        revoker.assert_not_called()
         # The write is one UPDATE on the transition connection, not Model.update.
         update.assert_not_awaited()
+        if not row_present:
+            assert response.status == 409
+            assert b"credentials_changed" in response.body
+            return
+        assert response.status == 202
         [(_sql, (user_id, new_hash))] = conn.updates
         assert user_id == OWNER_ID
         assert check_password(new_hash, "newpass-456")

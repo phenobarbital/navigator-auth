@@ -1060,8 +1060,8 @@ class AuthHandler:
         OAuth2 access tokens are self-contained JWTs, so revoking one only
         marks its ``jti`` in the provider's access-token storage. Without this
         check a revoked token would keep passing ``auth_middleware`` until it
-        expires. Only tokens that actually carry a ``jti`` (i.e. OAuth2 ones)
-        cost a storage lookup.
+        expires. Only tokens that carry a ``jti`` cost a storage lookup.
+        Storage errors abort authentication with 503, including for Basic JWTs.
         """
         jti = payload.get("jti") if payload else None
         if not jti:
@@ -1074,7 +1074,8 @@ class AuthHandler:
                 if await storage.is_revoked(jti):
                     return True
             except Exception as exc:  # pylint: disable=W0703
-                self.logger.warning(f"Auth Middleware: unable to check revocation of jti={jti}: {exc}")
+                self.logger.error(f"Auth Middleware: revocation check failed: {type(exc).__name__}")
+                raise web.HTTPServiceUnavailable(reason="Authentication temporarily unavailable") from exc
         return False
 
     async def _oauth_generation_ok(self, request: web.Request, payload: Optional[dict]) -> bool:
