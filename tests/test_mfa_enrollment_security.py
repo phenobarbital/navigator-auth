@@ -43,6 +43,9 @@ async def test_strong_factor_proof_rejects_email() -> None:
     session = Session(auth_method="email")
     assert not await MfaHandler()._strong_factor_proof(SimpleNamespace(), services, session, _record(), {})
 
+    session = Session()
+    assert not await MfaHandler()._strong_factor_proof(SimpleNamespace(), services, session, _record(), {})
+
 
 def test_security_state_values_are_stable() -> None:
     assert MfaState.EMAIL.value == "email"

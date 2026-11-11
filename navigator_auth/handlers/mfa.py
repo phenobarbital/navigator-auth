@@ -98,7 +98,7 @@ class MfaHandler:
         session = await get_session(request, new=False)
         if session is None:
             raise web.HTTPUnauthorized(text='{"error": "session_required"}', content_type="application/json")
-        session_data = session[AUTH_SESSION_OBJECT] if hasattr(session, "__getitem__") else {}
+        session_data = session.get(AUTH_SESSION_OBJECT, {}) if hasattr(session, "get") else {}
         user_id = getattr(getattr(request, "user", None), "user_id", None) or session_data.get("user_id")
         if user_id is None:
             raise web.HTTPUnauthorized(text='{"error": "session_required"}', content_type="application/json")
@@ -131,7 +131,7 @@ class MfaHandler:
         backup_code = body.get("backup_code")
         if backup_code and await services.backup_codes.consume(uid, backup_code):
             return True
-        session_data = session[AUTH_SESSION_OBJECT] if hasattr(session, "__getitem__") else {}
+        session_data = session.get(AUTH_SESSION_OBJECT, {}) if hasattr(session, "get") else {}
         created = getattr(session, "created", 0)
         return (
             session_data.get("auth_method") == "passkey" and int(time.time()) - int(created) <= AUTH_OTP_CHALLENGE_TTL
