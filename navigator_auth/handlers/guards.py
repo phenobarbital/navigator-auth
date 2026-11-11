@@ -188,9 +188,7 @@ class OwnerOrSuperuserGuard:
         if not allowed:
             self._refuse(not_found_on_deny)
         if payload is not None:
-            await self.authorize_columns(
-                payload, is_owner=False, creating=creating, action=action, owner_id=owner_id
-            )
+            await self.authorize_columns(payload, is_owner=False, creating=creating, action=action, owner_id=owner_id)
         return True
 
     async def authorize_columns(

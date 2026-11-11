@@ -172,9 +172,12 @@ class TestAdminPath:
     async def test_create_uses_creatable_allowlist(self):
         pdp = FakePDP([_policy(POLICY, ACTIONS)])
         with S(_session(groups=("superuser",))):
-            assert await Host(_request(pdp)).authorize_row(
-                "user:create", None, payload={"username", "email"}, creating=True
-            ) is True
+            assert (
+                await Host(_request(pdp)).authorize_row(
+                    "user:create", None, payload={"username", "email"}, creating=True
+                )
+                is True
+            )
         with S(_session(groups=("superuser",))), pytest.raises(web.HTTPForbidden):
             await Host(_request(pdp)).authorize_row(
                 "user:create", None, payload={"username", "password"}, creating=True
@@ -188,9 +191,12 @@ class TestAdminPath:
     async def test_mapping_row_create_allowed_for_admin(self):
         policy = _policy(MappingHost.policy_name, MappingHost.superuser_actions)
         with S(_session(groups=("superuser",))):
-            assert await MappingHost(_request(FakePDP([policy]))).authorize_row(
-                "user_group:create", None, payload={"user_id", "group_id"}, creating=True
-            ) is True
+            assert (
+                await MappingHost(_request(FakePDP([policy]))).authorize_row(
+                    "user_group:create", None, payload={"user_id", "group_id"}, creating=True
+                )
+                is True
+            )
 
     @pytest.mark.asyncio
     async def test_mapping_row_update_refused(self):
