@@ -1,4 +1,5 @@
 """Policy resolver, apply_tenant_policy and MfaStateMachine — FEAT-106 M7 (TASK-135)."""
+
 import inspect
 from pathlib import Path
 
@@ -89,9 +90,7 @@ SUPER = {"user_id": 8, "is_superuser": True, "email": "s@example.com"}
 
 def test_policy_strictest_org_wins():
     """enforced + optional => enforced; smallest remember_days among non-OFF wins (D9)."""
-    out = combine_policies(
-        [_p(5, MfaMode.OPTIONAL, 30), _p(7, MfaMode.ENFORCED, 14), _p(9, MfaMode.OFF, 1)]
-    )
+    out = combine_policies([_p(5, MfaMode.OPTIONAL, 30), _p(7, MfaMode.ENFORCED, 14), _p(9, MfaMode.OFF, 1)])
     assert out.mode == MfaMode.ENFORCED and out.org_id == 7 and out.remember_days == 14
     assert combine_policies([]) == NO_TENANT_POLICY
     tie = combine_policies([_p(9, MfaMode.ENFORCED, 5), _p(3, MfaMode.ENFORCED, 9)])
@@ -283,8 +282,13 @@ async def test_apply_tenant_policy_hardening_revokes_and_audits(mfa_db, mfa_user
             before = await security.current_version(conn, user["user_id"])
         try:
             out = await apply_tenant_policy(
-                db_pool=mfa_db, security=security, trusted_devices=devices,
-                org_id=org_id, mode=MfaMode.ENFORCED, remember_days=14, actor="test",
+                db_pool=mfa_db,
+                security=security,
+                trusted_devices=devices,
+                org_id=org_id,
+                mode=MfaMode.ENFORCED,
+                remember_days=14,
+                actor="test",
             )
             assert out.mode == MfaMode.ENFORCED and out.enforced_at is not None
             async with await mfa_db.acquire() as conn:
@@ -308,15 +312,25 @@ async def test_apply_tenant_policy_relaxing_does_not_revoke(mfa_db, mfa_user_fac
     devices = TrustedDeviceStore(mfa_db)
     try:
         await apply_tenant_policy(
-            db_pool=mfa_db, security=security, trusted_devices=devices,
-            org_id=org_id, mode=MfaMode.ENFORCED, remember_days=14, actor="test",
+            db_pool=mfa_db,
+            security=security,
+            trusted_devices=devices,
+            org_id=org_id,
+            mode=MfaMode.ENFORCED,
+            remember_days=14,
+            actor="test",
         )
         await devices.issue(user["user_id"], 30, "t")
         async with await mfa_db.acquire() as conn:
             before = await security.current_version(conn, user["user_id"])
         await apply_tenant_policy(
-            db_pool=mfa_db, security=security, trusted_devices=devices,
-            org_id=org_id, mode=MfaMode.OPTIONAL, remember_days=14, actor="test",
+            db_pool=mfa_db,
+            security=security,
+            trusted_devices=devices,
+            org_id=org_id,
+            mode=MfaMode.OPTIONAL,
+            remember_days=14,
+            actor="test",
         )
         async with await mfa_db.acquire() as conn:
             after = await security.current_version(conn, user["user_id"])

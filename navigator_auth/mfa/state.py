@@ -5,6 +5,7 @@ least one registered passkey. A strong factor CLOSES the e-mail path. The
 passkey half is derived from the credentials table on every login, so deleting
 the last passkey reopens e-mail for an ordinary user without TOTP.
 """
+
 import logging
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
@@ -105,9 +106,7 @@ class MfaStateMachine:
                 regclass = await db.fetchval("SELECT to_regclass($1)", _CREDENTIALS)
                 if regclass is None:
                     return 0
-                count = await db.fetchval(
-                    f"SELECT count(*) FROM {_CREDENTIALS} WHERE user_id = $1", int(user_id)
-                )
+                count = await db.fetchval(f"SELECT count(*) FROM {_CREDENTIALS} WHERE user_id = $1", int(user_id))
         except Exception as err:  # pylint: disable=W0703
             raise MfaStorageError(f"passkey count failed: {type(err).__name__}") from err
         return int(count or 0)

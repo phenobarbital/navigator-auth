@@ -4,6 +4,7 @@ The policy table is mutable operational data: it is read on EVERY login and
 never cached. Membership comes from the authenticated user id, never from
 request headers and never from the ABAC tenant helper (spec R14).
 """
+
 import logging
 from collections.abc import Sequence
 from typing import Any, Optional
@@ -196,9 +197,7 @@ async def apply_tenant_policy(
                             )
                             or 0
                         )
-                    revoked = await trusted_devices.revoke_tenant(
-                        int(org_id), "tenant_hardening", conn=conn
-                    )
+                    revoked = await trusted_devices.revoke_tenant(int(org_id), "tenant_hardening", conn=conn)
                 await security.write_audit(
                     conn,
                     MfaAuditEntry(
