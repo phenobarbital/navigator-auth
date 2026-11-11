@@ -1236,7 +1236,6 @@ import contextlib  # noqa: E402
 import json as _json_mod  # noqa: E402
 
 
-
 @pytest_asyncio.fixture(loop_scope="module")
 async def single_connection_authdb():
     """One-connection authdb on the module event loop (the recovery_app loop), recording nested acquires."""
@@ -1486,7 +1485,10 @@ class TestRecoveryTransactional:
             return await asyncio.wait_for(getattr(view, handler_name)(), 10)
 
         step2 = await run(
-            "GET", f"/api/v1/password-recovery/{recovery_token}", "_step2_validate", match_info={"token": recovery_token}
+            "GET",
+            f"/api/v1/password-recovery/{recovery_token}",
+            "_step2_validate",
+            match_info={"token": recovery_token},
         )
         assert step2.status == 200
         confirm_token = _json_mod.loads(step2.text)["token"]

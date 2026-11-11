@@ -64,6 +64,7 @@ def _field(record, name: str):
         return record.get(name)
     return getattr(record, name, None)
 
+
 # Registered route names (handlers/__init__.py) that mean "step 3, confirm"
 # rather than "step 1, request" when a POST lands on post(). Route names,
 # not path strings, so the dispatch doesn't need to know the literal path
