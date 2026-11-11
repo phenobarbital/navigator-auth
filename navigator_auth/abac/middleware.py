@@ -54,7 +54,7 @@ async def abac_middleware(
         return await handler(request)
     ### get Guardian:
     try:
-        response = await request.app["security"].authorize(request=request)
+        await request.app["security"].authorize(request=request)
     except (TypeError, KeyError) as ex:
         ### there is no ABAC access backend enabled:
         logging.warning(f"ABAC Warning: there is no backend installed on this system: {ex}")
