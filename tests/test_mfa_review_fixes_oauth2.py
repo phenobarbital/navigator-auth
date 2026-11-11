@@ -65,7 +65,9 @@ def provider():
     prov._create_user_session = AsyncMock(return_value=SimpleNamespace(session_id="sess-1"))
     prov._upstream_providers = lambda: []
     prov._parser = SimpleNamespace(
-        view=AsyncMock(side_effect=lambda filename, params=None, status=200, **_: web.Response(text=filename, status=status))
+        view=AsyncMock(
+            side_effect=lambda filename, params=None, status=200, **_: web.Response(text=filename, status=status)
+        )
     )
     prov.get_login_form = AsyncMock(return_value=("bob", "pw", dict(AUTHORIZE_PARAMS)))
     prov._idp.authenticate_credentials = AsyncMock(return_value={"user_id": 7, "is_active": True, "username": "bob"})
@@ -100,7 +102,9 @@ class _FakeGate:
         if result == "trusted":
             session = await issue(user, {"mfa": True, "amr": ["pwd", "trusted_device"]})
             return GateResult(session=session, device={"token": "rotated", "max_age": 3600})
-        return GateResult(challenge=LoginChallenge(token="chal-1", providers=("email", "totp"), preferred="email", expires_in=300))
+        return GateResult(
+            challenge=LoginChallenge(token="chal-1", providers=("email", "totp"), preferred="email", expires_in=300)
+        )
 
     async def verify(self, request, token, provider, code, issue, *, remember_device=False, device_label=""):
         if self.verify_error is not None:
@@ -183,7 +187,9 @@ async def test_oauth2_login_trusted_device(provider, gate, monkeypatch):
     assert extra["amr"] == ["pwd", "trusted_device"] and extra["auth_method"] == "oauth2"
     assert response.cookies[TRUSTED_COOKIE].value == "rotated"
 
-    provider.get_payload = AsyncMock(return_value={**AUTHORIZE_PARAMS, "challenge": "c", "provider": "otp", "code": "1", "remember_device": "1"})
+    provider.get_payload = AsyncMock(
+        return_value={**AUTHORIZE_PARAMS, "challenge": "c", "provider": "otp", "code": "1", "remember_device": "1"}
+    )
     response = await provider.auth_login_mfa(_request(_app(), "/oauth2/login/mfa"))
     assert response.cookies[TRUSTED_COOKIE].value == "dev-1"
 
@@ -257,11 +263,16 @@ async def test_auth_event_roundtrip_dict_user(provider):
     response = web.HTTPFound("/oauth2/authorize")
     session = SimpleNamespace(session_id="sess-9")
     await oauth_backend.Oauth2Provider._issue_auth_event(
-        provider, _request(_app()), response, session, {"user_id": "7"}, {"mfa": True, "amr": ["pwd", "totp"], "auth_method": "oauth2"}
+        provider,
+        _request(_app()),
+        response,
+        session,
+        {"user_id": "7"},
+        {"mfa": True, "amr": ["pwd", "totp"], "auth_method": "oauth2"},
     )
     handle = response.cookies[OAUTH2_EVENT_COOKIE].value
     assert response.cookies[OAUTH2_EVENT_COOKIE]["httponly"]
-    (key, (record, _ttl)), = provider._flow_store.data.items()
+    ((key, (record, _ttl)),) = provider._flow_store.data.items()
     assert key.startswith(OAUTH2_EVENT_KEY_PREFIX) and handle not in key
     assert record["user_id"] == 7 and record["session_id"] == "sess-9"
     assert record["mfa"] is True and record["amr"] == ["pwd", "totp"]
@@ -279,7 +290,11 @@ async def test_auth_event_store_failure_fails_closed(provider):
     provider._flow_store = store
     with pytest.raises(web.HTTPServiceUnavailable):
         await provider._issue_auth_event(
-            _request(_app()), web.HTTPFound("/x"), SimpleNamespace(session_id="s"), {"user_id": 1}, {"auth_method": "oauth2"}
+            _request(_app()),
+            web.HTTPFound("/x"),
+            SimpleNamespace(session_id="s"),
+            {"user_id": 1},
+            {"auth_method": "oauth2"},
         )
 
 

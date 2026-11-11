@@ -61,7 +61,6 @@ from ...conf import (
     OAUTH_REFRESH_ROTATION,
     OAUTH_SCOPES,
     # FEAT-094
-    OAUTH_INTROSPECT_INCLUDE_ABAC_SCOPES,
     OAUTH_DEVICE_CODE_TTL,
     OAUTH_DEVICE_POLL_INTERVAL,
     OAUTH_DEVICE_SLOW_DOWN_INCREMENT,
@@ -1888,9 +1887,7 @@ class Oauth2Provider(BaseAuthBackend):
                         request, data, None, error="Second factor is temporarily unavailable.", status=503
                     )
                 if code == "invalid_request":
-                    return await self._render_mfa_page(
-                        request, data, None, error="Invalid request.", status=400
-                    )
+                    return await self._render_mfa_page(request, data, None, error="Invalid request.", status=400)
                 message = (
                     "Your login expired, please sign in again."
                     if code in ("invalid_challenge", "stale_challenge")
@@ -1898,7 +1895,9 @@ class Oauth2Provider(BaseAuthBackend):
                 )
                 return await self._render_login_error(request, data, message, status=err.status or 401)
         if result.device:
-            response.set_cookie(TRUSTED_COOKIE, result.device["token"], **trusted_cookie_kwargs(result.device["max_age"]))
+            response.set_cookie(
+                TRUSTED_COOKIE, result.device["token"], **trusted_cookie_kwargs(result.device["max_age"])
+            )
         return response
 
     async def auth_login(self, request: web.Request):
@@ -2877,7 +2876,7 @@ class Oauth2Provider(BaseAuthBackend):
         Owner-binding invariant: user_id always comes from the authenticated
         session, never from client.user.
         """
-        from .models import OauthGrant, DeviceCodeStatus, OauthDeviceCode
+        from .models import DeviceCodeStatus
 
         if request.method == "GET":
             data = {key: val for (key, val) in request.query.items()}
