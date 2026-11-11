@@ -372,7 +372,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -383,8 +383,9 @@
       "parallelism_notes": "TASK-184: _load_auth_event/_create_user_session(extra) in backend.py; TASK-185: both modify backend.py, models.py and tests/test_mfa_review_fixes_oauth2_tokens.py (185 first)",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-186-oauth2-amr-propagation.md"
+      "completed_at": "2026-11-11T18:02:10+00:00",
+      "file": "sdd/tasks/completed/TASK-186-oauth2-amr-propagation.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-187",
