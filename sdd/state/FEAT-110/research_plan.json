@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "mode_hint": "enrichment",
+  "rationale": "Source is additive ('new command', 'create a docs/migrations/ folder') -> feature-shaped. Named entities: navauth self upgrade, docs/migrations/, auth.user_identities, users, identities, admin credentials.",
+  "queries": [
+    {"id": "Q001", "intent": "Orient: find existing migration machinery for auth tables.", "type": "wiki_query", "priority": 0, "params": {"question": "database migration SQL schema DDL auth tables"}},
+    {"id": "Q002", "intent": "Orient: find any existing CLI / console-script entry point.", "type": "wiki_query", "priority": 0, "params": {"question": "command line interface CLI entry point console script"}},
+    {"id": "Q003", "intent": "Orient: find what defines the auth.user_identities columns.", "type": "wiki_query", "priority": 0, "params": {"question": "user_identities table columns"}},
+    {"id": "Q004", "intent": "API outline of the identity migration runner (the table the source says is behind locally).", "type": "wiki_page", "priority": 0, "params": {"page_id": "file:navigator_auth/identity/migrations.py"}},
+    {"id": "Q005", "intent": "API outline of the vault migration runner.", "type": "wiki_page", "priority": 0, "params": {"page_id": "file:navigator_auth/vault/migrations.py"}},
+    {"id": "Q006", "intent": "API outline of the passkey startup migration.", "type": "wiki_page", "priority": 0, "params": {"page_id": "file:navigator_auth/passkey/migrations.py"}},
+    {"id": "Q007", "intent": "Learn how the existing navigator-vault CLI was specified (precedent for a new command).", "type": "wiki_page", "priority": 0, "params": {"page_id": "file:sdd/tasks/completed/TASK-076-navigator-vault-cli.md"}},
+    {"id": "Q008", "intent": "Who references the identity migration runner (startup hook vs manual).", "type": "wiki_related", "priority": 0, "params": {"page_id": "file:navigator_auth/identity/migrations.py"}},
+    {"id": "Q009", "intent": "In-flight MFA migration task: a fourth migration set that the new command must also cover.", "type": "wiki_page", "priority": 0, "params": {"page_id": "file:sdd/tasks/active/TASK-130-mfa-migrations.md"}},
+
+    {"id": "Q010", "intent": "Inventory every SQL migration file and every migrations.py runner.", "type": "glob", "priority": 1, "params": {"pattern": "navigator_auth/**/{sql/*.sql,migrations.py,*.sql}"}},
+    {"id": "Q011", "intent": "Find where the ensure_* migration functions are invoked (startup, CLI, tests).", "type": "grep", "priority": 1, "params": {"pattern": "ensure_vault_tables|ensure_passkey_tables|ensure_identity_columns|ensure_\\w+_tables", "path": "navigator_auth", "case_sensitive": true, "max_results": 40}},
+    {"id": "Q012", "intent": "Read the identity migration runner: ordering, idempotency, schema templating, failure handling.", "type": "read", "priority": 1, "params": {"path": "navigator_auth/identity/migrations.py", "lines": null}},
+    {"id": "Q013", "intent": "Read the vault migration runner for the same contract.", "type": "read", "priority": 1, "params": {"path": "navigator_auth/vault/migrations.py", "lines": null}},
+    {"id": "Q014", "intent": "Read the passkey migration runner for the same contract.", "type": "read", "priority": 1, "params": {"path": "navigator_auth/passkey/migrations.py", "lines": null}},
+    {"id": "Q015", "intent": "Locate existing CLI entry points and the arg-parsing library in use.", "type": "grep", "priority": 1, "params": {"pattern": "argparse|import click|typer|console_scripts|\\[project\\.scripts\\]|__main__", "path": ".", "include": ["navigator_auth/**", "pyproject.toml", "setup.py"], "case_sensitive": true, "max_results": 30}},
+    {"id": "Q016", "intent": "Read the existing CLI module found by Q015 (command layout, DB connection bootstrap).", "type": "read", "priority": 2, "params": {"path": "<path from Q015>", "lines": null}},
+    {"id": "Q017", "intent": "Find how DB credentials / DSN / AUTH_DB_SCHEMA are configured, to see where admin credentials would plug in.", "type": "grep", "priority": 2, "params": {"pattern": "AUTH_DB_SCHEMA|default_dsn|PG_USER|PG_PWD|DBUSER|asyncpg_url", "path": "navigator_auth/conf.py", "case_sensitive": true, "max_results": 30}},
+    {"id": "Q018", "intent": "Find DDL that lives outside the migration sql/ folders (base tables users, groups, etc. with no migration at all).", "type": "grep", "priority": 2, "params": {"pattern": "CREATE TABLE|ALTER TABLE", "path": ".", "include": ["docs/**", "documentation/**", "navigator_auth/**", "resources/**", "etc/**"], "case_sensitive": false, "max_results": 40}},
+    {"id": "Q019", "intent": "Read the newest identity migrations (004, 006) to capture the guard/idempotency style SQL files use.", "type": "read", "priority": 2, "params": {"path": "navigator_auth/identity/sql/004_identity_base_columns.sql", "lines": null}},
+    {"id": "Q020", "intent": "Read existing migration tests to learn what is asserted and how the DB is faked.", "type": "read", "priority": 3, "params": {"path": "tests/unit/identity/test_identity_migrations.py", "lines": null}},
+    {"id": "Q021", "intent": "Prove presence/absence of an applied-migrations tracking table.", "type": "grep", "priority": 3, "params": {"pattern": "schema_migrations|schema_version|applied_migrations|migration_history", "path": ".", "include": ["navigator_auth/**", "docs/**", "documentation/**"], "case_sensitive": false, "max_results": 20}},
+    {"id": "Q022", "intent": "Confirm docs/migrations/ does not exist yet and see what docs/ and documentation/ hold.", "type": "tree", "priority": 3, "params": {"path": "docs", "max_depth": 2}},
+
+    {"id": "Q023", "intent": "Recent history of identity migrations: which changes a stale local auth.user_identities is likely missing.", "type": "git_log", "priority": 1, "params": {"path": "navigator_auth/identity/", "since": "120.days.ago", "max_results": 20}},
+    {"id": "Q024", "intent": "Recent history of the vault and passkey migration runners.", "type": "git_log", "priority": 2, "params": {"path": "navigator_auth/vault/migrations.py navigator_auth/passkey/migrations.py", "since": "180.days.ago", "max_results": 15}},
+    {"id": "Q025", "intent": "History of pyproject.toml / setup.py entry points (when/if a CLI script was added).", "type": "git_log", "priority": 3, "params": {"path": "pyproject.toml setup.py", "since": "180.days.ago", "max_results": 15}}
+  ],
+  "expected_findings": [
+    "Inventory of existing per-subsystem migration runners and SQL files",
+    "Whether migrations run at app startup, via CLI, or manually",
+    "Existing CLI precedent (navigator-vault) and its DB bootstrap",
+    "How DB credentials are configured (hook for admin credentials)",
+    "Absence/presence of an applied-migrations ledger table",
+    "Base-table DDL not covered by any migration",
+    "Test patterns for migrations"
+  ],
+  "meta": {
+    "source_signals": {"named_entities": ["navauth self upgrade", "docs/migrations/", "auth.user_identities", "users", "identities", "admin credentials"], "verbs": ["create", "run", "check", "compare", "apply"], "polarity": "additive"},
+    "estimated_budget_use": {"wiki_queries": 9, "files_read": 6, "grep_calls": 7, "git_calls": 3}
+  }
+}

@@ -1,0 +1,407 @@
+[
+ {
+  "id": "c0",
+  "kind": "file",
+  "path": "navigator_auth/identity/migrations.py",
+  "min_lines": 107
+ },
+ {
+  "id": "c1",
+  "kind": "file",
+  "path": "navigator_auth/identity/sql/001_identity_credentials.sql"
+ },
+ {
+  "id": "c2",
+  "kind": "file",
+  "path": "navigator_auth/identity/sql/002_identity_id_token.sql"
+ },
+ {
+  "id": "c3",
+  "kind": "file",
+  "path": "navigator_auth/identity/sql/003_identity_key_version_integer.sql"
+ },
+ {
+  "id": "c4",
+  "kind": "file",
+  "path": "navigator_auth/identity/sql/004_identity_base_columns.sql"
+ },
+ {
+  "id": "c5",
+  "kind": "file",
+  "path": "navigator_auth/identity/sql/005_identity_legacy_uid_default.sql"
+ },
+ {
+  "id": "c6",
+  "kind": "file",
+  "path": "navigator_auth/identity/sql/006_identity_drop_legacy_uid.sql"
+ },
+ {
+  "id": "c7",
+  "kind": "file",
+  "path": "navigator_auth/vault/migrations.py",
+  "min_lines": 57
+ },
+ {
+  "id": "c8",
+  "kind": "file",
+  "path": "navigator_auth/vault/sql/001_create_vault_tables.sql"
+ },
+ {
+  "id": "c9",
+  "kind": "file",
+  "path": "navigator_auth/vault/sql/002_vault_crypto_hardening.sql"
+ },
+ {
+  "id": "c10",
+  "kind": "file",
+  "path": "navigator_auth/passkey/migrations.py",
+  "min_lines": 60
+ },
+ {
+  "id": "c11",
+  "kind": "file",
+  "path": "navigator_auth/passkey/sql/001_passkey_credentials.sql"
+ },
+ {
+  "id": "c12",
+  "kind": "file",
+  "path": "navigator_auth/backends/oauth2/ddl.sql"
+ },
+ {
+  "id": "c13",
+  "kind": "symbol",
+  "path": "navigator_auth/auth.py",
+  "name": "auth_startup"
+ },
+ {
+  "id": "c14",
+  "kind": "symbol",
+  "path": "navigator_auth/auth.py",
+  "name": "setup_identity_columns"
+ },
+ {
+  "id": "c15",
+  "kind": "symbol",
+  "path": "navigator_auth/vault/integration.py",
+  "name": "setup_vault_tables"
+ },
+ {
+  "id": "c16",
+  "kind": "symbol",
+  "path": "navigator_auth/backends/passkey.py",
+  "name": "on_startup"
+ },
+ {
+  "id": "c17",
+  "kind": "symbol",
+  "path": "tests/unit/identity/test_identity_migrations.py",
+  "name": "test_applies_the_rest_when_one_migration_fails"
+ },
+ {
+  "id": "c18",
+  "kind": "file",
+  "path": "examples/sql/identity_vault_schema.sql"
+ },
+ {
+  "id": "c19",
+  "kind": "symbol",
+  "path": "navigator_auth/identity/migrations.py",
+  "name": "_MIGRATION_FILES"
+ },
+ {
+  "id": "c20",
+  "kind": "symbol",
+  "path": "navigator_auth/identity/migrations.py",
+  "name": "_run_sql"
+ },
+ {
+  "id": "c21",
+  "kind": "symbol",
+  "path": "navigator_auth/identity/migrations.py",
+  "name": "ensure_identity_columns"
+ },
+ {
+  "id": "c22",
+  "kind": "symbol",
+  "path": "navigator_auth/identity/migrations.py",
+  "name": "setup_identity_columns"
+ },
+ {
+  "id": "c23",
+  "kind": "symbol",
+  "path": "navigator_auth/identity/targets.py",
+  "name": "IdentityTarget"
+ },
+ {
+  "id": "c24",
+  "kind": "symbol",
+  "path": "tests/unit/identity/test_identity_migrations.py",
+  "name": "test_base_columns_sql_is_additive_and_guarded"
+ },
+ {
+  "id": "c25",
+  "kind": "file",
+  "path": "documentation/identity-vault.md"
+ },
+ {
+  "id": "c26",
+  "kind": "symbol",
+  "path": "navigator_auth/vault/migrations.py",
+  "name": "MIGRATION_FILES"
+ },
+ {
+  "id": "c27",
+  "kind": "symbol",
+  "path": "navigator_auth/vault/migrations.py",
+  "name": "_run_sql"
+ },
+ {
+  "id": "c28",
+  "kind": "symbol",
+  "path": "navigator_auth/vault/migrations.py",
+  "name": "ensure_vault_tables"
+ },
+ {
+  "id": "c29",
+  "kind": "symbol",
+  "path": "navigator_auth/passkey/migrations.py",
+  "name": "render_sql"
+ },
+ {
+  "id": "c30",
+  "kind": "symbol",
+  "path": "navigator_auth/passkey/migrations.py",
+  "name": "ensure_passkey_tables"
+ },
+ {
+  "id": "c31",
+  "kind": "symbol",
+  "path": "navigator_auth/passkey/migrations.py",
+  "name": "setup_passkey_tables"
+ },
+ {
+  "id": "c32",
+  "kind": "symbol",
+  "path": "navigator_auth/passkey/migrations.py",
+  "name": "_MIGRATION_FILES"
+ },
+ {
+  "id": "c33",
+  "kind": "file",
+  "path": "navigator_auth/conf.py"
+ },
+ {
+  "id": "c34",
+  "kind": "symbol",
+  "path": "navigator_auth/conf.py",
+  "name": "AUTH_USERS_TABLE"
+ },
+ {
+  "id": "c35",
+  "kind": "file",
+  "path": "pyproject.toml",
+  "min_lines": 77
+ },
+ {
+  "id": "c36",
+  "kind": "file",
+  "path": "navigator_auth/identity/targets.py",
+  "min_lines": 4
+ },
+ {
+  "id": "c37",
+  "kind": "symbol",
+  "path": "navigator_auth/conf.py",
+  "name": "AUTH_DB_SCHEMA"
+ },
+ {
+  "id": "c38",
+  "kind": "symbol",
+  "path": "navigator_auth/conf.py",
+  "name": "default_dsn"
+ },
+ {
+  "id": "c39",
+  "kind": "file",
+  "path": "navigator_auth/backends/oauth2/ddl.sql",
+  "min_lines": 33
+ },
+ {
+  "id": "c40",
+  "kind": "file",
+  "path": "documentation/client_changes.md",
+  "min_lines": 26
+ },
+ {
+  "id": "c41",
+  "kind": "file",
+  "path": "documentation/audit-log.md",
+  "min_lines": 170
+ },
+ {
+  "id": "c42",
+  "kind": "file",
+  "path": "documentation/client_changes.md"
+ },
+ {
+  "id": "c43",
+  "kind": "file",
+  "path": "navigator_auth/identity/sql/004_identity_base_columns.sql",
+  "min_lines": 23
+ },
+ {
+  "id": "c44",
+  "kind": "file",
+  "path": "navigator_auth/identity/sql/004_identity_base_columns.sql",
+  "min_lines": 57
+ },
+ {
+  "id": "c45",
+  "kind": "symbol",
+  "path": "tests/unit/identity/test_identity_migrations.py",
+  "name": "_make_failing_pool"
+ },
+ {
+  "id": "c46",
+  "kind": "symbol",
+  "path": "tests/unit/identity/test_identity_migrations.py",
+  "name": "TestSQLFile"
+ },
+ {
+  "id": "c47",
+  "kind": "symbol",
+  "path": "tests/unit/identity/test_identity_migrations.py",
+  "name": "TestEnsureIdentityColumns"
+ },
+ {
+  "id": "c48",
+  "kind": "symbol",
+  "path": "tests/unit/identity/test_identity_migrations.py",
+  "name": "TestSetupIdentityColumns"
+ },
+ {
+  "id": "c49",
+  "kind": "file",
+  "path": "tests/unit/vault/test_migrations.py"
+ },
+ {
+  "id": "c50",
+  "kind": "file",
+  "path": "tests/test_passkey_migrations.py"
+ },
+ {
+  "id": "c51",
+  "kind": "file",
+  "path": "docs/conf.py"
+ },
+ {
+  "id": "c52",
+  "kind": "file",
+  "path": "docs/index.rst"
+ },
+ {
+  "id": "c53",
+  "kind": "file",
+  "path": "docs/settings.rst"
+ },
+ {
+  "id": "c54",
+  "kind": "file",
+  "path": "docs/vault.rst"
+ },
+ {
+  "id": "c55",
+  "kind": "file",
+  "path": "docs/sdd/CODEX.md"
+ },
+ {
+  "id": "c56",
+  "kind": "file",
+  "path": "pyproject.toml",
+  "min_lines": 89
+ },
+ {
+  "id": "c57",
+  "kind": "file",
+  "path": "MANIFEST.in",
+  "min_lines": 11
+ },
+ {
+  "id": "c58",
+  "kind": "symbol",
+  "path": "navigator_auth/identity/migrations.py",
+  "name": "SQL_DIR"
+ },
+ {
+  "id": "c59",
+  "kind": "file",
+  "path": "navigator_auth/identity/migrations.py"
+ },
+ {
+  "id": "c60",
+  "kind": "file",
+  "path": "navigator_auth/identity/store.py"
+ },
+ {
+  "id": "c61",
+  "kind": "file",
+  "path": "navigator_auth/passkey/migrations.py"
+ },
+ {
+  "id": "c62",
+  "kind": "file",
+  "path": "navigator_auth/vault/migrations.py"
+ },
+ {
+  "id": "c63",
+  "kind": "file",
+  "path": "pyproject.toml"
+ },
+ {
+  "id": "c64",
+  "kind": "file",
+  "path": "setup.py"
+ },
+ {
+  "id": "c65",
+  "kind": "file",
+  "path": "navigator_auth/vault/sql"
+ },
+ {
+  "id": "c66",
+  "kind": "file",
+  "path": "sdd/tasks/active/TASK-130-mfa-migrations.md"
+ },
+ {
+  "id": "c67",
+  "kind": "file",
+  "path": "sdd/tasks/completed/TASK-102-identity-base-columns-migration.md"
+ },
+ {
+  "id": "c68",
+  "kind": "symbol",
+  "path": "tests/test_passkey_migrations.py",
+  "name": "test_ensure_passkey_tables_uses_pool"
+ },
+ {
+  "id": "c69",
+  "kind": "file",
+  "path": ".agent/skills/database-schema-validator/SKILL.md"
+ },
+ {
+  "id": "c70",
+  "kind": "file",
+  "path": "sdd/tasks/completed/TASK-076-navigator-vault-cli.md"
+ },
+ {
+  "id": "c71",
+  "kind": "file",
+  "path": ".agent/workflows/run-python-command.md"
+ },
+ {
+  "id": "c72",
+  "kind": "symbol",
+  "path": "tests/unit/identity/test_identity_vault_v2.py",
+  "name": "test_entry_point_declared"
+ }
+]
