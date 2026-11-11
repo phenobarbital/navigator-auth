@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-108 — OAuth2 3LO examples work end-to-end — auth paths fail closed on misconfiguration and unknown users
 **Spec**: `sdd/specs/oauth2-3lo-issues.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-195, TASK-196, TASK-202, TASK-205
@@ -225,3 +225,7 @@ When you pick up this task:
 **Notes**:
 
 **Deviations from spec**: none
+
+## Completion Note
+
+Native haiku delivery (edits only; could not run Bash). Orchestrator ran tests/test_oauth2_examples_wiring.py (6 passed) and committed the three declared files in the sub-worktree, then merged. Not verified by the coder: refresh-grant, device-resume and APIKeyAuth claims in the changelog were taken from the completion notes of TASK-204/205/197/199.
