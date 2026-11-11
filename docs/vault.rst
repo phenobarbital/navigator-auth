@@ -39,6 +39,29 @@ navigator-auth registers its stores through the
 (``navigator_auth.identity.targets:factory``), which is what makes them visible
 to ``navigator-vault list-targets``.
 
+In-process rotation
+-------------------
+
+``navigator-vault`` opens its own asyncpg pool. Code that rotates or migrates in
+process with the application's ``authdb`` pool (an asyncdb pool) must give the
+targets native asyncpg connections: the asyncdb driver's ``execute()`` never
+raises, so a failed or row-less write would be counted as rotated.
+navigator-auth's targets (``IdentityTarget``, ``MfaSecretTarget``) wrap the pool
+they receive with ``navigator_auth.vault.asyncpg_pool``. Wrap the pool yourself
+for navigator-session's targets:
+
+.. code-block:: python
+
+    from navigator_session.vault import rotate_master_key
+    from navigator_session.vault.targets import UserVaultTarget
+    from navigator_auth.mfa.targets import MfaSecretTarget
+    from navigator_auth.vault import asyncpg_pool
+
+    await rotate_master_key(
+        [UserVaultTarget(asyncpg_pool(authdb)), MfaSecretTarget(authdb)],
+        old_key_id, new_key_id, keyring,
+    )
+
 Schema migrations
 -----------------
 
