@@ -68,7 +68,6 @@ from navigator_auth.exceptions import UserNotFound  # noqa: E402
 from navigator_auth.models import User  # noqa: E402
 import navigator_auth.conf as nav_conf  # noqa: E402
 
-
 #: RFC 7518 §3.2: an HS256 key must be at least 32 bytes.
 _MIN_SECRET_BYTES = 32
 
