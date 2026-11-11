@@ -32,10 +32,10 @@ from ..passkey.migrations import ensure_passkey_tables
 from ..responses import JSONResponse
 from .abstract import user_is_active
 from .basic import BasicAuth
-from ..mfa.events import security_transition
-from ..mfa.exceptions import MfaStorageError
+from ..mfa.events import TransitionAborted, security_transition
+from ..mfa.exceptions import MfaStorageError, MfaUnavailable
 from ..mfa.notify import notify_security_event
-from ..mfa.services import get_mfa_services
+from ..mfa.services import mfa_services_lease
 from ..mfa.state import usable_email
 from ..mfa.types import MfaSecurityNotice
 
@@ -319,10 +319,16 @@ class PasskeyAuth(BasicAuth):
                 raise web.HTTPConflict(reason="Passkey: credential already registered")
             async with security_transition(
                 request.app, user.user_id, "passkey_registered", actor_user_id=user.user_id, revoke_devices=False
-            ):
-                await self._store.save_credential(stored)
+            ) as conn:
+                await self._store.save_credential(stored, conn=conn)
         except web.HTTPException:
             raise
+        except (MfaUnavailable, MfaStorageError) as err:
+            self.logger.warning(f"Passkey: registration transition failed for user {user.user_id}: {type(err).__name__}")
+            raise web.HTTPServiceUnavailable(
+                text=json.dumps({"error": "mfa_unavailable", "reason": "Passkey: MFA storage unavailable"}),
+                content_type="application/json",
+            ) from err
         except Exception as err:  # pylint: disable=W0703
             if "unique" in type(err).__name__.lower() or "duplicate key" in str(err).lower():
                 raise web.HTTPConflict(reason="Passkey: credential already registered") from err
@@ -557,27 +563,36 @@ class PasskeyAuth(BasicAuth):
 
     @_json_errors
     async def delete_credential(self, request: web.Request) -> web.Response:
-        """Delete one of the caller's passkeys; 409 when it would lock the user out (E13)."""
+        """Delete one of the caller's passkeys; 409 when it would lock the user out (E13).
+
+        The guard and the DELETE run on the security-transition connection, so the removal
+        commits or rolls back together with the MFA bump/audit (FEAT-106 review A2, AC16).
+        """
         user = self._session_user(request)
         credential_id = self._credential_id(request)
         owned = await self._store.list_credentials(user.user_id)
         if credential_id not in {c.credential_id for c in owned}:
             raise web.HTTPNotFound(reason="Passkey: credential not found")
         guard_last = not await self._has_other_login_method(user.user_id)
-        services = get_mfa_services(request.app)
-        record, guard_strong = await self._mfa_strong_factor_guard(services, user.user_id)
-        async with security_transition(
-            request.app, user.user_id, "passkey_removed", actor_user_id=user.user_id
-        ) as conn:
-            if guard_strong:
-                if conn is None:
-                    raise web.HTTPServiceUnavailable(
-                        text=json.dumps({"error": "mfa_unavailable", "reason": "Passkey: MFA storage unavailable"}),
-                        content_type="application/json",
-                    )
-                totp = await services.state.totp_confirmed(user.user_id, conn=conn)
-                count = await services.state.passkey_count(user.user_id, conn=conn)
-                if not totp and count <= 1:
+        async with mfa_services_lease(request.app) as services:
+            try:
+                record, guard_strong = await self._mfa_strong_factor_guard(services, user.user_id)
+                async with security_transition(
+                    request.app, user.user_id, "passkey_removed", actor_user_id=user.user_id
+                ) as conn:
+                    if guard_strong:
+                        totp = await services.state.totp_confirmed(user.user_id, conn=conn)
+                        count = await services.state.passkey_count(user.user_id, conn=conn)
+                        if not totp and count <= 1:
+                            raise TransitionAborted("strong_factor_required")
+                    # With no other login method the store deletes only if another passkey remains,
+                    # atomically (two concurrent deletes cannot both succeed).
+                    if not await self._store.delete_credential(
+                        user.user_id, credential_id, keep_last=guard_last, conn=conn
+                    ):
+                        raise TransitionAborted("last_login_method" if guard_last else "not_found")
+            except TransitionAborted as aborted:
+                if aborted.reason == "strong_factor_required":
                     raise web.HTTPConflict(
                         text=json.dumps(
                             {
@@ -586,14 +601,19 @@ class PasskeyAuth(BasicAuth):
                             }
                         ),
                         content_type="application/json",
-                    )
-            # With no other login method the store deletes only if another passkey remains,
-            # atomically (two concurrent deletes cannot both succeed).
-            if not await self._store.delete_credential(user.user_id, credential_id, keep_last=guard_last):
-                if guard_last:
-                    raise web.HTTPConflict(reason="Passkey: cannot delete the last login method")
-                raise web.HTTPNotFound(reason="Passkey: credential not found")
-        await self._notify_if_downgraded(services, record)
+                    ) from aborted
+                if aborted.reason == "last_login_method":
+                    raise web.HTTPConflict(reason="Passkey: cannot delete the last login method") from aborted
+                if aborted.reason == "not_found":
+                    raise web.HTTPNotFound(reason="Passkey: credential not found") from aborted
+                raise
+            except (MfaUnavailable, MfaStorageError) as err:
+                self.logger.warning(f"Passkey: removal transition failed for user {user.user_id}: {type(err).__name__}")
+                raise web.HTTPServiceUnavailable(
+                    text=json.dumps({"error": "mfa_unavailable", "reason": "Passkey: MFA storage unavailable"}),
+                    content_type="application/json",
+                ) from err
+            await self._notify_if_downgraded(services, record)
         return web.Response(status=204)
 
     async def _has_other_login_method(self, user_id: int) -> bool:
