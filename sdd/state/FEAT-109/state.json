@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "feat_id": "FEAT-109",
   "started_at": "2026-11-11T14:40:00Z",
-  "updated_at": "2026-11-11T15:02:00Z",
+  "updated_at": "2026-11-11T15:04:00Z",
   "source": {
     "kind": "inline",
     "jira_key": null,
@@ -14,7 +14,7 @@
   },
   "mode": "investigation",
   "wiki_available": true,
-  "phase": "proposal_drafted",
+  "phase": "committed",
   "budget": {
     "profile": "default",
     "files_read": 40,
@@ -146,11 +146,12 @@
       "questions_answered": 4
     },
     "output": {
-      "proposal_path": "sdd/proposals/policy-issues.proposal.md"
+      "proposal_path": "sdd/proposals/policy-issues.proposal.md",
+      "commit_sha": "67279dc"
     }
   },
   "resume_hint": {
-    "next_phase": "commit",
-    "next_action": "/sdd-proposal --resume FEAT-109"
+    "next_phase": "done",
+    "next_action": "/sdd-spec sdd/proposals/policy-issues.proposal.md"
   }
 }
