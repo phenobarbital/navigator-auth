@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -14,7 +15,7 @@ from navigator_auth.handlers.recovery.store import (
     _hash_token,
 )
 from navigator_auth.handlers.recovery.limiter import RateLimiter
-from navigator_auth.handlers.recovery.revoke import SessionRevoker
+from navigator_auth.handlers.recovery.revoke import RevocationError, SessionRevoker
 from navigator_auth.libs.json import json_encoder, json_decoder
 from navigator_auth.models import User
 
@@ -449,6 +450,100 @@ class TestSessionRevoker:
         count = await revoker.revoke_user(fake_request, user)
         assert count == 1   # only the successful one counted
         assert storage.revoke.call_count == 2
+
+
+class TestStrictSessionRevoker:
+    """FEAT-106 review fixes (spec M4, AC31): strict revocation propagates every failure."""
+
+    @staticmethod
+    def _request(storage):
+        backend = SimpleNamespace(access_token_storage=storage)
+        return SimpleNamespace(app={"auth": SimpleNamespace(backends={"BasicAuth": backend})})
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_on_token_revoke_failure_after_attempting_all(
+        self, revoker, redis_pool, access_token_storage
+    ):
+        """One failing jti revoke -> RevocationError, but the other jti is still revoked and pruned."""
+        storage = access_token_storage
+        storage.revoke = AsyncMock(side_effect=[Exception("boom"), True])
+        user_id = 918274
+        key = f"auth:user:jti:{user_id}"
+        async with aioredis.Redis(connection_pool=redis_pool) as r:
+            await r.delete(key)
+            await r.sadd(key, "jti-a", "jti-b")
+        user = SimpleNamespace(user_id=user_id, username="strict_user_1")
+        with pytest.raises(RevocationError) as ei:
+            await revoker.revoke_user(self._request(storage), user, strict=True)
+        assert "jti_revoke" in str(ei.value)
+        assert "jti-a" not in str(ei.value) and "jti-b" not in str(ei.value)
+        assert storage.revoke.call_count == 2
+        async with aioredis.Redis(connection_pool=redis_pool) as r:
+            remaining = await r.smembers(key)
+            await r.delete(key)
+        assert len(remaining) == 1
+
+    @pytest.mark.asyncio
+    async def test_strict_retry_converges(self, revoker, redis_pool, access_token_storage):
+        """After a partial failure, a retry with a healthy storage revokes the rest and returns normally."""
+        storage = access_token_storage
+        user_id = 918275
+        key = f"auth:user:jti:{user_id}"
+        async with aioredis.Redis(connection_pool=redis_pool) as r:
+            await r.delete(key)
+            await r.sadd(key, "jti-c", "jti-d")
+        user = SimpleNamespace(user_id=user_id, username="strict_user_2")
+        storage.revoke = AsyncMock(side_effect=[Exception("boom"), True])
+        with pytest.raises(RevocationError):
+            await revoker.revoke_user(self._request(storage), user, strict=True)
+        storage.revoke = AsyncMock(return_value=True)
+        count = await revoker.revoke_user(self._request(storage), user, strict=True)
+        assert count == 1
+        async with aioredis.Redis(connection_pool=redis_pool) as r:
+            assert await r.smembers(key) == set()
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_when_jti_index_unreadable(self, revoker, access_token_storage):
+        storage = access_token_storage
+        storage.redis.smembers = AsyncMock(side_effect=ConnectionError("down"))
+        user = SimpleNamespace(user_id=918276, username="strict_user_3")
+        with pytest.raises(RevocationError, match="jti_index_unreadable"):
+            await revoker.revoke_user(self._request(storage), user, strict=True)
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_when_session_store_unreachable(self, broken_redis_pool, access_token_storage):
+        broken = SessionRevoker(broken_redis_pool)
+        user = SimpleNamespace(user_id=918277, username="strict_user_4")
+        with pytest.raises(RevocationError, match="session_store_unreachable"):
+            await broken.revoke_user(self._request(access_token_storage), user, strict=True)
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_without_required_backend(self, revoker):
+        """request None / no auth handler / no access_token_storage are failures in strict mode only."""
+        user = SimpleNamespace(user_id=918278, username="strict_user_5")
+        requests = [
+            None,
+            SimpleNamespace(app={}),
+            SimpleNamespace(app={"auth": SimpleNamespace(backends={"b": SimpleNamespace()})}),
+        ]
+        for req in requests:
+            with pytest.raises(RevocationError, match="jti_backend_missing"):
+                await revoker.revoke_user(req, user, strict=True)
+            assert isinstance(await revoker.revoke_user(req, user), int)
+
+    def test_session_revoker_is_the_process_wide_instance(self):
+        from navigator_auth.handlers.recovery.handler import PasswordRecoveryHandler
+
+        names = ("_pool", "_store", "_policy", "_email_limiter", "_ip_limiter", "_revoker")
+        saved = {n: getattr(PasswordRecoveryHandler, n) for n in names}
+        try:
+            revoker = PasswordRecoveryHandler.session_revoker()
+            assert isinstance(revoker, SessionRevoker)
+            assert revoker is PasswordRecoveryHandler.session_revoker() is PasswordRecoveryHandler._revoker
+        finally:
+            # Resources built here use unpatched settings; later live tests must build their own.
+            for n, v in saved.items():
+                setattr(PasswordRecoveryHandler, n, v)
 
 
 class TestNotificationPayloadSecrecy:

@@ -150,6 +150,16 @@ class PasswordRecoveryHandler(BaseView):
         cls._ip_limiter = RateLimiter(cls._pool, AUTH_RECOVERY_RATE_IP, "ip")
         cls._revoker = SessionRevoker(cls._pool)
 
+    @classmethod
+    def session_revoker(cls) -> SessionRevoker:
+        """Return the single process-wide ``SessionRevoker`` (FEAT-106 review fixes, spec M4 / G9).
+
+        ``password_reset`` (``handlers/users/session.py``) revokes the target user's sessions and tokens
+        with the same instance recovery completion uses, so both share one Redis pool.
+        """
+        cls._ensure_resources()
+        return cls._revoker
+
     def __init__(self, request, *args, **kwargs):
         super().__init__(request, *args, **kwargs)
         self._ensure_resources()
