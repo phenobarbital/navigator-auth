@@ -58,3 +58,21 @@ def test_callback_page_sends_verifier_and_checks_state():
     assert "saved.state !== state" in html
     assert "nav_oauth2_index_pkce" in html
     assert "sessionStorage.removeItem(STORE)" in html
+
+
+CHANGELOG = ROOT / "CHANGELOG.md"
+README = ROOT / "examples" / "README.md"
+
+
+def test_changelog_records_feat108_behaviour_changes():
+    """AC20 — the client-visible changes and the custom-IdP contract are in the Unreleased section."""
+    unreleased = CHANGELOG.read_text().split("\n# ", 1)[0]
+    for needle in ("FEAT-108", "IdentityStoreUnavailable", "allow_anonymous", "invalid_grant", "503"):
+        assert needle in unreleased, needle
+
+
+def test_readme_documents_pinned_backends_and_pkce():
+    """AC20 — both new README subsections exist and name the facts they explain."""
+    text = README.read_text()
+    assert "### Why it pins its backends" in text and "authz_backends=[]" in text
+    assert "### Browser walk-through (PKCE)" in text and "crypto.subtle" in text
