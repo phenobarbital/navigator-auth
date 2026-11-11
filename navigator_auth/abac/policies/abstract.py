@@ -91,11 +91,16 @@ class AbstractPolicy(ABC):
         self.conditions: dict = {}
         if isinstance(actions, list):
             self.actions = [ActionKey(r) for r in actions]
+        # raw_resources keeps the resource strings verbatim: Resource objects
+        # drop them for non-URI URNs, and PolicyAdapter.from_policy needs them.
         if type(resource) == str:  # pylint: disable=C0123  # noqa: E721
-            self.resources = list(Resource(resource))
+            self.raw_resources: list[str] = [resource]
+            self.resources = [Resource(resource)]
         elif isinstance(resource, list):
+            self.raw_resources = [str(r) for r in resource]
             self.resources = [Resource(r) for r in resource]
         else:
+            self.raw_resources = []
             self.resources = None
         if isinstance(context, dict):
             self.context = context
