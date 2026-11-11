@@ -22,7 +22,6 @@ from navigator_auth.migrations.runner import (
     upgrade,
 )
 
-
 class AwaitableAcquire:
     """Awaitable pool-acquire result without async-context-manager methods."""
 
@@ -294,7 +293,11 @@ async def test_missing_prerequisites_and_oauth2_postconditions_fail(tmp_catalog,
     assert len(report.failed) == 1 and "missing base table" in report.failed[0].error
     assert not fake_conn.ledger
 
-    fake_conn.relations |= {f"{AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE}", f"{AUTH_DB_SCHEMA}.clients", f"{AUTH_DB_SCHEMA}.policies"}
+    fake_conn.relations |= {
+        f"{AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE}",
+        f"{AUTH_DB_SCHEMA}.clients",
+        f"{AUTH_DB_SCHEMA}.policies",
+    }
     report = await upgrade(fake_conn, sets=["oauth2"], runtime_role=ROLE)
     assert len(report.failed) == 1 and "client_access" in report.failed[0].error
     assert not fake_conn.ledger
