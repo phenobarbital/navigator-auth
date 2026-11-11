@@ -26,6 +26,7 @@ from .storages.abstract import AbstractStorage
 from .storages.yaml_storage import YAMLStorage
 from .audit import AuditLog
 from .middleware import abac_middleware
+from ..middlewares.protected_paths import install_protected_paths
 
 # Maximum number of per-tenant evaluator instances kept in the LRU.
 _TENANT_EVALUATOR_LRU_SIZE = 128
@@ -361,6 +362,9 @@ class PDP:
         # middlewares: appended here it already does when AuthHandler.setup()
         # ran first; otherwise AuthHandler.setup() moves it behind them.
         mdl.append(abac_middleware)
+        # System paths stay closed whatever the policies say (and even when
+        # the PDP is used without AuthHandler).
+        install_protected_paths(self.app)
         ### create the API endpoint for this ABAC
         pep = PEP()
         self.app.router.add_post(
