@@ -108,7 +108,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -118,8 +118,9 @@
       "parallelism_notes": "TASK-172: both modify navigator_auth/mfa/totp.py; exclusive: applies DDL migration 002_mfa_secrets.sql against the shared live test database and edits pyproject.toml",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-174-mfa-secrets-table-rotation-target.md"
+      "completed_at": "2026-11-11T16:45:37+00:00",
+      "file": "sdd/tasks/completed/TASK-174-mfa-secrets-table-rotation-target.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-175",
