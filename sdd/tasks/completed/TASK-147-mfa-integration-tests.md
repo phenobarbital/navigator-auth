@@ -396,7 +396,53 @@ Locate each test with `grep -rn "def <name>" tests/`. Owning task per contract �
 
 **Completed by**: gpt-5.6-luna (codex) + worker fixes
 **Date**: 2026-11-11
-**Notes**: PARTIAL. tests/test_mfa_e2e.py delivered by gpt-5.6-luna (attempt 2 after an empty terra delivery); merged manually (51a927d) because the engine's task-tier gate was unavailable for that attempt. Worker fixes: missing fixture import (mfa_db etc.); mfa_app pinned to BasicAuth via AuthHandler(backends=...) because the backend loop was calling Azure over the network; the backend-loop-vs-explicit test now asserts refusal/no-session instead of 401 parity. Merge-tier: 21 passed on Postgres/Redis.
-GAP: most flow tests (login email/TOTP e2e, enforce-tenant no-lockout, TOTP enrolment closes email path, remember-me, device revocation, cross-tenant, security-transition races, superuser recovery, redis outage, no-secret-in-logs) are hollow — they only call _assert_live_row(mfa_app) or assert a constant — so the AC traceability table is NOT demonstrated. Tracked as ledger issue:c8f556d572ea.
+**Notes**: First delivery by gpt-5.6-luna was hollow (rows only asserted a live client; tracked as ledger issue:c8f556d572ea).
+Test gap CLOSED (2026-11-11): tests/test_mfa_e2e.py rewritten — all 15 spec §4 rows and the six sweep tests drive a real AuthHandler(BasicAuth) app over HTTP on live Postgres + Redis (MFA services built by on_startup). Test-only seams, none bypassing a check: frozen TOTP clock; e-mail OTP / recovery callbacks pointed at capture functions (EmailOTPProvider binds its callback default at import time, so the built provider's _callback is set after startup); app["abac"] holder that is empty (fail-closed) except row 15, which loads the shipped mfa_admin_access pack via PolicyAdapter; a get_userdata user-attribute provider that adds `groups` for row 15's admin (BasicAuth sessions carry no groups).
+Run: 21 passed + 1 strict xfail (see Bugs) in ~16 s; `pytest tests/test_mfa_*.py` 183 passed, 2 skipped (pre-existing in test_mfa_policy_state.py: "cannot create membership"), 1 xfailed.
+Mutation check (each killed): no device revocation in security_transition (rows 6, 7); no version/digest check in _revalidate (rows 11, 12, 13); no trusted-cookie rotation (row 5); e-mail offered to strong-factor users (rows 3, 4, 15).
+Row 9 form: the PDP's declarative conditions cannot read `amr` (EvalContext has no first-class amr), so the fresh-factor requirement is the documented Python check over ctx.userinfo["amr"] (requires_fresh_factor). EvalContext values must be read by attribute (ctx.mfa), as ResourcePolicy does; ctx["mfa"] hits __missing__ and returns False.
+Row 13 jitters the verify start (0–150 ms, last iteration strictly after recovery) so both orderings occur every run (observed 2 verified-then-revoked, 8 refused).
+Bugs found (NOT fixed here — outside MFA modules, pre-existing on dev):
+1. auth.py finalize_login (line ~522) and api_refresh_token (~433) call asyncdb `redis.setex(key, 7776000, str(user_id))`, but asyncdb's signature is setex(key, value, timeout): the refresh-token record stores "7776000" with a TTL of user_id seconds, so api_refresh_token resolves every refresh token to user 7776000. Documented by test_refresh_token_key_maps_to_user (xfail strict=True — it will fail loudly once fixed, prompting removal of the marker).
+2. AC3 regression: tests/test_passkey_signin.py hangs in its module-scoped passkey_app fixture; reproduced identically on origin/dev @ 27667f2 (baseline tree), so not caused by FEAT-106. test_basic_auth.py (8) and test_eval_context_auth_method.py (1) pass.
 
-**Deviations from spec**: backend-loop vs explicit-backend login: the task text says both return 401 with identical key sets; the legacy loop returns 403 (ForbiddenAccess) while explicit returns 401 (unchanged by FEAT-106). The test asserts refusal + no session/token instead.
+AC traceability (FEAT-106 spec AC1–AC34):
+
+| Spec AC | Proven by (test → owning task) | Status |
+|---|---|---|
+| AC1 | `pytest tests/test_mfa_*.py` — 183 passed, 2 skipped (pre-existing), 1 xfail (bug 1) | ✅ |
+| AC2 | rows 1–15 of `tests/test_mfa_e2e.py` (147) | ✅ |
+| AC3 | test_basic_auth.py, test_eval_context_auth_method.py pass; test_passkey_signin.py hangs on dev too (bug 2) | ⚠️ pre-existing hang |
+| AC4 | `git diff dev -- pyproject.toml` empty + test_no_forbidden_runtime_dependency (147) | ✅ |
+| AC5 | refined grep empty + test_no_session_minting_reference_in_mfa_package (147) | ✅ |
+| AC6 | test_mfa_required_payload_has_no_token (138), test_api_login_mfa_required_creates_no_session (139), row 1 | ✅ |
+| AC7 | test_api_login_mfa_required_does_not_try_next_backend (139) | ✅ |
+| AC8 | test_enforced_floor_is_email_without_enrolment (135), row 3 | ✅ |
+| AC9 | test_strong_factor_closes_email, test_registered_passkey_closes_email (135), row 4 | ✅ |
+| AC10 | test_passkey_signin_never_challenged (138) | ✅ |
+| AC11 | test_token_exchange_never_challenged (138) | ✅ |
+| AC12 | test_redis_outage_refuses_verification (147), test_verify_fails_closed_when_store_fails (140) | ⚠️ no limiter fail-closed test (test_strict_limiter_fails_closed absent in 131) |
+| AC13 | test_totp_accepts_exact_skew_window, test_totp_rejects_outside_window_and_malformed_codes (136); step burned in test_totp_confirmation_single_use (141) | ⚠️ no verify-level replay test (test_totp_replay_rejected absent in 136) |
+| AC14 | test_notification_payload_repr_redacted, test_mfa_models_frozen_and_redacted (129), test_no_secret_in_logs (147), test_enroll_response_is_only_secret_carrier (141) | ✅ |
+| AC15 | test_preflight_blocks_users_without_email, test_preflight_blocks_superuser_without_strong_factor (146), row 3 | ✅ |
+| AC16 | test_admin_disenroll_requires_mfa_action, test_admin_disenroll_changes_nothing_but_otp (142), row 15 | ✅ |
+| AC17 | test_trusted_device_not_offered_to_email_state (133), row 5 | ✅ |
+| AC18 | rows 6, 7, 8; test_admin_disenroll_revokes_trusted_devices (142); test_totp_confirmation_single_use, test_factor_transitions_write_durable_audit (141) | ✅ |
+| AC19 | row 5 | ✅ |
+| AC20 | test_2fa_disabled_login_unchanged (147) | ✅ |
+| AC21 | docs/two_factor_auth.rst (148) — review, not a test | ➖ manual |
+| AC22 | test_policy_read_is_per_login_not_cached, test_resolver_ignores_tenant_headers (135), row 10 | ✅ |
+| AC23 | test_factor_transitions_write_durable_audit (141), test_admin_disenroll_audits_actor_target_org (142), row 8 policy_change rows, rows 6/7 transition rows | ✅ |
+| AC24 | test_missing_mfa_tables_refuse_login (138) | ✅ |
+| AC25 | row 10 (sealed seed copied to another user does not verify — AAD binds user_id); row 2 (seed read at login without a session) | ✅ (test_totp_seed_read_without_session absent in 136) |
+| AC26 | test_admin_disenroll_rejects_foreign_tenant (142) | ✅ |
+| AC27 | test_deleting_last_passkey_reopens_email (135) | ✅ |
+| AC28 | test_vault_rejects_mfa_namespace (143) | ✅ |
+| AC29 | test_totp_enrollment_requires_fresh_auth, test_totp_pending_seed_isolated (141) | ✅ |
+| AC30 | test_stale_challenge_rejected (140), test_email_challenge_invalid_after_totp_confirmation (141 unit), rows 11, 12, 13 | ✅ |
+| AC31 | test_challenge_retry_budget, test_concurrent_verify_consumes_once, test_expiry_during_verification (140), row 13 | ✅ |
+| AC32 | test_explicit_backend_mfa_response (139), row 14, test_api_login_backend_loop_and_explicit_backend_same_envelope (147) | ✅ |
+| AC33 | test_enforced_superuser_requires_strong_factor_at_login (138), row 15, test_disenroll_superuser_last_factor_refused (141) | ✅ |
+| AC34 | test_mfa_models_frozen_and_redacted (129) | ✅ |
+
+**Deviations from spec**: test_api_login_backend_loop_and_explicit_backend_same_envelope now tests AC32 as written — an MFA-owing user gets the identical 401 challenge envelope from the backend loop and from X-Auth-Method: BasicAuth. The earlier unknown-user comparison (legacy 403 vs 401, unchanged by FEAT-106) was dropped as it does not concern the MFA envelope. Row 14's spec wording ("Redis has auth:refresh_token:<rt>") is asserted as key existence; the key's value is wrong because of pre-existing bug 1 (strict xfail).
