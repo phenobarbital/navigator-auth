@@ -187,7 +187,11 @@ async def test_trusted_device_skips_otp_with_honest_amr(monkeypatch):
     services.trusted_devices.consume_and_rotate.return_value = (7, "rotated")
     result = await backend.authenticate(_request(services, "raw"))
     assert result[MFA_DEVICE_TOKEN_KEY] == {"token": "rotated", "max_age": 172800}
-    assert backend.open_session.await_args.kwargs["extra"] == {"auth_method": "basic", "mfa": True, "amr": ["pwd", "trusted_device"]}
+    assert backend.open_session.await_args.kwargs["extra"] == {
+        "auth_method": "basic",
+        "mfa": True,
+        "amr": ["pwd", "trusted_device"],
+    }
 
 
 @pytest.mark.asyncio

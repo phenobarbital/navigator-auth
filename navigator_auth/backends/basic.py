@@ -3,13 +3,12 @@
 Navigator Authentication using JSON Web Tokens.
 """
 
-import logging
 import time
 from datetime import datetime
 from typing import Optional
 from aiohttp import web
 from navigator_session import AUTH_SESSION_OBJECT
-from navigator_session import SESSION_KEY, SESSION_ID, SessionHandler, get_session
+from navigator_session import SESSION_ID
 from datamodel.exceptions import ValidationError
 
 # Authenticated Entity
