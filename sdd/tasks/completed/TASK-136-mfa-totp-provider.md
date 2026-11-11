@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
 **Spec**: `sdd/specs/basicauth-otp-2fa.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-131, TASK-132
@@ -890,10 +890,8 @@ is TASK-141 (it is an HTTP-level property).
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
+**Completed by**: gpt-5.6-luna (codex), attempt 3 (terra x2 first: second hit an oversized validation-verdict artifact error)
+**Date**: 2026-11-11
+**Notes**: MFA TOTP provider delivered; merge-tier green (25 passed, 2 skipped across wave).
 
 **Deviations from spec**: none | describe if any

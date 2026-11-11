@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
 **Spec**: `sdd/specs/basicauth-otp-2fa.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-132, TASK-133, TASK-134
@@ -727,10 +727,8 @@ Spec §4 rows owned here: `test_policy_strictest_org_wins`,
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sonnet (native), 1 attempt
+**Date**: 2026-11-11
+**Notes**: MFA policy/state machine delivered. 2 live-Postgres tests (apply_tenant_policy) skipped in sandbox — run in CI. Residual F811 fixture-import lint left for /sdd-done.
 
 **Deviations from spec**: none | describe if any
