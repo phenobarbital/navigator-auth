@@ -545,8 +545,11 @@ request = make_mocked_request("GET", "/dashboard/", app=app)
       `/dashboard/` returns 200; the four browser-probe WARNINGs are gone.
 - [ ] **Operator (not a task)**: `AUTH_SECRET_KEY`, `PARTNER_KEY` / `AUTH_TOKEN_SECRET` in `env/.env` and
       `env/prod/.env` rotated to ≥ 32 bytes (files are git-ignored).
-- [ ] **Operator (not a task)**: `navigator-vault migrate --dry-run` then `--run` on the example DB;
-      user 35's `account` secret loads without an integrity failure.
+- [ ] **Operator (not a task)**: dry run done (§8: 1 v1 row, `failed=0`). Remaining:
+      `navigator-vault migrate --run --backup-dir <secure dir>` on the example DB (after
+      `navigator_auth/vault/sql/002_vault_crypto_hardening.sql` if not yet applied), then
+      `navigator-vault verify --backup-dir <secure dir>/<run_id>`; user 35's `account` secret then
+      loads without an integrity failure.
 
 ---
 
@@ -826,8 +829,13 @@ None new.
       around `await handler(request)` swallows `HTTPNotFound` (reproduced, aiohttp 3.14.3).
 - [x] Is `env/prod/.env` tracked by git? — *Resolved in spec research*: no, `env/` is ignored
       (`.gitignore:113`).
-- [ ] Confirm user 35's `account` vault row is a v1 blob (`navigator-vault migrate --dry-run`). —
-      *Owner: Jesus Lara* (operator check; no code depends on it)
+- [x] Confirm user 35's `account` vault row is a v1 blob (`navigator-vault migrate --dry-run`). —
+      *Resolved 2026-11-11 by dry run* (run `20261111T150813-be5a10ab`, decrypt-only, no writes):
+      `auth.user_vault_secrets` holds **1** row — `already_v2=0`, `migrated=1`, `failed=0` — so it
+      is a v1 blob that opens with the legacy key and will migrate without quarantine. With a single
+      row in the table, it is the `user=35 key=account` secret from the runtime log.
+      `auth.user_identities` (1 row) is already v2. No code change; the remaining `--run` is the
+      operator step in §5.
 
 ---
 
@@ -879,3 +887,4 @@ Summary: **0** confirmed · **0** rejected · **0** escalated.
 |---|---|---|---|
 | 0.1 | 2026-11-11 | Jesus Lara / Claude Code | Initial draft from `sdd/proposals/policy-issues.proposal.md` |
 | 0.2 | 2026-11-11 | Codex | Address review: reject lost classic restrictions and invalid resources atomically, normalize weekday conditions, fix string-resource construction, and add negative authorization coverage |
+| 0.3 | 2026-11-11 | Claude Code | Resolve last open question (vault row is v1 and migratable, per `navigator-vault migrate --dry-run`); narrow the §5 vault operator step to `--run` + `verify` |
