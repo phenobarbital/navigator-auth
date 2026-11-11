@@ -511,9 +511,7 @@ class TestStrictSessionRevoker:
             await revoker.revoke_user(self._request(storage), user, strict=True)
 
     @pytest.mark.asyncio
-    async def test_strict_raises_when_session_store_unreachable(
-        self, broken_redis_pool, access_token_storage
-    ):
+    async def test_strict_raises_when_session_store_unreachable(self, broken_redis_pool, access_token_storage):
         broken = SessionRevoker(broken_redis_pool)
         user = SimpleNamespace(user_id=918277, username="strict_user_4")
         with pytest.raises(RevocationError, match="session_store_unreachable"):

@@ -74,7 +74,9 @@ class SessionRevoker:
         if failures:
             logger.error(
                 "SessionRevoker: strict revocation incomplete for user_id=%s (%d failure(s), %d revoked)",
-                _user_id_of(user), len(failures), count,
+                _user_id_of(user),
+                len(failures),
+                count,
             )
             raise RevocationError(f"revocation incomplete: {', '.join(sorted(set(failures)))}")
         return count
