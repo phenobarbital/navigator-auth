@@ -95,10 +95,21 @@ classic dict shape that `PolicyAdapter.adapt()` already understands), records th
 `_registered` and `_policies`, loads it into the shared evaluator, clears the evaluator's decision cache
 and drops cached per-tenant evaluators. The constructor's `policies=` argument goes through the same
 path. Conversion needs the original resource strings — `Resource` objects lose them for non-URI URNs —
-so `AbstractPolicy.__init__` also records `raw_resources: list[str]`.
+so `AbstractPolicy.__init__` also records `raw_resources: list[str]` and fixes string-resource
+construction to use `[Resource(resource)]` instead of `list(Resource(resource))`.
 
 `add_policy` fails loudly: a policy the adapter skips (e.g. an invalid regex) or a name already
 registered raises `ValueError`. A silently ignored policy is the failure mode this feature removes.
+Before calling the legacy dict adapter, `from_policy` rejects classic policies with non-empty
+`context`, `conditions`, or `scopes`: the existing conversion/evaluator does not preserve those
+restrictions. It validates every resource, including negated patterns, and rejects the whole policy
+if any pattern is invalid. A warning alone is not successful adaptation. These stricter checks apply
+to the new programmatic conversion path; the existing storage dict adapter remains unchanged.
+
+Classic environment conditions normalize `day_of_week` to the engine's `dow` key before adaptation.
+Conflicting alias values or unsupported environment keys/shapes cause rejection, never silent removal.
+The example's `prod_config_manager` uses `subject=["platform-lead@acme.com"]` instead of its unsupported
+username context restriction, preserving the intended user-specific grant.
 
 The startup guard in `_load_policies` changes from "skip when the evaluator index is non-empty" to "skip
 when the evaluator holds policies that were **not** registered through `add_policy`" (identity check
@@ -152,7 +163,7 @@ AuthHandler.setup ──→ hmac_keys.warn_short_hmac_keys() ──→ "navigato
 | `PDP._load_policies` | modifies | guard ignores registered policies |
 | `PDP.reload_policies` / `PDP._build_tenant_evaluator` | modifies | include `_registered` |
 | `PolicyAdapter` | extends | new `from_policy()` static method |
-| `AbstractPolicy.__init__` | modifies | records `raw_resources` |
+| `AbstractPolicy.__init__` | modifies | records `raw_resources`; fixes string-resource construction |
 | `PolicyEvaluator.load_policies` / `.invalidate_cache` | uses | unchanged |
 | `abac_middleware` | modifies | 404 skip fix, DEBUG log, dead except removed |
 | `AuthHandler.setup` | modifies | one call to `warn_short_hmac_keys` |
@@ -171,12 +182,18 @@ No new Pydantic models. `PolicyAdapter.from_policy` emits the existing classic p
     "actions": list[str],           # "object:action" from ActionKey
     "subject": list[str],           # [] when None
     "groups": list[str],            # [] when None
-    "context": dict, "environment": dict | None,
+    "context": {},                  # non-empty classic context is rejected before conversion
+    "environment": dict | None,     # validated; day_of_week normalized to dow
     "priority": int, "enforcing": bool,
     "objects": dict | None,
     "org_id": int, "client_id": int,  # from policy.attributes, default 1
 }
 ```
+
+Non-empty classic `conditions` and `scopes` are also rejected before this dict is emitted; their
+omission must never silently weaken a policy. Rejection returns `AdapterResult(skipped=True,
+reason=...)` with no policy or additional policies. `PDP.add_policy` turns that result into
+`ValueError` before changing any registry, evaluator, or cache.
 
 ### New Public Interfaces
 
@@ -203,11 +220,11 @@ def warn_short_hmac_keys(logger: logging.Logger | None = None) -> list[str]: ...
 
 | Module | Eligible? | Decided patterns / exact contracts | Why not (if no) |
 |---|---|---|---|
-| M1: Policy-object adapter | yes | `from_policy` signature and dict shape fixed (§2 Data Models); `raw_resources` capture rules fixed | — |
+| M1: Policy-object adapter | yes | `from_policy` signature and dict shape fixed (§2 Data Models); reject unsupported restrictions and invalid resources; normalize weekday alias; fix string-resource construction | — |
 | M2: PDP registration | yes | `_registered` list; `add_policy` returns the loaded `ResourcePolicy` list; `ValueError` on skip/duplicate; guard = identity check; reload + tenant include `_registered`; cache + tenant LRU invalidated | — |
 | M3: abac_middleware 404 fix | yes | helper `_is_system_route(request) -> bool`; handler awaited outside `try`; DEBUG level; one except clause | — |
 | M4: HMAC key-length warning | yes | module path, three functions, logger name `navigator_auth.security`, threshold 32 bytes, never logs values | — |
-| M5: Example + README | yes | `add_policy` for all ten example policies; no manual evaluator preload; README section headings fixed | — |
+| M5: Example + README | yes | `add_policy` for all ten example policies; username restriction uses subject; negative user/weekend tests; no manual evaluator preload; README section headings fixed | — |
 
 ### Module 1: Policy-object adapter
 
@@ -224,7 +241,9 @@ def warn_short_hmac_keys(logger: logging.Logger | None = None) -> list[str]: ...
           # NEW, next to the resource handling at abstract.py:94:
           self.raw_resources: list[str]
           """Resource strings exactly as passed: a str becomes [str], a list is copied
-          (items str()-ed), None becomes []. Used by PolicyAdapter.from_policy."""
+          (items str()-ed), None becomes []. Used by PolicyAdapter.from_policy.
+          FIX: the str branch sets self.resources = [Resource(resource)], so construction
+          succeeds and retains the same Resource semantics as a one-item list."""
 
   # navigator_auth/abac/policies/adapter.py  (modifies; new method before adapt_batch, adapter.py:276)
   class PolicyAdapter:
@@ -235,8 +254,9 @@ def warn_short_hmac_keys(logger: logging.Logger | None = None) -> list[str]: ...
           ResourcePolicy -> AdapterResult(policy=policy), unchanged.
           FilePolicy -> policy_type "file"; ObjectPolicy -> "object"; any other
           AbstractPolicy -> "policy". Classic objects are converted to the classic
-          dict shape (spec §2 Data Models; resource = policy.raw_resources) and
-          passed to PolicyAdapter.adapt(). Never raises: failures come back as
+          dict shape (spec §2 Data Models; resource = policy.raw_resources) only after
+          the validation contract below succeeds, then passed to PolicyAdapter.adapt().
+          Never raises: failures come back as
           AdapterResult(skipped=True, reason=...).
           """
   ```
@@ -244,6 +264,24 @@ def warn_short_hmac_keys(logger: logging.Logger | None = None) -> list[str]: ...
   `FilePolicy` before `ObjectPolicy` (file.py:8 subclasses obj.py:8). New imports in adapter.py must be
   absolute (`from navigator_auth.abac.policies.<mod> import ...`), matching adapter.py:5-7; no cycle
   (policy/obj/file modules do not import the adapter).
+
+  **Classic conversion validation contract (before calling `adapt`):**
+  - Reject non-empty `context`, `conditions`, or `scopes` with a reason naming the unsupported
+    restriction. Do not drop them, merely warn, or rely on `python_conditions` (the evaluator does
+    not enforce that attribute). This applies to ALLOW and DENY policies alike.
+  - Convert and validate every supplied resource, including `!`-prefixed resources, using the
+    existing URN conversion and pattern validation helpers. Any invalid pattern rejects the entire
+    input, including mixed valid/invalid lists; no partial allow or generated deny may escape.
+    An explicitly empty resource list retains the existing unrestricted semantics, but filtering
+    invalid input down to an empty list is forbidden. Adapter warnings about lost resources must
+    likewise be treated as failure, not successful registration.
+  - Copy the environment mapping; normalize `day_of_week` to `dow`. If both keys occur, accept
+    equal values and reject conflicting values. Accepted engine keys are `hour`, `dow`,
+    `is_business_hours`, `is_weekend`, and `day_segment`. Accept scalar equality, lists of scalar
+    values, and numeric range dictionaries with only `min`/`max` and at least one bound; reject
+    unsupported keys, shapes, and incompatible value types. Do not mutate the source policy.
+  - Keep valid `ResourcePolicy` objects as pass-through; do not reinterpret their native conditions
+    through the classic conversion path.
 
 ### Module 2: PDP registration of programmatic policies
 
@@ -269,7 +307,10 @@ def warn_short_hmac_keys(logger: logging.Logger | None = None) -> list[str]: ...
 
           Adapts with PolicyAdapter.from_policy; raises ValueError when the result is
           skipped (message includes result.reason) or when a policy with the same name is
-          already in self._registered. On success: appends the adapted policies (the policy
+          already in self._registered. Validate the complete adapted batch, including generated
+          deny names, before any mutation; rejection leaves _registered, _policies, the evaluator
+          index/serialized policies, decision cache and tenant LRU unchanged.
+          On success: appends the adapted policies (the policy
           plus any `<name>_negated` deny) to self._registered and self._policies, calls
           self._evaluator.load_policies(adapted), self._evaluator.invalidate_cache(), and
           self._invalidate_tenant_evaluators() when the tenant LRU is non-empty; then
@@ -365,10 +406,17 @@ def warn_short_hmac_keys(logger: logging.Logger | None = None) -> list[str]: ...
       (data_science_vectors, qa_testing_tools, deny_vector_delete, agent_chat_all,
       agent_configure_platform) and the five classic policies with pdp.add_policy (586)."""
   ```
+  Update the policy declarations as well as `create_app`: replace `prod_config_manager`'s
+  `context={"username": "platform-lead@acme.com"}` with `subject=["platform-lead@acme.com"]`.
+  Keep `analytics_business_hours`'s `day_of_week` declaration to exercise M1's alias normalization;
+  its weekday-only behavior must survive registration, reload, and tenant evaluator construction.
   `examples/README.md`: new section `## \`policy_server.py\` — PBAC example` placed before the
   identity-vault section (README.md:77), with: what it demonstrates, how to run, and a
   **Troubleshooting** list:
   - `428 "No Matching Policies"` → no policy covers the path; register one with `pdp.add_policy`.
+  - Registration `ValueError` → correct invalid resources or unsupported classic restrictions;
+    use `subject` for a username restriction. Classic `context`, `conditions`, and `scopes` are
+    rejected, not silently ignored. Document the supported environment keys and weekday alias.
   - `InsecureKeyLengthWarning` / the new startup warning → set `AUTH_SECRET_KEY` (and
     `AUTH_TOKEN_SECRET` / `PARTNER_KEY`) to ≥ 32 bytes.
   - `Vault secret failed integrity check ... UnsupportedFormatError` → a pre-v2 (v1) secret; apply
@@ -383,12 +431,14 @@ def warn_short_hmac_keys(logger: logging.Logger | None = None) -> list[str]: ...
 
 | Test | Module | Description |
 |---|---|---|
-| `test_raw_resources_captured` | M1 | str → `[str]`, list copied, None → `[]` on `Policy` |
+| `test_raw_resources_captured` | M1 | Construct `Policy` with str, list and None; str produces one `Resource` and `[str]` raw resources without TypeError; list copied, None → `[]` |
 | `test_from_policy_resource_policy_passthrough` | M1 | `ResourcePolicy` returned as-is |
 | `test_from_policy_classic_uri_regex` | M1 | `Policy(resource=["urn:uri:/admin.*$"], groups=[...])` → `uri:/admin.*$`, groups kept |
 | `test_from_policy_object_policy_urn` | M1 | `ObjectPolicy(resource=["urn:navigator:deployment::*"], actions=["deployment:approve"])` → `deployment:*`, action kept |
 | `test_from_policy_negated_resource` | M1 | `!`-prefixed resource yields an extra `<name>_negated` DENY |
-| `test_from_policy_invalid_regex_skipped` | M1 | invalid regex → `skipped=True` or warning, never raises |
+| `test_from_policy_invalid_regex_skipped` | M1 | Invalid positive/negated regex and mixed valid/invalid lists → `skipped=True`, reason present, no policy or additional policies; warning-only success forbidden |
+| `test_from_policy_unsupported_restrictions_rejected` | M1 | Parameterize non-empty context, conditions and scopes on classic policy classes and both effects; reject with reason, never silently omit |
+| `test_from_policy_environment_normalization` | M1 | day_of_week → dow, equal aliases accepted, conflicting aliases and unsupported keys/shapes/types rejected; source mapping unchanged |
 | `test_add_policy_loads_into_evaluator` | M2 | classic policy name appears in `pdp.evaluator._index.all()` |
 | `test_add_policy_empty_subject_allows_dashboard` | M2 | `public_dashboard`-like policy → `evaluator.check_access(..., ResourceType.URI, "/dashboard/", "uri:read")` allowed |
 | `test_authorize_dashboard_no_428` | M2 | `PDP.authorize` on a mocked GET `/dashboard/` returns a response instead of raising |
@@ -396,6 +446,7 @@ def warn_short_hmac_keys(logger: logging.Logger | None = None) -> list[str]: ...
 | `test_constructor_policies_registered` | M2 | `PDP(storage, policies=[p])` enforces `p` |
 | `test_add_policy_duplicate_name_raises` | M2 | second registration of a name → `ValueError` |
 | `test_add_policy_unadaptable_raises` | M2 | adapter skip → `ValueError` with the reason |
+| `test_add_policy_rejection_is_atomic` | M2 | Invalid resources and unsupported restrictions leave registries, index/JSON, decision cache and tenant LRU unchanged; `/admin[` never grants `/unrelated` |
 | `test_add_policy_invalidates_cache` | M2 | cached decision is dropped after `add_policy` |
 | `test_load_policies_runs_with_only_registered` | M2 | evaluator holding only registered policies → storage still loaded |
 | `test_reload_keeps_registered` | M2 | `reload_policies()` result contains registered policies |
@@ -407,6 +458,8 @@ def warn_short_hmac_keys(logger: logging.Logger | None = None) -> list[str]: ...
 | `test_configured_hmac_keys_recovery_fallback_skipped` | M4 | recovery secret equal to the SECRET_KEY fallback is not listed separately |
 | `test_example_policies_adapt_cleanly` | M5 | every example policy adapts via `from_policy` without skip |
 | `test_example_policy_names_disjoint_from_packs` | M5 | example names do not collide with `default_policies` pack names |
+| `test_example_config_user_restriction` | M5 | Through registration, reload and tenant evaluator paths, platform lead may edit/deploy production config; unrelated username is denied |
+| `test_example_analytics_weekday_restriction` | M5 | Analytics-group user allowed on weekday at noon, denied Saturday/Sunday at noon and outside configured hours; verify registration, reload and tenant evaluator paths |
 
 ### Integration Tests
 
@@ -459,6 +512,16 @@ request = make_mocked_request("GET", "/dashboard/", app=app)
       `PDP.authorize`: `/dashboard/` granted by a no-subject ALLOW policy returns a response, not 428.
 - [ ] A path no policy covers still raises `PreconditionFailed` (428) — deny default unchanged.
 - [ ] `add_policy` raises `ValueError` for an unadaptable policy and for a duplicate registered name.
+- [ ] Classic policies with non-empty `context`, `conditions`, or `scopes` are rejected with an
+      explicit reason; no unsupported restriction becomes an unrestricted grant.
+- [ ] Any invalid resource (positive, negated, or in a mixed list) rejects the entire registration
+      before registry/index/cache mutation. An invalid `/admin[` pattern never grants `/unrelated`.
+- [ ] String-resource `Policy` construction succeeds and captures the same resource as a one-item list.
+- [ ] Classic `day_of_week` normalizes to `dow`; conflicting aliases and unsupported environment
+      keys/shapes/types are rejected without changing the source policy.
+- [ ] The example denies production config edit/deploy to unrelated users and denies analytics
+      access on weekends, including after reload and through tenant evaluators; corresponding
+      authorized-user and weekday positive cases still succeed.
 - [ ] `_load_policies` still skips storage for an externally pre-loaded evaluator
       (`TestPDPDoubleLoadPrevention` green) and still loads storage when the evaluator holds only
       registered policies.
@@ -474,9 +537,10 @@ request = make_mocked_request("GET", "/dashboard/", app=app)
 - [ ] `docs/settings.rst` documents the 32-byte minimum and a generation command.
 - [ ] `examples/policy_server.py` registers all ten example policies with `pdp.add_policy` and no longer
       calls `evaluator.load_from_directory` / `evaluator.load_policies`; `examples/README.md` has the
-      `policy_server.py` section with the three troubleshooting entries.
-- [ ] No breaking change to the PDP public API: `add_policy` accepts a superset of its old input and
-      only adds a return value.
+      `policy_server.py` section with the troubleshooting entries, including registration failures.
+- [ ] PDP call signatures remain compatible and `add_policy` adds a return value. Document the
+      intentional behavior change: duplicate names, invalid patterns, and unsupported classic
+      restrictions now raise `ValueError` instead of being silently accepted but unenforced.
 - [ ] **Operator (not a task)**: running `python examples/policy_server.py`, logging in and opening
       `/dashboard/` returns 200; the four browser-probe WARNINGs are gone.
 - [ ] **Operator (not a task)**: `AUTH_SECRET_KEY`, `PARTNER_KEY` / `AUTH_TOKEN_SECRET` in `env/.env` and
@@ -653,6 +717,7 @@ Verified against: `1d06621`
 | `examples/policy_server.py` | MODIFY | `        evaluator.load_from_directory(default_policies_dir)` | `policy_server.py:560` | 1 |
 | `examples/policy_server.py` | MODIFY | `    evaluator.load_policies([` | `policy_server.py:563` | 1 |
 | `examples/policy_server.py` | MODIFY | `        pdp.add_policy(policy)` | `policy_server.py:586` | 1 |
+| `examples/policy_server.py` | MODIFY | `    context={"username": "platform-lead@acme.com"},` | `policy_server.py:177` | 1 |
 | `examples/README.md` | MODIFY | ``## `identity_vault_server.py` — Identity Vault: login + linked credentials`` | `README.md:77` | 1 |
 | `tests/test_policy_adapter_from_policy.py` | CREATE | — | — | — |
 | `tests/test_pdp_add_policy.py` | CREATE | — | — | — |
@@ -693,15 +758,17 @@ Verified against: `1d06621`
   subjects (`resources.py:147-169`) while the Rust engine matches everyone (`lib.rs:222-225`). Only the
   engine decides `authorize`; do not "fix" either side here.
 - **`raw_resources` for a str `resource`**: `AbstractPolicy.__init__` does `list(Resource(resource))`
-  for a str (`abstract.py:94-95`), which looks wrong (Resource is not iterable). Capture
-  `raw_resources` before that line and do not change the existing branch in this feature.
+  for a str (`abstract.py:94-95`), which raises `TypeError` because Resource is not iterable.
+  M1 must capture `raw_resources` and replace that expression with `[Resource(resource)]`.
+  Test real construction; assigning `raw_resources` on a mock does not cover this regression.
 - **`self._policies` aliasing**: today `PDP(policies=lst)` stores the caller's list object
   (`pdp.py:80-81`). After M2 the PDP keeps its own list; callers that mutated `lst` afterwards were
   never enforced anyway.
 - **Compiled engine**: tests need the `rs_pep` extension (`evaluator.py:223-227`). Worktrees receive it
   through the native-artifact sync; never run `maturin develop` inside a worktree.
-- **Example still needs Postgres/Redis to run**; the example test only imports the module and adapts
-  its policy objects — the running app is an operator check (§5).
+- **Example still needs Postgres/Redis to run**; automated example tests import its policy objects
+  and exercise the real evaluator with mocked storage for registration, reload, and tenant builds.
+  They require no live DB/Redis; the running app remains an operator check (§5).
 
 ### External Dependencies
 
@@ -722,6 +789,12 @@ None new.
   exclude list; unrouted requests are skipped by the ABAC middleware's system-route check.
   *Rationale*: the exclude list also bypasses authentication (`auth.py:958`), so a `/.well-known/*`
   default would make routed well-known endpoints public. *Rejected*: default exclusions for both paths.
+- **Reject unsupported classic restrictions rather than weakening authorization.** The new
+  `from_policy` path rejects non-empty `context`, `conditions`, and `scopes`, validates resources
+  atomically, and normalizes supported environment conditions. No Rust engine change or broad
+  storage-adapter migration is required. The example expresses its username restriction using
+  `subject`. *Rejected*: warning-and-continue conversion, which reproduced an unrelated user's
+  access to production config and an invalid regex becoming an unrestricted grant.
 
 ---
 
@@ -805,3 +878,4 @@ Summary: **0** confirmed · **0** rejected · **0** escalated.
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-11-11 | Jesus Lara / Claude Code | Initial draft from `sdd/proposals/policy-issues.proposal.md` |
+| 0.2 | 2026-11-11 | Codex | Address review: reject lost classic restrictions and invalid resources atomically, normalize weekday conditions, fix string-resource construction, and add negative authorization coverage |
