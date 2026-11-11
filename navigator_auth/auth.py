@@ -1134,6 +1134,7 @@ class AuthHandler:
                             user = await self.get_session_user(session)
                             if user:
                                 request.user = user
+                                request["userdata"] = payload
                                 request["authenticated"] = True
                                 request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
                                 request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
