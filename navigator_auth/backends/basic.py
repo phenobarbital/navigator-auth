@@ -103,12 +103,11 @@ class BasicAuth(BaseAuthBackend):
             except Exception as ex:  # pylint: disable=W0703
                 self.logger.warning(f"BasicAuth: error closing access_token_storage Redis: {ex}")
         slot = getattr(self, "_mfa_slot", None)
-        if slot is not None and slot.services is not None:
+        if slot is not None:
             try:
-                await slot.services.close()
+                await slot.close()
             except Exception as ex:  # pylint: disable=W0703
                 self.logger.warning(f"BasicAuth: error closing MFA services: {type(ex).__name__}")
-            slot.services = None
 
     def _owns_mfa(self) -> bool:
         """Return whether this backend executes the BasicAuth login path."""
