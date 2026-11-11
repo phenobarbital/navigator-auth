@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-114 — Live end-to-end OAuth2 MFA tests for the FEAT-106 review fixes
 **Spec**: `sdd/specs/tests-test-mfa-review-fixes-oauth2-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -465,10 +465,20 @@ See the tests block of the Implementation Blueprint. Minimum assertions:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: agent:sdd-fix:c9cd5387 (Claude Opus 5.5, /sdd-fix issue:1a329591f638)
+**Date**: 2026-11-11
+**Notes**: Implemented code commit `8474c82`. Live harness (`_start_oauth`, `_stop_oauth`,
+`_oauth_evalctx_view`, `OAuthLive`, `_oauth_env`, `oauth_live`, `live_test`) plus three live tests,
+all run against live Postgres + Redis (not skipped):
+`test_oauth2_live_email_otp_single_delivery_and_replay` (AC1/AC2),
+`test_oauth2_live_event_record` (AC3), `test_oauth2_login_single_connection_pool` (AC4 = FEAT-106
+AC10 OAuth rows). Validation: `pytest tests/test_mfa_review_fixes_oauth2.py -q` → 15 passed;
+`pytest tests/test_mfa_e2e.py -q` → 21 passed, 1 xfailed; `flake8` clean.
+No production defect surfaced: the real gate makes no `acquire()` under the user lock on the OAuth path.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**:
+- `# noqa: F811` sits on the parameter line of multi-line defs, because flake8 reports F811 there.
+- Added a helper not in the blueprint: `_email_challenge`, shared by AC1 and AC3.
+- `OAuthLive.cleanup` also deletes the pre-seeded Redis grants.
+- The AC10 test also asserts that the measured calls really acquired from the one-connection
+  pool, so it cannot pass vacuously.
