@@ -87,6 +87,21 @@ class MfaHandler:
         services = get_mfa_services(request.app)
         if services is None or not services.available:
             return _error("mfa_unavailable", 503)
+        body = await _json_body(request)
+        token, provider, code = body.get("challenge"), body.get("provider"), body.get("code")
+        if not all(isinstance(value, str) and value for value in (token, provider, code)):
+            return _error("invalid_request", 400)
+        try:
+            preview = await services.store.peek(token)
+            if preview is None:
+                return _error("invalid_challenge", 401)
+            async with services.security.user_lock(preview.user_id) as conn:
+                return await self._verify_locked(request, services, conn, token, provider, code, body)
+        except web.HTTPException:
+            raise
+        except Exception as err:  # pylint: disable=W0718 -- security dependencies fail closed.
+            logger.error("MFA verify: refused, dependency failure: %s", type(err).__name__)
+            return _error("mfa_unavailable", 503)
 
     async def _session_user(self, request: web.Request) -> tuple[Any, Any, Any]:
         """Return MFA services, the live session, and its fresh user record."""
@@ -149,21 +164,6 @@ class MfaHandler:
             user=record, memberships=memberships, policy=policy, state=state, has_strong_factor=strong
         )
         return policy, state, strong, digest
-        body = await _json_body(request)
-        token, provider, code = body.get("challenge"), body.get("provider"), body.get("code")
-        if not all(isinstance(value, str) and value for value in (token, provider, code)):
-            return _error("invalid_request", 400)
-        try:
-            preview = await services.store.peek(token)
-            if preview is None:
-                return _error("invalid_challenge", 401)
-            async with services.security.user_lock(preview.user_id) as conn:
-                return await self._verify_locked(request, services, conn, token, provider, code, body)
-        except web.HTTPException:
-            raise
-        except Exception as err:  # pylint: disable=W0718 -- security dependencies fail closed.
-            logger.error("MFA verify: refused, dependency failure: %s", type(err).__name__)
-            return _error("mfa_unavailable", 503)
 
     async def _verify_locked(
         self,
