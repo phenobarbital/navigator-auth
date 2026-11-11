@@ -14,7 +14,12 @@ from typing import Optional
 import redis.asyncio as aioredis
 from redis.exceptions import RedisError
 
-from navigator_auth.conf import AUTH_OTP_CHALLENGE_TTL, AUTH_OTP_MAX_ATTEMPTS, AUTH_USERID_ATTRIBUTE, AUTH_USERNAME_ATTRIBUTE
+from navigator_auth.conf import (
+    AUTH_OTP_CHALLENGE_TTL,
+    AUTH_OTP_MAX_ATTEMPTS,
+    AUTH_USERID_ATTRIBUTE,
+    AUTH_USERNAME_ATTRIBUTE,
+)
 from navigator_auth.mfa.exceptions import MfaStorageError
 from navigator_auth.mfa.types import MfaChallenge, PendingEnrollment
 
@@ -77,7 +82,13 @@ def _user_field(user: Mapping, name: str):
 class MfaChallengeStore:
     """HMAC-signed, TTL-bound, single-use MFA state store."""
 
-    def __init__(self, pool: aioredis.ConnectionPool, secret: bytes, ttl: int = AUTH_OTP_CHALLENGE_TTL, max_attempts: int = AUTH_OTP_MAX_ATTEMPTS):
+    def __init__(
+        self,
+        pool: aioredis.ConnectionPool,
+        secret: bytes,
+        ttl: int = AUTH_OTP_CHALLENGE_TTL,
+        max_attempts: int = AUTH_OTP_MAX_ATTEMPTS,
+    ):
         if not secret:
             raise ValueError("MfaChallengeStore requires a non-empty secret")
         self._pool, self._secret = pool, secret
@@ -101,13 +112,36 @@ class MfaChallengeStore:
             logger.warning("MFA record decode failed: %s", type(exc).__name__)
             return None
 
-    async def issue(self, user: Mapping, providers: list[str], preferred: str, *, security_version: int, context_digest: str, email_code_hash: Optional[str] = None) -> tuple[str, MfaChallenge]:
+    async def issue(
+        self,
+        user: Mapping,
+        providers: list[str],
+        preferred: str,
+        *,
+        security_version: int,
+        context_digest: str,
+        email_code_hash: Optional[str] = None,
+    ) -> tuple[str, MfaChallenge]:
         token = new_opaque_token()
-        fields = {"user_id": int(_user_field(user, AUTH_USERID_ATTRIBUTE)), "username": str(_user_field(user, AUTH_USERNAME_ATTRIBUTE)), "providers": list(providers), "preferred": preferred, "issued_at": time.time(), "security_version": int(security_version), "context_digest": context_digest, "email_code_hash": email_code_hash}
+        fields = {
+            "user_id": int(_user_field(user, AUTH_USERID_ATTRIBUTE)),
+            "username": str(_user_field(user, AUTH_USERNAME_ATTRIBUTE)),
+            "providers": list(providers),
+            "preferred": preferred,
+            "issued_at": time.time(),
+            "security_version": int(security_version),
+            "context_digest": context_digest,
+            "email_code_hash": email_code_hash,
+        }
         record = MfaChallenge(**fields, signature=self._sign(fields))
         try:
             async with self._redis() as redis:
-                ok = await redis.set(f"{CHALLENGE_KEY_PREFIX}{_hash_token(token)}", json.dumps(record.model_dump(mode="json")), nx=True, ex=self._ttl)
+                ok = await redis.set(
+                    f"{CHALLENGE_KEY_PREFIX}{_hash_token(token)}",
+                    json.dumps(record.model_dump(mode="json")),
+                    nx=True,
+                    ex=self._ttl,
+                )
             if not ok:
                 raise MfaStorageError("MFA challenge key collision")
         except RedisError as exc:
@@ -154,7 +188,9 @@ class MfaChallengeStore:
         h = _hash_token(token)
         try:
             async with self._redis() as redis:
-                result = await redis.eval(_REGISTER_FAILURE_LUA, 2, f"{record_prefix}{h}", f"{counter_prefix}{h}", self._max_attempts)
+                result = await redis.eval(
+                    _REGISTER_FAILURE_LUA, 2, f"{record_prefix}{h}", f"{counter_prefix}{h}", self._max_attempts
+                )
             return int(result)
         except RedisError as exc:
             raise MfaStorageError("MFA storage unavailable") from exc
@@ -189,12 +225,25 @@ class MfaChallengeStore:
         except RedisError as exc:
             raise MfaStorageError("MFA storage unavailable") from exc
 
-    async def put_enrollment(self, token: str, *, user_id: int, session_id: str, security_version: int, sealed_seed: bytes) -> PendingEnrollment:
-        fields = {"user_id": int(user_id), "session_hash": hashlib.sha256(session_id.encode()).hexdigest(), "security_version": int(security_version), "sealed_seed": base64.b64encode(sealed_seed).decode("ascii"), "issued_at": time.time()}
+    async def put_enrollment(
+        self, token: str, *, user_id: int, session_id: str, security_version: int, sealed_seed: bytes
+    ) -> PendingEnrollment:
+        fields = {
+            "user_id": int(user_id),
+            "session_hash": hashlib.sha256(session_id.encode()).hexdigest(),
+            "security_version": int(security_version),
+            "sealed_seed": base64.b64encode(sealed_seed).decode("ascii"),
+            "issued_at": time.time(),
+        }
         record = PendingEnrollment(**fields, signature=self._sign(fields))
         try:
             async with self._redis() as redis:
-                ok = await redis.set(f"{ENROLL_KEY_PREFIX}{_hash_token(token)}", json.dumps(record.model_dump(mode="json")), nx=True, ex=ENROLLMENT_TTL)
+                ok = await redis.set(
+                    f"{ENROLL_KEY_PREFIX}{_hash_token(token)}",
+                    json.dumps(record.model_dump(mode="json")),
+                    nx=True,
+                    ex=ENROLLMENT_TTL,
+                )
             if not ok:
                 raise MfaStorageError("MFA enrollment key collision")
             return record
