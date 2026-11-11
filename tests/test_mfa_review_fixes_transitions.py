@@ -146,8 +146,7 @@ async def test_transition_not_configured_yields_tx(mfa_db, mfa_user_factory):
         async with security_transition(app, user["user_id"], "password_change") as conn:
             assert LOCK_CONNECTION.get() is conn
             changed = await conn.fetchval(
-                f"UPDATE {AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE} SET first_name = $1 "
-                "WHERE user_id = $2 RETURNING 1",
+                f"UPDATE {AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE} SET first_name = $1 " "WHERE user_id = $2 RETURNING 1",
                 "changed",
                 user["user_id"],
             )
@@ -170,8 +169,7 @@ async def test_transition_aborted_rolls_back(mfa_db, mfa_user_factory, mfa_secre
     with pytest.raises(TransitionAborted, match="credentials_changed"):
         async with security_transition(app, user["user_id"], "password_change") as conn:
             changed = await conn.fetchval(
-                f"UPDATE {AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE} SET first_name = $1 "
-                "WHERE user_id = $2 RETURNING 1",
+                f"UPDATE {AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE} SET first_name = $1 " "WHERE user_id = $2 RETURNING 1",
                 "changed",
                 user["user_id"],
             )
@@ -193,7 +191,9 @@ async def test_transition_aborted_rolls_back(mfa_db, mfa_user_factory, mfa_secre
 
 
 @pytest.mark.asyncio
-async def test_transition_commits_write_with_bookkeeping(single_connection_authdb, mfa_db, mfa_user_factory, mfa_secret):
+async def test_transition_commits_write_with_bookkeeping(
+    single_connection_authdb, mfa_db, mfa_user_factory, mfa_secret
+):
     """One connection commits the body write, version, and audit without a nested acquire."""
     user = await mfa_user_factory()
     app = _app_with_services(single_connection_authdb, mfa_secret)
@@ -202,8 +202,7 @@ async def test_transition_commits_write_with_bookkeeping(single_connection_authd
         async with security_transition(app, user["user_id"], "password_change") as conn:
             assert LOCK_CONNECTION.get() is conn
             changed = await conn.fetchval(
-                f"UPDATE {AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE} SET first_name = $1 "
-                "WHERE user_id = $2 RETURNING 1",
+                f"UPDATE {AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE} SET first_name = $1 " "WHERE user_id = $2 RETURNING 1",
                 "committed",
                 user["user_id"],
             )
