@@ -10,7 +10,7 @@ from .exceptions import MfaStorageError
 logger = logging.getLogger("navigator.mfa")
 
 SQL_DIR = Path(__file__).parent / "sql"
-_MIGRATION_FILES = ("001_mfa_tables.sql",)
+_MIGRATION_FILES = ("001_mfa_tables.sql", "002_mfa_secrets.sql")
 MFA_TABLES = (
     "tenant_mfa_policy",
     "user_mfa",
@@ -18,6 +18,7 @@ MFA_TABLES = (
     "user_trusted_devices",
     "user_mfa_audit",
     "user_mfa_security",
+    "user_mfa_secrets",
 )
 
 
@@ -75,7 +76,7 @@ def _raise_on_execute_error(result: Any, filename: str) -> None:
 
 
 async def ensure_mfa_tables(db_pool: Any) -> None:
-    """Create the six MFA tables if missing.
+    """Create the MFA tables if missing and move MFA seeds out of the user vault.
 
     Args:
         db_pool: Database pool used to execute migrations.

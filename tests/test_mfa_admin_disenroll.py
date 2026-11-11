@@ -37,7 +37,7 @@ pytestmark = [pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppK
 USERS = f"{AUTH_DB_SCHEMA}.users"
 USER_MFA = f"{AUTH_DB_SCHEMA}.user_mfa"
 AUDIT = f"{AUTH_DB_SCHEMA}.user_mfa_audit"
-VAULT = "auth.user_vault_secrets"
+VAULT = f"{AUTH_DB_SCHEMA}.user_mfa_secrets"  # FEAT-106 review fix #2: seeds moved out of the user vault (spec M7)
 ORGS = f"{AUTH_DB_SCHEMA}.organizations"
 ORG_USERS = f"{AUTH_DB_SCHEMA}.organization_users"
 PASSKEYS = f"{AUTH_DB_SCHEMA}.user_credentials"
@@ -122,7 +122,7 @@ class Env:
         )
         if await self.one("SELECT to_regclass($1)", VAULT) is not None:
             await self.one(
-                f"INSERT INTO {VAULT} (user_id, key, ciphertext_db) VALUES ($1, 'mfa:totp', $2) RETURNING 1",
+                f"INSERT INTO {VAULT} (user_id, provider, key, ciphertext_db) VALUES ($1, 'totp', 'mfa:totp', $2) RETURNING 1",
                 user_id,
                 b"sealed-test-seed",
             )

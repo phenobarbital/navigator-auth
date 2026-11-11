@@ -96,6 +96,14 @@ class TestValidateKey:
         assert not is_reserved_key(key)
 
 
+def test_mfa_seeds_never_live_in_the_user_vault():
+    """FEAT-106 review fix #2: TOTP seeds use the dedicated MFA table (spec M7)."""
+    from navigator_auth.mfa import totp
+
+    assert totp.MFA_SECRETS_TABLE.endswith(".user_mfa_secrets")
+    assert not hasattr(totp, "VAULT_" + "SECRETS_TABLE")
+
+
 class FakeSession(dict):
     def decode(self, key):
         return {"id": 42, "user_id": 42}

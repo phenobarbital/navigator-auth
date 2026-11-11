@@ -15,6 +15,7 @@ from uuid import UUID
 from navigator_session.vault.targets.postgres import PostgresTarget
 
 from ..conf import AUTH_DB_SCHEMA
+from ..vault.pool import asyncpg_pool
 from .crypto import IDENTITY_FIELDS, IDENTITY_PURPOSE, normalize_user_id
 
 
@@ -38,7 +39,7 @@ class IdentityTarget(PostgresTarget):
         # is not "auth"; the name follows the table for unambiguous backups.
         self.table = f"{schema}.user_identities"
         self.name = self.table
-        super().__init__(db_pool)
+        super().__init__(asyncpg_pool(db_pool))
 
     def context_value(self, column: str, value: Any) -> Any:
         """Match ``identity_context``: normalized user id, str provider, nullable puid."""

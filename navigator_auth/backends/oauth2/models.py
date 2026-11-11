@@ -18,7 +18,8 @@ FEAT-095:
   TASK-044 — resource (RFC 8707) on OauthAuthorizationCode.
 """
 
-from typing import Optional, Union
+from collections.abc import Mapping
+from typing import Any, Optional, Union
 from datetime import datetime, timedelta
 from enum import Enum
 import json
@@ -27,10 +28,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ...conf import OAUTH_DEFAULT_TOKEN_EXPIRATION_DAYS
 
-
 # ---------------------------------------------------------------------------
 # Resource Owner representation (lightweight, no DB dependency)
 # ---------------------------------------------------------------------------
+
 
 class OauthUser(BaseModel):
     user_id: int = Field()
@@ -53,9 +54,9 @@ class OauthUser(BaseModel):
         return cls(
             user_id=user.user_id,
             username=user.username,
-            given_name=getattr(user, 'first_name', '') or "",
-            family_name=getattr(user, 'last_name', '') or "",
-            email=getattr(user, 'email', None),
+            given_name=getattr(user, "first_name", "") or "",
+            family_name=getattr(user, "last_name", "") or "",
+            email=getattr(user, "email", None),
         )
 
 
@@ -66,6 +67,7 @@ def default_expiration():
 # ---------------------------------------------------------------------------
 # OAuth2 Client (TASK-023: client_id = public uid; client_pk = int PK)
 # ---------------------------------------------------------------------------
+
 
 class OAuthClient(BaseModel):
     """OAuthClient.
@@ -147,6 +149,7 @@ class OAuthClient(BaseModel):
 # Dynamic Client Registration — RFC 7591 (FEAT-095 TASK-040)
 # ---------------------------------------------------------------------------
 
+
 class ClientRegistrationRequest(BaseModel):
     """RFC 7591 §2 client metadata, as submitted to ``POST /oauth2/register``.
 
@@ -160,9 +163,7 @@ class ClientRegistrationRequest(BaseModel):
 
     redirect_uris: list[str] = Field()
     client_name: Optional[str] = Field(default=None)
-    grant_types: list[str] = Field(
-        default_factory=lambda: ["authorization_code", "refresh_token"]
-    )
+    grant_types: list[str] = Field(default_factory=lambda: ["authorization_code", "refresh_token"])
     response_types: list[str] = Field(default_factory=lambda: ["code"])
     token_endpoint_auth_method: str = Field(default="client_secret_post")
     scope: Optional[str] = Field(default=None)
@@ -198,6 +199,7 @@ class ClientRegistrationResponse(BaseModel):
 # Auth code TTL helper
 # ---------------------------------------------------------------------------
 
+
 def code_expiration():
     return datetime.now() + timedelta(minutes=2)
 
@@ -205,6 +207,7 @@ def code_expiration():
 # ---------------------------------------------------------------------------
 # Authorization Code (TASK-024: user_id required; nested field = client)
 # ---------------------------------------------------------------------------
+
 
 class OauthAuthorizationCode(BaseModel):
     """Authorization code issued during consent.
@@ -236,11 +239,18 @@ class OauthAuthorizationCode(BaseModel):
     # Single-use enforcement (B5).
     used: bool = Field(default=False)
     used_at: Optional[datetime] = Field(default=None)
+    # FEAT-106 review fixes (M9, D8): second-factor outcome of the approving browser
+    # authentication event. ``amr`` is None when that login did not pass MFA.
+    mfa: bool = Field(default=False)
+    amr: Optional[list[str]] = Field(default=None)
+    # FEAT-106 review fix (M4): 0 preserves compatibility with legacy carriers.
+    generation: int = Field(default=0)
 
 
 # ---------------------------------------------------------------------------
 # Refresh Token (TASK-024: user_id + renamed client; TASK-026: rotation fields)
 # ---------------------------------------------------------------------------
+
 
 class OauthRefreshToken(BaseModel):
     """Refresh token with rotation/reuse-detection support.
@@ -265,11 +275,27 @@ class OauthRefreshToken(BaseModel):
     revoked_at: Optional[datetime] = Field(default=None)
     # 'rotated' | 'revoked' | 'reuse_detected' | 'cascade'
     revoked_reason: Optional[str] = Field(default=None)
+    # FEAT-106 review fixes (M9, D8): copied from the authorization code at exchange and
+    # from the parent token on rotation — never re-derived.
+    mfa: bool = Field(default=False)
+    amr: Optional[list[str]] = Field(default=None)
+    # FEAT-106 review fix (M4): copied from the issuing carrier.
+    generation: int = Field(default=0)
 
 
 # ---------------------------------------------------------------------------
+def is_oauth_user_token(payload: Mapping[str, Any]) -> bool:
+    """Return whether ``payload`` is an OAuth access token for a user.
+
+    BasicAuth JWTs have no ``client_id`` and client-credentials tokens have no
+    ``user_id``; neither participates in OAuth credential-generation checks.
+    """
+    return bool(payload) and all(payload.get(key) not in (None, "") for key in ("client_id", "user_id", "jti"))
+
+
 # OauthGrant — durable consent record (TASK-027)
 # ---------------------------------------------------------------------------
+
 
 class OauthGrant(BaseModel):
     """Durable consent grant record.
@@ -293,6 +319,7 @@ class OauthGrant(BaseModel):
 # OauthAccessTokenRecord — jti tracking (TASK-027)
 # ---------------------------------------------------------------------------
 
+
 class OauthAccessTokenRecord(BaseModel):
     """Per-access-token jti record for revocation checking.
 
@@ -303,7 +330,7 @@ class OauthAccessTokenRecord(BaseModel):
     jti: UUID = Field(default_factory=uuid4)
     # None for client_credentials (2LO) tokens with no associated end user.
     user_id: Optional[int] = Field(default=None)
-    client_id: str = Field()   # public client_uid (wire/claim value)
+    client_id: str = Field()  # public client_uid (wire/claim value)
     client_pk: Optional[int] = Field(default=None)  # int FK for DB
     scope: str = Field(default="")
     issued_at: datetime = Field(default_factory=datetime.now)
@@ -314,6 +341,7 @@ class OauthAccessTokenRecord(BaseModel):
 # ---------------------------------------------------------------------------
 # OauthToken (composite; kept for backward compat, uses renamed fields)
 # ---------------------------------------------------------------------------
+
 
 def token_uid():
     return uuid4()
@@ -340,13 +368,14 @@ class OauthToken(BaseModel):
 # Device Code Grant — RFC 8628 (FEAT-094 TASK-032)
 # ---------------------------------------------------------------------------
 
+
 class DeviceCodeStatus(str, Enum):
     """Status of an OauthDeviceCode record (RFC 8628)."""
 
-    PENDING = "pending"       # waiting for user to visit verification_uri
-    APPROVED = "approved"     # user has authenticated and granted scopes
-    DENIED = "denied"         # user explicitly denied the request
-    CONSUMED = "consumed"     # single-use guard: token polling succeeded
+    PENDING = "pending"  # waiting for user to visit verification_uri
+    APPROVED = "approved"  # user has authenticated and granted scopes
+    DENIED = "denied"  # user explicitly denied the request
+    CONSUMED = "consumed"  # single-use guard: token polling succeeded
 
 
 class OauthDeviceCode(BaseModel):
@@ -371,11 +400,11 @@ class OauthDeviceCode(BaseModel):
                       public clients
     """
 
-    device_code: str = Field()                          # high-entropy opaque
-    user_code: str = Field()                            # human-legible
-    client_id: str = Field()                            # public client_uid
-    client_pk: Optional[int] = Field(default=None)     # integer FK for DB
-    scopes: list = Field(default_factory=list)          # requested, filtered to allow-list
+    device_code: str = Field()  # high-entropy opaque
+    user_code: str = Field()  # human-legible
+    client_id: str = Field()  # public client_uid
+    client_pk: Optional[int] = Field(default=None)  # integer FK for DB
+    scopes: list = Field(default_factory=list)  # requested, filtered to allow-list
     status: DeviceCodeStatus = Field(default=DeviceCodeStatus.PENDING)
     # D4: PKCE — required (S256) for public clients
     code_challenge: Optional[str] = Field(default=None)
@@ -386,7 +415,7 @@ class OauthDeviceCode(BaseModel):
     # D-2: internal owner-bound OauthAuthorizationCode carrier reference.
     auth_code: Optional[str] = Field(default=None)
     # Polling state machine
-    interval: int = Field(default=5)                    # current required poll interval (s)
+    interval: int = Field(default=5)  # current required poll interval (s)
     last_polled_at: Optional[datetime] = Field(default=None)
     issued_at: datetime = Field(default_factory=datetime.now)
-    expires_at: datetime = Field()                      # issued_at + OAUTH_DEVICE_CODE_TTL
+    expires_at: datetime = Field()  # issued_at + OAUTH_DEVICE_CODE_TTL

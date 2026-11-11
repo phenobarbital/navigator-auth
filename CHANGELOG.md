@@ -13,6 +13,33 @@
   `client` / `client_name` must be repaired). Run `navauth self upgrade`
   after upgrading; see `docs/migrations/README.md`.
 
+- **Vault targets on the asyncdb `authdb` pool (FEAT-115).** `MfaSecretTarget`
+  and `IdentityTarget` now run on native asyncpg connections even when they are
+  given the application's asyncdb pool, so in-process master-key rotation no
+  longer crashes (`'coroutine' object has no attribute 'start'`) and no longer
+  counts a failed or row-less write as rotated. The new
+  `navigator_auth.vault.asyncpg_pool()` does the same for navigator-session's
+  `UserVaultTarget`. See `docs/vault.rst`.
+
+- **FEAT-106 review fixes (0.30.0).** Fixes every high-severity finding from the
+  PR #633 review. The OAuth2 login form now enforces the second factor
+  (`POST /oauth2/login/mfa`; `503` when 2FA is on and the MFA services are
+  unavailable). MFA seeds move to their own `user_mfa_secrets` table
+  (migration `002_mfa_secrets.sql`) with an `mfa` vault target registered under
+  `navigator_session.vault_targets`; reinstall the package (`uv pip install -e .`)
+  so `navigator-vault` discovers it. Security transitions use one connection and a
+  bounded per-user lock (`AUTH_MFA_LOCK_TIMEOUT`), MFA services heal without a
+  restart (`AUTH_MFA_RETRY_INTERVAL`), and credential changes are atomic and
+  fail-closed (`503 mfa_unavailable`, `409 credentials_changed`). Regenerating
+  backup codes needs proof of a strong factor (`403 strong_factor_proof_required`).
+  OAuth2 access tokens carry `mfa`/`amr` through refresh, introspection and
+  userinfo, and ABAC reads assurance from the presented bearer token.
+  `oauth_user_generation` invalidates older OAuth credentials after a password
+  reset or recovery, admin `password_reset` now ends the target's sessions and
+  tokens, revocation failures are strict (503, password unchanged), and recovery
+  confirmations are consumed transactionally in `recovery_confirm_consumptions`.
+  See `docs/two_factor_auth.rst`.
+
 - **Two-factor authentication for BasicAuth (FEAT-106, opt-in).** TOTP
   (Google-Authenticator-compatible) and e-mail one-time codes are a second
   factor for username/password logins, enforced per tenant through the new

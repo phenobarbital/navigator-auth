@@ -1,17 +1,21 @@
 """Security-transition semantics for FEAT-106 credential changes."""
 
+from contextlib import asynccontextmanager
+
 import pytest
 
 from navigator_auth.mfa.events import SECURITY_EVENTS, security_transition
+from navigator_auth.mfa.exceptions import MfaStorageError, MfaUnavailable
 
 
 @pytest.mark.asyncio
-async def test_security_transition_is_noop_without_services():
-    """A disabled MFA installation does not block the protected operation."""
-    seen = []
-    async with security_transition({}, 42, "password_change") as connection:
-        seen.append(connection)
-    assert seen == [None]
+async def test_security_transition_without_services_requires_authdb():
+    """M3 changes no MFA from yielding None to an authdb transaction, failing closed without one."""
+    ran = []
+    with pytest.raises(MfaStorageError):
+        async with security_transition({}, 42, "password_change"):
+            ran.append(True)
+    assert ran == []
 
 
 @pytest.mark.asyncio
@@ -61,7 +65,12 @@ def _fake_services(monkeypatch, *, fail_enter=False, fail_bump=False):
             calls.append("revoke")
 
     services = type("S", (), {"available": True, "security": _Security(), "trusted_devices": _Devices()})()
-    monkeypatch.setattr("navigator_auth.mfa.events.get_mfa_services", lambda app: services)
+
+    @asynccontextmanager
+    async def _lease(app):
+        yield services
+
+    monkeypatch.setattr("navigator_auth.mfa.events.mfa_services_lease", _lease)
     return calls, exits
 
 
@@ -119,3 +128,156 @@ def test_security_events_are_complete():
             "global_logout",
         }
     )
+
+
+class _TransactionalCredentialStore:
+    """Small transactional credential store for passkey transition call-site tests."""
+
+    def __init__(self) -> None:
+        self.credentials: set[bytes] = set()
+
+    async def save_credential(self, credential_id: bytes, *, conn) -> None:
+        """Stage a credential insert on the supplied connection."""
+        conn.setdefault("inserts", set()).add(credential_id)
+
+    async def delete_credential(self, credential_id: bytes, *, conn) -> bool:
+        """Stage a credential deletion on the supplied connection."""
+        if credential_id not in self.credentials:
+            return False
+        conn.setdefault("deletes", set()).add(credential_id)
+        return True
+
+    def commit(self, conn) -> None:
+        """Apply staged writes after the transition succeeds."""
+        self.credentials.update(conn.get("inserts", set()))
+        self.credentials.difference_update(conn.get("deletes", set()))
+
+
+@pytest.mark.asyncio
+async def test_passkey_transition_atomic(monkeypatch):
+    """AC16: register and remove writes roll back when transition audit fails."""
+    store = _TransactionalCredentialStore()
+    credential_id = b"remove-credential"
+    store.credentials.add(credential_id)
+    audit_errors = []
+
+    class _Security:
+        def user_lock(self, user_id):
+            class _Transaction:
+                async def __aenter__(self):
+                    return {}
+
+                async def __aexit__(self, exc_type, exc, tb):
+                    return False
+
+            return _Transaction()
+
+        async def bump_version(self, conn, user_id):
+            pass
+
+        async def write_audit(self, conn, entry):
+            audit_errors.append(entry.action)
+            raise MfaStorageError("audit failed")
+
+    class _Devices:
+        async def revoke_all(self, user_id, event, conn=None):
+            pass
+
+    services = type(
+        "Services",
+        (),
+        {"available": True, "security": _Security(), "trusted_devices": _Devices()},
+    )()
+
+    @asynccontextmanager
+    async def lease(app):
+        yield services
+
+    monkeypatch.setattr("navigator_auth.mfa.events.mfa_services_lease", lease)
+    app = {}
+
+    with pytest.raises(MfaStorageError):
+        async with security_transition(app, 42, "passkey_removed") as conn:
+            assert await store.delete_credential(credential_id, conn=conn)
+    assert store.credentials == {credential_id}
+
+    with pytest.raises(MfaStorageError):
+        async with security_transition(app, 42, "passkey_registered") as conn:
+            await store.save_credential(b"register-credential", conn=conn)
+    assert b"register-credential" not in store.credentials
+    assert audit_errors == ["passkey_removed", "passkey_registered"]
+
+
+@pytest.mark.asyncio
+async def test_passkey_endpoints_mfa_unavailable_503(monkeypatch):
+    """AC13: both passkey transition events fail closed when MFA storage is unavailable."""
+    services = type("Services", (), {"available": False})()
+
+    @asynccontextmanager
+    async def lease(app):
+        yield services
+
+    monkeypatch.setattr("navigator_auth.mfa.events.mfa_services_lease", lease)
+    credentials = {b"unchanged"}
+    for event in ("passkey_registered", "passkey_removed"):
+        with pytest.raises(MfaUnavailable):
+            async with security_transition({}, 42, event):
+                credentials.clear()
+    assert credentials == {b"unchanged"}
+
+
+@pytest.mark.asyncio
+async def test_passkey_flows_single_connection():
+    """AC10: register and remove pass the one transition connection to every credential write."""
+    calls = []
+    connection = object()
+
+    class _Security:
+        def user_lock(self, user_id):
+            class _OneConnection:
+                async def __aenter__(self):
+                    return connection
+
+                async def __aexit__(self, exc_type, exc, tb):
+                    return False
+
+            return _OneConnection()
+
+        async def bump_version(self, conn, user_id):
+            assert conn is connection
+
+        async def write_audit(self, conn, entry):
+            assert conn is connection
+
+    class _Devices:
+        async def revoke_all(self, user_id, event, conn=None):
+            assert conn is connection
+
+    services = type(
+        "Services",
+        (),
+        {"available": True, "security": _Security(), "trusted_devices": _Devices()},
+    )()
+
+    @asynccontextmanager
+    async def lease(app):
+        yield services
+
+    async def register(conn):
+        calls.append(("register", conn))
+
+    async def remove(conn):
+        calls.append(("remove", conn))
+
+    import navigator_auth.mfa.events as events
+
+    original_lease = events.mfa_services_lease
+    events.mfa_services_lease = lease
+    try:
+        async with security_transition({}, 42, "passkey_registered") as conn:
+            await register(conn)
+        async with security_transition({}, 42, "passkey_removed") as conn:
+            await remove(conn)
+    finally:
+        events.mfa_services_lease = original_lease
+    assert calls == [("register", connection), ("remove", connection)]

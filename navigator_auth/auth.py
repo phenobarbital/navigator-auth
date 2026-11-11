@@ -10,7 +10,7 @@ Supporting:
 """
 
 import contextlib
-from typing import Any, Union
+from typing import Any, Optional, Union
 from collections.abc import Awaitable, Callable, Iterable
 import fnmatch
 import importlib
@@ -35,13 +35,17 @@ from .vault.integration import (
     VAULT_SESSION_KEY,
 )
 from .migrations.startup import warn_pending_migrations
+from .security_state import setup_security_state_tables
 from .backends.idp import IdentityProvider
+from .backends.oauth2.models import is_oauth_user_token
+from .security_state.store import SecurityStateError, generation_matches, generation_of
 from .libs.expiry import expiry_fields
 from .libs.hmac_keys import warn_short_hmac_keys
 from .identities import AuthUser
 from .conf import (
     AUTH_MECHANISM_KEY,
     AUTH_MECHANISM_BEARER,
+    AUTH_BEARER_CONTEXT_KEY,
     AUTH_MECHANISM_COOKIE,
     AUTH_EXCLUDE_LIST_KEY,
     AUTHORIZED_KEY,
@@ -82,6 +86,7 @@ from .middlewares.csrf import csrf_middleware
 from .middlewares.version import version_middleware
 from .middlewares.protected_paths import install_protected_paths
 from .abac.middleware import abac_middleware
+from .abac.context import bearer_context_from_claims
 
 url = logging.getLogger("urllib3.connectionpool")
 url.setLevel(logging.WARNING)
@@ -192,6 +197,9 @@ class AuthHandler:
         # Schema changes are applied by `navauth self upgrade` (FEAT-110); startup only checks.
         if "authdb" in app:
             await warn_pending_migrations(app["authdb"])
+            # security_state (FEAT-106 review fixes) is not in the migration
+            # catalog yet, so its DDL still runs here until it joins it.
+            await setup_security_state_tables(app["authdb"])
         # Re-hydrate exclude-provider paths after each startup (FEAT-241 M2):
         for provider in self._exclude_providers:
             try:
@@ -1053,8 +1061,8 @@ class AuthHandler:
         OAuth2 access tokens are self-contained JWTs, so revoking one only
         marks its ``jti`` in the provider's access-token storage. Without this
         check a revoked token would keep passing ``auth_middleware`` until it
-        expires. Only tokens that actually carry a ``jti`` (i.e. OAuth2 ones)
-        cost a storage lookup.
+        expires. Only tokens that carry a ``jti`` cost a storage lookup.
+        Storage errors abort authentication with 503, including for Basic JWTs.
         """
         jti = payload.get("jti") if payload else None
         if not jti:
@@ -1067,8 +1075,18 @@ class AuthHandler:
                 if await storage.is_revoked(jti):
                     return True
             except Exception as exc:  # pylint: disable=W0703
-                self.logger.warning(f"Auth Middleware: unable to check revocation of jti={jti}: {exc}")
+                self.logger.error(f"Auth Middleware: revocation check failed: {type(exc).__name__}")
+                raise web.HTTPServiceUnavailable(reason="Authentication temporarily unavailable") from exc
         return False
+
+    async def _oauth_generation_ok(self, request: web.Request, payload: Optional[dict]) -> bool:
+        """Return whether an OAuth user token carries the current credential generation."""
+        if not payload or not is_oauth_user_token(payload):
+            return True
+        pool = request.app.get("authdb") if request.app is not None else None
+        if pool is None:
+            raise SecurityStateError("authdb is not configured")
+        return await generation_matches(pool, int(payload["user_id"]), generation_of(payload))
 
     @web.middleware
     async def auth_middleware(
@@ -1108,7 +1126,11 @@ class AuthHandler:
                 try:
                     token = await self._idp.get_payload(request)
                     _, payload = self._idp.decode_token(code=token)
-                    if payload and not await self._token_is_revoked(payload):
+                    if (
+                        payload
+                        and not await self._token_is_revoked(payload)
+                        and await self._oauth_generation_ok(request, payload)
+                    ):
                         session = await get_session(request, payload, new=False)
                         if session:
                             user = await self.get_session_user(session)
@@ -1116,6 +1138,7 @@ class AuthHandler:
                                 request.user = user
                                 request["authenticated"] = True
                                 request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
+                                request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
                 except Exception:
                     pass  # Best-effort: if token is invalid, proceed unauthenticated
             return await handler(request)
@@ -1137,6 +1160,14 @@ class AuthHandler:
             raise self.Unauthorized(reason=err.message, exception=err) from err
         if payload and await self._token_is_revoked(payload):
             raise self.Unauthorized(reason="Token has been revoked")
+        if payload:
+            try:
+                generation_ok = await self._oauth_generation_ok(request, payload)
+            except (SecurityStateError, ValueError, TypeError) as err:
+                self.logger.error(f"Auth Middleware: credential generation check failed: {type(err).__name__}")
+                raise web.HTTPServiceUnavailable(reason="Authentication temporarily unavailable") from err
+            if not generation_ok:
+                raise self.Unauthorized(reason="Token has been revoked")
         try:
             if payload:
                 ## check if user has a session:
@@ -1184,6 +1215,7 @@ class AuthHandler:
                         request["userdata"] = payload
                         request["authenticated"] = True
                         request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
+                        request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
 
                     except web.HTTPException:
                         raise
@@ -1216,6 +1248,7 @@ class AuthHandler:
                         request["userdata"] = payload
                         request["authenticated"] = True
                         request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
+                        request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
                     except web.HTTPException:
                         raise
                     except Exception as ex:  # pylint: disable=W0703

@@ -116,6 +116,10 @@ AUTH_MECHANISM_APIKEY = "apikey"
 AUTH_MECHANISM_PARTNER = "partner"
 AUTH_MECHANISM_TOKEN = "token"
 AUTH_MECHANISM_DJANGO = "django"
+# FEAT-106 review fixes (M9, D9): request key holding the immutable, request-local
+# assurance (mfa/amr/auth_method) and identity of the VALIDATED bearer token. ABAC
+# uses it instead of the identity-shared session for bearer requests.
+AUTH_BEARER_CONTEXT_KEY = "auth_bearer_context"
 
 # Version / Deployment Headers:
 import platform  # noqa: E402
@@ -703,6 +707,11 @@ AUTH_OTP_CODE_LENGTH = config.getint("AUTH_OTP_CODE_LENGTH", fallback=6)
 AUTH_OTP_RATE_USER = config.get("AUTH_OTP_RATE_USER", fallback="10/hour")
 AUTH_OTP_RATE_IP = config.get("AUTH_OTP_RATE_IP", fallback="30/hour")
 AUTH_OTP_EMAIL_CALLBACK = config.get("AUTH_OTP_EMAIL_CALLBACK")
+# Bound (seconds) on the MFA per-user lock: pool acquire AND advisory-lock wait (FEAT-106 review fixes, M2).
+# navconfig has no getfloat(): parse explicitly.
+AUTH_MFA_LOCK_TIMEOUT = float(config.get("AUTH_MFA_LOCK_TIMEOUT", fallback=5.0))
+# Minimum seconds between two rebuild attempts of transiently unavailable MFA services (FEAT-106 review fixes, M1).
+AUTH_MFA_RETRY_INTERVAL = config.getint("AUTH_MFA_RETRY_INTERVAL", fallback=15)
 AUTH_TOTP_ISSUER = config.get("AUTH_TOTP_ISSUER", fallback="Navigator")
 AUTH_MFA_BACKUP_CODE_COUNT = config.getint("AUTH_MFA_BACKUP_CODE_COUNT", fallback=10)
 AUTH_MFA_BACKUP_CODE_LENGTH = config.getint("AUTH_MFA_BACKUP_CODE_LENGTH", fallback=8)

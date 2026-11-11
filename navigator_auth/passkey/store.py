@@ -1,7 +1,8 @@
 """Persistence for WebAuthn credentials and per-(user, RP) user handles (FEAT-101)."""
 
 import secrets
-from typing import Any, Optional
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Optional
 
 from navconfig.logging import logging
 
@@ -63,14 +64,23 @@ class PasskeyStore:
                 )
         return [self._row_to_credential(r) for r in rows or []]
 
-    async def save_credential(self, credential: StoredCredential) -> None:
-        """Insert a newly registered credential."""
-        async with await self._pool.acquire() as conn:
-            await conn.execute(
+    @asynccontextmanager
+    async def _scope(self, conn: Any = None) -> AsyncIterator[Any]:
+        """Yield the caller's connection, or acquire one from the pool."""
+        if conn is not None:
+            yield conn
+            return
+        async with await self._pool.acquire() as own:
+            yield own
+
+    async def save_credential(self, credential: StoredCredential, *, conn: Any = None) -> None:
+        """Insert a newly registered credential, using ``conn`` when supplied."""
+        async with self._scope(conn) as db:
+            inserted = await db.fetchval(
                 f"INSERT INTO {_CREDENTIALS} "
                 "(credential_id, user_id, rp_id, public_key, sign_count, transports, "
                 "aaguid, device_type, backed_up, label) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7::uuid, $8, $9, $10)",
+                "VALUES ($1, $2, $3, $4, $5, $6, $7::uuid, $8, $9, $10) RETURNING credential_id",
                 credential.credential_id,
                 credential.user_id,
                 credential.rp_id,
@@ -82,6 +92,8 @@ class PasskeyStore:
                 credential.backed_up,
                 credential.label,
             )
+        if inserted is None:
+            raise RuntimeError("passkey credential insert returned no row")
 
     async def update_usage(self, credential_id: bytes, *, sign_count: int, backed_up: bool) -> None:
         """Raise ``sign_count`` (never lower it), set ``backed_up`` and ``last_used_at = now()``."""
@@ -107,7 +119,9 @@ class PasskeyStore:
             )
         return bool(changed)
 
-    async def delete_credential(self, user_id: int, credential_id: bytes, *, keep_last: bool = False) -> bool:
+    async def delete_credential(
+        self, user_id: int, credential_id: bytes, *, keep_last: bool = False, conn: Any = None
+    ) -> bool:
         """Delete a credential owned by ``user_id``; True when a row was removed.
 
         Args:
@@ -118,8 +132,8 @@ class PasskeyStore:
                 check-then-act race).
         """
         guard = f" AND (SELECT count(*) FROM {_CREDENTIALS} WHERE user_id = $1) > 1" if keep_last else ""
-        async with await self._pool.acquire() as conn:
-            removed = await conn.fetchval(
+        async with self._scope(conn) as db:
+            removed = await db.fetchval(
                 f"WITH d AS (DELETE FROM {_CREDENTIALS} "
                 f"WHERE user_id = $1 AND credential_id = $2{guard} RETURNING 1) "
                 "SELECT count(*) FROM d",
