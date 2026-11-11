@@ -33,12 +33,14 @@ different ways, none of them dependable:
 - **Vault and identity** SQL runs on every application boot from
   `AuthHandler.auth_startup`, with the runtime database user, and failures are
   only logged. A database whose runtime user cannot run DDL, or that hit a lock
-  timeout, stays behind silently. This is the most likely reason a local
-  `auth.user_identities` lacks recent columns.
+  timeout, stays behind silently. (On the database inspected for this spec the
+  identity set turned out to be fully applied — see §8 — so this is a design
+  weakness, not the observed cause of a stale table.)
 - **Passkey** SQL runs only when that backend is enabled.
 - **OAuth2** changes (`navigator_auth/backends/oauth2/ddl.sql`, 284 lines
   touching `auth.clients`, `auth.policies` and six OAuth tables) are loaded by
-  no code at all: someone has to find the file and run it by hand.
+  no code at all: someone has to find the file and run it by hand. The
+  inspected database is missing five of those tables for exactly this reason.
 
 On top of that, the three runners are copies of each other, each keeps a
 hand-written file list (a file that is not listed never runs — this already
@@ -76,8 +78,9 @@ SQL changes kept in one documented place.
 - Changing the content of already-released SQL files (identity 001–006,
   vault 001–002, passkey 001). They move; they are not edited.
 - Databases other than PostgreSQL.
-- MFA tables. They belong to FEAT-106 (TASK-130); see §7 for how that task
-  plugs into the catalog.
+- Designing the MFA tables. They are FEAT-106's (TASK-130). FEAT-106 merges
+  first; this feature then moves its SQL into the catalog and turns its runner
+  into a shim, exactly like the other three (§3 M1, M3, M6).
 - Adopting an external migration tool — not evaluated; the proposal went
   straight to a home-grown runner because every SQL file is already idempotent.
 
@@ -100,7 +103,7 @@ changes:
 
 1. **Catalog** — SQL files live in `navigator_auth/migrations/sql/<set>/`,
    named `NNN_description.sql`. Sets are applied in a fixed order
-   (`vault`, `identity`, `passkey`, `oauth2`); files inside a set are applied
+   (`vault`, `identity`, `passkey`, `mfa`, `oauth2`); files inside a set are applied
    in filename order. Files are discovered by listing the directory, so a new
    file needs no registration. `{schema}` and `{users_table}` placeholders are
    rendered from `AUTH_DB_SCHEMA` / `AUTH_USERS_TABLE`; files that hard-code
@@ -152,12 +155,12 @@ navauth (console script)
                         │        │
                         │        └─→ <schema>.schema_migrations  (ledger)
                         └─→ migrations/catalog.py ── discover / render_sql
-                                     └─→ migrations/sql/{vault,identity,passkey,oauth2}/NNN_*.sql
+                                     └─→ migrations/sql/{vault,identity,passkey,mfa,oauth2}/NNN_*.sql
 
 AuthHandler.auth_startup ─→ migrations/startup.py::warn_pending_migrations ─→ runner.get_status (read-only)
 PasskeyAuth.on_startup   ─→ migrations/startup.py::tables_present
 
-identity/vault/passkey migrations.py (legacy ensure_*) ─→ catalog.set_filenames + runner.execute_checked
+identity/vault/passkey/mfa migrations.py (legacy ensure_*) ─→ catalog.set_filenames + runner.execute_checked
 ```
 
 ### Integration Points
@@ -178,7 +181,7 @@ identity/vault/passkey migrations.py (legacy ensure_*) ─→ catalog.set_filena
 
 ```python
 class MigrationFile(BaseModel):          # frozen
-    migration_set: str                   # "vault" | "identity" | "passkey" | "oauth2"
+    migration_set: str                   # "vault" | "identity" | "passkey" | "mfa" | "oauth2"
     filename: str                        # "004_identity_base_columns.sql"
     path: Path
     checksum: str                        # sha256 hex of the raw file bytes
@@ -273,11 +276,15 @@ database and user.
 ### Module 1: Catalog + SQL relocation
 - **Path**: `navigator_auth/migrations/__init__.py`, `navigator_auth/migrations/catalog.py`, `navigator_auth/migrations/sql/<set>/`
 - **Responsibility**: single source of truth for which migration files exist,
-  in what order, and how they are rendered. Moves the nine released SQL files
+  in what order, and how they are rendered. Moves the released SQL files (nine
+  today, plus the MFA file FEAT-106 adds)
   with `git mv` (content byte-identical):
   - `navigator_auth/vault/sql/*.sql` → `navigator_auth/migrations/sql/vault/`
   - `navigator_auth/identity/sql/*.sql` → `navigator_auth/migrations/sql/identity/`
   - `navigator_auth/passkey/sql/*.sql` → `navigator_auth/migrations/sql/passkey/`
+  - `navigator_auth/mfa/sql/*.sql` → `navigator_auth/migrations/sql/mfa/`
+    (delivered by FEAT-106 TASK-130; path as planned there — re-verify once
+    FEAT-106 is merged)
 - **Depends on**: `navigator_auth/conf.py` (`AUTH_DB_SCHEMA`, `AUTH_USERS_TABLE`)
 - **Interface Skeleton**:
   ```python
@@ -285,7 +292,7 @@ database and user.
   from ..conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE  # verified: navigator_auth/conf.py:33-34
 
   SQL_ROOT: Path = Path(__file__).parent / "sql"
-  MIGRATION_SETS: tuple[str, ...] = ("vault", "identity", "passkey", "oauth2")
+  MIGRATION_SETS: tuple[str, ...] = ("vault", "identity", "passkey", "mfa", "oauth2")
   FILENAME_PATTERN: re.Pattern[str]  # ^\d{3}_[a-z0-9_]+\.sql$
 
   class MigrationCatalogError(Exception):
@@ -458,7 +465,7 @@ no default grants, proving runtime reads and writes, including sequence-backed
 inserts, after upgrade.
 
 ### Module 3: Legacy runner shims
-- **Path**: `navigator_auth/identity/migrations.py`, `navigator_auth/vault/migrations.py`, `navigator_auth/passkey/migrations.py`
+- **Path**: `navigator_auth/identity/migrations.py`, `navigator_auth/vault/migrations.py`, `navigator_auth/passkey/migrations.py`, `navigator_auth/mfa/migrations.py`
 - **Responsibility**: keep the existing public functions working against the
   relocated files, without private copies of shared logic.
 - **Depends on**: Module 1, Module 2 (`execute_checked`)
@@ -481,6 +488,12 @@ inserts, after upgrade.
   from ..migrations.catalog import render_sql                    # same name stays importable from this module
   async def ensure_passkey_tables(db_pool: Any) -> None: ...     # verified: passkey/migrations.py:43
   async def setup_passkey_tables(db_pool: Any) -> None: ...      # verified: passkey/migrations.py:55
+
+  # navigator_auth/mfa/migrations.py  (unverified — created by FEAT-106 TASK-130; names as planned in that task)
+  SQL_DIR = set_dir("mfa")
+  _MIGRATION_FILES = set_filenames("mfa")
+  # render_sql, ensure_mfa_tables, mfa_tables_present, setup_mfa_tables, MFA_TABLES keep their names and contracts.
+  # The module keeps its own execute-result check (TASK-130 AC-8 allows `.execute(` only in this file).
   ```
   Each `ensure_*` keeps acquiring one connection per file from `db_pool` and
   calls `execute_checked(conn, sql)` on the pool's own connection object (not
@@ -570,6 +583,12 @@ inserts, after upgrade.
   `setup_vault_tables` stays in `navigator_auth/vault/integration.py` (tests
   patch it) but is no longer called by `auth_startup`.
 
+  **MFA** (unverified — FEAT-106 TASK-138 wires `setup_mfa_tables()` into
+  `BasicAuth.on_startup` and stores its boolean as the MFA usability flag):
+  that call is replaced by `mfa_tables_present()`, which keeps the flag's
+  meaning ("the six tables exist") without running DDL at boot. When the flag
+  is false the log line names `navauth self upgrade`.
+
 ### Module 7: Docs + release notes
 - **Path**: `docs/migrations/README.md`, `docs/migrations.rst`, `docs/index.rst`, `CHANGELOG.md`
 - **Responsibility**: the documented view of the migrations.
@@ -593,7 +612,7 @@ inserts, after upgrade.
 
 | Test | Module | Description |
 |---|---|---|
-| `test_discover_orders_sets_then_files` | M1 | vault → identity → passkey → oauth2, filenames ascending |
+| `test_discover_orders_sets_then_files` | M1 | vault → identity → passkey → mfa → oauth2, filenames ascending |
 | `test_every_sql_dir_is_registered` | M1 | every directory under `SQL_ROOT` is in `MIGRATION_SETS` |
 | `test_discover_rejects_bad_filename_and_duplicate_prefix` | M1 | `MigrationCatalogError` on each (tmp catalog) |
 | `test_released_files_are_byte_identical` | M1 | checksums of the nine moved files equal the values recorded at spec time (computed by the task from `git show`) |
@@ -690,10 +709,11 @@ No E2E scenarios: this feature has no deterministic E2E gate surface.
 - [ ] A failing file is reported by name, later files still run, and the exit code is `2`; with `--fail-fast` the run stops at that file.
 - [ ] No code path uses the return value of asyncdb `execute()` unchecked: every migration statement goes through `execute_checked` or a raw asyncpg connection.
 - [ ] Adding `NNN_new.sql` to a set directory makes it pending with no other code change.
-- [ ] All SQL lives under `navigator_auth/migrations/sql/`; `navigator_auth/identity/sql/`, `navigator_auth/vault/sql/`, `navigator_auth/passkey/sql/` and `navigator_auth/backends/oauth2/ddl.sql` no longer exist; the nine moved files are byte-identical to their previous content.
+- [ ] All SQL lives under `navigator_auth/migrations/sql/`; `navigator_auth/identity/sql/`, `navigator_auth/vault/sql/`, `navigator_auth/passkey/sql/`, `navigator_auth/mfa/sql/` and `navigator_auth/backends/oauth2/ddl.sql` no longer exist; the moved files are byte-identical to their previous content.
 - [ ] `ensure_vault_tables`, `ensure_identity_columns`, `ensure_passkey_tables`, `setup_vault_tables`, `setup_identity_columns`, `setup_passkey_tables`, `SQL_DIR`, `MIGRATION_FILES` / `_MIGRATION_FILES` and `passkey.migrations.render_sql` remain importable from their current modules with unchanged signatures.
 - [ ] `AuthHandler.auth_startup` executes no DDL; with pending migrations it logs one warning naming them and `navauth self upgrade`; a failing check never blocks startup.
 - [ ] `PasskeyAuth.on_startup` raises `ConfigError` when the passkey tables are missing and runs no DDL.
+- [ ] The MFA startup path runs no DDL: its usability flag comes from `mfa_tables_present()`; `ensure_mfa_tables`, `setup_mfa_tables`, `mfa_tables_present` and `render_sql` remain importable from `navigator_auth.mfa.migrations`.
 - [ ] Credentials resolve in the order `--dsn` → `AUTH_ADMIN_DSN` → `--user`/`AUTH_ADMIN_USER` + `AUTH_ADMIN_PWD` or prompt → `default_dsn` (with a notice); neither the DSN nor the password appears in stdout, stderr or logs.
 - [ ] The OAuth2 migration contains no seed or test data and can be run twice on a populated `auth.clients` without error.
 - [ ] `docs/migrations/README.md` lists every SQL file; `test_readme_index_lists_every_sql_file` enforces it.
@@ -813,7 +833,7 @@ Test settings: `filterwarnings = ["error", …]` (`pyproject.toml:121`);
 - ~~`navigator_auth/cli.py`, `navigator_auth/__main__.py`~~ — no CLI module exists.
 - ~~`[project.scripts]` / `console_scripts`~~ — never present in `pyproject.toml` or `setup.py`.
 - ~~`argparse`, `click`, `typer` usage in `navigator_auth/`~~ — none.
-- ~~`navigator_auth/mfa/`~~ — not created yet (FEAT-106 TASK-130, pending).
+- ~~`navigator_auth/mfa/`~~ — not in the tree at spec time (`27ec076`); FEAT-106 (TASK-129…148, all pending) creates it and must be merged before this feature starts. Every MFA name in this spec is taken from `sdd/tasks/active/TASK-130-mfa-migrations.md` and is unverified until then.
 - ~~`AUTH_ADMIN_DSN`, `AUTH_ADMIN_USER`, `AUTH_ADMIN_PWD`~~ — not in `navigator_auth/conf.py`; added by M5.
 - ~~`schema_migrations` or any applied-migrations table~~ — none anywhere.
 - ~~`setup_vault_tables` in `navigator_auth/vault/migrations.py`~~ — it is in `navigator_auth/vault/integration.py`.
@@ -838,6 +858,9 @@ Verified against: `27ec076`
 | `navigator_auth/migrations/sql/oauth2/001_oauth2_schema.sql` | CREATE | — | — | — |
 | `navigator_auth/migrations/sql/{vault,identity,passkey}/*.sql` | MOVE (`git mv`) | — | — | — |
 | `navigator_auth/backends/oauth2/ddl.sql` | DELETE | — | — | — |
+| `navigator_auth/mfa/sql/*.sql` → `navigator_auth/migrations/sql/mfa/` | MOVE (`git mv`) | (unverified — check before use; exists only after FEAT-106) | — | — |
+| `navigator_auth/mfa/migrations.py` | MODIFY | (unverified — check before use; `SQL_DIR`, `_MIGRATION_FILES` as planned by TASK-130) | — | — |
+| MFA startup call site (`BasicAuth.on_startup`, wired by FEAT-106 TASK-138) | MODIFY | (unverified — check before use) | — | — |
 | `navigator_auth/identity/migrations.py` | MODIFY | `SQL_DIR = Path(__file__).parent / "sql"` | `migrations.py:18` | 1 |
 | `navigator_auth/identity/migrations.py` | MODIFY | `_MIGRATION_FILES = (` | `migrations.py:24` | 1 |
 | `navigator_auth/identity/migrations.py` | MODIFY | `async def _run_sql(db_pool: Any, sql: str) -> None:` | `migrations.py:34` | 1 |
@@ -959,12 +982,14 @@ Verified against: `27ec076`
 - **`filterwarnings = error`**: constructing `asyncdb.AsyncPool("pg", …)` emits
   a `FutureWarning` from `google.api_core` and turns live-DB tests into skips.
   The live integration test uses `asyncpg.connect` directly.
-- **FEAT-106 TASK-130** plans `navigator_auth/mfa/migrations.py` and
-  `navigator_auth/mfa/sql/001_mfa_tables.sql`. Whichever feature lands second
-  must adapt: with FEAT-110 merged, the MFA SQL goes to
-  `navigator_auth/migrations/sql/mfa/` and `"mfa"` is appended to
-  `MIGRATION_SETS` (the `test_every_sql_dir_is_registered` test will fail
-  otherwise, which is the point).
+- **FEAT-106 merges first** (decided, §8). It delivers
+  `navigator_auth/mfa/migrations.py` and `navigator_auth/mfa/sql/001_mfa_tables.sql`
+  in the old per-subsystem style, and TASK-138 calls `setup_mfa_tables()` at
+  startup. This feature then relocates that SQL, shims that module and replaces
+  the startup call with the presence probe. `/sdd-task` for FEAT-110 must run
+  after FEAT-106 is on `dev`, so the three MFA rows in §6 Edit Sites can be
+  verified instead of guessed. `test_every_sql_dir_is_registered` guards the
+  set list.
 - **Docs and SQL comments mention old paths** (`passkey/migrations.py`,
   `identity/sql/…` in `documentation/identity-vault.md` and in SQL headers).
   SQL file content is frozen; prose docs are updated in M7 where they name a
@@ -1000,9 +1025,9 @@ No new dependency.
 - [x] **Ledger table name and runtime read access** — decided here: `<schema>.schema_migrations`, `GRANT SELECT TO PUBLIC` (§2).
 - [x] **Numbering** — decided here: per-set subfolders, each with its own `NNN` sequence (keeps released filenames).
 - [x] **Do in-package `.sql` files ship in the wheel?** — yes by configuration (`graft navigator_auth` + default include-package-data); enforced by `test_wheel_contains_sql`.
-- [ ] **Ordering with FEAT-106 TASK-130** — which feature merges first decides who adapts the MFA SQL location (§7). — *Owner: Jesus Lara*
-- [ ] **Should the passkey backend keep failing startup when its tables are missing**, or only warn like the other sets? The spec keeps the existing fail-fast behaviour. — *Owner: Jesus Lara*
-- [ ] **The local `auth.user_identities` lag** was attributed to a silent startup failure by inference only; running `navauth self upgrade --check` on that database after M5 will confirm or refute it. — *Owner: Jesus Lara*
+- [x] **Ordering with FEAT-106** — *Resolved by the user (2026-11-11)*: "FEAT-106 first". FEAT-106 lands as planned; FEAT-110 moves `navigator_auth/mfa/sql/` into the catalog, shims the MFA runner and replaces its startup call. → `MIGRATION_SETS`, M1, M3, M6, Worktree Strategy.
+- [x] **Passkey backend when its tables are missing** — *Resolved by the user (2026-11-11)*: "Fail startup": raise `ConfigError` telling the operator to run `navauth self upgrade`. → M6, §5.
+- [x] **Is the local `auth.user_identities` really behind?** — *Resolved by inspection (2026-11-11, read-only catalog queries with the DSN the project environment resolves: database `navigator`, PostgreSQL 17.3)*: no. All columns added by identity 001–004 are present, the legacy `uid` column is gone and the primary key is `identity_id`, so identity 001–006 are fully applied; vault and passkey tables are present too. The proposal's inference of a silent startup failure (claim C3) is **not supported** on this database. What that database does lack is the hand-applied OAuth2 patch: `oauth_refresh_tokens`, `oauth_grants`, `oauth_access_tokens`, `oauth_device_codes` and `client_access` are missing (`clients` exists). The connecting role owns the table and is a superuser, so permissions were not an obstacle. If "my local" meant a different database than the one this environment points at, re-check there with `navauth self upgrade --check` once M5 exists.
 
 ---
 
@@ -1041,6 +1066,7 @@ Summary: **0** confirmed · **0** rejected · **0** escalated.
   - M5 → M2 (`get_status`, `upgrade`, `MigrationError`)
   - M6 → M2 (`get_status`, `acquire_raw`)
   - M7 → M1, M4, M5 (documents the final file list and the CLI)
+  - M3 and M6 additionally touch FEAT-106 code (`navigator_auth/mfa/migrations.py`, the MFA startup call)
   - M3, M4, M5 and M6 have no edges between them and can run concurrently once
     their prerequisites are merged.
 - **Shared files**: none between concurrent modules. `pyproject.toml` and
@@ -1051,8 +1077,9 @@ Summary: **0** confirmed · **0** rejected · **0** escalated.
 - **Exclusive resources**: the `git mv` of the nine SQL files (M1) changes
   paths every other module reads — M1 must be merged before any other module
   starts. No extension rebuild, lockfile or database is mutated by the tasks.
-- **Cross-feature dependencies**: none required. FEAT-106 (TASK-130) overlaps;
-  see §8.
+- **Cross-feature dependencies**: **FEAT-106 (`basicauth-otp-2fa`) must be
+  merged into `dev` first.** Its MFA runner, SQL file and startup call are
+  inputs to M1, M3 and M6.
 
 ---
 
@@ -1061,4 +1088,5 @@ Summary: **0** confirmed · **0** rejected · **0** escalated.
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-11-11 | Jesus Lara | Initial draft from `sdd/proposals/new-command-migration.proposal.md` |
+| 0.2 | 2026-11-11 | Jesus Lara | Open questions resolved: FEAT-106 merges first (MFA set added), passkey fails startup, local database inspected |
 | 0.2 | 2026-11-11 | Codex | Review fixes: non-None asyncdb errors fail closed; prerequisite/postcondition checks preserve retries; explicit runtime-role grants and read-only access checks, with regression validation. |
