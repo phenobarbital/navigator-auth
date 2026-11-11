@@ -38,6 +38,20 @@ class UserNotFound(AuthException):
         super().__init__(message or "User doesn't exists.", status=status)
 
 
+class IdentityStoreUnavailable(AuthException):
+    """The identity store could not be queried (FEAT-108).
+
+    Raised for infrastructure failures (pool, connection or query errors) so that callers
+    never confuse an outage with a confirmed missing user (:class:`UserNotFound`).
+    Custom IdPs must raise ``UserNotFound`` only for a confirmed missing user and this
+    exception for infrastructure failures. The message stays generic; chain the original
+    exception (``raise IdentityStoreUnavailable() from err``) and log details server-side.
+    """
+
+    def __init__(self, message: str = None, status=503):
+        super().__init__(message or "Identity store unavailable.", status=status)
+
+
 class Unauthorized(AuthException):
 
     def __init__(self, message: str = None, status=401):
