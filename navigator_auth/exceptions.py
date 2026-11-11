@@ -58,3 +58,56 @@ class AuthExpired(AuthException):
 
     def __init__(self, message: str = None, status=410):
         super().__init__(message or "Gone: Authentication Expired.", status=status)
+
+
+#### Second factor (FEAT-106)
+class MfaSignal(AuthException):
+    """Terminal outcome of the BasicAuth second-factor hook (FEAT-106, D1)."""
+
+    def payload(self) -> dict:
+        """Return the JSON body of the HTTP response without session material."""
+        raise NotImplementedError
+
+
+class MFARequired(MfaSignal):
+    """Credentials are valid, but a second factor is owed."""
+
+    def __init__(
+        self,
+        challenge: str,
+        providers: list[str],
+        preferred: str,
+        expires_in: int,
+        status: int = 401,
+    ):
+        super().__init__("Second factor required", status=status)
+        self._challenge = challenge
+        self.providers = list(providers)
+        self.preferred = preferred
+        self.expires_in = int(expires_in)
+
+    def payload(self) -> dict:
+        """Return the required-second-factor challenge envelope."""
+        return {
+            "mfa_required": True,
+            "challenge": self._challenge,
+            "providers": list(self.providers),
+            "preferred": self.preferred,
+            "expires_in": self.expires_in,
+        }
+
+
+class MFARefused(MfaSignal):
+    """The MFA layer refused the login and therefore fails closed."""
+
+    STRONG_FACTOR_REQUIRED = "strong_factor_required"
+    NO_FACTOR_AVAILABLE = "no_factor_available"
+    MFA_UNAVAILABLE = "mfa_unavailable"
+
+    def __init__(self, code: str, message: str = None, status: int = 403):
+        super().__init__(message or code, status=status)
+        self.code = code
+
+    def payload(self) -> dict:
+        """Return the safe refusal response body."""
+        return {"error": self.code, "message": self.message}
