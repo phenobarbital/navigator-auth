@@ -26,6 +26,7 @@ async def _stored_group_name(view: Any, group_id: Any) -> Optional[str]:
 
 class GroupManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandler):
     """Group definitions with protected-name checks on every write."""
+
     model: BaseModel = Group
     model_name: str = AUTH_GROUP_MODEL
     name: str = "Group"
@@ -66,6 +67,7 @@ class GroupManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandler):
 
 class UserGroupManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandler):
     """Membership is admin-only and protected memberships need grant-role access."""
+
     model: BaseModel = UserGroup
     model_name: str = AUTH_USER_GROUP_MODEL
     name: str = "User Group"
@@ -98,15 +100,14 @@ class UserGroupManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandle
 
 class GroupPermissionManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandler):
     """Group-permission grants are admin-only mapping rows."""
+
     model: BaseModel = GroupPermission
     name: str = "Group Permissions"
     pk: list = ["permission_id", "group_id"]
     action_object: str = "group_permission"
     owner_column: Optional[str] = None
     policy_name: str = "group_permissions_admin_access"
-    superuser_actions = frozenset(
-        {"group_permission:read", "group_permission:create", "group_permission:delete"}
-    )
+    superuser_actions = frozenset({"group_permission:read", "group_permission:create", "group_permission:delete"})
     writable_by_admin = frozenset()
     creatable_by_admin = frozenset({"group_id", "permission_id"})
     privileged_columns = frozenset()
