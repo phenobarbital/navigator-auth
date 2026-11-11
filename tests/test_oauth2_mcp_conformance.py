@@ -18,6 +18,7 @@ no aiohttp server.  The provider methods under test are the real ones.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 import base64
 import json
 import secrets
@@ -293,6 +294,13 @@ def provider(monkeypatch):
     # No auth.users table in this suite: skip session binding (the provider
     # already degrades gracefully, this just keeps the logs clean).
     prov._token_session_claims = AsyncMock(return_value={})
+    # FEAT-106 review fixes TASK-185: this memory harness has no authdb.
+    @asynccontextmanager
+    async def _no_generation(request, user_id):
+        yield None, 0
+
+    prov._user_generation = _no_generation
+    prov._generation_ok = AsyncMock(return_value=True)
     return prov
 
 

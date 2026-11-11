@@ -11,6 +11,7 @@ Tests:
 """
 
 import secrets
+from contextlib import asynccontextmanager
 import time
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
@@ -198,6 +199,13 @@ def _make_provider(
     provider.refresh_token_storage = refresh_store or _MemRefreshStorage()
     provider.access_token_storage = access_store or _MemAccessStorage()
     provider.grant_storage = grant_store
+    # FEAT-106 review fixes TASK-185: this memory harness has no authdb.
+    @asynccontextmanager
+    async def _no_generation(request, user_id):
+        yield None, 0
+
+    provider._user_generation = _no_generation
+    provider._generation_ok = AsyncMock(return_value=True)
 
     # IDP: create_token returns (token, user_id, exp_ts, "Bearer")
     # decode_token is set per test.

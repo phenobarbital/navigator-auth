@@ -9,6 +9,7 @@ Tests:
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -74,6 +75,13 @@ def _make_provider(
     provider.refresh_token_storage = refresh_token_storage or MagicMock()
     provider.device_code_storage = MagicMock()
     provider.grant_storage = MagicMock()
+    # FEAT-106 review fixes TASK-185: this memory harness has no authdb.
+    @asynccontextmanager
+    async def _no_generation(request, user_id):
+        yield None, 0
+
+    provider._user_generation = _no_generation
+    provider._generation_ok = AsyncMock(return_value=True)
     provider.code_storage = MagicMock()
 
     # IDP mock

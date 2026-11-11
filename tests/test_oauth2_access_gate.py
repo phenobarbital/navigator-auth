@@ -6,6 +6,7 @@ Covers spec §4:
   + test_gate_lifecycle (activate → works → deactivate → revoked everywhere)
 """
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -48,6 +49,13 @@ def provider(storage):
 
     prov = Oauth2Provider(user_model=MagicMock(), identity=MagicMock())
     prov.client_access_storage = storage
+    # FEAT-106 review fixes TASK-185: this memory harness has no authdb.
+    @asynccontextmanager
+    async def _no_generation(request, user_id):
+        yield None, 0
+
+    prov._user_generation = _no_generation
+    prov._generation_ok = AsyncMock(return_value=True)
     return prov
 
 
@@ -710,6 +718,7 @@ class TestRefreshGrantIsGated:
         rt.revoked = revoked
         rt.revoked_reason = None
         rt.user_id = USER_ID
+        rt.generation = 0
         rt.client = client
         rt.scope = "default"
         # Real datetimes: past the gate the handler runs genuine expiry checks.
