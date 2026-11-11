@@ -32,7 +32,15 @@ from ...conf import (
     OAUTH_JWT_KEYS,
     AUTH_DEFAULT_SCHEME,
 )
-from ...exceptions import UserNotFound, ConfigError, InvalidAuth, FailedAuth, AuthExpired, AuthException
+from ...exceptions import (
+    UserNotFound,
+    ConfigError,
+    InvalidAuth,
+    FailedAuth,
+    AuthExpired,
+    AuthException,
+    IdentityStoreUnavailable,
+)
 from ...libs import DefaultEncoder
 
 
@@ -122,8 +130,10 @@ class IdentityProvider:
             conn: When given, run the lookup on this connection without acquiring from the pool.
 
         Raises:
-            UserNotFound: No such user, or the lookup failed.
+            UserNotFound: Confirmed missing user (``NoDataFound`` or an empty result).
             ValidationError: The stored row does not fit the user model.
+            IdentityStoreUnavailable: Any other storage failure (FEAT-108); the original
+                exception is chained and only logged, never put in the message.
         """
         user = None
         search = {self.userid_attribute: uid}
@@ -142,8 +152,11 @@ class IdentityProvider:
             self.logger.error(f"Invalid User Information {search!s}: {ex}")
             self.logger.warning(f"Error on User Model = {ex.payload!r}")
             raise
-        except Exception as e:
-            raise UserNotFound(f"Error getting User {search!s}: {e!s}") from e
+        except AuthException:
+            raise
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.error(f"IdP: user lookup failed for {search!s}: {err!s}")
+            raise IdentityStoreUnavailable() from err
         # if not exists, return error of missing
         if not user:
             raise UserNotFound(f"Invalid credentials for User {search!s}")
