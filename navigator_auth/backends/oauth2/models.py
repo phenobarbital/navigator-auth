@@ -237,6 +237,10 @@ class OauthAuthorizationCode(BaseModel):
     # Single-use enforcement (B5).
     used: bool = Field(default=False)
     used_at: Optional[datetime] = Field(default=None)
+    # FEAT-106 review fixes (M9, D8): second-factor outcome of the approving browser
+    # authentication event. ``amr`` is None when that login did not pass MFA.
+    mfa: bool = Field(default=False)
+    amr: Optional[list[str]] = Field(default=None)
     # FEAT-106 review fix (M4): 0 preserves compatibility with legacy carriers.
     generation: int = Field(default=0)
 
@@ -268,6 +272,10 @@ class OauthRefreshToken(BaseModel):
     revoked_at: Optional[datetime] = Field(default=None)
     # 'rotated' | 'revoked' | 'reuse_detected' | 'cascade'
     revoked_reason: Optional[str] = Field(default=None)
+    # FEAT-106 review fixes (M9, D8): copied from the authorization code at exchange and
+    # from the parent token on rotation — never re-derived.
+    mfa: bool = Field(default=False)
+    amr: Optional[list[str]] = Field(default=None)
     # FEAT-106 review fix (M4): copied from the issuing carrier.
     generation: int = Field(default=0)
 
