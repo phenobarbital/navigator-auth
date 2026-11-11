@@ -82,3 +82,30 @@ async def test_migration_idempotent():
         await ensure_passkey_tables(pool)
     finally:
         await pool.close()
+
+
+class _ErrorPairConn:
+    async def execute(self, sql):
+        return [None, "err"]
+
+
+class _ErrorPairCtx:
+    async def __aenter__(self):
+        return _ErrorPairConn()
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _ErrorPairPool:
+    def acquire(self):
+        return _ErrorPairCtx()
+
+
+@pytest.mark.asyncio
+async def test_asyncdb_error_pair_raises_but_setup_does_not():
+    """An asyncdb [None, error] return fails ensure_*; the setup_* wrapper swallows it."""
+    pool = _ErrorPairPool()
+    with pytest.raises(Exception, match="err"):
+        await ensure_passkey_tables(pool)
+    await setup_passkey_tables(pool)

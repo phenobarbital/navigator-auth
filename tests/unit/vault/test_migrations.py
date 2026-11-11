@@ -172,3 +172,20 @@ class TestCryptoHardeningMigration:
         body = sql.split("DO $$")[1:]
         assert len(body) == 4
         assert all("IF " in block or "FOR target IN" in block for block in body)
+
+
+class TestEnsureVaultTablesFailClosed:
+    @pytest.mark.asyncio
+    async def test_asyncdb_error_pair_raises(self):
+        """conn.execute returns [None, "Postgres Error: boom"] -> MigrationError."""
+        from navigator_auth.migrations.runner import MigrationError
+
+        conn = AsyncMock()
+        conn.execute = AsyncMock(return_value=[None, "Postgres Error: boom"])
+        pool_ctx = MagicMock()
+        pool_ctx.__aenter__ = AsyncMock(return_value=conn)
+        pool_ctx.__aexit__ = AsyncMock(return_value=False)
+        pool = MagicMock()
+        pool.acquire = MagicMock(return_value=pool_ctx)
+        with pytest.raises(MigrationError, match="boom"):
+            await ensure_vault_tables(pool)
