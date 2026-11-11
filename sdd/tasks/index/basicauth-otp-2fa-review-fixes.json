@@ -50,7 +50,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
@@ -58,8 +58,9 @@
       "parallelism_notes": "root: no dependencies; creates LOCK_CONNECTION/advisory_user_lock (mfa/security.py), AUTH_MFA_LOCK_TIMEOUT (conf.py) and single_connection_authdb (tests/fixtures/mfa.py) used by later tasks",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-171-mfa-lock-core.md"
+      "completed_at": "2026-11-11T16:23:38+00:00",
+      "file": "sdd/tasks/completed/TASK-171-mfa-lock-core.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-172",
@@ -68,7 +69,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
@@ -76,8 +77,9 @@
       "parallelism_notes": "root: no dependencies; adds conn= kwargs in backends/idp/__init__.py, mfa/totp.py, mfa/trusted_devices.py and passkey/store.py",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-172-mfa-store-conn-params.md"
+      "completed_at": "2026-11-11T16:23:39+00:00",
+      "file": "sdd/tasks/completed/TASK-172-mfa-store-conn-params.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-173",
@@ -145,7 +147,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -153,8 +155,9 @@
       "parallelism_notes": "root: no dependencies; handlers/recovery/revoke.py and handler.py are untouched by earlier tasks",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-176-strict-session-revocation.md"
+      "completed_at": "2026-11-11T16:23:39+00:00",
+      "file": "sdd/tasks/completed/TASK-176-strict-session-revocation.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-177",
