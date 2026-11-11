@@ -22,8 +22,10 @@ identity provider owns that policy.
 The global switch is ``AUTH_BASIC_2FA_ENABLED``. At its default ``False`` value,
 the BasicAuth login path is unchanged. When enabled, missing MFA tables, Redis or
 Postgres failures, or an unset ``AUTH_OTP_SECRET`` make every BasicAuth login fail
-closed with ``mfa_unavailable``. Startup still succeeds so the deployment can be
-repaired without masking the outage.
+closed with ``mfa_unavailable``. Startup still succeeds, and availability heals
+without a restart: the first MFA decision after ``AUTH_MFA_RETRY_INTERVAL`` seconds
+rebuilds the services (one rebuild at a time). A missing ``AUTH_OTP_SECRET`` or
+``authdb`` pool is a permanent misconfiguration and is never retried.
 
 Settings
 --------
@@ -43,6 +45,8 @@ Setting                                  Default            Meaning
 ``AUTH_MFA_BACKUP_CODE_COUNT``           ``10``             Backup codes issued per set.
 ``AUTH_MFA_BACKUP_CODE_LENGTH``          ``8``              Characters in each backup code.
 ``AUTH_MFA_NOTIFY_CALLBACK``             unset              Dotted callback path receiving ``MfaSecurityNotice``.
+``AUTH_MFA_RETRY_INTERVAL``              ``15``             Seconds between rebuilds of unavailable MFA services.
+``AUTH_MFA_LOCK_TIMEOUT``                ``5.0``            Seconds to wait for the per-user lock; a timeout is ``mfa_unavailable``.
 ======================================== ================== ===============================================
 
 Unlike password recovery, both OTP rate limiters refuse the request if Redis is
@@ -86,6 +90,33 @@ Submit the factor to ``POST /auth/mfa/verify`` using ``challenge``, ``provider``
 ``mfa=True`` and AMR values ``pwd`` plus ``otp`` (e-mail), ``totp``, or
 ``backup``. A trusted-device login uses ``["pwd", "trusted_device"]``. ABAC can
 require a fresh factor by inspecting ``amr`` and rejecting ``trusted_device``.
+
+OAuth2 login form
+-----------------
+
+The same ``SecondFactorGate`` that guards BasicAuth also guards ``POST /oauth2/login``.
+When a factor is owed, the server renders ``oauth/mfa.html`` with
+``Cache-Control: no-store`` and sets no session cookie. The user submits the factor to
+``POST /oauth2/login/mfa`` (route ``nav_oauth2_login_mfa``), which verifies it and
+redirects to ``/oauth2/authorize`` preserving PKCE, ``state``, ``nonce``, ``scope`` and
+``prompt``. The trusted-device cookie works on this form too. When 2FA is on and
+BasicAuth's MFA slot is missing or unavailable, the OAuth2 login answers ``503`` and
+creates no session; when 2FA is off, the login is unchanged.
+
+OAuth2 tokens and ABAC
+----------------------
+
+An access token minted after an MFA-verified OAuth2 login carries ``mfa`` and ``amr``.
+A ``refresh`` rotation copies both from the parent token, token introspection
+(``introspect``) echoes ``amr`` and ``mfa``, and ``userinfo`` echoes ``amr``. A token
+minted without a factor carries no such claim. For bearer requests, ABAC reads
+assurance from the validated presented token and never from the shared session, so a
+password-only token cannot borrow the assurance of another session of the same user.
+
+OAuth credential invalidation uses a per-user generation stored in
+``oauth_user_generation``. A password reset or recovery completion advances it; older
+authorization codes, device carriers, access tokens and refresh tokens then fail
+everywhere. If the generation cannot be read, the request fails closed.
 
 E-mail delivery callback
 ------------------------
@@ -135,7 +166,9 @@ e-mail path. Deleting an ordinary user's last passkey without TOTP reopens the
 e-mail state, writes an audit event, revokes trusted devices, and sends a security
 notice. Backup codes are ten 8-character codes, shown once on initial TOTP
 confirmation, consumed once each, and regenerated only with password
-re-authentication. A user who has no usable factor (for example no usable address,
+re-authentication **and** fresh proof of a strong factor (a current TOTP code, an
+unused backup code, or a fresh passkey session); without the proof
+``POST /auth/mfa/backup-codes`` answers ``403`` ``strong_factor_proof_required``. A user who has no usable factor (for example no usable address,
 or a passkey-only user without backup codes) receives ``no_factor_available``;
 passkey holders should sign in with their passkey.
 
@@ -237,6 +270,19 @@ trusted devices. A global-logout revocation hook exists, but there is no
 "logout everywhere" endpoint yet; logging out of one session does not revoke
 devices.
 
+Credential changes
+~~~~~~~~~~~~~~~~~~
+
+A credential change, its security-version bump, the trusted-device revocation and the
+audit row happen in one transaction. When 2FA is on and MFA is unavailable, the change
+is refused with ``503`` ``mfa_unavailable``; if the stored password hash changed
+underneath the request, it answers ``409`` ``credentials_changed``. An administrator
+``password_reset`` now also ends the target user's sessions and tokens. Recovery
+completion records its single-use confirmation in ``recovery_confirm_consumptions`` in
+the same transaction, and a failure to revoke sessions and tokens rolls the password
+change back (``503``, password unchanged). Self-service ``password_change`` still does
+not revoke the user's other sessions.
+
 Recovering an enforced superuser
 --------------------------------
 
@@ -263,9 +309,14 @@ refuses verification.
 Protected seed storage
 ----------------------
 
-TOTP seeds are sealed by the vault kernel in ``auth.user_vault_secrets`` beneath
-the reserved ``mfa:`` prefix using MFA-specific associated data, so a copied seed
-cannot be opened. The session-vault HTTP API rejects ``mfa:`` keys and hides them
+TOTP seeds are sealed by the vault kernel in their own table, ``auth.user_mfa_secrets``,
+whose identity columns ``(user_id, provider, key)`` are the seed's associated data, so a
+copied seed cannot be opened. Migration ``002_mfa_secrets.sql`` moves existing ``mfa:``
+rows out of ``auth.user_vault_secrets``. Master-key rotation re-seals them through the
+``mfa`` target of the ``navigator_session.vault_targets`` entry point
+(``mfa = "navigator_auth.mfa.targets:factory"``). Entry points are read from installed
+metadata, so reinstall the package (``uv pip install -e .``) for ``navigator-vault`` to
+discover the target. The session-vault HTTP API rejects ``mfa:`` keys and hides them
 from listings; the session-vault loader never decrypts them. Verification can read
 a seed without a session, but any vault error refuses the login.
 
