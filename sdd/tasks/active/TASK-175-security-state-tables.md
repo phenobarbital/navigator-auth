@@ -574,8 +574,8 @@ async def test_record_confirmation_single_use_and_transactional(state_db, mfa_us
 
 When you pick up this task:
 
-1. **Work in the existing feature worktree `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa`** (branch
-   `feat-FEAT-106-basicauth-otp-2fa`, PR #633) — never on `dev`.
+1. **Work in the stacked feature worktree `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa-review-fixes`** (branch
+   `feat-FEAT-106-basicauth-otp-2fa-review-fixes`, stacked on `feat-FEAT-106-basicauth-otp-2fa`; ships in PR #633) — never on `dev`.
 2. **Read the spec** at the path listed above (§3 Module 4 "Durable recovery and token revocation contract", §3 Module 9 "Generation encoding").
 3. **Check dependencies** — none.
 4. **Verify the Codebase Contract** — re-run the two `grep -c` anchors in `navigator_auth/auth.py`; update the contract first if they moved.

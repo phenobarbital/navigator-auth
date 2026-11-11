@@ -1,7 +1,7 @@
 ---
 # SDD flow type and base branch (FEAT-145).
 type: feature
-base_branch: dev
+base_branch: feat-FEAT-106-basicauth-otp-2fa
 # Intentional multi-spec split of one initiative: these fixes ship in the same
 # branch and PR (#633) as FEAT-106, so no new FEAT-ID is reserved.
 reuse_feature_id: FEAT-106
@@ -971,7 +971,7 @@ Verified against: `3f14b3c`
 
 ## Worktree Strategy
 
-- **Isolation**: the existing feature worktree `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa` (branch `feat-FEAT-106-basicauth-otp-2fa`, PR #633). No new worktree; the `sdd-coder` engine gives each task its own sub-worktree inside it.
+- **Isolation**: a stacked worktree `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa-review-fixes`, created from `origin/feat-FEAT-106-basicauth-otp-2fa` (frontmatter `base_branch`). `/sdd-done` merges it back into `feat-FEAT-106-basicauth-otp-2fa`, so the fixes still ship in PR #633. The `sdd-coder` engine gives each task its own sub-worktree inside it.
 - **Module dependency graph** (an edge means "imports or relies on"):
   - M3 → M1 (`get_ready_mfa_services`), M3 → M2 (`user_lock` timeout);
   - M4 → M3 (`TransitionAborted`, `MfaUnavailable`, always-a-connection), M4 → M2 (`PasskeyStore` `conn=`);

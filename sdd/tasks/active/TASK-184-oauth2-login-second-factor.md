@@ -676,8 +676,8 @@ def test_mfa_template_escapes_authorize_parameters():
 
 When you pick up this task:
 
-1. **Work in the existing feature worktree** `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa` (branch
-   `feat-FEAT-106-basicauth-otp-2fa`, PR #633) — never on `dev`.
+1. **Work in the stacked feature worktree** `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa-review-fixes` (branch
+   `feat-FEAT-106-basicauth-otp-2fa-review-fixes`, stacked on `feat-FEAT-106-basicauth-otp-2fa`; ships in PR #633) — never on `dev`.
 2. **Read the spec** at the path listed above (§3 M6, §7 D1/D4, §5 AC1–AC6, AC10).
 3. **Check dependencies** — TASK-173 and TASK-181 must be `"done"` in
    `sdd/tasks/index/basicauth-otp-2fa-review-fixes.json`.

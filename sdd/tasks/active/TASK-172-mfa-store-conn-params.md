@@ -580,8 +580,8 @@ async def test_consume_and_rotate_pooled_path_unchanged(mfa_db, mfa_user_factory
 
 When you pick up this task:
 
-1. **Work in the existing feature worktree** `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa`
-   (branch `feat-FEAT-106-basicauth-otp-2fa`, PR #633), never on `dev`.
+1. **Work in the stacked feature worktree** `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa-review-fixes`
+   (branch `feat-FEAT-106-basicauth-otp-2fa-review-fixes`, stacked on `feat-FEAT-106-basicauth-otp-2fa`; ships in PR #633), never on `dev`.
 2. **Read the spec** at the path listed above, §3 Module 2.
 3. **Check dependencies**: none.
 4. **Verify the Codebase Contract**: re-run the `grep -c` counts in the blueprint before editing.

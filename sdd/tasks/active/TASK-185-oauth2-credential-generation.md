@@ -691,8 +691,8 @@ async def test_token_session_claims_uses_lock_connection(gen_provider, single_co
 
 When you pick up this task:
 
-1. **Work in the existing feature worktree** `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa` (branch
-   `feat-FEAT-106-basicauth-otp-2fa`, PR #633) — never on `dev`.
+1. **Work in the stacked feature worktree** `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa-review-fixes` (branch
+   `feat-FEAT-106-basicauth-otp-2fa-review-fixes`, stacked on `feat-FEAT-106-basicauth-otp-2fa`; ships in PR #633) — never on `dev`.
 2. **Read the spec** at the path listed above (§3 M4 "Durable recovery and token revocation contract", M9
    "Generation encoding", §5 AC24, AC28, AC30).
 3. **Check dependencies** — TASK-171, TASK-172, TASK-175 and TASK-184 must be `"done"` in

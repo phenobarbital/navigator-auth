@@ -491,8 +491,8 @@ async def test_oauth_assurance_isolation():
 
 When you pick up this task:
 
-1. **Work in the existing feature worktree** `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa` (branch
-   `feat-FEAT-106-basicauth-otp-2fa`, PR #633) — never on `dev`.
+1. **Work in the stacked feature worktree** `.claude/worktrees/feat-FEAT-106-basicauth-otp-2fa-review-fixes` (branch
+   `feat-FEAT-106-basicauth-otp-2fa-review-fixes`, stacked on `feat-FEAT-106-basicauth-otp-2fa`; ships in PR #633) — never on `dev`.
 2. **Read the spec** at the path listed above (§3 Module 9 "ABAC", D9, AC27, AC29).
 3. **Check dependencies** — TASK-186 must be `"done"` in `sdd/tasks/index/basicauth-otp-2fa-review-fixes.json`.
 4. **Verify the Codebase Contract** — re-run every `grep -c`; TASK-185/186 moved lines in `auth.py`/`backend.py`.

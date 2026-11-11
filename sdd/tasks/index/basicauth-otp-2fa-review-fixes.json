@@ -3,7 +3,7 @@
   "feature_id": "FEAT-106",
   "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
   "type": "feature",
-  "base_branch": "dev",
+  "base_branch": "feat-FEAT-106-basicauth-otp-2fa",
   "created_at": "2026-11-11T15:32:26+00:00",
   "completed_at": null,
   "parallel_semantics": "exclusive",
