@@ -30,6 +30,7 @@ from typing import Optional, Any
 from collections.abc import Awaitable
 from html import escape
 import base64
+import hashlib
 import hmac
 import importlib
 import json
@@ -60,7 +61,6 @@ from ...conf import (
     OAUTH_REFRESH_ROTATION,
     OAUTH_SCOPES,
     # FEAT-094
-    OAUTH_INTROSPECT_INCLUDE_ABAC_SCOPES,
     OAUTH_DEVICE_CODE_TTL,
     OAUTH_DEVICE_POLL_INTERVAL,
     OAUTH_DEVICE_SLOW_DOWN_INCREMENT,
@@ -98,6 +98,7 @@ from navigator_session.conf import (
     SESSION_OBJECT,
     SESSION_REQUEST_KEY,
     SESSION_STORAGE,
+    SESSION_TIMEOUT,
 )
 from ...exceptions import (
     FailedAuth,
@@ -106,6 +107,11 @@ from ...exceptions import (
 )
 from ...responses import JSONResponse
 from ..abstract import BaseAuthBackend, user_is_active
+from ... import conf as auth_conf
+from ...exceptions import MFARefused
+from ...mfa.login import SecondFactorGate, VerifyRefused
+from ...mfa.services import mfa_services_lease
+from ...mfa.types import TRUSTED_COOKIE, trusted_cookie_kwargs
 from .models import (
     OauthUser,
     OauthRefreshToken,
@@ -153,6 +159,12 @@ METADATA_CACHE_MAX_ENTRIES: int = 32
 #: client_secret presented via HTTP Basic (FEAT-095 review finding).  Never
 #: read as a credential itself — only `_secret_matches` consults it.
 BASIC_SECRET_ALT_KEY: str = "_basic_client_secret_decoded"
+
+#: FEAT-106 review fix #1 (M6): opaque handle of one browser authentication event.
+#: The record (Redis, keyed by sha256 of the handle) carries the login's assurance so it
+#: never lives in the identity-shared OAuth2 session. Validated by TASK-186.
+OAUTH2_EVENT_COOKIE: str = "nav_oauth2_event"
+OAUTH2_EVENT_KEY_PREFIX: str = "oauth2:event:"
 
 
 def validate_resource_uri(resource: str) -> bool:
@@ -327,6 +339,9 @@ class Oauth2Provider(BaseAuthBackend):
 
         router.add_route("*", self.login_uri, self.auth_login, name="nav_oauth2_login")
         app[AUTH_EXCLUDE_LIST_KEY].append(self.login_uri)
+        # FEAT-106 review fix #1 (M6): second-factor step of the OAuth2 password form.
+        router.add_route("POST", f"{self.login_uri}/mfa", self.auth_login_mfa, name="nav_oauth2_login_mfa")
+        app[AUTH_EXCLUDE_LIST_KEY].append(f"{self.login_uri}/mfa")
 
         router.add_route("*", self.consent_uri, self.consent, name="nav_oauth2_consent")
 
@@ -634,8 +649,13 @@ class Oauth2Provider(BaseAuthBackend):
         request: web.Request,
         user: Any,
         response: web.StreamResponse = None,
+        extra: Optional[dict] = None,
     ):
         """Create (or refresh) the server-side session for a resource owner.
+
+        ``extra`` is ``None`` for 2FA-off and token-endpoint sessions (pre-FEAT-106
+        behaviour); a dict additionally records a browser authentication event that
+        carries the login's assurance, never stored in the shared session data.
 
         The session is keyed by the user's identity, so the interactive login
         and any token minted for that same user share one session — the same
@@ -683,7 +703,85 @@ class Oauth2Provider(BaseAuthBackend):
         if not session:
             self.logger.error("Oauth2: unable to create the User session.")
             return None
+        if extra is not None:
+            await self._issue_auth_event(request, response, session, user, extra)
         return session
+
+    async def _issue_auth_event(
+        self,
+        request: web.Request,
+        response: Optional[web.StreamResponse],
+        session: Any,
+        user: Any,
+        extra: dict,
+    ) -> None:
+        """Record one browser authentication event and bind it to the browser.
+
+        Args:
+            request: The login request.
+            response: The redirect carrying the session cookie; receives the event cookie.
+            session: The ``SessionData`` just created for ``user``.
+            user: The authenticated resource owner.
+            extra: ``{"auth_method": ..., "mfa"?: True, "amr"?: [...]}`` from the gate adapter.
+
+        Raises:
+            web.HTTPServiceUnavailable: the event could not be stored (fail closed).
+        """
+        handle = secrets.token_urlsafe(32)
+        if isinstance(user, dict):
+            raw_uid = user.get(self.userid_attribute)
+        else:
+            try:
+                raw_uid = user[self.userid_attribute]
+            except (KeyError, TypeError, AttributeError):
+                raw_uid = getattr(user, self.userid_attribute, None)
+        try:
+            user_id = int(raw_uid)
+        except (TypeError, ValueError) as err:
+            self.logger.error("Oauth2: cannot resolve the user id for the login event")
+            raise web.HTTPServiceUnavailable(reason="Auth: login temporarily unavailable.") from err
+        record = {
+            "user_id": user_id,
+            "session_id": session.session_id,
+            "mfa": bool(extra.get("mfa", False)),
+            "amr": list(extra["amr"]) if extra.get("amr") else None,
+            "auth_method": extra.get("auth_method", "oauth2"),
+            "issued_at": int(datetime.now(timezone.utc).timestamp()),
+        }
+        ttl = int(SESSION_TIMEOUT)
+        key = OAUTH2_EVENT_KEY_PREFIX + hashlib.sha256(handle.encode("utf-8")).hexdigest()
+        try:
+            await self.flow_store.set(key, record, ttl=ttl)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.error(f"Oauth2: cannot record the login event: {type(err).__name__}")
+            raise web.HTTPServiceUnavailable(reason="Auth: login temporarily unavailable.") from err
+        if response is not None:
+            response.set_cookie(
+                OAUTH2_EVENT_COOKIE,
+                handle,
+                max_age=ttl,
+                httponly=True,
+                samesite="Lax",
+                secure=(PREFERRED_AUTH_SCHEME == "https"),
+                path="/oauth2",
+            )
+
+    async def _load_auth_event(self, request: web.Request) -> Optional[dict]:
+        """Return the raw event record named by the browser's event cookie, if any.
+
+        Load only: TASK-186 validates it against the current session. ``None`` when
+        the cookie is missing, unknown, expired or unreadable.
+        """
+        handle = request.cookies.get(OAUTH2_EVENT_COOKIE)
+        if not handle:
+            return None
+        key = OAUTH2_EVENT_KEY_PREFIX + hashlib.sha256(handle.encode("utf-8")).hexdigest()
+        try:
+            record = await self.flow_store.get(key)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"Oauth2: cannot read the login event: {type(err).__name__}")
+            return None
+        return record if isinstance(record, dict) else None
 
     async def _token_session_claims(self, request: web.Request, user_id: int) -> dict:
         """Bind a freshly issued access token to a session.
@@ -1613,6 +1711,195 @@ class Oauth2Provider(BaseAuthBackend):
         else:
             raise self.auth_error(reason=f"Invalid HTTP Form Data: {request.method}", status=400)
 
+    def _authorize_redirect(self, request: web.Request, data: dict) -> web.HTTPFound:
+        """Build the redirect back to ``/oauth2/authorize`` carrying the authorize request.
+
+        Extracted verbatim from ``auth_login``; the key list is fixed.
+        """
+        location = request.app.router["nav_oauth2_authorize"].url_for()
+        payload = {
+            "client_id": data.get("client_id"),
+            "redirect_uri": data.get("redirect_uri"),
+            "response_type": data.get("response_type", "code") or "code",
+        }
+        # Carry the rest of the authorization request across the login hop.
+        # PKCE in particular MUST survive it: dropping code_challenge here
+        # makes every public-client exchange fail later with
+        # "PKCE required for public clients".
+        for key in (
+            "state",
+            "scope",
+            "code_challenge",
+            "code_challenge_method",
+            "nonce",
+            "prompt",
+        ):
+            value = data.get(key)
+            if value:
+                payload[key] = value
+        payload = {k: v for k, v in payload.items() if v is not None}
+        url = location.with_query(**payload)
+        return web.HTTPFound(url)
+
+    def _second_factor_issuer(self, request: web.Request, response: web.HTTPFound):
+        """Return the gate issuer that creates the session on ``response``."""
+
+        async def _issue(fresh: Any, extra: dict) -> web.HTTPFound:
+            try:
+                session = await self._create_user_session(
+                    request, fresh, response=response, extra={**extra, "auth_method": "oauth2"}
+                )
+            except web.HTTPException:
+                raise
+            except Exception as err:  # pylint: disable=W0703
+                self.logger.error(f"Error creating session: {type(err).__name__}")
+                raise web.HTTPBadRequest(reason="Auth: unable to create the User session.") from err
+            if not session:
+                raise web.HTTPBadRequest(reason="Auth: unable to create the User session.")
+            return response
+
+        return _issue
+
+    async def _oauth2_second_factor(self, request: web.Request, user: Any, data: dict, response: web.HTTPFound):
+        """2FA-on tail of the password POST: decide through the shared gate (spec M6, D4)."""
+        async with mfa_services_lease(request.app) as services:
+            if services is None or not services.available:
+                raise web.HTTPServiceUnavailable(reason="Auth: second factor temporarily unavailable.")
+            gate = SecondFactorGate(
+                services, userid_attribute=self.userid_attribute, password_attribute=self.password_attribute
+            )
+            try:
+                result = await gate.decide(request, user, self._second_factor_issuer(request, response))
+            except FailedAuth as err:
+                status = getattr(err, "status", None) or 401
+                return await self._render_login_error(request, data, "Login failed.", status=status)
+            except MFARefused as err:
+                return await self._render_login_error(
+                    request, data, "Second factor is not available.", status=getattr(err, "status", 403) or 403
+                )
+        if result.session is not None:
+            if result.device:
+                response.set_cookie(
+                    TRUSTED_COOKIE, result.device["token"], **trusted_cookie_kwargs(result.device["max_age"])
+                )
+            return response
+        return await self._render_mfa_page(request, data, result.challenge)
+
+    async def _render_login_error(
+        self, request: web.Request, data: dict, error: str, *, status: int = 401
+    ) -> web.Response:
+        """Render ``oauth/login.html`` with an error (no session, no-store)."""
+        params = {key: data.get(key) or "" for key in self._MFA_FORM_KEYS}
+        params["error"] = error
+        params["action_url"] = str(request.app.router["nav_oauth2_login"].url_for())
+        params["upstream_providers"] = self._upstream_providers()
+        page = await self._parser.view(filename="oauth/login.html", params=params, status=status)
+        page.headers["Cache-Control"] = "no-store"
+        return page
+
+    _MFA_FORM_KEYS = (
+        "client_id",
+        "redirect_uri",
+        "response_type",
+        "state",
+        "scope",
+        "code_challenge",
+        "code_challenge_method",
+        "nonce",
+        "prompt",
+    )
+
+    async def _render_mfa_page(
+        self,
+        request: web.Request,
+        data: dict,
+        challenge: Any,
+        *,
+        error: Optional[str] = None,
+        attempts_remaining: Optional[int] = None,
+        status: int = 200,
+    ) -> web.Response:
+        """Render ``oauth/mfa.html`` (no-store) carrying the challenge and the authorize request."""
+        params = {key: data.get(key) or "" for key in self._MFA_FORM_KEYS}
+        if challenge is not None:
+            providers = list(challenge.providers)
+            preferred = challenge.preferred
+            expires_in = challenge.expires_in
+            token = challenge.token
+        else:
+            raw = str(data.get("providers") or "")
+            providers = [p for p in raw.split(",") if p]
+            preferred = data.get("provider")
+            expires_in = None
+            token = str(data.get("challenge") or "")
+        params.update(
+            action_url=str(request.app.router["nav_oauth2_login_mfa"].url_for()),
+            challenge=token,
+            providers=providers,
+            preferred=preferred,
+            expires_in=expires_in,
+            error=error,
+            attempts_remaining=attempts_remaining,
+        )
+        page = await self._parser.view(filename="oauth/mfa.html", params=params, status=status)
+        page.headers["Cache-Control"] = "no-store"
+        return page
+
+    async def auth_login_mfa(self, request: web.Request) -> web.StreamResponse:
+        """POST {login_uri}/mfa — complete an OAuth2 password login's second factor (spec M6)."""
+        if not auth_conf.AUTH_BASIC_2FA_ENABLED:
+            raise web.HTTPNotFound()  # no new surface with 2FA off (AC5)
+        data = await self.get_payload(request)
+        response = self._authorize_redirect(request, data)
+        async with mfa_services_lease(request.app) as services:
+            if services is None or not services.available:
+                raise web.HTTPServiceUnavailable(reason="Auth: second factor temporarily unavailable.")
+            gate = SecondFactorGate(
+                services, userid_attribute=self.userid_attribute, password_attribute=self.password_attribute
+            )
+            try:
+                result = await gate.verify(
+                    request,
+                    str(data.get("challenge") or ""),
+                    str(data.get("provider") or ""),
+                    str(data.get("code") or ""),
+                    self._second_factor_issuer(request, response),
+                    remember_device=bool(data.get("remember_device")),
+                    device_label=str(data.get("device_label") or "")[:128],
+                )
+            except VerifyRefused as err:
+                code = err.code
+                if code == "invalid_code":
+                    return await self._render_mfa_page(
+                        request,
+                        data,
+                        None,
+                        error="Invalid code.",
+                        attempts_remaining=err.extra.get("attempts_remaining"),
+                        status=401,
+                    )
+                if code == "rate_limited":
+                    return await self._render_mfa_page(
+                        request, data, None, error="Too many attempts, try again later.", status=429
+                    )
+                if code == "mfa_unavailable":
+                    return await self._render_mfa_page(
+                        request, data, None, error="Second factor is temporarily unavailable.", status=503
+                    )
+                if code == "invalid_request":
+                    return await self._render_mfa_page(request, data, None, error="Invalid request.", status=400)
+                message = (
+                    "Your login expired, please sign in again."
+                    if code in ("invalid_challenge", "stale_challenge")
+                    else "Login failed."
+                )
+                return await self._render_login_error(request, data, message, status=err.status or 401)
+        if result.device:
+            response.set_cookie(
+                TRUSTED_COOKIE, result.device["token"], **trusted_cookie_kwargs(result.device["max_age"])
+            )
+        return response
+
     async def auth_login(self, request: web.Request):
         """Login page for OAuth2 resource owner authentication.
 
@@ -1645,30 +1932,9 @@ class Oauth2Provider(BaseAuthBackend):
                 self.logger.warning("Oauth2: rejected login for a disabled user")
                 raise web.HTTPForbidden(reason="Auth: User account is disabled.")
 
-            location = request.app.router["nav_oauth2_authorize"].url_for()
-            payload = {
-                "client_id": data.get("client_id"),
-                "redirect_uri": data.get("redirect_uri"),
-                "response_type": data.get("response_type", "code") or "code",
-            }
-            # Carry the rest of the authorization request across the login hop.
-            # PKCE in particular MUST survive it: dropping code_challenge here
-            # makes every public-client exchange fail later with
-            # "PKCE required for public clients".
-            for key in (
-                "state",
-                "scope",
-                "code_challenge",
-                "code_challenge_method",
-                "nonce",
-                "prompt",
-            ):
-                value = data.get(key)
-                if value:
-                    payload[key] = value
-            payload = {k: v for k, v in payload.items() if v is not None}
-            url = location.with_query(**payload)
-            response = web.HTTPFound(url)
+            response = self._authorize_redirect(request, data)
+            if auth_conf.AUTH_BASIC_2FA_ENABLED:
+                return await self._oauth2_second_factor(request, user, data, response)
 
             # Establish the browser session for the resource owner: the
             # session cookie is written on this redirect, and /oauth2/authorize
@@ -2610,7 +2876,7 @@ class Oauth2Provider(BaseAuthBackend):
         Owner-binding invariant: user_id always comes from the authenticated
         session, never from client.user.
         """
-        from .models import OauthGrant, DeviceCodeStatus, OauthDeviceCode
+        from .models import DeviceCodeStatus
 
         if request.method == "GET":
             data = {key: val for (key, val) in request.query.items()}
