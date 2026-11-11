@@ -41,11 +41,7 @@ from navigator_auth.models import Group, GroupPermission, Permission, User, User
 pytestmark = pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning")
 
 PACK = (
-    Path(__file__).resolve().parents[1]
-    / "navigator_auth"
-    / "abac"
-    / "default_policies"
-    / "auth_crud_admin_access.yaml"
+    Path(__file__).resolve().parents[1] / "navigator_auth" / "abac" / "default_policies" / "auth_crud_admin_access.yaml"
 )
 
 OWNER_ID, ADMIN_ID, GRANTOR_ID, SECADMIN_ID, VICTIM_ID = 42, 7, 8, 9, 99
@@ -270,9 +266,9 @@ async def _drive(app, method, path, body=None, *, session, pdp=None, db=None):
     """
     probe = make_mocked_request(method, path)
     match = await app.router.resolve(probe)
-    assert not isinstance(match, web.UrlMappingMatchInfo) or match.http_exception is None, (
-        f"{method} {path} did not resolve: {match.http_exception!r}"
-    )
+    assert (
+        not isinstance(match, web.UrlMappingMatchInfo) or match.http_exception is None
+    ), f"{method} {path} did not resolve: {match.http_exception!r}"
     cls = match.handler
     holder = {"auth": MagicMock(), "authdb": MagicMock(), "redis": MagicMock()}
     if pdp is not None:
@@ -578,9 +574,7 @@ class TestLegitimateAdministration:
             match = await app.router.resolve(probe)
             assert match.handler is UserRoleHandler
             holder = {"authdb": MagicMock(acquire=AsyncMock(return_value=conn)), "abac": pdp_with_pack}
-            request = make_mocked_request(
-                "POST", f"/api/v1/users/{VICTIM_ID}/role", app=holder, match_info=match
-            )
+            request = make_mocked_request("POST", f"/api/v1/users/{VICTIM_ID}/role", app=holder, match_info=match)
             request["authenticated"] = True
             handler = UserRoleHandler.__new__(UserRoleHandler)
             handler._request = request
