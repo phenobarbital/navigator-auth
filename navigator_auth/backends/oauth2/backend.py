@@ -3340,7 +3340,9 @@ class Oauth2Provider(BaseAuthBackend):
         if not user:
             raise InvalidAuth("Oauth2: cannot resolve the user of this access token.", status=401)
         request["userdata"] = payload
-        from ...abac.context import bearer_context_from_claims  # noqa: PLC0415 — lazy: oauth2 must not import abac at load
+        from ...abac.context import (
+            bearer_context_from_claims,
+        )  # noqa: PLC0415 — lazy: oauth2 must not import abac at load
 
         request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
         request["authenticated"] = True
