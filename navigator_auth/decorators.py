@@ -9,6 +9,7 @@ from navigator_session import get_session
 from navconfig.logging import logger
 from .exceptions import AuthException, MfaSignal
 from .conf import AUTH_SESSION_OBJECT, AUTH_EXCLUDE_LIST_KEY
+from .backends.noauth import AnonymousUser
 from .vault.integration import _attach_vault_to_request
 
 
@@ -176,6 +177,17 @@ def user_session() -> Callable[[F], F]:
     return lambda handler: _apply_decorator(handler, _func_wrapper, _method_wrapper)
 
 
+def _is_restored_guest(request: web.Request) -> bool:
+    """Return whether the request carries a rehydrated NoAuth guest identity.
+
+    NoAuth stores the concrete ``AnonymousUser`` class in the session and
+    jsonpickle restores it, so the class is the trusted signal. The restored
+    ``is_authenticated`` flag, Guest group, and display name are not reliable
+    guest indicators.
+    """
+    return isinstance(getattr(request, "user", None), AnonymousUser)
+
+
 async def _authenticate_with_backends(auth: Any, request: web.Request) -> Optional[Any]:
     """Try each configured backend in order and return authenticated userdata.
 
@@ -236,6 +248,14 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
             # Short-circuit for explicitly excluded paths (public form URLs etc.)
             if _is_path_excluded(request) or getattr(request, "allow_anonymous", False):
                 return await handler(*args, **kwargs)
+            if _is_restored_guest(request):
+                raise web.HTTPUnauthorized(
+                    reason="Access Denied",
+                    headers={
+                        hdrs.CONTENT_TYPE: content_type,
+                        hdrs.CONNECTION: "keep-alive",
+                    },
+                )
             if request.get("authenticated", False):
                 return await handler(*args, **kwargs)
             else:
@@ -265,6 +285,14 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
             # Short-circuit for explicitly excluded paths (public form URLs etc.)
             if _is_path_excluded(request) or getattr(request, "allow_anonymous", False):
                 return await method(self, *args, **kwargs)
+            if _is_restored_guest(request):
+                raise web.HTTPUnauthorized(
+                    reason="Access Denied",
+                    headers={
+                        hdrs.CONTENT_TYPE: content_type,
+                        hdrs.CONNECTION: "keep-alive",
+                    },
+                )
             if request.get("authenticated", False):
                 return await method(self, *args, **kwargs)
             app = request.app
