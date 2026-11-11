@@ -4,6 +4,7 @@ Ten single-use codes, shown exactly once, stored as a keyed hash
 (HMAC-SHA256 under AUTH_OTP_SECRET, bound to the user id). Consumption commits
 on its own connection so a downstream failure can never restore a used code.
 """
+
 import hashlib
 import hmac
 import logging

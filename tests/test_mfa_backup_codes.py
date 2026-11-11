@@ -1,4 +1,5 @@
 """BackupCodeStore / BackupCodeProvider — FEAT-106 spec §3 Module 5 (TASK-134)."""
+
 import asyncio
 import hashlib
 import inspect
@@ -7,7 +8,10 @@ import pytest
 
 from navigator_auth.conf import AUTH_DB_SCHEMA
 from navigator_auth.mfa.backup_codes import (
-    BACKUP_CODE_ALPHABET, BackupCodeProvider, BackupCodeStore, normalize_code,
+    BACKUP_CODE_ALPHABET,
+    BackupCodeProvider,
+    BackupCodeStore,
+    normalize_code,
 )
 from navigator_auth.mfa.exceptions import MfaStorageError
 from tests.fixtures.mfa import mfa_db, mfa_secret, mfa_user_factory  # noqa: F401
