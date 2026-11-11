@@ -38,14 +38,14 @@
       "feature_id": "FEAT-113",
       "feature": "abac-pdp-fixes",
       "spec": "sdd/specs/abac-pdp-fixes.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "medium",
       "effort": "S",
       "depends_on": [],
       "parallel": true,
       "parallelism_notes": "single task; edits navigator_auth/abac/pdp.py on_shutdown and creates tests/test_pdp_shutdown.py",
-      "assigned_to": null,
-      "started_at": null,
+      "assigned_to": "claude-code:sdd-fix:03fdff77",
+      "started_at": "2026-11-11T18:49:18+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-213-pdp-shutdown-suppress.md"
     }
