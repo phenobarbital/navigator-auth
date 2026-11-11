@@ -15,7 +15,7 @@
       "feature_id": "FEAT-107",
       "feature": "auth-model-crud-hardening",
       "spec": "sdd/specs/auth-model-crud-hardening.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
@@ -23,8 +23,9 @@
       "parallelism_notes": "Spec Module 1 (core). Foundation: every handler task consumes authorize_columns() and the payload/creating kwargs of authorize_row(). Edits guards.py, which TASK-152 edits after it. Can run alongside TASK-150 (disjoint files).",
       "assigned_to": null,
       "started_at": "2026-11-11T00:20:19+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-149-guard-write-allowlist.md"
+      "completed_at": "2026-11-11T01:56:56+00:00",
+      "file": "sdd/tasks/completed/TASK-149-guard-write-allowlist.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-150",
@@ -33,7 +34,7 @@
       "feature_id": "FEAT-107",
       "feature": "auth-model-crud-hardening",
       "spec": "sdd/specs/auth-model-crud-hardening.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -41,8 +42,9 @@
       "parallelism_notes": "Spec Module 6. Creates only a YAML file and its own contract test; imports no FEAT-107 code. Names are fixed in the task, so it can run at any time, in its own worktree.",
       "assigned_to": null,
       "started_at": "2026-11-11T00:20:19+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-150-auth-crud-policy-pack.md"
+      "completed_at": "2026-11-11T01:56:57+00:00",
+      "file": "sdd/tasks/completed/TASK-150-auth-crud-policy-pack.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-151",

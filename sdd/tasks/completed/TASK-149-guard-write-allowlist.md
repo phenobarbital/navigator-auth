@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-107 — Write-envelope hardening for the remaining auth CRUD handlers
 **Spec**: `sdd/specs/auth-model-crud-hardening.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -491,10 +491,7 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Completed by**: sdd-worker (orchestrator)
+**Date**: 2026-11-11
+**Seat**: Seat: gpt-5.6-terra · Backend: codex · Model: gpt-5.6-terra · Attempts: 1 (attempt 4 after env-blocked earlier runs) · Duration: 274s
+**Notes**: Added writable_by_owner / writable_by_admin / creatable_by_admin / privileged_columns and authorize_columns() to OwnerOrSuperuserGuard; authorize_row gained payload/creating (payload=None keeps FEAT-105 behaviour). Merge-tier: 22 passed. Review: zero fixes (feedback coder-review:b048a9599dab42436ada8d6f).

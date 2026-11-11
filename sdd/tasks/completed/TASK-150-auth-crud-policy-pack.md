@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-107 — Write-envelope hardening for the remaining auth CRUD handlers
 **Spec**: `sdd/specs/auth-model-crud-hardening.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -331,10 +331,7 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: action strings are `object:verb` (see Context) | other
+**Completed by**: sdd-worker (orchestrator)
+**Date**: 2026-11-11
+**Seat**: Seat: gpt-5.6-luna · Backend: codex · Model: gpt-5.6-luna · Attempts: 1 (attempt 4 after env-blocked earlier runs) · Duration: 87s
+**Notes**: Added default_policies/auth_crud_admin_access.yaml (superuser CRUD policies; users:grant_role held only by security_admin) and tests. Merge-tier: 22 passed. Review: zero fixes (feedback coder-review:7e8cc30a3bde082509f21701).
