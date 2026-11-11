@@ -266,9 +266,7 @@ async def test_verify_adapter_email_without_conn_totp_with_lock_conn(client):
         return_value=_evaluation(state=MfaState.TOTP, providers=("totp",), preferred="totp")
     )
 
-    response, body = await _post(
-        client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="totp", code="correct"
-    )
+    response, body = await _post(client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="totp", code="correct")
 
     assert response.status == 200
     assert body == {"ok": True}
