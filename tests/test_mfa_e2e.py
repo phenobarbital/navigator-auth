@@ -55,7 +55,9 @@ async def mfa_app(monkeypatch, mfa_db, mfa_redis_pool, mfa_secret, otp_callback_
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            auth = AuthHandler(secure_cookies=False)
+            # Pin BasicAuth only: settings.settings may enable network backends (Azure/ADFS)
+            # and a backend-loop login must never reach an external identity provider.
+            auth = AuthHandler(secure_cookies=False, backends=("navigator_auth.backends.BasicAuth",))
             auth.setup(app)
         server = TestServer(app)
         client = TestClient(server)
