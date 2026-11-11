@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-116 — MFA management and evaluation review fixes
 **Spec**: `sdd/specs/handlers-mfa-tech-debt.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-221
@@ -330,3 +330,18 @@ Inspect the complete surrounding implementation before editing; apply only the s
 The commit-before-session boundary requires updating existing security doubles in test_mfa_verify.py and test_mfa_basic_auth_hook.py. Run both files as regressions. Correct only the stale AC5 session-call grep in the original FEAT-106 spec, as explicitly covered by issue:607e5356c449.
 
 - `pytest tests/test_mfa_verify.py tests/test_mfa_basic_auth_hook.py -q`
+
+## Completion Note
+
+- Task: TASK-222
+- Feature: handlers-mfa-tech-debt
+- Implementation SHA: 66f5ae85fd9d16243f584d2b9bbf1c4c1ca6123b
+- Closed at (UTC): 2026-11-11T23:48:21+00:00
+- Fix commits: none
+
+| Metric | Value |
+|---|---|
+| validation_refs | 1 |
+| fix_commits | 0 |
+| review | TASK-222-review.md |
+| validation | Host executed tests; inspect TASK-222-host.log |
