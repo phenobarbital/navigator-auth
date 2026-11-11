@@ -540,6 +540,7 @@ class MfaHandler:
                 )
         except MfaStorageError:
             return _error("mfa_unavailable", 503)
+
         def _read(source: Any, name: str, default: Any) -> Any:
             """Read a field from a dict-like or attribute-style user record."""
             if isinstance(source, dict):
