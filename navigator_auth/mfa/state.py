@@ -98,7 +98,7 @@ class MfaStateMachine:
     async def passkey_count(self, user_id: int, *, conn: Any = None) -> int:
         """Registered passkeys. 0 when the passkey table does not exist (backend never ran).
 
-        Reads the table directly — never imports webauthn (R10).
+        Reads the table directly — never imports the passkey backend (R10).
         """
         try:
             async with _scope(self._pool, conn) as db:
