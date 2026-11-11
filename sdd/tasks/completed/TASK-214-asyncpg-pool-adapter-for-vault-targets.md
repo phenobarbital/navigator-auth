@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-115 — Vault targets on the asyncdb `authdb` pool — native asyncpg connections for rotation
 **Spec**: `sdd/specs/tests-test-mfa-review-fixes-vault-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -317,10 +317,20 @@ def test_native_connection_rejects_asyncdb_style_without_engine():
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: agent:sdd-fix:e9a076bc (Claude Code, /sdd-fix issue:82ec902fa145)
+**Date**: 2026-11-11
+**Notes**: Implemented in `df73ea6`. `navigator_auth/vault/pool.py` adds `AsyncpgPoolAdapter`,
+`native_connection()` and `asyncpg_pool()` (exported from `navigator_auth.vault`). `MfaSecretTarget` and
+`IdentityTarget` wrap their pool; the fail-open `MfaSecretTarget.transaction()` override is deleted.
+Validation Commands: all five pass in the worktree against live Postgres (37 tests, no skips), plus
+`tests/unit/vault`, `tests/unit/identity` and `tests/test_mfa_trusted_devices.py` (366 passed). Live-DB
+tests now prove that, on the asyncdb pool, `IdentityTarget`/`MfaSecretTarget` transactions run, a row-less
+write raises `LookupError`, a rejected write raises, and rotation works without `mfa_db._pool`. flake8: no
+new findings (F811 warnings are the file's existing fixture-import pattern); pylint 10/10 on `pool.py`.
+Adversarial review: `codex exec review --base 060e3f4`, no actionable findings; its test claims were
+spot-checked (logs `artifacts/logs/review_*.log`: 32 passed, 5 DB tests skipped in its sandbox).
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
-
-**Deviations from spec**: none
+**Deviations from spec**: one extra unit test
+(`test_adapter_supports_context_acquire_and_releases_on_refusal`): a refused driver is still returned to a
+context-manager pool. Upstream navigator-session (`PostgresTarget.transaction()` / `execute`) is unchanged,
+per the spec's non-goals.
