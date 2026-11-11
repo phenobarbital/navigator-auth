@@ -1,5 +1,6 @@
 from aiohttp import web
 from ..conf import SECURITY_CONFIG_HANDLER
+from .. import conf as auth_conf
 from .permissions import PermissionHandler
 from .users import UserManager, UserSession
 from .groups import GroupManager, GroupPermissionManager, UserGroupManager
@@ -15,6 +16,7 @@ from .recovery.handler import PasswordRecoveryHandler
 from .config import ConfigHandler
 from .allowed_ips import AllowedIPHandler
 from .client_access import ClientAccessHandler
+from .mfa import setup_mfa_routes
 
 ## TODO migration of login/logout handlers:
 def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
@@ -98,7 +100,7 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     router.add_post("/api/v2/user/set_password", usr.password_change)
     router.add_post("/api/v2/user/password_reset/{userid:.*}", usr.password_reset)
     router.add_get("/api/v2/user/gen_token/{userid:.*}", usr.gen_token, allow_head=True)
-    
+
     ## Password Recovery (FEAT-098): three-step, HMAC-signed flow.
     # The literal /confirm segment must be registered before {token}, or
     # "confirm" would be captured as a token (same ordering problem solved
@@ -124,6 +126,10 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
         r"/api/v1/reset-password", PasswordRecoveryHandler,
         name="api_reset_password"
     )
+
+    ## Second factor for BasicAuth (FEAT-106): routes are absent when disabled.
+    if auth_conf.AUTH_BASIC_2FA_ENABLED:
+        setup_mfa_routes(app, router)
 
     ## Security: Environment/Config debug (superuser only, GET only):
     ## Disabled by default; enable via SECURITY_CONFIG_HANDLER env flag.
