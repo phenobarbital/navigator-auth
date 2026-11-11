@@ -22,6 +22,10 @@
   WARNING on startup and reload (both stay enforced). `PDP(policies=...)`
   accepts any iterable and raises `TypeError` for strings, mappings and
   non-iterables instead of silently ignoring a tuple.
+- **`PDP.on_shutdown` no longer crashes with periodic reload on (FEAT-113).**
+  It called the nonexistent `asyncio.suppress`, so with
+  `ABAC_RELOAD_INTERVAL > 0` shutdown raised `AttributeError` and the policy
+  storages were never closed. It now uses `contextlib.suppress`.
 - **`PolicyAdapter.from_policy` validates `ObjectPolicy(objects=...)` (FEAT-111).**
   Objects are converted with the policy's `type=` (default `object`) and
   validated like `resource=`. A policy is rejected (`add_policy` raises

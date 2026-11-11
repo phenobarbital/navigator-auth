@@ -2,6 +2,7 @@ from typing import List, Optional, Union, Any, Tuple
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 import asyncio
+import contextlib
 from aiohttp import web
 from navconfig.logging import logger
 from navigator_session import SessionData
@@ -382,7 +383,7 @@ class PDP:
     async def on_shutdown(self, app: web.Application):
         if self._reload_task:
             self._reload_task.cancel()
-            with asyncio.suppress(asyncio.CancelledError):
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._reload_task
         await self.storage.close()
         if self.yaml_storage is not None:
