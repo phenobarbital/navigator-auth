@@ -40,14 +40,14 @@
       "feature_id": "FEAT-115",
       "feature": "tests-test-mfa-review-fixes-vault-fixes",
       "spec": "sdd/specs/tests-test-mfa-review-fixes-vault-fixes.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
       "parallel": true,
       "parallelism_notes": "single task: creates navigator_auth/vault/pool.py and is its only consumer (mfa/identity targets)",
-      "assigned_to": null,
-      "started_at": null,
+      "assigned_to": "agent:sdd-fix:e9a076bc",
+      "started_at": "2026-11-11T21:52:14+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-214-asyncpg-pool-adapter-for-vault-targets.md"
     }
