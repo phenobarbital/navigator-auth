@@ -243,4 +243,4 @@ When you pick up this task:
 
 ## Completion Note
 
-Merged manually from attempt 3 (luna). Task-tier validation: 18 passed, 1 failed — test_existing_guest_sessions_rejected needs a live Redis (AC6a), unavailable in the sandbox (connection refused on localhost:6379). NOT verified here; must be re-run with Redis before release.
+Merged manually from attempt 3 (luna). Task-tier validation in the sandbox: 18 passed, 1 not runnable (test_existing_guest_sessions_rejected needs live Redis). Verified afterwards on the host with Redis: tests/test_is_authenticated_backend_loop.py + tests/unit/test_is_authenticated_exclude.py all pass, after commit cec3ca7 sized the test's signing key (a 6-byte AUTH_SECRET_KEY made PyJWT warn, which pytest turns into an error).
