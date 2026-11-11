@@ -10,12 +10,13 @@ startup:
   and INTEGER key versions. Each change is applied only when needed.
 """
 import logging
-from pathlib import Path
 from typing import Any
+
+from ..migrations.catalog import set_dir
 
 logger = logging.getLogger("navigator.vault")
 
-SQL_DIR = Path(__file__).parent / "sql"
+SQL_DIR = set_dir("vault")
 
 # Applied in order, at every startup. Each file is idempotent.
 MIGRATION_FILES = (

@@ -5,14 +5,14 @@ Mirrors ``navigator_auth/identity/migrations.py``. Run by
 """
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from ..conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE
+from ..migrations.catalog import set_dir
 
 logger = logging.getLogger("navigator.passkey")
 
-SQL_DIR = Path(__file__).parent / "sql"
+SQL_DIR = set_dir("passkey")
 
 _MIGRATION_FILES = ("001_passkey_credentials.sql",)
 
