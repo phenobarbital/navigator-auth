@@ -1,0 +1,97 @@
+{
+  "feature": "abac-pdp-tech-debt",
+  "feature_id": "FEAT-112",
+  "spec": "sdd/specs/abac-pdp-tech-debt.spec.md",
+  "type": "feature",
+  "base_branch": "dev",
+  "created_at": "2026-11-11T18:23:58+00:00",
+  "completed_at": null,
+  "parallel_semantics": "exclusive",
+  "validation_contract": "required",
+  "test_contract": {
+    "schema": 2,
+    "runners": [
+      {
+        "kind": "pytest",
+        "targets": [
+          "tests/test_pdp_registry_hardening.py",
+          "tests/test_pdp_add_policy.py",
+          "tests/test_yaml_storage_double_load.py",
+          "tests/test_tenant_sql_filtering.py",
+          "tests/test_tenant_scoping.py",
+          "tests/test_unified_evaluation.py",
+          "tests/test_policy_server_example.py"
+        ],
+        "settings": {
+          "markers": ""
+        },
+        "tiers": [
+          "task",
+          "merge",
+          "feature"
+        ]
+      }
+    ],
+    "digest": "sha256:bdec98a370d35c5059214bebf28d0f3e89d8046b13a7c31a4606a89e9eaa5de1"
+  },
+  "tasks": [
+    {
+      "id": "TASK-210",
+      "slug": "atomic-evaluator-load",
+      "title": "Atomic evaluator load for PDP.add_policy",
+      "feature_id": "FEAT-112",
+      "feature": "abac-pdp-tech-debt",
+      "spec": "sdd/specs/abac-pdp-tech-debt.spec.md",
+      "status": "pending",
+      "priority": "high",
+      "effort": "M",
+      "depends_on": [],
+      "parallel": true,
+      "parallelism_notes": "root of the graph; creates PolicyIndex.copy (evaluator.py) and tests/test_pdp_registry_hardening.py",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "file": "sdd/tasks/active/TASK-210-atomic-evaluator-load.md"
+    },
+    {
+      "id": "TASK-211",
+      "slug": "policy-name-collisions",
+      "title": "Detect policy name collisions beyond registered policies",
+      "feature_id": "FEAT-112",
+      "feature": "abac-pdp-tech-debt",
+      "spec": "sdd/specs/abac-pdp-tech-debt.spec.md",
+      "status": "pending",
+      "priority": "medium",
+      "effort": "S",
+      "depends_on": [
+        "TASK-210"
+      ],
+      "parallel": true,
+      "parallelism_notes": "TASK-210: both modify navigator_auth/abac/pdp.py (add_policy, _load_policy_dicts) and append to tests/test_pdp_registry_hardening.py, which TASK-210 creates",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "file": "sdd/tasks/active/TASK-211-policy-name-collisions.md"
+    },
+    {
+      "id": "TASK-212",
+      "slug": "pdp-policies-iterable",
+      "title": "Accept any iterable for PDP(policies=...)",
+      "feature_id": "FEAT-112",
+      "feature": "abac-pdp-tech-debt",
+      "spec": "sdd/specs/abac-pdp-tech-debt.spec.md",
+      "status": "pending",
+      "priority": "low",
+      "effort": "S",
+      "depends_on": [
+        "TASK-211"
+      ],
+      "parallel": true,
+      "parallelism_notes": "TASK-211: both modify navigator_auth/abac/pdp.py and append to tests/test_pdp_registry_hardening.py (fixtures _storage/_allow/_ctx from TASK-210)",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "file": "sdd/tasks/active/TASK-212-pdp-policies-iterable.md"
+    }
+  ]
+}
