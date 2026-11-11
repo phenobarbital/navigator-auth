@@ -280,7 +280,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "in-progress",
+      "status": "pending",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -291,9 +291,10 @@
       "parallel": true,
       "parallelism_notes": "Extends prerequisite_tables/check_postconditions from TASK-161 (checks.py) and RUNTIME_TABLES from TASK-162 (access.py); adds MFA rows to docs/migrations/README.md created by TASK-169. GATED: FEAT-106 (+ its review fixes) must be on dev first — see the task file.",
       "assigned_to": null,
-      "started_at": "2026-11-11T21:35:00+00:00",
+      "started_at": null,
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-170-mfa-migration-set.md"
     }
   ]
 }
+
