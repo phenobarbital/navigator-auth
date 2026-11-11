@@ -76,6 +76,7 @@ def test_migration_declares_six_tables():
 
     The MFA seed table was moved out of the user vault by FEAT-106 review fix #2.
     """
+
     sql = (SQL_DIR / _MIGRATION_FILES[0]).read_text()
     all_sql = "\n".join((SQL_DIR / name).read_text() for name in _MIGRATION_FILES)
     for table in MFA_TABLES:

@@ -109,7 +109,10 @@ async def test_mfa_secrets_migration_moves_rows(mfa_db, mfa_user_factory):
     assert {row["ciphertext_db"] for row in moved} == {active_blob, deleted_blob}
     assert {row["key_version"] for row in moved} == {41001, 41002}
     assert [
-        {key: row[key] for key in ("id", "key", "ciphertext_db", "key_version", "created_at", "updated_at", "deleted_at")}
+        {
+            key: row[key]
+            for key in ("id", "key", "ciphertext_db", "key_version", "created_at", "updated_at", "deleted_at")
+        }
         for row in moved
     ] == source_rows
     assert await _fetch_rows(mfa_db, f"SELECT id FROM {VAULT} WHERE key LIKE 'mfa:%'") == []
@@ -117,7 +120,9 @@ async def test_mfa_secrets_migration_moves_rows(mfa_db, mfa_user_factory):
     assert ordinary == [{"key": "jira:token", "ciphertext_db": b"ordinary-ciphertext"}]
 
     await ensure_mfa_tables(mfa_db)
-    moved_again = await _fetch_rows(mfa_db, f"SELECT id, ciphertext_db FROM {SECRETS} WHERE id = ANY($1::uuid[])", [active_id, deleted_id])
+    moved_again = await _fetch_rows(
+        mfa_db, f"SELECT id, ciphertext_db FROM {SECRETS} WHERE id = ANY($1::uuid[])", [active_id, deleted_id]
+    )
     assert len(moved_again) == 2
     assert {row["ciphertext_db"] for row in moved_again} == {active_blob, deleted_blob}
 
@@ -155,7 +160,9 @@ async def test_mfa_secrets_migration_moves_rows(mfa_db, mfa_user_factory):
 
 
 @pytest.mark.asyncio
-async def test_rotate_master_key_rotates_mfa_seeds(mfa_db, mfa_redis_pool, mfa_secret, mfa_user_factory, frozen_totp_clock):
+async def test_rotate_master_key_rotates_mfa_seeds(
+    mfa_db, mfa_redis_pool, mfa_secret, mfa_user_factory, frozen_totp_clock
+):
     """AC7: a rotated seed verifies with the new key and no longer needs the old key."""
     await setup_vault_tables(mfa_db)
     user = await mfa_user_factory()
@@ -182,9 +189,9 @@ async def test_rotate_master_key_rotates_mfa_seeds(mfa_db, mfa_redis_pool, mfa_s
     )
     assert stats[target.name]["errors"] == 0
     assert stats[target.name]["rotated"] == 1
-    assert await _fetch_rows(mfa_db, f"SELECT key_version FROM {SECRETS} WHERE user_id = $1 AND deleted_at IS NULL", user["user_id"]) == [
-        {"key_version": new_id}
-    ]
+    assert await _fetch_rows(
+        mfa_db, f"SELECT key_version FROM {SECRETS} WHERE user_id = $1 AND deleted_at IS NULL", user["user_id"]
+    ) == [{"key_version": new_id}]
 
     new_provider = TOTPProvider(
         app={VAULT_KEYRING_APP_KEY: KeyRing({new_id: new_key}, new_id)},
