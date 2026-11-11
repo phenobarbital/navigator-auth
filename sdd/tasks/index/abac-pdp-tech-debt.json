@@ -61,7 +61,7 @@
       "feature_id": "FEAT-112",
       "feature": "abac-pdp-tech-debt",
       "spec": "sdd/specs/abac-pdp-tech-debt.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "medium",
       "effort": "S",
       "depends_on": [
@@ -69,8 +69,8 @@
       ],
       "parallel": true,
       "parallelism_notes": "TASK-210: both modify navigator_auth/abac/pdp.py (add_policy, _load_policy_dicts) and append to tests/test_pdp_registry_hardening.py, which TASK-210 creates",
-      "assigned_to": null,
-      "started_at": null,
+      "assigned_to": "claude-code:sdd-fix:953638ae",
+      "started_at": "2026-11-11T18:26:24+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-211-policy-name-collisions.md"
     },
