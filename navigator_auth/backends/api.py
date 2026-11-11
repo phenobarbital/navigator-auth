@@ -150,6 +150,10 @@ class APIKeyAuth(BaseAuthBackend):
             return None
         else:
             data = await self.get_token_info(request, mech, token)
+            if not data:
+                # Not an API key (e.g. an OAuth2 JWT without device_id): decline so the
+                # next backend can try it, exactly as check_credentials does.
+                return None
             try:
                 device_id = str(data["device_id"])
                 user_id = data["user_id"]
@@ -183,6 +187,9 @@ class APIKeyAuth(BaseAuthBackend):
                 return False
 
     async def check_token_info(self, request, payload):
+        if not payload:
+            # An empty/absent payload is "no API key", not a malformed one.
+            return False
         try:
             user_id = payload["user_id"]
             device_id = payload["device_id"]
