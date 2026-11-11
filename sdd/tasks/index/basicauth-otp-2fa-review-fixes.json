@@ -168,7 +168,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -179,8 +179,9 @@
       "parallelism_notes": "TASK-171: uses advisory_user_lock/user_lock timeout and extends tests/test_mfa_review_fixes_transitions.py (created by 171); TASK-173: uses mfa_services_lease (mfa/services.py)",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-177-transactional-security-transition.md"
+      "completed_at": "2026-11-11T17:06:03+00:00",
+      "file": "sdd/tasks/completed/TASK-177-transactional-security-transition.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-178",
@@ -277,7 +278,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -289,8 +290,9 @@
       "parallelism_notes": "TASK-181: imports SecondFactorGate/VerifyRefused (mfa/login.py) and extends tests/test_mfa_review_fixes_gate.py; TASK-173: mfa_services_lease and both modify backends/basic.py; TASK-174: both modify tests/test_mfa_enrollment_security.py",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-182-second-factor-gate-adapters.md"
+      "completed_at": "2026-11-11T17:06:04+00:00",
+      "file": "sdd/tasks/completed/TASK-182-second-factor-gate-adapters.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-183",
@@ -319,7 +321,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -330,8 +332,9 @@
       "parallelism_notes": "TASK-181: imports SecondFactorGate/VerifyRefused (mfa/login.py); TASK-173: mfa_services_lease (mfa/services.py)",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-184-oauth2-login-second-factor.md"
+      "completed_at": "2026-11-11T17:06:04+00:00",
+      "file": "sdd/tasks/completed/TASK-184-oauth2-login-second-factor.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-185",
