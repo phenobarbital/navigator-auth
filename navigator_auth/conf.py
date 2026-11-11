@@ -714,9 +714,7 @@ ABAC_DEFAULT_EFFECT = config.get("ABAC_DEFAULT_EFFECT", fallback="deny")
 # belongs to the group; nobody can add themselves. ``superuser`` is always
 # protected, whatever this says.
 AUTH_PROTECTED_GROUPS = [
-    e.strip()
-    for e in config.get("AUTH_PROTECTED_GROUPS", fallback="superuser,security_admin").split(",")
-    if e.strip()
+    e.strip() for e in config.get("AUTH_PROTECTED_GROUPS", fallback="superuser,security_admin").split(",") if e.strip()
 ]
 
 # ABAC Hot-Reload Interval (seconds). Default: 0 (disabled).

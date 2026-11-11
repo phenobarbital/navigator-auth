@@ -53,32 +53,39 @@ class TestAuthorizeProtectedGroup:
 
     @pytest.mark.asyncio
     async def test_superuser_without_grant_role_refused(self):
-        with patch.object(guards, "policy_allows", new=AsyncMock(return_value=(False, "denied", None))), patch.object(
-            Host, "audit_decision", new=AsyncMock()
-        ), patch.object(guards, "get_session", new=AsyncMock(return_value=session())):
+        with (
+            patch.object(guards, "policy_allows", new=AsyncMock(return_value=(False, "denied", None))),
+            patch.object(Host, "audit_decision", new=AsyncMock()),
+            patch.object(guards, "get_session", new=AsyncMock(return_value=session())),
+        ):
             with pytest.raises(web.HTTPForbidden):
                 await Host(request()).authorize_protected_group(["superuser"], member_id=99)
 
     @pytest.mark.asyncio
     async def test_grantor_can_add_member_to_protected_group(self):
-        with patch.object(guards, "policy_allows", new=AsyncMock(return_value=(True, "allowed", None))), patch.object(
-            Host, "audit_decision", new=AsyncMock()
-        ), patch.object(guards, "get_session", new=AsyncMock(return_value=session())):
+        with (
+            patch.object(guards, "policy_allows", new=AsyncMock(return_value=(True, "allowed", None))),
+            patch.object(Host, "audit_decision", new=AsyncMock()),
+            patch.object(guards, "get_session", new=AsyncMock(return_value=session())),
+        ):
             await Host(request()).authorize_protected_group(["security_admin"], member_id=99)
 
     @pytest.mark.asyncio
     async def test_no_self_add_to_protected_group(self):
-        with patch.object(guards, "policy_allows", new=AsyncMock(return_value=(True, "allowed", None))), patch.object(
-            Host, "audit_decision", new=AsyncMock()
-        ), patch.object(guards, "get_session", new=AsyncMock(return_value=session())):
+        with (
+            patch.object(guards, "policy_allows", new=AsyncMock(return_value=(True, "allowed", None))),
+            patch.object(Host, "audit_decision", new=AsyncMock()),
+            patch.object(guards, "get_session", new=AsyncMock(return_value=session())),
+        ):
             with pytest.raises(web.HTTPForbidden):
                 await Host(request()).authorize_protected_group(["security_admin"], member_id=42)
 
     @pytest.mark.asyncio
     async def test_cannot_add_to_protected_group_not_held(self):
-        with patch.object(guards, "policy_allows", new=AsyncMock(return_value=(True, "allowed", None))), patch.object(
-            Host, "audit_decision", new=AsyncMock()
-        ), patch.object(guards, "get_session", new=AsyncMock(return_value=session(groups=("security_admin",)))):
+        with (
+            patch.object(guards, "policy_allows", new=AsyncMock(return_value=(True, "allowed", None))),
+            patch.object(Host, "audit_decision", new=AsyncMock()),
+            patch.object(guards, "get_session", new=AsyncMock(return_value=session(groups=("security_admin",)))),
+        ):
             with pytest.raises(web.HTTPForbidden):
                 await Host(request()).authorize_protected_group(["superuser"], member_id=99)
-
