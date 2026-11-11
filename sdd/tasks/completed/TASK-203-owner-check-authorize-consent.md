@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-108 — OAuth2 3LO examples work end-to-end — auth paths fail closed on misconfiguration and unknown users
 **Spec**: `sdd/specs/oauth2-3lo-issues.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-200, TASK-201
@@ -360,3 +360,7 @@ When you pick up this task:
 **Notes**:
 
 **Deviations from spec**: none
+
+## Completion Note
+
+Native sonnet delivery merged. Coder ran test_oauth2_unknown_resource_owner.py (21 passed) and test_oauth2_access_gate.py (45 passed). Deviation: no user_from_id stub added to TestGateLifecycle (test never reaches the resolver).

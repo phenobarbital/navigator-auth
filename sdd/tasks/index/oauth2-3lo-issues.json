@@ -207,7 +207,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -218,8 +218,9 @@
       "parallelism_notes": "TASK-200: imports IdentityStoreUnavailable (navigator_auth/exceptions.py) and appends to TASK-200's tests/test_oauth2_unknown_resource_owner.py. TASK-201: both modify navigator_auth/backends/oauth2/backend.py (serialized, lower id first).",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-203-owner-check-authorize-consent.md"
+      "completed_at": "2026-11-11T22:02:30+00:00",
+      "file": "sdd/tasks/completed/TASK-203-owner-check-authorize-consent.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-204",
