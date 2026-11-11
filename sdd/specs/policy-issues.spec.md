@@ -11,7 +11,7 @@ docs:
 
 # Feature Specification: PBAC example policy issues
 
-**Feature ID**: FEAT-<pending>
+**Feature ID**: FEAT-109
 **Date**: 2026-11-11
 **Author**: Jesus Lara (spec scaffolded by Claude Code)
 **Status**: draft
