@@ -1,5 +1,6 @@
 from typing import List, Optional, Union, Any, Tuple
 from collections import OrderedDict
+from collections.abc import Iterable, Mapping
 import asyncio
 from aiohttp import web
 from navconfig.logging import logger
@@ -74,10 +75,23 @@ class PDP:
     def __init__(
         self,
         storage: AbstractStorage,
-        policies: Optional[List[Policy]] = None,
+        policies: Optional[Iterable[AbstractPolicy]] = None,
         yaml_storage: Optional[YAMLStorage] = None,
         evaluator: Optional[PolicyEvaluator] = None,
     ):
+        """Create the PDP.
+
+        Args:
+            storage: Storage the policies are loaded from on startup and reload.
+            policies: Policies to register with ``add_policy``: any iterable
+                (list, tuple, generator, set). ``None`` registers nothing.
+            yaml_storage: Optional YAML policy storage.
+            evaluator: Shared evaluator to use instead of a new one.
+
+        Raises:
+            TypeError: ``policies`` is a string, bytes, a mapping or not iterable.
+            ValueError: ``add_policy`` rejected one of ``policies``.
+        """
         self._policies: list = []
         # Policies registered through add_policy / policies=: enforced by the
         # evaluator and kept across reload_policies() and tenant evaluators.
@@ -94,7 +108,9 @@ class PDP:
         self._tenant_evaluators: OrderedDict[Tuple[int, int], PolicyEvaluator] = OrderedDict()
         # Register constructor policies last: add_policy needs the evaluator and
         # the tenant LRU created above. The caller's list is not aliased.
-        if isinstance(policies, list):
+        if policies is not None:
+            if isinstance(policies, (str, bytes, Mapping)) or not isinstance(policies, Iterable):
+                raise TypeError(f"PDP policies= must be an iterable of policies, got {type(policies).__name__}")
             for policy in policies:
                 self.add_policy(policy)
 

@@ -228,3 +228,37 @@ async def test_no_collision_no_warning():
 
     assert _collision_warnings(pdp.logger) == []
     assert sorted(policy.name for policy in pdp.evaluator._index.all()) == ["registered", "stored"]
+
+
+# --- Module 3: iterable policies= (issue:d1c06c381acc) ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "make",
+    [tuple, lambda items: (item for item in items), set],
+    ids=["tuple", "generator", "set"],
+)
+def test_constructor_accepts_iterables(make):
+    pdp = PDP(storage=_storage(), policies=make([_allow("a", "/a/"), _allow("b", "/b/")]))
+
+    assert sorted(policy.name for policy in pdp._registered) == ["a", "b"]
+    assert pdp.evaluator.check_access(_ctx(), ResourceType.URI, "/a/", "uri:read").allowed
+    assert pdp.evaluator.check_access(_ctx(), ResourceType.URI, "/b/", "uri:read").allowed
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["public_dashboard", b"public_dashboard", {"name": "x"}, _allow("single"), 42],
+    ids=["str", "bytes", "dict", "policy", "int"],
+)
+def test_constructor_rejects_non_iterables(bad):
+    with pytest.raises(TypeError, match=f"got {type(bad).__name__}"):
+        PDP(storage=_storage(), policies=bad)
+
+
+@pytest.mark.parametrize("empty", [None, ()], ids=["none", "empty-tuple"])
+def test_constructor_empty_policies(empty):
+    pdp = PDP(storage=_storage(), policies=empty)
+
+    assert pdp._registered == []
+    assert pdp.evaluator._index.all() == []
