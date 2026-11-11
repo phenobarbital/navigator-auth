@@ -63,7 +63,7 @@
       "feature_id": "FEAT-116",
       "feature": "handlers-mfa-tech-debt",
       "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -71,8 +71,8 @@
       ],
       "parallel": true,
       "parallelism_notes": "TASK-217 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
-      "assigned_to": null,
-      "started_at": null,
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:02:28+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-218-shared-management-context.md"
     },
