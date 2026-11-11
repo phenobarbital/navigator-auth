@@ -7,14 +7,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-import pytest_asyncio
 from aiohttp import web
 
 from navigator_auth import conf as auth_conf
 from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY
 from navigator_auth.exceptions import MFARefused
 from navigator_auth.handlers import setup_handlers
-from navigator_auth.handlers.mfa import MFA_PREFIX, MfaHandler, setup_mfa_routes
+from navigator_auth.handlers.mfa import MFA_PREFIX, MfaHandler
 from navigator_auth.mfa.services import MFA_APP_KEY, MfaServices, MfaServicesSlot
 from navigator_auth.mfa.types import MfaChallenge, MfaMode, MfaState, TenantMfaPolicy
 
@@ -43,9 +42,7 @@ def _evaluation(**over):
     """Build a current evaluation matching ``_record`` by default."""
     values = {
         "user_id": 7,
-        "policy": TenantMfaPolicy(
-            org_id=1, mode=MfaMode.ENFORCED, remember_days=0, enforced_at=None, enforced_by=None
-        ),
+        "policy": TenantMfaPolicy(org_id=1, mode=MfaMode.ENFORCED, remember_days=0, enforced_at=None, enforced_by=None),
         "memberships": (1,),
         "state": MfaState.EMAIL,
         "has_strong_factor": False,
@@ -169,15 +166,21 @@ async def test_concurrent_verify_consumes_once(client):
 async def test_challenge_retry_budget(client):
     """Four failures retain the challenge; the fifth failure burns it."""
     for remaining in range(4, 0, -1):
-        response, body = await _post(client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="bad")
+        response, body = await _post(
+            client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="bad"
+        )
         assert response.status == 401
         assert body["attempts_remaining"] == remaining
-    assert (await _post(client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="correct"))[0].status == 200
+    assert (await _post(client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="correct"))[
+        0
+    ].status == 200
     client.mfa_services.store = FakeStore()
     for _ in range(5):
         response, _ = await _post(client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="bad")
     assert response.status == 401
-    assert (await _post(client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="correct"))[0].status == 401
+    assert (await _post(client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="correct"))[
+        0
+    ].status == 401
 
 
 @pytest.mark.asyncio
@@ -192,7 +195,9 @@ async def test_verify_rejects_disallowed_provider(client):
 async def test_stale_challenge_rejected(client):
     """Context drift discards the challenge before provider verification."""
     client.mfa_services.evaluate.return_value = _evaluation(context_digest="new-digest")
-    response, body = await _post(client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="correct")
+    response, body = await _post(
+        client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="correct"
+    )
     assert response.status == 401
     assert body == {"error": "stale_challenge"}
     assert client.mfa_services.store.record is None
@@ -202,7 +207,9 @@ async def test_stale_challenge_rejected(client):
 async def test_strong_factor_required_on_verify(client):
     """A fresh strong-factor refusal discards the challenge and opens no session."""
     client.mfa_services.evaluate.side_effect = MFARefused("strong_factor_required", status=403)
-    response, body = await _post(client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="correct")
+    response, body = await _post(
+        client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="correct"
+    )
     assert response.status == 403
     assert body["error"] == "strong_factor_required"
     assert client.mfa_services.store.record is None
@@ -262,7 +269,9 @@ async def test_remember_device_only_when_allowed(client):
 async def test_verify_fails_closed_when_store_fails(client):
     """Store failures return an unavailable MFA response without a session."""
     client.mfa_services.store.peek = AsyncMock(side_effect=RuntimeError("redis"))
-    response, body = await _post(client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="correct")
+    response, body = await _post(
+        client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="email", code="correct"
+    )
     assert response.status == 503
     assert body == {"error": "mfa_unavailable"}
     client.mfa_services.backend.open_session.assert_not_awaited()

@@ -12,7 +12,6 @@ from typing import Any, Optional
 
 from aiohttp import web
 
-from navigator_auth import conf as auth_conf
 from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY
 from navigator_auth.exceptions import FailedAuth, MfaSignal, UserNotFound
 from navigator_auth.mfa.services import MfaServices, get_mfa_services
@@ -106,9 +105,15 @@ class MfaHandler:
         if isinstance(revalidated, web.Response):
             return revalidated
         user, evaluation = revalidated
-        if not await services.user_limiter.check(str(record.user_id)) or not await services.ip_limiter.check(_remote(request)):
+        if not await services.user_limiter.check(str(record.user_id)) or not await services.ip_limiter.check(
+            _remote(request)
+        ):
             return _error("rate_limited", 429)
-        if provider not in record.providers or provider not in evaluation.providers or provider not in services.providers:
+        if (
+            provider not in record.providers
+            or provider not in evaluation.providers
+            or provider not in services.providers
+        ):
             return await self._failed(services, token)
         if not await services.providers[provider].verify(request, user, code, challenge=record):
             return await self._failed(services, token)
