@@ -8,6 +8,7 @@ Tests:
 
 import asyncio
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 import json
@@ -120,6 +121,18 @@ def _make_provider(
     provider.access_token_storage = MagicMock()
     provider.refresh_token_storage = MagicMock()
     provider._idp = MagicMock()
+    # FEAT-108 D5: device verification resolves the session owner against the IdP.
+    provider._idp.user_from_id = AsyncMock(
+        return_value={"user_id": getattr(session_user, "user_id", 0), "username": "owner", "is_active": True}
+    )
+    provider._create_user_session = AsyncMock(return_value=None)
+
+    # FEAT-106 review fixes: this memory harness has no authdb.
+    @asynccontextmanager
+    async def _no_generation(request, user_id):
+        yield None, 0
+
+    provider._user_generation = _no_generation
     provider._parser = MagicMock()
 
     # Simulate rendering templates by returning a simple Response.
@@ -349,3 +362,193 @@ async def test_device_verification_no_session_redirects():
 
     with pytest.raises(web.HTTPFound):
         await provider.device_verification(provider_request)
+
+
+# ---------------------------------------------------------------------------
+# FEAT-108 TASK-205 — owner check + device login resume (AC13, AC16a)
+# ---------------------------------------------------------------------------
+
+def _routed_app():
+    """aiohttp app registering the named OAuth2 routes so ``url_for`` works."""
+    from aiohttp import web
+
+    async def _noop(request):  # pragma: no cover - never served
+        return web.Response()
+
+    app = web.Application()
+    app.router.add_route("*", "/oauth2/login", _noop, name="nav_oauth2_login")
+    app.router.add_route("*", "/oauth2/device", _noop, name="nav_oauth2_device")
+    app.router.add_route("*", "/oauth2/authorize", _noop, name="nav_oauth2_authorize")
+    return app
+
+
+def _routed_request(form_data: dict, method: str = "POST") -> MagicMock:
+    request = _make_post_request(form_data)
+    request.method = method
+    request.app = _routed_app()
+    return request
+
+
+async def _pending_setup(user_id: int = 7):
+    client = _public_client()
+    user = OauthUser(user_id=user_id, username="erin", given_name="Erin", family_name="Doe")
+    dc = _make_dc(client_id=client.client_id)
+    store = MemoryDeviceCodeStorage()
+    await store.save(dc)
+    return client, user, dc, store
+
+
+@pytest.mark.asyncio
+async def test_device_verification_unknown_owner_redirects():
+    """Unknown session owner -> login with device_user_code; code stays pending (AC13)."""
+    from aiohttp import web
+    from navigator_auth.exceptions import UserNotFound
+
+    client, user, dc, store = await _pending_setup()
+    provider = _make_provider(client, device_store=store, session_user=user)
+    provider.grant_storage = None
+    provider._idp.user_from_id = AsyncMock(side_effect=UserNotFound("gone"))
+
+    request = _routed_request({"action": "approve", "user_code": dc.user_code})
+    with pytest.raises(web.HTTPFound) as exc:
+        await provider.device_verification(request)
+    location = str(exc.value.location)
+    assert location.startswith("/oauth2/login")
+    assert f"device_user_code={dc.user_code}" in location
+    current = await store.get_by_device_code(dc.device_code)
+    assert current.status == DeviceCodeStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_device_verification_owner_outage_503():
+    """Identity-store outage -> generic 503, nothing approved (AC16a)."""
+    from navigator_auth.exceptions import IdentityStoreUnavailable
+
+    client, user, dc, store = await _pending_setup()
+    provider = _make_provider(client, device_store=store, session_user=user)
+    provider.grant_storage = None
+    provider._idp.user_from_id = AsyncMock(side_effect=IdentityStoreUnavailable())
+
+    request = _routed_request({"action": "approve", "user_code": dc.user_code})
+    resp = await provider.device_verification(request)
+    assert resp.status == 503
+    current = await store.get_by_device_code(dc.device_code)
+    assert current.status == DeviceCodeStatus.PENDING
+
+
+def _login_provider(client, store, user):
+    from aiohttp import web
+    provider = _make_provider(client, device_store=store, session_user=user)
+    provider.grant_storage = None
+    provider._idp.authenticate_credentials = AsyncMock(
+        return_value={"user_id": user.user_id, "username": "erin", "is_active": True}
+    )
+    provider._create_user_session = AsyncMock(return_value=True)
+    provider.get_login_form = AsyncMock()
+    provider.auth_error = lambda reason, status=400: web.HTTPBadRequest(reason=reason)
+    return provider
+
+
+@pytest.mark.asyncio
+async def test_device_login_resumes_verification():
+    """No-session -> login with the code -> pre-filled device form -> explicit approve."""
+    from aiohttp import web
+    from navigator_auth.backends.oauth2 import backend as backend_mod
+
+    client, user, dc, store = await _pending_setup()
+    provider = _make_provider(client, device_store=store, session_user=None)
+    provider.grant_storage = None
+
+    # 1. no session -> redirected to login carrying the code
+    with pytest.raises(web.HTTPFound) as exc:
+        await provider.device_verification(
+            _routed_request({"action": "approve", "user_code": dc.user_code})
+        )
+    assert f"device_user_code={dc.user_code}" in str(exc.value.location)
+
+    # 2. POST the login form with the device code -> device route, not authorize
+    login_provider = _login_provider(client, store, user)
+    login_provider.get_login_form = AsyncMock(
+        return_value=("erin", "pw", {"device_user_code": dc.user_code, "client_id": "x"})
+    )
+    request = _routed_request({}, method="POST")
+    with patch.object(backend_mod.auth_conf, "AUTH_BASIC_2FA_ENABLED", False):
+        response = await login_provider.auth_login(request)
+    assert isinstance(response, web.HTTPFound)
+    target = str(response.location)
+    assert target.startswith("/oauth2/device")
+    assert f"user_code={dc.user_code}" in target
+    assert "/oauth2/authorize" not in target
+    current = await store.get_by_device_code(dc.device_code)
+    assert current.status == DeviceCodeStatus.PENDING  # login alone approves nothing
+
+    # 3. GET the device route renders the form
+    get_request = _routed_request({}, method="GET")
+    get_request.query = {"user_code": dc.user_code}
+    resp = await login_provider.device_verification(get_request)
+    assert resp.status == 200
+    assert "oauth/device.html" in resp.text
+
+    # 4. explicit POST approve (session now present) approves the code
+    code_store = _MemCodeStorage()
+    approver = _make_provider(client, device_store=store, session_user=user, code_store=code_store)
+    approver.grant_storage = _MemGrantStorage()
+    await approver.grant_storage.save_grant(
+        OauthGrant(user_id=user.user_id, client_id=client.client_id,
+                   scopes=["default", "offline_access"], revoked=False)
+    )
+    resp = await approver.device_verification(
+        _routed_request({"action": "approve", "user_code": dc.user_code})
+    )
+    assert resp.status == 200
+    current = await store.get_by_device_code(dc.device_code)
+    assert current.status == DeviceCodeStatus.APPROVED
+    assert current.auth_code is not None
+
+
+def test_device_authorize_redirect_shared_by_mfa_hop():
+    """auth_login and auth_login_mfa both resume through ``_authorize_redirect`` (FEAT-106 hop)."""
+    import inspect
+    from aiohttp import web
+    from navigator_auth.backends.oauth2.backend import Oauth2Provider
+
+    assert "_authorize_redirect" in inspect.getsource(Oauth2Provider.auth_login_mfa)
+    assert "device_user_code" in Oauth2Provider._MFA_FORM_KEYS
+    provider = Oauth2Provider.__new__(Oauth2Provider)
+    request = _routed_request({})
+    response = provider._authorize_redirect(request, {"device_user_code": "BCDF-BCDF"})
+    assert isinstance(response, web.HTTPFound)
+    assert str(response.location).startswith("/oauth2/device?user_code=BCDF-BCDF")
+
+
+@pytest.mark.asyncio
+async def test_device_login_rejects_url_like_code():
+    """A device_user_code that is a URL is refused with 400."""
+    from aiohttp import web
+    from navigator_auth.backends.oauth2 import backend as backend_mod
+
+    client, user, dc, store = await _pending_setup()
+    provider = _login_provider(client, store, user)
+    provider.get_login_form = AsyncMock(
+        return_value=("erin", "pw", {"device_user_code": "https://evil"})
+    )
+    with patch.object(backend_mod.auth_conf, "AUTH_BASIC_2FA_ENABLED", False):
+        with pytest.raises(web.HTTPBadRequest):
+            await provider.auth_login(_routed_request({}, method="POST"))
+
+
+def test_device_login_hides_passkey_and_upstream():
+    """login.html with device_user_code set renders no passkey and no upstream block."""
+    from pathlib import Path
+    import jinja2
+
+    root = Path(__file__).resolve().parent.parent / "templates"
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(root)))
+    tpl = env.get_template("oauth/login.html")
+    device = tpl.render(device_user_code="BCDF-BCDF", upstream_providers=["google"], action_url="/oauth2/login")
+    assert "passkey-signin" not in device
+    assert "Continue with" not in device
+    assert 'name="device_user_code" value="BCDF-BCDF"' in device
+    normal = tpl.render(upstream_providers=["google"], action_url="/oauth2/login")
+    assert "passkey-signin" in normal
+    assert "Continue with" in normal

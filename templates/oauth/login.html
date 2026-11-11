@@ -36,12 +36,15 @@
         <input type="hidden" name="code_challenge_method" value="{{ code_challenge_method }}">
         <input type="hidden" name="nonce" value="{{ nonce }}">
         <input type="hidden" name="prompt" value="{{ prompt }}">
+        <input type="hidden" name="device_user_code" value="{{ device_user_code }}">
         <input type="submit" value="Submit">
+        {% if not device_user_code %}
         <button type="button" id="passkey-signin" hidden>Sign in with a passkey</button>
         <div id="passkey-error" role="alert" hidden></div>
+        {% endif %}
     </form>
   </div>
-  {% if upstream_providers %}
+  {% if upstream_providers and not device_user_code %}
   <div>
     <hr />
     <div><span>Or sign in with:</span></div>
@@ -56,6 +59,7 @@
     {% endfor %}
   </div>
   {% endif %}
+  {% if not device_user_code %}
   <script>
   (function () {
     var OPTIONS_URL = "/api/v1/auth/passkey/login/options";
@@ -183,5 +187,6 @@
     }
   })();
   </script>
+  {% endif %}
 </body>
 </html>
