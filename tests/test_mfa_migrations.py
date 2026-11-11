@@ -72,10 +72,14 @@ def test_render_sql_substitutes_placeholders():
 
 
 def test_migration_declares_six_tables():
-    """DDL contains required MFA tables and security-specific columns."""
+    """DDL contains required MFA tables across migrations and security-specific columns.
+
+    The MFA seed table was moved out of the user vault by FEAT-106 review fix #2.
+    """
     sql = (SQL_DIR / _MIGRATION_FILES[0]).read_text()
+    all_sql = "\n".join((SQL_DIR / name).read_text() for name in _MIGRATION_FILES)
     for table in MFA_TABLES:
-        assert f"CREATE TABLE IF NOT EXISTS {{schema}}.{table}" in sql
+        assert f"CREATE TABLE IF NOT EXISTS {{schema}}.{table}" in all_sql
     trusted_devices = sql.split("CREATE TABLE IF NOT EXISTS {schema}.user_trusted_devices", 1)[1]
     audit = sql.split("CREATE TABLE IF NOT EXISTS {schema}.user_mfa_audit", 1)[1]
     assert "rotated_at" in trusted_devices

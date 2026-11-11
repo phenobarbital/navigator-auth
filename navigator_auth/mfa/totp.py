@@ -28,7 +28,7 @@ TOTP_DIGITS, TOTP_PERIOD, TOTP_SKEW_STEPS = 6, 30, 1
 TOTP_SEED_BYTES = 20
 MFA_SEED_PURPOSE, MFA_PENDING_PURPOSE = "mfa", "mfa-pending"
 REPLAY_TTL = TOTP_PERIOD * (2 * TOTP_SKEW_STEPS + 2)
-VAULT_SECRETS_TABLE = "auth.user_vault_secrets"
+MFA_SECRETS_TABLE = f"{AUTH_DB_SCHEMA}.user_mfa_secrets"
 USER_MFA_TABLE = f"{AUTH_DB_SCHEMA}.user_mfa"
 SECURITY_TABLE = f"{AUTH_DB_SCHEMA}.user_mfa_security"
 
@@ -111,15 +111,13 @@ class TOTPProvider(AbstractOTPProvider):
         return None
 
     async def _load_seed(self, user_id: int, *, conn: Any = None) -> Optional[bytes]:
-        sql = (
-            f"SELECT ciphertext_db FROM {VAULT_SECRETS_TABLE} " "WHERE user_id = $1 AND key = $2 AND deleted_at IS NULL"
-        )
+        sql = f"SELECT ciphertext_db FROM {MFA_SECRETS_TABLE} WHERE user_id = $1 AND provider = $2 AND key = $3 AND deleted_at IS NULL"
         try:
             if conn is not None:
-                row = await conn.fetch_one(sql, user_id, TOTP_VAULT_KEY)
+                row = await conn.fetch_one(sql, user_id, PROVIDER_TOTP, TOTP_VAULT_KEY)
             else:
                 async with await self._db.acquire() as own:
-                    row = await own.fetch_one(sql, user_id, TOTP_VAULT_KEY)
+                    row = await own.fetch_one(sql, user_id, PROVIDER_TOTP, TOTP_VAULT_KEY)
         except Exception as err:
             raise MfaStorageError(f"totp seed read failed: {type(err).__name__}") from err
         if not row:
@@ -141,7 +139,7 @@ class TOTPProvider(AbstractOTPProvider):
         try:
             async with await self._db.acquire() as conn:
                 row = await conn.fetch_one(
-                    f"SELECT m.enabled, m.confirmed_at FROM {USER_MFA_TABLE} m WHERE m.user_id=$1 AND m.provider=$2 AND EXISTS (SELECT 1 FROM {VAULT_SECRETS_TABLE} v WHERE v.user_id=$1 AND v.key=$3 AND v.deleted_at IS NULL)",
+                    f"SELECT m.enabled, m.confirmed_at FROM {USER_MFA_TABLE} m WHERE m.user_id=$1 AND m.provider=$2 AND EXISTS (SELECT 1 FROM {MFA_SECRETS_TABLE} v WHERE v.user_id=$1 AND v.provider=$2 AND v.key=$3 AND v.deleted_at IS NULL)",
                     user_id,
                     PROVIDER_TOTP,
                     TOTP_VAULT_KEY,
@@ -251,8 +249,9 @@ class TOTPProvider(AbstractOTPProvider):
 
     async def _disenroll_on(self, conn: Any, user_id: int) -> None:
         await conn.fetchval(
-            f"UPDATE {VAULT_SECRETS_TABLE} SET deleted_at = now() WHERE user_id=$1 AND key=$2 AND deleted_at IS NULL RETURNING 1",
+            f"UPDATE {MFA_SECRETS_TABLE} SET deleted_at = now() WHERE user_id=$1 AND provider=$2 AND key=$3 AND deleted_at IS NULL RETURNING 1",
             user_id,
+            PROVIDER_TOTP,
             TOTP_VAULT_KEY,
         )
         await conn.fetchval(
@@ -280,8 +279,9 @@ class TOTPProvider(AbstractOTPProvider):
         keyring = self._keyring()
         ciphertext = seal_value(seed, mfa_seed_context(user_id), keyring)
         await conn.fetchval(
-            f"INSERT INTO {VAULT_SECRETS_TABLE} (user_id,key,ciphertext_db,key_version) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id,key) WHERE deleted_at IS NULL DO UPDATE SET ciphertext_db=EXCLUDED.ciphertext_db,key_version=EXCLUDED.key_version,updated_at=NOW() RETURNING 1",
+            f"INSERT INTO {MFA_SECRETS_TABLE} (user_id,provider,key,ciphertext_db,key_version) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id,provider,key) WHERE deleted_at IS NULL DO UPDATE SET ciphertext_db=EXCLUDED.ciphertext_db,key_version=EXCLUDED.key_version,updated_at=NOW() RETURNING 1",
             user_id,
+            PROVIDER_TOTP,
             TOTP_VAULT_KEY,
             ciphertext,
             keyring.active_key_id,

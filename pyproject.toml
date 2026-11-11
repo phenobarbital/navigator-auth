@@ -75,6 +75,7 @@ Documentation = "https://github.com/phenobarbital/navigator-auth"
 # (navigator-vault CLI). See navigator_session/vault/registry.py.
 [project.entry-points."navigator_session.vault_targets"]
 identity = "navigator_auth.identity.targets:factory"
+mfa = "navigator_auth.mfa.targets:factory"
 
 [tool.setuptools.packages.find]
 where = ["."]
