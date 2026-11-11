@@ -14,16 +14,8 @@ from aiohttp.test_utils import TestClient, TestServer
 
 import navigator_auth.conf as conf
 from navigator_auth import AuthHandler
-from navigator_auth.mfa.services import MFA_APP_KEY, get_mfa_services
+from navigator_auth.mfa.services import get_mfa_services
 from navigator_auth.mfa.types import TRUSTED_COOKIE
-from tests.fixtures.mfa import (
-    frozen_totp_clock,
-    mfa_db,
-    mfa_redis_pool,
-    mfa_secret,
-    mfa_user_factory,
-    otp_callback_spy,
-)
 
 pytestmark = [
     pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning"),
@@ -96,6 +88,7 @@ async def _verify(client: TestClient, challenge: str, provider: str, code: str, 
 @pytest.fixture
 def tenant():
     """Provide a deterministic tenant helper for live implementations."""
+
     async def create(_db, **_kwargs):
         pytest.skip("Tenant provisioning requires the feature's live database schema")
 
