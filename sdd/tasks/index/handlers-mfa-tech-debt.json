@@ -44,7 +44,7 @@
       "feature_id": "FEAT-116",
       "feature": "handlers-mfa-tech-debt",
       "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
@@ -52,8 +52,9 @@
       "parallelism_notes": "Independent initial evaluation snapshot task.",
       "assigned_to": "agent:sdd-worker:mfa_116_implementation",
       "started_at": "2026-11-11T22:43:05.971086+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-217-factor-query-snapshot.md"
+      "completed_at": "2026-11-11T23:01:13+00:00",
+      "file": "sdd/tasks/completed/TASK-217-factor-query-snapshot.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-218",
