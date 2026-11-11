@@ -7,7 +7,7 @@ from aiohttp import web, hdrs
 from aiohttp.abc import AbstractView
 from navigator_session import get_session
 from navconfig.logging import logger
-from .exceptions import AuthException
+from .exceptions import AuthException, MfaSignal
 from .conf import AUTH_SESSION_OBJECT, AUTH_EXCLUDE_LIST_KEY
 from .vault.integration import _attach_vault_to_request
 
@@ -215,6 +215,10 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
                 for _, backend in auth.backends.items():
                     try:
                         result = await backend.authenticate(request)
+                    except MfaSignal:
+                        # FEAT-106 R2: a second factor is owed — never let another backend
+                        # authenticate this request. userdata stays None → 401 below.
+                        break
                     except AuthException:
                         continue
                     if not result:
@@ -259,6 +263,10 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
             for _, backend in auth.backends.items():
                 try:
                     result = await backend.authenticate(request)
+                except MfaSignal:
+                    # FEAT-106 R2: a second factor is owed — never let another backend
+                    # authenticate this request. userdata stays None → 401 below.
+                    break
                 except AuthException:
                     continue
                 if not result:
