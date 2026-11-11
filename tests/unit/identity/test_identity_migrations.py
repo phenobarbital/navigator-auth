@@ -252,3 +252,14 @@ class TestSetupIdentityColumns:
         # must not raise, and must still have run 004/005/006
         await setup_identity_columns(pool)
         assert conn.execute.await_count == 6
+
+
+class TestEnsureIdentityColumnsAsyncdbErrorPair:
+    @pytest.mark.asyncio
+    async def test_asyncdb_error_pair_raises(self):
+        """conn.execute returning [None, error] is a failure, not a silent success."""
+        pool, conn = _make_pool_async_cm()
+        conn.execute = AsyncMock(return_value=[None, RuntimeError("x")])
+        with pytest.raises(RuntimeError, match="6 of 6"):
+            await ensure_identity_columns(pool)
+        assert conn.execute.await_count == 6
