@@ -4,13 +4,16 @@ from collections.abc import Generator
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
+import asyncpg
 import pytest
 from asyncdb.interfaces.abstract import AbstractDriver
 
 from navigator_auth.conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE
 from navigator_auth.migrations import MigrationStatus, UpgradeReport, get_status as exported_get_status
 from navigator_auth.migrations import catalog
+from navigator_auth.migrations.access import missing_runtime_access
 from navigator_auth.migrations.runner import (
+    get_status,
     MigrationError,
     MigrationState,
     acquire_pooled,
@@ -337,3 +340,123 @@ async def test_upgrade_rejects_invalid_runtime_role_before_writes(tmp_catalog, f
         await upgrade(fake_conn, runtime_role=ROLE)
     assert not fake_conn.writes()
     assert not any("advisory" in q for q in _sqls(fake_conn))
+
+
+from ._live import provision_base_tables, runtime_role, throwaway_database  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_upgrade_twice_is_noop_live() -> None:
+    """A live upgrade records every migration, then a second run is a no-op."""
+    async with throwaway_database() as dsn:
+        admin_conn = await asyncpg.connect(dsn)
+        try:
+            await provision_base_tables(admin_conn)
+            async with runtime_role(admin_conn) as (role, _password):
+                first = await upgrade(admin_conn, runtime_role=role)
+                assert not first.failed
+                assert not first.access_errors
+
+                second = await upgrade(admin_conn, runtime_role=role)
+                assert not second.applied
+                assert not second.failed
+                assert not second.access_errors
+                statuses = await get_status(admin_conn)
+                assert statuses
+                assert all(status.state is MigrationState.APPLIED for status in statuses)
+        finally:
+            await admin_conn.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_access_live() -> None:
+    """A runtime role receives, loses, and regains vault table and sequence access."""
+    async with throwaway_database() as dsn:
+        admin_conn = await asyncpg.connect(dsn)
+        try:
+            await provision_base_tables(admin_conn, with_oauth_base=False)
+            async with runtime_role(admin_conn) as (role, password):
+                first = await upgrade(admin_conn, sets=["vault"], runtime_role=role)
+                assert not first.failed
+
+                timestamps_before = {
+                    row["filename"]: row["applied_at"]
+                    for row in await admin_conn.fetch(
+                        'SELECT filename, applied_at FROM "auth"."schema_migrations" ' "WHERE migration_set = 'vault'"
+                    )
+                }
+                runtime_conn = await asyncpg.connect(dsn, user=role, password=password)
+                try:
+                    audit_id = await runtime_conn.fetchval(
+                        'INSERT INTO "auth"."user_vault_audit" '
+                        "(user_id, key, operation) VALUES (1, 'live-key', 'set') RETURNING id"
+                    )
+                    await runtime_conn.execute(
+                        'UPDATE "auth"."user_vault_audit" SET key = $1 WHERE id = $2',
+                        "updated-key",
+                        audit_id,
+                    )
+                    assert (
+                        await runtime_conn.fetchval('SELECT key FROM "auth"."user_vault_audit" WHERE id = $1', audit_id)
+                        == "updated-key"
+                    )
+                finally:
+                    await runtime_conn.close()
+
+                await admin_conn.execute(f'REVOKE INSERT ON TABLE "auth"."user_vault_audit" FROM "{role}"')
+                missing = await missing_runtime_access(admin_conn, "vault", role)
+                assert any("lacks INSERT on auth.user_vault_audit" in item for item in missing)
+
+                repaired = await upgrade(admin_conn, sets=["vault"], runtime_role=role)
+                assert not repaired.applied
+                assert not repaired.failed
+                assert not repaired.access_errors
+                assert not await missing_runtime_access(admin_conn, "vault", role)
+                timestamps_after = {
+                    row["filename"]: row["applied_at"]
+                    for row in await admin_conn.fetch(
+                        'SELECT filename, applied_at FROM "auth"."schema_migrations" ' "WHERE migration_set = 'vault'"
+                    )
+                }
+                assert timestamps_after == timestamps_before
+
+                runtime_conn = await asyncpg.connect(dsn, user=role, password=password)
+                try:
+                    assert await runtime_conn.fetchval(
+                        'INSERT INTO "auth"."user_vault_audit" '
+                        "(user_id, key, operation) VALUES (1, 'repaired-key', 'set') RETURNING id"
+                    )
+                finally:
+                    await runtime_conn.close()
+        finally:
+            await admin_conn.close()
+
+
+@pytest.mark.asyncio
+async def test_guarded_skip_retry_live() -> None:
+    """Identity 006 stays pending behind a view, then applies after the view is removed."""
+    async with throwaway_database() as dsn:
+        admin_conn = await asyncpg.connect(dsn)
+        try:
+            await provision_base_tables(admin_conn, legacy_identity=True, with_oauth_base=False)
+            async with runtime_role(admin_conn) as (role, _password):
+                await admin_conn.execute(
+                    'CREATE VIEW "auth"."identity_uid_blocker" AS ' 'SELECT uid FROM "auth"."user_identities"'
+                )
+                blocked = await upgrade(admin_conn, sets=["identity"], runtime_role=role)
+                assert [result.file.filename for result in blocked.failed] == ["006_identity_drop_legacy_uid.sql"]
+                assert not await admin_conn.fetchval(
+                    'SELECT EXISTS (SELECT 1 FROM "auth"."schema_migrations" '
+                    "WHERE migration_set = 'identity' AND filename = '006_identity_drop_legacy_uid.sql')"
+                )
+
+                await admin_conn.execute('DROP VIEW "auth"."identity_uid_blocker"')
+                retried = await upgrade(admin_conn, sets=["identity"], runtime_role=role)
+                assert [result.file.filename for result in retried.applied] == ["006_identity_drop_legacy_uid.sql"]
+                assert not retried.failed
+                assert not await admin_conn.fetchval(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = 'auth' AND table_name = 'user_identities' AND column_name = 'uid')"
+                )
+        finally:
+            await admin_conn.close()
