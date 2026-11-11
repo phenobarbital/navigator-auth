@@ -397,7 +397,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -413,8 +413,9 @@
       "parallelism_notes": "Spec §4 Integration Tests + AC sweep. Needs the whole stack; new tests/test_mfa_e2e.py only.",
       "assigned_to": null,
       "started_at": "2026-11-10T23:59:12+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-147-mfa-integration-tests.md"
+      "completed_at": "2026-11-11T02:48:47+00:00",
+      "file": "sdd/tasks/completed/TASK-147-mfa-integration-tests.md",
+      "verification": "partial"
     },
     {
       "id": "TASK-148",
