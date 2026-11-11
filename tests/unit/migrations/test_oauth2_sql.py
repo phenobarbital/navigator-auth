@@ -52,14 +52,9 @@ def test_oauth2_sql_is_guarded_and_has_no_seed_data():
     assert "DROP CONSTRAINT" not in sql
     assert not re.search(r"\bauth\.", sql)
     assert re.search(r"ALTER TABLE IF EXISTS \{schema\}\.clients", sql)
-    assert all(
-        re.search(rf"ADD COLUMN IF NOT EXISTS\s+{re.escape(column)}\b", sql)
-        for column in CLIENT_COLUMNS
-    )
+    assert all(re.search(rf"ADD COLUMN IF NOT EXISTS\s+{re.escape(column)}\b", sql) for column in CLIENT_COLUMNS)
 
-    add_constraint_block = re.search(
-        r"(?s)DO \$\$.*?ADD CONSTRAINT clients_client_uid_key.*?END\s*\$\$;", sql
-    )
+    add_constraint_block = re.search(r"(?s)DO \$\$.*?ADD CONSTRAINT clients_client_uid_key.*?END\s*\$\$;", sql)
     assert add_constraint_block
     assert "FROM pg_constraint" in add_constraint_block.group(0)
     assert re.findall(r"ALTER COLUMN (\w+) SET NOT NULL", sql) == ["client_name", "client_uid"]
