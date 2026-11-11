@@ -4,6 +4,7 @@ Contract test between this YAML and TASK-142's admin_disenroll handler: if
 either side renames the policy or the action, admin disenrolment silently dies,
 because policy_allows() fails closed on a policy or action it cannot match.
 """
+
 from pathlib import Path
 
 import pytest
