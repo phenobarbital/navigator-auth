@@ -2178,7 +2178,9 @@ class Oauth2Provider(BaseAuthBackend):
                     await self.code_storage.delete_code(code)
                     return self._error_response("invalid_grant", "Authorization code is no longer valid.")
                 # B5: mark code as used + delete from storage.
-                await self.code_storage.mark_used(code)
+                if not await self.code_storage.mark_used(code):
+                    # A concurrent exchange already consumed this code (RFC 6749 §4.1.2: single use).
+                    return self._error_response("invalid_grant", "Authorization code already used.")
                 await self.code_storage.delete_code(code)
 
                 scope = auth_code.scope

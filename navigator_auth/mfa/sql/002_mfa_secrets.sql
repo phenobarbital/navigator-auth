@@ -32,6 +32,9 @@ BEGIN
           FROM auth.user_vault_secrets
          WHERE key LIKE 'mfa:%'
         ON CONFLICT DO NOTHING;
-        DELETE FROM auth.user_vault_secrets WHERE key LIKE 'mfa:%';
+        -- Only rows that now exist in the new table are removed; a row skipped by a conflict stays put.
+        DELETE FROM auth.user_vault_secrets v
+         WHERE v.key LIKE 'mfa:%'
+           AND EXISTS (SELECT 1 FROM {schema}.user_mfa_secrets s WHERE s.id = v.id);
     END IF;
 END $$;
