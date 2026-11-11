@@ -7,10 +7,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from navigator_auth.exceptions import FailedAuth, MFARefused
+from navigator_auth.backends.basic import BasicAuth
 from navigator_auth.mfa.exceptions import MfaStorageError
 from navigator_auth.mfa.login import SecondFactorGate, VerifyRefused
 from navigator_auth.mfa.security import LOCK_CONNECTION
-from navigator_auth.mfa.services import MfaServices
+from navigator_auth.mfa.services import MFA_APP_KEY, MfaServices, MfaServicesSlot
 from navigator_auth.mfa.types import MfaChallenge, MfaMode, MfaState, TenantMfaPolicy
 
 USER = {"user_id": 7, "username": "alice", "email": "alice@example.test", "password": "hash", "is_active": True}
@@ -185,6 +186,28 @@ async def test_no_factor_owed_issued_under_lock_with_empty_extra():
         return "session"
 
     assert (await SecondFactorGate(services).decide(_request(), USER, issue)).session == "session"
+
+
+@pytest.mark.asyncio
+async def test_basic_adapter_issues_session_inside_gate():
+    """AC10/AC18: BasicAuth's adapter invokes its issuer while the user lock is held."""
+    services = _services(evaluate=AsyncMock(return_value=_evaluation(state=MfaState.NONE)))
+    app = {MFA_APP_KEY: MfaServicesSlot(services)}
+    request = _request(app=app)
+    backend = BasicAuth.__new__(BasicAuth)
+    backend.userid_attribute = "user_id"
+    backend.pwd_atrribute = "password"
+
+    async def open_session(_request, _user, extra=None):
+        assert LOCK_CONNECTION.get() is services.security.conn
+        assert extra is None
+        return {"token": "session"}
+
+    backend.open_session = open_session
+
+    result = await backend._second_factor(request, USER)
+
+    assert result == {"token": "session"}
 
 
 @pytest.mark.asyncio

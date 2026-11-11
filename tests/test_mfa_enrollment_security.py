@@ -264,8 +264,12 @@ async def env(mfa_db, mfa_redis_pool, mfa_secret, mfa_user_factory, frozen_totp_
         check_password = IdentityProvider.check_password
         set_password = IdentityProvider.set_password
 
-        async def user_from_id(self, uid):
-            async with await mfa_db.acquire() as conn:
+        async def user_from_id(self, uid, *, conn=None):
+            # The gate passes its lock connection to avoid a nested pool acquire (AC10).
+            if conn is None:
+                async with await mfa_db.acquire() as conn:
+                    row = await conn.fetch_one(f"SELECT * FROM {USERS} WHERE user_id = $1", int(uid))
+            else:
                 row = await conn.fetch_one(f"SELECT * FROM {USERS} WHERE user_id = $1", int(uid))
             if row is None:
                 raise UserNotFound(f"user {uid}")

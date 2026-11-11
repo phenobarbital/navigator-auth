@@ -1,6 +1,7 @@
 """FEAT-106 TASK-138 — BasicAuth second-factor hook unit tests."""
 
 import logging
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock
 
@@ -12,7 +13,7 @@ from navigator_auth import conf as auth_conf
 from navigator_auth.backends.basic import BasicAuth
 from navigator_auth.backends.exchange import TokenExchangeAuth
 from navigator_auth.backends.passkey import PasskeyAuth
-from navigator_auth.exceptions import MFARefused, MFARequired
+from navigator_auth.exceptions import FailedAuth, MFARefused, MFARequired
 from navigator_auth.mfa.services import MFA_APP_KEY, MfaServices, MfaServicesSlot, build_mfa_services
 from navigator_auth.mfa.types import (
     MFA_DEVICE_TOKEN_KEY,
@@ -43,6 +44,7 @@ def _backend() -> BasicAuth:
     backend = BasicAuth.__new__(BasicAuth)
     backend.logger = logging.getLogger("test.mfa")
     backend.userid_attribute = "user_id"
+    backend.pwd_atrribute = "password"
     backend.validate_user = AsyncMock()
     backend.get_payload = AsyncMock(return_value=("alice", "password"))
     backend.open_session = AsyncMock(return_value={"token": "session"})
@@ -70,7 +72,13 @@ def _evaluation(state=MfaState.EMAIL, providers=("email",), preferred="email", s
 
 def _services(evaluation=None, available=True) -> MfaServices:
     """Build MFA services with isolated async collaborators."""
-    services = MfaServices(backend=None, available=available)
+    @asynccontextmanager
+    async def user_lock(_user_id):
+        """Yield a lock connection as the gate requires for fresh reads."""
+        yield object()
+
+    backend = SimpleNamespace(_idp=SimpleNamespace(user_from_id=AsyncMock(return_value=_user())))
+    services = MfaServices(backend=backend, available=available, security=SimpleNamespace(user_lock=user_lock))
     services.evaluate = AsyncMock(return_value=evaluation or _evaluation())
     services.store = SimpleNamespace(issue=AsyncMock(return_value=("challenge", object())))
     services.trusted_devices = SimpleNamespace(consume_and_rotate=AsyncMock(return_value=None))
@@ -238,6 +246,36 @@ async def test_email_preferred_issues_code_hash(monkeypatch):
     with pytest.raises(MFARequired):
         await backend.authenticate(_request(services))
     assert services.store.issue.await_args.kwargs["email_code_hash"] == "hash"
+
+
+@pytest.mark.asyncio
+async def test_no_factor_owed_opens_session_inside_gate(monkeypatch):
+    """MfaState.NONE: the gate opens the session with the unchanged no-MFA envelope."""
+    monkeypatch.setattr(auth_conf, "AUTH_BASIC_2FA_ENABLED", True)
+    backend, user = _backend(), _user()
+    backend.validate_user.return_value = user
+    services = _services(_evaluation(state=MfaState.NONE, providers=(), preferred=None))
+
+    result = await backend.authenticate(_request(services))
+
+    assert result == {"token": "session"}
+    backend.open_session.assert_awaited_once_with(ANY, user, extra=None)
+
+
+@pytest.mark.asyncio
+async def test_hash_drift_refuses_login(monkeypatch):
+    """AC17: the adapter rejects a password hash changed after validation."""
+    monkeypatch.setattr(auth_conf, "AUTH_BASIC_2FA_ENABLED", True)
+    backend, user = _backend(), _user()
+    backend.validate_user.return_value = user
+    services = _services(_evaluation(state=MfaState.NONE, providers=(), preferred=None))
+    services.backend._idp.user_from_id.return_value = _user(password="new-hash")
+
+    with pytest.raises(FailedAuth, match="credentials_changed") as raised:
+        await backend.authenticate(_request(services))
+
+    assert raised.value.status == 401
+    backend.open_session.assert_not_awaited()
 
 
 @pytest.mark.asyncio
