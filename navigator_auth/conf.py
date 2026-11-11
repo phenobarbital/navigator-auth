@@ -686,6 +686,26 @@ if FORGOT_PASSWORD_CALLBACK and not AUTH_RECOVERY_CALLBACK:
     )
     AUTH_RECOVERY_CALLBACK = FORGOT_PASSWORD_CALLBACK
 
+## Two-factor authentication for BasicAuth (FEAT-106).
+# Global kill switch. The per-tenant policy is data, not configuration.
+AUTH_BASIC_2FA_ENABLED = config.getboolean("AUTH_BASIC_2FA_ENABLED", fallback=False)
+# REQUIRED when enabled; deliberately no fallback to SECRET_KEY.
+AUTH_OTP_SECRET = config.get("AUTH_OTP_SECRET")
+if isinstance(AUTH_OTP_SECRET, str):
+    AUTH_OTP_SECRET = AUTH_OTP_SECRET.encode("utf-8")
+if not AUTH_OTP_SECRET:
+    AUTH_OTP_SECRET = None
+AUTH_OTP_CHALLENGE_TTL = config.getint("AUTH_OTP_CHALLENGE_TTL", fallback=300)
+AUTH_OTP_MAX_ATTEMPTS = config.getint("AUTH_OTP_MAX_ATTEMPTS", fallback=5)
+AUTH_OTP_CODE_LENGTH = config.getint("AUTH_OTP_CODE_LENGTH", fallback=6)
+AUTH_OTP_RATE_USER = config.get("AUTH_OTP_RATE_USER", fallback="10/hour")
+AUTH_OTP_RATE_IP = config.get("AUTH_OTP_RATE_IP", fallback="30/hour")
+AUTH_OTP_EMAIL_CALLBACK = config.get("AUTH_OTP_EMAIL_CALLBACK")
+AUTH_TOTP_ISSUER = config.get("AUTH_TOTP_ISSUER", fallback="Navigator")
+AUTH_MFA_BACKUP_CODE_COUNT = config.getint("AUTH_MFA_BACKUP_CODE_COUNT", fallback=10)
+AUTH_MFA_BACKUP_CODE_LENGTH = config.getint("AUTH_MFA_BACKUP_CODE_LENGTH", fallback=8)
+AUTH_MFA_NOTIFY_CALLBACK = config.get("AUTH_MFA_NOTIFY_CALLBACK")
+
 ## Audit Backend
 # this is the backend for saving Authentication information
 ENABLE_AUDIT_LOG = config.getboolean("ENABLE_AUDIT_LOG", fallback=True)

@@ -10,7 +10,7 @@ Supporting:
 """
 
 import contextlib
-from typing import Union
+from typing import Any, Union
 from collections.abc import Awaitable, Callable, Iterable
 import fnmatch
 import importlib
@@ -67,12 +67,14 @@ from .exceptions import (
     Forbidden,
     InvalidAuth,
     UserNotFound,
+    MfaSignal,
 )
 from .handlers import setup_handlers
 
 ## Responses
 from .libs.json import JSONContent
 from .responses import JSONResponse
+from .mfa.types import MFA_DEVICE_TOKEN_KEY, TRUSTED_COOKIE, trusted_cookie_kwargs
 from .storages.postgres import PostgresStorage
 from .storages.redis import RedisStorage
 from .templates import TemplateParser
@@ -372,6 +374,10 @@ class AuthHandler:
                 if not userdata:
                     raise self.ForbiddenAccess(reason="User was not authenticated")
                 return userdata
+            except MfaSignal:
+                # FEAT-106 R2: a second-factor outcome is terminal. Re-raise
+                # untouched — api_login alone turns it into a response.
+                raise
             except UserNotFound as err:
                 raise self.Unauthorized(reason="Invalid credentials", exception=err)
             except Exception as err:
@@ -383,6 +389,10 @@ class AuthHandler:
             if not userdata:
                 raise self.ForbiddenAccess(reason="User was not Authenticated")
             return userdata
+        except MfaSignal:
+            # FEAT-106 R2: MUST precede `except AuthException` below, which would
+            # turn the challenge into a 403 with no envelope (AC32).
+            raise
         except UserNotFound as err:
             raise self.Unauthorized(reason="Invalid Credentials", exception=err)
         except (InvalidAuth, Forbidden, FailedAuth) as err:
@@ -477,67 +487,99 @@ class AuthHandler:
         # first: getting header for an existing backend
         userdata = None
         qs = {key: val for (key, val) in request.query.items()}
-        if backend := self.get_auth_backend(request):
-            userdata = await self._backend_auth(request, backend)
-        elif "auth" in qs:
-            userdata = await self._login_token(request)
-        else:
-            # second: if no backend declared, will iterate over all backends
-            for _, backend in self.backends.items():
-                try:
-                    # check credentials for all backends
-                    userdata = await backend.authenticate(request)
-                    if userdata:
-                        break
-                except (AuthException, UserNotFound, InvalidAuth, FailedAuth):
-                    continue
-                except Exception as err:
-                    raise self.auth_error(reason=f"Auth Exception: {err}", exception=err)
+        try:
+            if backend := self.get_auth_backend(request):
+                userdata = await self._backend_auth(request, backend)
+            elif "auth" in qs:
+                userdata = await self._login_token(request)
+            else:
+                # second: if no backend declared, will iterate over all backends
+                for _, backend in self.backends.items():
+                    try:
+                        # check credentials for all backends
+                        userdata = await backend.authenticate(request)
+                        if userdata:
+                            break
+                    except MfaSignal:
+                        # FEAT-106 R2: BEFORE the tuple below, which would
+                        # `continue` and let the NEXT backend mint a session
+                        # with no second factor.
+                        raise
+                    except (AuthException, UserNotFound, InvalidAuth, FailedAuth):
+                        continue
+                    except Exception as err:
+                        raise self.auth_error(reason=f"Auth Exception: {err}", exception=err)
+        except MfaSignal as err:
+            # The ONLY place a second-factor outcome becomes HTTP (AC32): before
+            # any userdata serialization, load_session() or vault loading.
+            # no-store: the body carries a bearer challenge token.
+            return JSONResponse(err.payload(), status=err.status, headers={"Cache-Control": "no-store"})
         # if not userdata, then raise an not Authorized
         if not userdata:
             raise self.ForbiddenAccess(reason="Access Denied")
-        else:
-            if isinstance(userdata, web.HTTPFound):
-                return userdata
-            # at now: create the user-session
-            try:
-                response = JSONResponse(userdata, status=200)
-                await self._session.storage.load_session(request, userdata, response=response)
-            except Exception as err:
-                raise self.Unauthorized(reason=f"Error Creating User Session: {err.message}", exception=err) from err
-            # Load vault for the authenticated session (non-blocking)
-            try:
-                session = await get_session(request, new=False)
-                user_id = userdata.get("user_id") if isinstance(userdata, dict) else getattr(userdata, "user_id", None)
-                if session and user_id:
-                    db_pool = request.app.get("authdb")
-                    redis = request.app.get("redis")
+        if isinstance(userdata, web.HTTPFound):
+            return userdata
+        return await self.finalize_login(request, userdata)
 
-                    refresh_token = (
-                        userdata.get("refresh_token")
-                        if isinstance(userdata, dict)
-                        else getattr(userdata, "refresh_token", None)
+    async def finalize_login(self, request: web.Request, userdata: Any) -> web.Response:
+        """Turn an authenticated login result into the HTTP response.
+
+        Extracted unchanged from ``api_login`` (FEAT-106) so a second-factor
+        login (``MfaHandler.verify``) completes through the same session,
+        refresh-token and vault code. Additionally pops the transient
+        trusted-device token (contract D14) BEFORE anything serializes or
+        persists ``userdata``, and sets it as a Secure/HttpOnly cookie.
+
+        Args:
+            request: The login request.
+            userdata: The dict returned by a backend's ``authenticate()`` /
+                ``open_session()``.
+
+        Returns:
+            The JSON login response with the session loaded.
+        """
+        device = userdata.pop(MFA_DEVICE_TOKEN_KEY, None) if isinstance(userdata, dict) else None
+        # at now: create the user-session
+        try:
+            response = JSONResponse(userdata, status=200)
+            await self._session.storage.load_session(request, userdata, response=response)
+        except Exception as err:
+            raise self.Unauthorized(reason=f"Error Creating User Session: {err.message}", exception=err) from err
+        if device:
+            response.set_cookie(TRUSTED_COOKIE, device["token"], **trusted_cookie_kwargs(device["max_age"]))
+        # Load vault for the authenticated session (non-blocking)
+        try:
+            session = await get_session(request, new=False)
+            user_id = userdata.get("user_id") if isinstance(userdata, dict) else getattr(userdata, "user_id", None)
+            if session and user_id:
+                db_pool = request.app.get("authdb")
+                redis = request.app.get("redis")
+
+                refresh_token = (
+                    userdata.get("refresh_token")
+                    if isinstance(userdata, dict)
+                    else getattr(userdata, "refresh_token", None)
+                )
+                if refresh_token and redis:
+                    try:
+                        # 3 months = 90 days = 7776000 seconds
+                        await redis.setex(f"auth:refresh_token:{refresh_token}", 7776000, str(user_id))
+                    except Exception as e:
+                        self.logger.error(f"Failed to save refresh token to redis: {e}")
+
+                if db_pool:
+                    vault = await load_vault_for_session(
+                        session,
+                        user_id=user_id,
+                        db_pool=db_pool,
+                        redis=redis,
+                        keyring=request.app.get(VAULT_KEYRING_APP_KEY),
                     )
-                    if refresh_token and redis:
-                        try:
-                            # 3 months = 90 days = 7776000 seconds
-                            await redis.setex(f"auth:refresh_token:{refresh_token}", 7776000, str(user_id))
-                        except Exception as e:
-                            self.logger.error(f"Failed to save refresh token to redis: {e}")
-
-                    if db_pool:
-                        vault = await load_vault_for_session(
-                            session,
-                            user_id=user_id,
-                            db_pool=db_pool,
-                            redis=redis,
-                            keyring=request.app.get(VAULT_KEYRING_APP_KEY),
-                        )
-                        if vault:
-                            session[VAULT_SESSION_KEY] = vault
-            except Exception:
-                pass  # Vault failure must not block login
-            return response
+                    if vault:
+                        session[VAULT_SESSION_KEY] = vault
+        except Exception:
+            pass  # Vault failure must not block login
+        return response
 
     ### Auth Methods:
     async def auth_methods(self, request: web.Request) -> web.Response:

@@ -11,6 +11,7 @@ Errors:
       but its ciphertext fails integrity checks (tampered, moved, unknown key
       version, legacy format).
 """
+
 import logging
 from typing import Any
 
@@ -19,6 +20,7 @@ from aiohttp_cors import CorsViewMixin
 from navigator_session import get_session
 from navigator_session.vault import VaultCryptoError, VaultSecretMetadata
 from navigator_auth.vault import VAULT_SESSION_KEY, get_session_vault
+from navigator_auth.vault.reserved import is_reserved_key
 from navigator_auth.responses import JSONResponse, json_error as _json_error
 from navigator_auth.decorators import user_session
 
@@ -26,6 +28,13 @@ logger = logging.getLogger("navigator.vault")
 
 VAULT_UNAVAILABLE = "vault_unavailable"
 VAULT_INTEGRITY_ERROR = "vault_integrity_error"
+VAULT_RESERVED_KEY = "reserved_key"
+
+
+def _reject_reserved(key: str) -> None:
+    """Reject keys in the MFA-reserved namespace."""
+    if is_reserved_key(key):
+        _json_error(400, VAULT_RESERVED_KEY)
 
 
 def _metadata_dict(metadata: Any, key: str) -> dict:
@@ -56,15 +65,11 @@ class VaultView(web.View, CorsViewMixin):
             _json_error(503, VAULT_UNAVAILABLE)
 
         try:
-            vault = await get_session_vault(
-                self.request, session, user_id=user_id
-            )
+            vault = await get_session_vault(self.request, session, user_id=user_id)
             if vault:
                 return vault
         except Exception:
-            logger.exception(
-                "Failed to load vault dynamically"
-            )
+            logger.exception("Failed to load vault dynamically")
 
         _json_error(503, VAULT_UNAVAILABLE)
 
@@ -94,6 +99,7 @@ class VaultView(web.View, CorsViewMixin):
         vault = await self._get_session_and_vault()
 
         if key := self.request.match_info.get("key"):
+            _reject_reserved(key)
             if not await vault.exists(key):
                 _json_error(404, f"Secret '{key}' not found.")
             try:
@@ -108,7 +114,11 @@ class VaultView(web.View, CorsViewMixin):
                 _json_error(409, VAULT_INTEGRITY_ERROR)
             return JSONResponse(await self._metadata_for(vault, key))
 
-        secrets = [_metadata_dict(metadata, getattr(metadata, "key", "")) for metadata in await vault.list_metadata()]
+        secrets = [
+            _metadata_dict(metadata, getattr(metadata, "key", ""))
+            for metadata in await vault.list_metadata()
+            if not is_reserved_key(getattr(metadata, "key", ""))
+        ]
         return JSONResponse({"secrets": secrets})
 
     async def post(self):
@@ -129,6 +139,7 @@ class VaultView(web.View, CorsViewMixin):
 
         if not key:
             _json_error(400, "'key' is required")
+        _reject_reserved(key)
         if value is None:
             _json_error(400, "'value' is required")
 
@@ -153,6 +164,7 @@ class VaultView(web.View, CorsViewMixin):
         key = self.request.match_info.get("key")
         if not key:
             _json_error(400, "Key parameter is required for deletion.")
+        _reject_reserved(key)
 
         if not await vault.exists(key):
             _json_error(404, f"Secret '{key}' not found.")
@@ -161,7 +173,5 @@ class VaultView(web.View, CorsViewMixin):
             await vault.delete(key)
             return JSONResponse({"message": f"Secret '{key}' deleted successfully.", "key": key}, status=200)
         except Exception:
-            logger.exception(
-                "Error deleting vault secret"
-            )
+            logger.exception("Error deleting vault secret")
             _json_error(500, "Error deleting vault secret")

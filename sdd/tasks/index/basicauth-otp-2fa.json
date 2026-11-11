@@ -5,7 +5,7 @@
   "type": "feature",
   "base_branch": "dev",
   "created_at": "2026-11-10T23:35:32+00:00",
-  "completed_at": null,
+  "completed_at": "2026-11-11T11:10:17+00:00",
   "tasks": [
     {
       "id": "TASK-129",
@@ -14,16 +14,17 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
       "parallel": false,
       "parallelism_notes": "Spec M1 (+M3 ABC, M9 exception classes per D2/D3). Creates navigator_auth/mfa/ and edits conf.py + exceptions.py, which every later task imports — must land first.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-129-mfa-foundation.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T01:57:57+00:00",
+      "file": "sdd/tasks/completed/TASK-129-mfa-foundation.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-130",
@@ -32,7 +33,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -41,9 +42,10 @@
       "parallel": true,
       "parallelism_notes": "Spec M8. New files only (mfa/migrations.py, mfa/sql/, tests/fixtures/mfa.py, tests/test_mfa_migrations.py). Disjoint from 131 and 143; parallel once 129 is done.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-130-mfa-migrations.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:03:19+00:00",
+      "file": "sdd/tasks/completed/TASK-130-mfa-migrations.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-131",
@@ -52,7 +54,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -61,9 +63,10 @@
       "parallel": true,
       "parallelism_notes": "Spec M2. New files only (mfa/store.py, mfa/limiter.py, tests/test_mfa_challenge_store.py). Redis-only, no DB; parallel with 130/143 once 129 is done.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-131-mfa-challenge-store.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:03:19+00:00",
+      "file": "sdd/tasks/completed/TASK-131-mfa-challenge-store.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-132",
@@ -72,7 +75,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -82,9 +85,10 @@
       "parallel": false,
       "parallelism_notes": "Spec M2/M8 security contracts. New mfa/security.py; needs the user_mfa_security/user_mfa_audit tables and fixtures from 130. Imported by 135, 136, 138, 140-144.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-132-mfa-security-core.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:08:05+00:00",
+      "file": "sdd/tasks/completed/TASK-132-mfa-security-core.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-133",
@@ -93,7 +97,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -103,9 +107,10 @@
       "parallel": true,
       "parallelism_notes": "Spec M6. New mfa/trusted_devices.py + its test; touches no file another pending task touches. Parallel with 132/134 once 130 is done.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-133-mfa-trusted-devices.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:08:05+00:00",
+      "file": "sdd/tasks/completed/TASK-133-mfa-trusted-devices.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-134",
@@ -114,7 +119,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -124,9 +129,10 @@
       "parallel": true,
       "parallelism_notes": "Spec M5. New mfa/backup_codes.py + its test; disjoint files. Parallel with 132/133 once 130 is done.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-134-mfa-backup-codes.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:08:06+00:00",
+      "file": "sdd/tasks/completed/TASK-134-mfa-backup-codes.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-135",
@@ -135,7 +141,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -146,9 +152,10 @@
       "parallel": false,
       "parallelism_notes": "Spec M7. New mfa/policy.py + mfa/state.py; apply_tenant_policy uses MfaSecurity (132) and TrustedDeviceStore.revoke_tenant (133); available_providers counts backup codes (134).",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-135-mfa-policy-state.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:18:06+00:00",
+      "file": "sdd/tasks/completed/TASK-135-mfa-policy-state.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-136",
@@ -157,7 +164,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -167,9 +174,10 @@
       "parallel": true,
       "parallelism_notes": "Spec M3. New mfa/totp.py + its test. Uses the store's pending-enrollment/replay API (131) and security digest inputs (132). Disjoint from 135/137, so parallel with them.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-136-mfa-totp-provider.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:18:06+00:00",
+      "file": "sdd/tasks/completed/TASK-136-mfa-totp-provider.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-137",
@@ -178,7 +186,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -187,9 +195,10 @@
       "parallel": true,
       "parallelism_notes": "Spec M4. New mfa/email_otp.py + mfa/notify.py + test. Only needs the store (131); parallel with 132-136.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-137-mfa-email-provider.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:18:07+00:00",
+      "file": "sdd/tasks/completed/TASK-137-mfa-email-provider.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-138",
@@ -198,7 +207,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -209,9 +218,10 @@
       "parallel": false,
       "parallelism_notes": "Spec M9 — NOT delegation-eligible (R2). New mfa/services.py wires every component; modifies backends/basic.py. Thinking model only; must follow all component tasks.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-138-mfa-basic-auth-hook.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:25:02+00:00",
+      "file": "sdd/tasks/completed/TASK-138-mfa-basic-auth-hook.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-139",
@@ -220,7 +230,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -229,9 +239,10 @@
       "parallel": false,
       "parallelism_notes": "Spec M10 (part) — NOT delegation-eligible (R2: except-clause ordering). Only needs the MfaSignal exceptions (129); edits auth.py, which no other task edits. Kept sequential for review focus.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-139-mfa-auth-call-sites.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:03:20+00:00",
+      "file": "sdd/tasks/completed/TASK-139-mfa-auth-call-sites.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-140",
@@ -240,7 +251,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -250,9 +261,10 @@
       "parallel": false,
       "parallelism_notes": "Spec M10 (part) — NOT delegation-eligible. Creates handlers/mfa.py and edits handlers/__init__.py; calls finalize_login (139) and MfaServices (138).",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-140-mfa-verify-handler.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:31:02+00:00",
+      "file": "sdd/tasks/completed/TASK-140-mfa-verify-handler.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-141",
@@ -261,7 +273,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -270,9 +282,10 @@
       "parallel": false,
       "parallelism_notes": "Spec M10 (part). Extends handlers/mfa.py created by 140 — same file, so strictly after it.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-141-mfa-enrollment-endpoints.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:39:45+00:00",
+      "file": "sdd/tasks/completed/TASK-141-mfa-enrollment-endpoints.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-142",
@@ -281,7 +294,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -290,9 +303,10 @@
       "parallel": false,
       "parallelism_notes": "Spec M10 (part). Extends handlers/mfa.py after 141 (route must follow the literal /totp route).",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-142-mfa-admin-disenroll.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:43:39+00:00",
+      "file": "sdd/tasks/completed/TASK-142-mfa-admin-disenroll.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-143",
@@ -301,7 +315,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -310,9 +324,10 @@
       "parallel": true,
       "parallelism_notes": "Spec M10 security contract (protected seed namespace). New vault/reserved.py; edits vault/integration.py and handlers/vault.py, which no other task touches. Only needs MFA_VAULT_PREFIX (129).",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-143-mfa-vault-isolation.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:25:02+00:00",
+      "file": "sdd/tasks/completed/TASK-143-mfa-vault-isolation.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-144",
@@ -321,7 +336,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -330,9 +345,10 @@
       "parallel": false,
       "parallelism_notes": "Spec M10 additional integration scope. New mfa/events.py; edits handlers/users/session.py, handlers/recovery/handler.py, backends/passkey.py (no other task edits them). Needs MfaServices (138).",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-144-mfa-security-event-hooks.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:31:02+00:00",
+      "file": "sdd/tasks/completed/TASK-144-mfa-security-event-hooks.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-145",
@@ -341,16 +357,17 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [],
       "parallel": true,
       "parallelism_notes": "Spec M11. One YAML + tests/test_mfa_policy_pack.py; no Python under navigator_auth/. Fully independent; can run at any time.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-145-mfa-abac-policy-pack.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T01:57:57+00:00",
+      "file": "sdd/tasks/completed/TASK-145-mfa-abac-policy-pack.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-146",
@@ -359,7 +376,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -368,9 +385,10 @@
       "parallel": true,
       "parallelism_notes": "Spec M12. New scripts/preflight_mfa.py + test; uses MfaStateMachine.has_strong_factor (135). Disjoint from 136-145.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-146-mfa-preflight-script.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:25:03+00:00",
+      "file": "sdd/tasks/completed/TASK-146-mfa-preflight-script.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-147",
@@ -379,7 +397,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -394,9 +412,10 @@
       "parallel": false,
       "parallelism_notes": "Spec §4 Integration Tests + AC sweep. Needs the whole stack; new tests/test_mfa_e2e.py only.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-147-mfa-integration-tests.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:48:47+00:00",
+      "file": "sdd/tasks/completed/TASK-147-mfa-integration-tests.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-148",
@@ -405,7 +424,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -414,9 +433,10 @@
       "parallel": false,
       "parallelism_notes": "Spec M13. Documents the finished behaviour; last so docs match what the integration tests proved.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-148-mfa-docs-changelog.md"
+      "started_at": "2026-11-10T23:59:12+00:00",
+      "completed_at": "2026-11-11T02:53:44+00:00",
+      "file": "sdd/tasks/completed/TASK-148-mfa-docs-changelog.md",
+      "verification": "verified"
     }
   ]
 }
