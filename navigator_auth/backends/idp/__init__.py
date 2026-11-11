@@ -1,5 +1,5 @@
 import time
-from typing import Union
+from typing import Any, Union
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import hashlib
@@ -121,15 +121,28 @@ class IdentityProvider:
             await store.update_tokens(identity, token)
         return token.credential()
 
-    async def user_from_id(self, uid: int) -> Identity:
-        """Getting User Object."""
+    async def user_from_id(self, uid: int, *, conn: Any = None) -> Identity:
+        """Return the user with ``uid``.
+
+        Args:
+            uid: The user id.
+            conn: When given, run the lookup on this connection without acquiring from the pool.
+
+        Raises:
+            UserNotFound: No such user, or the lookup failed.
+            ValidationError: The stored row does not fit the user model.
+        """
         user = None
+        search = {self.userid_attribute: uid}
         try:
-            db = self.app["authdb"]
-            async with await db.acquire() as conn:
-                search = {self.userid_attribute: uid}
+            if conn is not None:
                 self.user_search.Meta.connection = conn
                 user = await self.user_search.get(**search)
+            else:
+                db = self.app["authdb"]
+                async with await db.acquire() as own:
+                    self.user_search.Meta.connection = own
+                    user = await self.user_search.get(**search)
         except NoDataFound as ex:
             raise UserNotFound(f"Invalid credentials for User {search!s}") from ex
         except ValidationError as ex:
