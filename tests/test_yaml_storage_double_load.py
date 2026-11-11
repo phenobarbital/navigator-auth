@@ -21,6 +21,17 @@ from navigator_auth.abac.policies.resource_policy import ResourcePolicy
 from navigator_auth.abac.policies import PolicyEffect
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_event_loop():
+    """Install a current loop for legacy tests that call get_event_loop().
+
+    pytest-asyncio tears down its loop, leaving none set for sync tests that
+    call asyncio.get_event_loop() (RuntimeError on Python 3.11).
+    """
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    yield
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
