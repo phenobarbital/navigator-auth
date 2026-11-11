@@ -540,14 +540,20 @@ class MfaHandler:
                 )
         except MfaStorageError:
             return _error("mfa_unavailable", 503)
+        def _read(source: Any, name: str, default: Any) -> Any:
+            """Read a field from a dict-like or attribute-style user record."""
+            if isinstance(source, dict):
+                return source.get(name, default)
+            return getattr(source, name, default)
+
         await notify_security_event(
             MfaSecurityNotice(
                 email=usable_email(record),
-                display_name=str(getattr(record, "display_name", "") or ""),
-                username=str(getattr(record, "username", target_id)),
+                display_name=str(_read(record, "display_name", "") or ""),
+                username=str(_read(record, "username", target_id)),
                 event="admin_disenrolled",
                 occurred_at=datetime.now(timezone.utc),
-                actor=str(getattr(actor, "username", actor_id)),
+                actor=str(_read(actor, "username", actor_id)),
             )
         )
         return JSONResponse({"status": "disenrolled", "user_id": target_id}, status=200, headers=NO_STORE)
