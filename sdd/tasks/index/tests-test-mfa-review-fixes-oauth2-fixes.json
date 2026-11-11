@@ -1,0 +1,75 @@
+{
+  "feature": "tests-test-mfa-review-fixes-oauth2-fixes",
+  "feature_id": "FEAT-114",
+  "spec": "sdd/specs/tests-test-mfa-review-fixes-oauth2-fixes.spec.md",
+  "type": "feature",
+  "base_branch": "dev",
+  "created_at": "2026-11-11T21:58:00+00:00",
+  "completed_at": null,
+  "parallel_semantics": "exclusive",
+  "validation_contract": "required",
+  "test_contract": {
+    "schema": 2,
+    "runners": [
+      {
+        "kind": "pytest",
+        "targets": [
+          "tests/test_mfa_review_fixes_oauth2.py",
+          "tests/test_mfa_review_fixes_oauth2_tokens.py",
+          "tests/test_mfa_e2e.py"
+        ],
+        "settings": {
+          "markers": ""
+        },
+        "tiers": [
+          "task",
+          "merge",
+          "feature"
+        ]
+      }
+    ],
+    "digest": "sha256:baa2786c920075e452cd11ee1af8737f0f85c5cb89373bee0d6c505318bd8090"
+  },
+  "tasks": [
+    {
+      "id": "TASK-215",
+      "slug": "live-oauth2-harness-mfa-tests",
+      "title": "Live OAuth2 harness and TASK-184 live MFA tests (e-mail OTP, replay, event record, AC10)",
+      "feature_id": "FEAT-114",
+      "feature": "tests-test-mfa-review-fixes-oauth2-fixes",
+      "spec": "sdd/specs/tests-test-mfa-review-fixes-oauth2-fixes.spec.md",
+      "status": "pending",
+      "priority": "medium",
+      "effort": "M",
+      "depends_on": [],
+      "parallel": true,
+      "parallelism_notes": "root task: creates the live harness (OAuthLive, oauth_live, _start_oauth) in tests/test_mfa_review_fixes_oauth2.py",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "discovered_from": "issue:1a329591f638",
+      "file": "sdd/tasks/active/TASK-215-live-oauth2-harness-mfa-tests.md"
+    },
+    {
+      "id": "TASK-216",
+      "slug": "live-oauth2-abac-assurance-tests",
+      "title": "End-to-end AC27/AC29 — fresh-factor ABAC with really minted OAuth2 tokens",
+      "feature_id": "FEAT-114",
+      "feature": "tests-test-mfa-review-fixes-oauth2-fixes",
+      "spec": "sdd/specs/tests-test-mfa-review-fixes-oauth2-fixes.spec.md",
+      "status": "pending",
+      "priority": "medium",
+      "effort": "M",
+      "depends_on": [
+        "TASK-215"
+      ],
+      "parallel": true,
+      "parallelism_notes": "uses OAuthLive/oauth_live/live_test from TASK-215 and appends to the same file tests/test_mfa_review_fixes_oauth2.py",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "discovered_from": "issue:1a329591f638",
+      "file": "sdd/tasks/active/TASK-216-live-oauth2-abac-assurance-tests.md"
+    }
+  ]
+}
