@@ -18,9 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture(scope="module")
 def example():
     """Load examples/policy_server.py by path without live services."""
-    spec = importlib.util.spec_from_file_location(
-        "policy_server_example", ROOT / "examples" / "policy_server.py"
-    )
+    spec = importlib.util.spec_from_file_location("policy_server_example", ROOT / "examples" / "policy_server.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -64,9 +62,7 @@ def test_example_policies_adapt_cleanly(example):
 
 def test_example_policy_names_disjoint_from_packs(example):
     """Ensure example policy names cannot collide with the default packs."""
-    default_policies = PolicyLoader.load_from_directory(
-        ROOT / "navigator_auth" / "abac" / "default_policies"
-    )
+    default_policies = PolicyLoader.load_from_directory(ROOT / "navigator_auth" / "abac" / "default_policies")
     example_names = set()
     for policy in example.EXAMPLE_POLICIES:
         result = PolicyAdapter.from_policy(policy)
@@ -105,6 +101,7 @@ async def test_example_config_user_restriction(example, monkeypatch):
 async def test_example_analytics_weekday_restriction(example, monkeypatch):
     """Allow analytics reads only during weekday business hours."""
     for label, evaluator, org_id, client_id in await _evaluator_paths(_pdp(example, monkeypatch)):
+
         def allowed_at(environment: Environment) -> bool:
             return evaluator.check_access(
                 _ctx("analyst@acme.com", ["analytics"]),

@@ -41,14 +41,13 @@ from aiohttp import web
 from navigator.views import BaseView
 from navigator_auth import AuthHandler
 from navigator_auth.abac.pdp import PDP
-from navigator_auth.abac.guardian import Guardian
-from navigator_auth.abac.decorators import groups_protected, requires_permission
+from navigator_auth.abac.decorators import groups_protected
 from navigator_auth.abac.storages.pg import pgStorage
 from navigator_auth.abac.storages.yaml_storage import YAMLStorage
 from navigator_auth.abac.policies import Policy, PolicyEffect, ObjectPolicy
 from navigator_auth.abac.policies.resource_policy import ResourcePolicy
 from navigator_auth.abac.policies.resources import ResourceType, ActionType
-from navigator_auth.abac.policies.evaluator import PolicyEvaluator, PolicyLoader
+from navigator_auth.abac.policies.evaluator import PolicyEvaluator
 from navigator_auth.abac.policies.environment import Environment
 from navigator_auth.conf import default_dsn
 
