@@ -5,6 +5,7 @@ Provides `groups_protected` and `requires_permission` decorators that
 work with both function-based handlers and `aiohttp.web.View` subclasses
 via the `_apply_decorator` pattern.
 """
+
 from functools import wraps
 from typing import Any, TypeVar
 from collections.abc import Callable
@@ -53,10 +54,7 @@ async def _get_userinfo(request: web.Request) -> tuple:
     return session, effective_userinfo(request, userinfo)
 
 
-def groups_protected(
-    groups: list,
-    content_type: str = "application/json"
-) -> Callable:
+def groups_protected(groups: list, content_type: str = "application/json") -> Callable:
     """Restrict the handler to certain groups in user information.
 
     Works with both function-based handlers and class-based views
@@ -73,21 +71,17 @@ def groups_protected(
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
             request = _get_request(*args)
             if request is None:
-                raise ValueError(
-                    f"web.Request was not found in arguments. {handler!s}"
-                )
-            return await _check_groups_and_call(
-                request, handler, args, kwargs, groups, content_type
-            )
+                raise ValueError(f"web.Request was not found in arguments. {handler!s}")
+            return await _check_groups_and_call(request, handler, args, kwargs, groups, content_type)
+
         return _wrap
 
     def _method_wrapper(method):
         @wraps(method)
         async def _wrap(self, *args, **kwargs) -> web.StreamResponse:
             request = self.request
-            return await _check_groups_and_call(
-                request, method, (self, *args), kwargs, groups, content_type
-            )
+            return await _check_groups_and_call(request, method, (self, *args), kwargs, groups, content_type)
+
         return _wrap
 
     return lambda handler: _apply_decorator(handler, _func_wrapper, _method_wrapper)
@@ -119,7 +113,7 @@ async def _check_groups_and_call(
     elif session is not None:
         try:
             user = session.decode("user")
-            if user and hasattr(user, 'groups'):
+            if user and hasattr(user, "groups"):
                 for group in user.groups:
                     if group.group in groups:
                         member = True
@@ -139,10 +133,7 @@ async def _check_groups_and_call(
     )
 
 
-def scope_required(
-    *scopes: str,
-    content_type: str = "application/json"
-) -> Callable:
+def scope_required(*scopes: str, content_type: str = "application/json") -> Callable:
     """Restrict the handler to requests carrying all the required OAuth2 scopes.
 
     Works with both function-based handlers and class-based views
@@ -167,21 +158,17 @@ def scope_required(
         async def _wrap(*args, **kwargs) -> web.StreamResponse:
             request = _get_request(*args)
             if request is None:
-                raise ValueError(
-                    f"web.Request was not found in arguments. {handler!s}"
-                )
-            return await _check_scopes_and_call(
-                request, handler, args, kwargs, scope_set, content_type
-            )
+                raise ValueError(f"web.Request was not found in arguments. {handler!s}")
+            return await _check_scopes_and_call(request, handler, args, kwargs, scope_set, content_type)
+
         return _wrap
 
     def _method_wrapper(method):
         @wraps(method)
         async def _wrap(self, *args, **kwargs) -> web.StreamResponse:
             request = self.request
-            return await _check_scopes_and_call(
-                request, method, (self, *args), kwargs, scope_set, content_type
-            )
+            return await _check_scopes_and_call(request, method, (self, *args), kwargs, scope_set, content_type)
+
         return _wrap
 
     return lambda handler: _apply_decorator(handler, _func_wrapper, _method_wrapper)
@@ -223,11 +210,7 @@ async def _check_scopes_and_call(
     )
 
 
-def requires_permission(
-    resource_type: ResourceType,
-    action: str,
-    resource_name_param: str = None
-):
+def requires_permission(resource_type: ResourceType, action: str, resource_name_param: str = None):
     """Decorator for methods/handlers that require permission checks.
 
     Works with both function-based handlers and class-based views
@@ -252,24 +235,19 @@ def requires_permission(
             if ctx is None:
                 raise ValueError("EvalContext required for permission check")
 
-            resource_name = _resolve_resource_name(
-                handler, resource_name_param, args, kwargs
-            )
+            resource_name = _resolve_resource_name(handler, resource_name_param, args, kwargs)
 
             evaluator = None
-            if args and hasattr(args[0], '_policy_evaluator'):
-                evaluator = getattr(args[0], '_policy_evaluator')
-            elif args and hasattr(args[0], 'policy_evaluator'):
-                evaluator = getattr(args[0], 'policy_evaluator')
+            if args and hasattr(args[0], "_policy_evaluator"):
+                evaluator = getattr(args[0], "_policy_evaluator")
+            elif args and hasattr(args[0], "policy_evaluator"):
+                evaluator = getattr(args[0], "policy_evaluator")
 
             if evaluator is None:
                 return await handler(*args, **kwargs)
 
             result = evaluator.check_access(
-                ctx=ctx,
-                resource_type=resource_type,
-                resource_name=resource_name,
-                action=action
+                ctx=ctx, resource_type=resource_type, resource_name=resource_name, action=action
             )
 
             if not result.allowed:
@@ -278,6 +256,7 @@ def requires_permission(
                 )
 
             return await handler(*args, **kwargs)
+
         return _wrap
 
     def _method_wrapper(method):
@@ -287,23 +266,15 @@ def requires_permission(
             if ctx is None:
                 raise ValueError("EvalContext required for permission check")
 
-            resource_name = _resolve_resource_name(
-                method, resource_name_param, args, kwargs, is_method=True
-            )
+            resource_name = _resolve_resource_name(method, resource_name_param, args, kwargs, is_method=True)
 
-            evaluator = getattr(
-                self, '_policy_evaluator',
-                getattr(self, 'policy_evaluator', None)
-            )
+            evaluator = getattr(self, "_policy_evaluator", getattr(self, "policy_evaluator", None))
 
             if evaluator is None:
                 return await method(self, *args, **kwargs)
 
             result = evaluator.check_access(
-                ctx=ctx,
-                resource_type=resource_type,
-                resource_name=resource_name,
-                action=action
+                ctx=ctx, resource_type=resource_type, resource_name=resource_name, action=action
             )
 
             if not result.allowed:
@@ -312,6 +283,7 @@ def requires_permission(
                 )
 
             return await method(self, *args, **kwargs)
+
         return _wrap
 
     return lambda handler: _apply_decorator(handler, _func_wrapper, _method_wrapper)
@@ -321,9 +293,10 @@ def requires_permission(
 # Helpers
 # ------------------------------------------------------------------
 
+
 def _find_eval_context(args: tuple, kwargs: dict):
     """Find EvalContext in args or kwargs."""
-    ctx = kwargs.get('ctx')
+    ctx = kwargs.get("ctx")
     if ctx is not None:
         return ctx
     for arg in args:
@@ -355,7 +328,7 @@ def _resolve_resource_name(
                 idx = params.index(resource_name_param)
                 # For methods, adjust index since self is params[0]
                 # but not in args (already bound)
-                if is_method and params and params[0] == 'self':
+                if is_method and params and params[0] == "self":
                     idx -= 1
                 if 0 <= idx < len(args):
                     return args[idx]
