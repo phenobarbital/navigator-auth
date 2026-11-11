@@ -1,0 +1,168 @@
+{
+  "schema_version": "1.0",
+  "feat_id": "FEAT-108",
+  "started_at": "2026-11-11T14:30:00Z",
+  "updated_at": "2026-11-11T15:25:00Z",
+  "source": {
+    "kind": "inline",
+    "jira_key": null,
+    "jira_url": null,
+    "file_path": null,
+    "raw_path": "sdd/state/FEAT-108/source.md",
+    "fetched_at": "2026-11-11T14:30:00Z",
+    "summary_oneline": "OAuth2 3LO example: /api/v1/me 500s, session bind fails for user 35, anonymous passes, grants 401, userinfo empty"
+  },
+  "mode": "investigation",
+  "wiki_available": true,
+  "phase": "proposal_drafted",
+  "budget": {
+    "profile": "default",
+    "files_read": 40,
+    "grep_calls": 25,
+    "git_calls": 10,
+    "depth": 2,
+    "wall_seconds": 300
+  },
+  "consumed": {
+    "files_read": 19,
+    "grep_calls": 21,
+    "git_calls": 17,
+    "depth_reached": 2
+  },
+  "truncated": false,
+  "budget_overruns": [
+    "git lane used 15 git calls against a lane quota of 10 (all 3 planned git queries ran)",
+    "codebase lane ran 315 s against a lane wall quota of 255 s (all 12 planned queries ran)"
+  ],
+  "phases": {
+    "plan": {
+      "approved_by_user": false,
+      "note": "auto mode; plan executed directly"
+    },
+    "research": {
+      "status": "complete",
+      "completed_at": "2026-11-11T14:50:00Z",
+      "queries_executed": 24,
+      "queries_skipped": 0,
+      "parallel": {
+        "enabled": true,
+        "lanes": {
+          "codebase": {
+            "status": "completed",
+            "queries_executed": 12,
+            "queries_skipped": 0,
+            "files_read": 13,
+            "grep_calls": 17,
+            "git_calls": 0,
+            "duration_seconds": 315,
+            "findings": [
+              "FC-001",
+              "FC-002",
+              "FC-003",
+              "FC-004",
+              "FC-005",
+              "FC-006",
+              "FC-007",
+              "FC-008",
+              "FC-009",
+              "FC-010",
+              "FC-011",
+              "FC-012"
+            ],
+            "completed_at": "2026-11-11T14:47:00Z"
+          },
+          "git": {
+            "status": "completed",
+            "queries_executed": 3,
+            "queries_skipped": 0,
+            "files_read": 0,
+            "grep_calls": 0,
+            "git_calls": 15,
+            "duration_seconds": 92,
+            "findings": [
+              "FG-001",
+              "FG-002",
+              "FG-003",
+              "FG-004",
+              "FG-005"
+            ],
+            "completed_at": "2026-11-11T14:39:00Z"
+          },
+          "wiki": {
+            "status": "completed",
+            "queries_executed": 6,
+            "queries_skipped": 0,
+            "files_read": 2,
+            "grep_calls": 2,
+            "git_calls": 0,
+            "duration_seconds": 156,
+            "findings": [
+              "FW-001",
+              "FW-002",
+              "FW-003",
+              "FW-004",
+              "FW-005",
+              "FW-006",
+              "FW-007"
+            ],
+            "completed_at": "2026-11-11T14:42:00Z"
+          }
+        },
+        "merge": {
+          "started_at": "2026-11-11T14:50:00Z",
+          "completed_at": "2026-11-11T14:52:00Z",
+          "input_count": 24,
+          "output_count": 16,
+          "merged_count": 8,
+          "audit_dir": "findings/.audit",
+          "note": "Grouped by primary (path, symbol) with overlapping line ranges. Citations owned by another canonical finding were redirected (see each finding's 'Merge redirects' note). Git findings cite commits without line ranges and stay separate."
+        }
+      },
+      "addendum": {
+        "reason": "mid-run user report (oauth2_server.py PKCE)",
+        "queries": [
+          "Q040",
+          "Q041",
+          "Q042"
+        ],
+        "findings": [
+          "F017"
+        ],
+        "mode": "sequential, parent session"
+      }
+    },
+    "synthesis": {
+      "status": "complete",
+      "overall_confidence": "medium",
+      "lint": "pass (1 corrective edit: dropped F005 from Oauth2Provider.authenticate evidence)",
+      "citation_probe": {
+        "checks": 40,
+        "found": 35,
+        "ambiguous_consistent": 5,
+        "missing": 0
+      }
+    },
+    "review_gate": {
+      "status": "presented",
+      "note": "summary shown; user proceeded by answering Q&A"
+    },
+    "qa": {
+      "status": "complete",
+      "questions_total": 3,
+      "questions_answered": 3,
+      "resolved": 2,
+      "unresolved": [
+        "U1"
+      ]
+    },
+    "output": {
+      "proposal_path": "sdd/proposals/oauth2-3lo-issues.proposal.md",
+      "commit_sha": null
+    }
+  },
+  "resume_hint": {
+    "next_phase": "committed",
+    "next_action": "/sdd-proposal --resume FEAT-108"
+  },
+  "feature_slug": "oauth2-3lo-issues"
+}
