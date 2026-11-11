@@ -585,6 +585,9 @@ ODOO_SCOPES = [s.strip() for s in config.get("ODOO_SCOPES", fallback="profile,em
 IDENTITY_LINK_TTL = config.getint("IDENTITY_LINK_TTL", fallback=600)
 IDENTITY_CACHE_TTL = config.getint("IDENTITY_CACHE_TTL", fallback=3600)
 IDENTITY_REFRESH_LEEWAY = config.getint("IDENTITY_REFRESH_LEEWAY", fallback=120)
+# Seconds a credential refresh waits while another worker refreshes the same
+# credential (Postgres advisory lock, IdentityStore.refresh_lock).
+IDENTITY_REFRESH_LOCK_TIMEOUT = config.getint("IDENTITY_REFRESH_LOCK_TIMEOUT", fallback=30)
 # Scopes requested when linking an identity (offline/refresh access included
 # where the provider needs it explicitly):
 AZURE_IDENTITY_SCOPES = [s.strip() for s in config.get("AZURE_IDENTITY_SCOPES", fallback="User.Read").split(",")]

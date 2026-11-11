@@ -452,3 +452,79 @@ class TestFilterIdentitiesProjection:
         identities = await store.list_for_user("35")
         assert len(identities) == 1
         assert conn.fetch_all.await_args.args[1] == 35
+
+
+class TestRefreshLock:
+    """IdentityStore.refresh_lock: cross-process (advisory) lock around a refresh."""
+
+    KEY = "navigator_auth.identity_refresh:azure:35:acct"
+
+    @staticmethod
+    def _store(fetchval):
+        pool, conn = _make_pool()
+        conn.fetchval = AsyncMock(side_effect=fetchval)
+        conn.fetch_one = AsyncMock(return_value={"identity_id": "row-1"})
+        return IdentityStore(pool, cipher=IdentityCipher(master_keys=MASTER_KEYS)), pool, conn
+
+    @pytest.mark.asyncio
+    async def test_takes_and_releases_the_advisory_lock(self):
+        store, _, conn = self._store([True, True])
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            pass
+        (lock_sql, lock_key), (unlock_sql, unlock_key) = (c.args for c in conn.fetchval.await_args_list)
+        assert lock_sql == "SELECT pg_try_advisory_lock(hashtextextended($1, 0))"
+        assert unlock_sql == "SELECT pg_advisory_unlock(hashtextextended($1, 0))"
+        assert lock_key == unlock_key == self.KEY
+
+    @pytest.mark.asyncio
+    async def test_waits_while_another_worker_holds_it(self):
+        store, _, conn = self._store([False, False, True, True])
+        async with store.refresh_lock("azure", "35", "acct", timeout=5):
+            pass
+        assert conn.fetchval.await_count == 4  # two misses, the lock, the unlock
+
+    @pytest.mark.asyncio
+    async def test_gives_up_after_the_timeout(self):
+        from navigator_auth.identity.store import IdentityRefreshBusy
+
+        store, _, conn = self._store(lambda *_: False)
+        with pytest.raises(IdentityRefreshBusy) as err:
+            async with store.refresh_lock("azure", "35", "acct", timeout=0.15):
+                pytest.fail("must not enter the lock")
+        assert err.value.status == 503
+        assert all("pg_try_advisory_lock" in c.args[0] for c in conn.fetchval.await_args_list)
+
+    @pytest.mark.asyncio
+    async def test_store_calls_inside_reuse_the_lock_connection(self):
+        """One connection per refresh: a burst of refreshes cannot starve the pool."""
+        store, pool, conn = self._store([True, True])
+        identity = TestUpdateTokens._identity(store)
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            await store.update_tokens(identity, TokenResponse(access_token="AT.new"))
+        assert pool.acquire.call_count == 1
+        conn.fetch_one.assert_awaited_once()
+        # ...and outside the lock the store takes pooled connections again
+        await store.update_tokens(identity, TokenResponse(access_token="AT.newer"))
+        assert pool.acquire.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_a_store_on_another_pool_does_not_borrow_it(self):
+        store, pool, _ = self._store([True, True])
+        other_pool, other_conn = _make_pool()
+        other_conn.fetch_one = AsyncMock(return_value={"identity_id": "row-1"})
+        other = IdentityStore(other_pool, cipher=IdentityCipher(master_keys=MASTER_KEYS))
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            await other.update_tokens(TestUpdateTokens._identity(other), TokenResponse(access_token="AT"))
+        assert other_pool.acquire.call_count == 1 and pool.acquire.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_unlock_does_not_mask_the_result(self):
+        def fetchval(sql, *_):
+            if "unlock" in sql:
+                raise ConnectionError("connection lost")
+            return True
+
+        store, _, _ = self._store(fetchval)
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            result = "refreshed"
+        assert result == "refreshed"

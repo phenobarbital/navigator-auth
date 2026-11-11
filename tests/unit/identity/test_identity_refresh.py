@@ -1,5 +1,6 @@
 """refresh_linked_identity: one refresh per account at a time, re-read under the guard."""
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -14,9 +15,13 @@ LEEWAY = 60
 
 
 class FakeBackend:
-    """Borrows ExternalAuth's real per-account guard; the refresh grant is faked."""
+    """Borrows ExternalAuth's real per-account guard; the refresh grant is faked.
+
+    Each instance has its own in-process guard map, like a separate worker.
+    """
 
     refresh_guard = ExternalAuth._refresh_guard
+    _service_name = "azure"
 
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -29,14 +34,31 @@ class FakeBackend:
 
 
 class FakeStore:
-    """One identity row; every read returns a fresh copy of what is stored."""
+    """The shared database: one identity row plus the cross-process lock table.
 
-    def __init__(self, token: TokenResponse) -> None:
+    Every read returns a fresh copy of what is stored. Backends that share one
+    FakeStore behave like workers sharing one Postgres.
+    """
+
+    def __init__(self, token: TokenResponse, *, cross_process_lock: bool = True) -> None:
         self.token = token
         self.refreshed_at = datetime(2026, 11, 11, 13, 0, tzinfo=timezone.utc)
         self.exists = True
         self.enabled = True
         self.writes = 0
+        self.cross_process_lock = cross_process_lock
+        self.locks: dict[tuple, asyncio.Lock] = {}
+        self.lock_keys: list[tuple] = []
+
+    @asynccontextmanager
+    async def refresh_lock(self, provider, user_id, provider_user_id):
+        key = (provider, user_id, provider_user_id)
+        self.lock_keys.append(key)
+        if not self.cross_process_lock:
+            yield
+            return
+        async with self.locks.setdefault(key, asyncio.Lock()):
+            yield
 
     def row(self) -> SimpleNamespace:
         return SimpleNamespace(
@@ -81,6 +103,26 @@ async def test_concurrent_callers_refresh_once():
     assert backend.calls == ["rt-old"]
     assert store.writes == 1
     assert [token.access_token for _, token in results] == ["at-1", "at-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cross_process_lock, provider_calls", [(True, 1), (False, 2)])
+async def test_two_workers_refresh_once(cross_process_lock, provider_calls):
+    """Two workers (separate in-process guards) share one database.
+
+    With the store's cross-process lock they spend the refresh token once;
+    the in-process guard alone cannot stop the second worker.
+    """
+    store = FakeStore(_expiring(), cross_process_lock=cross_process_lock)
+    worker_a, worker_b = FakeBackend(), FakeBackend()
+    first_read = store.row()
+    await asyncio.gather(
+        refresh_linked_identity(store, worker_a, first_read, leeway=LEEWAY),
+        refresh_linked_identity(store, worker_b, first_read, leeway=LEEWAY),
+    )
+    assert len(worker_a.calls) + len(worker_b.calls) == provider_calls
+    # same key as the session-refresh path: provider, str(user), str(account)
+    assert set(store.lock_keys) == {("azure", "35", "acct")}
 
 
 @pytest.mark.asyncio

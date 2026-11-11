@@ -17,10 +17,11 @@ async def refresh_linked_identity(
 
     Takes the backend's per-(user, external account) refresh guard, the same
     one the session-refresh path (``ExternalAuth.get_live_provider_token``)
-    uses, and re-reads the row inside it. Without the guard, two concurrent
-    callers (a double click, two consumers) both spend the same refresh
-    token: a provider that rotates refresh tokens rejects the second call, or
-    keeps only one of the two rotations.
+    uses, including the store's cross-process lock, and re-reads the row
+    inside it. Without the guard, two concurrent callers (a double click, two
+    consumers, two workers) both spend the same refresh token: a provider
+    that rotates refresh tokens rejects the second call, or keeps only one of
+    the two rotations.
 
     Args:
         store: Store the row was read from.
@@ -38,9 +39,11 @@ async def refresh_linked_identity(
         UserNotFound: The identity was unlinked or disabled meanwhile.
         ConfigError: No refresh token is stored.
         IdentityCredentialError: The stored credential cannot be decrypted.
+        IdentityRefreshBusy: Another worker kept the credential locked past
+            ``IDENTITY_REFRESH_LOCK_TIMEOUT``.
     """
     provider = identity.auth_provider
-    async with backend.refresh_guard(identity.user_id, identity.provider_user_id):
+    async with backend.refresh_guard(identity.user_id, identity.provider_user_id, store=store):
         current = await store.get_one(identity.user_id, identity.identity_id)
         if current is None or not getattr(current, "enabled", True):
             raise UserNotFound(f"{provider}: identity {identity.identity_id} is no longer linked")

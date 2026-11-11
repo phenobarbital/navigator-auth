@@ -53,14 +53,14 @@ Both transcripts are committed under `sdd/state/FEAT-106/pr633-review/`. Both re
 - **G5** — When 2FA is enabled and MFA is unavailable, credential changes fail closed (503). MFA availability self-heals without a restart.
 - **G6** — Session issuance after a password check is serialized with security transitions for the same user.
 - **G7** — Minting a new second factor (backup codes) needs fresh proof of an existing strong factor.
-- **G8** — An OAuth2 access token minted after an MFA'd OAuth2 login carries `mfa`/`amr`. Its bound session exposes them to ABAC, so FEAT-106 fresh-factor rules can grant OAuth2 tokens (§8 Q2).
+- **G8** — An OAuth2 access token minted after an MFA'd OAuth2 login carries `mfa`/`amr`. ABAC evaluates assurance from the validated presented token, isolated from other tokens and browser sessions (§8 Q2).
 - **G9** — An admin `password_reset` ends the target user's existing sessions and tokens, as recovery does (§8 Q3).
 
 ### Non-Goals (explicitly out of scope)
 - Medium- and low-severity review findings: #6 proxy-aware IP limiter, #8 email-issuance flooding, #9 rate-spec parse fail-open, #10 device rotation before cookie delivery, #13 `attempts_remaining`, #14 redundant queries, #15 sync callbacks, A3 limiter on factor-management endpoints, A4 policy-hardening race, and L1–L6. They go to a follow-up spec.
 - **#11 — `UserManager` admin password writes.** This remains FEAT-106 non-goal R1 (Q17 → separate follow-up spec).
 - OAuth2 `acr`/`acr_values` step-up (FEAT-106 brainstorm Option C), and an `amr` claim in OIDC ID tokens. `amr` propagation into access tokens, introspection and userinfo **is** in scope (M9).
-- Copying `mfa`/`amr` from token claims into a session that `auth_middleware` **recreates** from a token after the bound session expired (`auth.py:1147`). Such a session carries no `amr`, so fresh-factor rules deny it (fail closed).
+- Persisting token assurance in a shared session is out of scope; the request-local validated token context is authoritative even when middleware recreates a session.
 - Revoking other sessions on a self-service `password_change`. Only `password_reset` (G9) and recovery revoke.
 - Moving MFA services ownership out of BasicAuth. The OAuth2 login form uses the slot BasicAuth builds (D4).
 
@@ -100,7 +100,7 @@ The new route `POST /oauth2/login/mfa` (`nav_oauth2_login_mfa`) runs `SecondFact
 `BackupCodeStore.consume` keeps its own connection (D16), so the gate consumes backup codes **before** taking the lock. `user_lock` bounds both the pool acquire and the advisory-lock wait with `AUTH_MFA_LOCK_TIMEOUT`.
 
 **Transactional `security_transition` (M3).** It always yields **one live connection inside one transaction**:
-- MFA not configured: a plain pooled transaction;
+- MFA not configured: a pooled transaction with the same per-user advisory lock, without MFA bookkeeping;
 - MFA available: the user-lock connection, followed by bump, revoke, audit and commit on that same connection;
 - MFA configured but unavailable after the M1 retry: it raises `MfaUnavailable` before yielding.
 
@@ -110,9 +110,9 @@ A body that raises `TransitionAborted` rolls back without being logged as an err
 1. Read and validate on a pooled connection, then release it.
 2. Enter the transition, re-read the user on its connection, compare the hash captured in phase 1 (`TransitionAborted` → 409 on drift), and write the credential on the transition connection.
 
-Recovery additionally consumes the confirmation token and revokes sessions **inside** the transition body, before commit, so a revocation failure rolls the password change back. `password_reset` (admin) revokes the target user's sessions and jtis the same way (G9). It uses the recovery handler's process-wide `SessionRevoker` through a new `PasswordRecoveryHandler.session_revoker()` accessor, so no new Redis pool is created.
+Recovery records confirmation consumption transactionally in Postgres, and strictly revokes sessions before commit; a failure rolls back the password and consumption marker. Redis cleanup follows commit. `password_reset` also revokes sessions and advances a durable OAuth credential generation in the same transaction (G9). OAuth validation checks that generation, covering access tokens and refresh chains without relying on a Redis JTI index.
 
-**OAuth2 token `amr` (M9).** `_create_user_session(extra=…)` (M6) stores `mfa`/`amr`/`auth_method` at the top level of the browser session. It also writes a minimal `AUTH_SESSION_OBJECT` (`user_id`, `username`, `mfa`, `amr`, `auth_method="oauth2"`), which is where ABAC reads `userinfo` (`abac/decorators.py:50`, `abac/guardian.py:88`).
+**OAuth2 token `amr` (M9).** The browser session records the login's assurance for authorization-code issuance. Bearer-token middleware constructs a request-local ABAC userinfo copy from the validated token's own claims; it never writes those claims into the identity-shared session. Missing assurance means no fresh factor.
 
 The new `_session_auth_context(request)` reads that pair back. The three places that mint authorization-code carriers copy it onto the carrier (`OauthAuthorizationCode.mfa`/`.amr`):
 - `_issue_code` (`backend.py:1494`) — the authorize and consent paths;
@@ -121,11 +121,11 @@ The new `_session_auth_context(request)` reads that pair back. The three places 
 The code exchange then copies the pair:
 - into `token_data` (claims `mfa`, `amr`);
 - into the issued `OauthRefreshToken`;
-- into the session bound by `_token_session_claims(..., extra=…)`.
+- into the request-local authorization context when that access token is validated.
 
 A refresh rotation copies the pair from the parent refresh token: `amr` describes the original authentication event. Introspection and userinfo echo `amr` (and `mfa`) when the token carries them.
 
-Codes and tokens minted without MFA carry neither claim, so 2FA-off tokens are byte-identical to today's (AC5).
+Codes and tokens minted without MFA carry neither assurance claim. Generation 0 is omitted for legacy payload compatibility; a positive generation is carried after reset or recovery (AC24).
 
 **Availability self-healing (M1).** `MfaServicesSlot.ready()` returns the current services. When they are unavailable for a transient reason, it rebuilds them at most once per `AUTH_MFA_RETRY_INTERVAL`, single-flight under an `asyncio.Lock`. Permanent configuration errors (no `AUTH_OTP_SECRET`, no `authdb`) are flagged `permanent=True` and are not retried.
 
@@ -159,11 +159,12 @@ Codes and tokens minted without MFA carry neither claim, so 2FA-off tokens are b
 | `BasicAuth._second_factor` | replaced by adapter | Delegates to `SecondFactorGate.decide()`, mapping `GateResult` to `open_session` result / `MFARequired`. |
 | `MfaHandler.verify` / `_verify_locked` | replaced by adapter | Delegates to `SecondFactorGate.verify()`, mapping `VerifyRefused` to `_error(code, status, **extra)`, then `finalize_login`. |
 | `Oauth2Provider.auth_login` | modifies | 2FA branch via the gate. A new `auth_login_mfa` route, plus an `_authorize_redirect` helper extracted from the existing payload code. |
-| `Oauth2Provider._create_user_session` | modifies | New `extra: Optional[dict]` merged into `session_data` (`mfa`, `amr`, `auth_method`). |
+| `Oauth2Provider._create_user_session` | modifies | New `extra: Optional[dict]` records assurance for the isolated browser authentication event. |
 | `security_transition` | modifies | Always yields a connection; fail closed on unavailable; `TransitionAborted`. |
 | `MfaSecurity.user_lock` | modifies | Timeout and `ContextVar` publication. |
 | `OauthAuthorizationCode` / `OauthRefreshToken` | modifies | New optional `mfa: bool = False`, `amr: Optional[list[str]] = None` (M9). Stored codes and tokens deserialize unchanged (`code_backend.py:82,163` use `Model(**json.loads(...))`). |
-| `Oauth2Provider._token_session_claims` / `token_request` / `userinfo` / `introspect` | modifies | Carry and echo `mfa`/`amr` (M9). |
+| OAuth bearer middleware / ABAC / token endpoints | modifies | Validate per-user token generation and use token-local `mfa`/`amr` (M4, M9). |
+| `SessionRevoker` / `RecoveryTokenStore` | modifies | Strict revocation and transactional confirmation consumption (M4). |
 | `PasswordRecoveryHandler` | modifies | New public `session_revoker()` classmethod returning the existing `_revoker` (M4, G9). |
 | `navigator_session.vault.targets.postgres.PostgresTarget` | extends | `MfaSecretTarget`. |
 | `navigator_session.vault_targets` entry point | registers | `mfa = "navigator_auth.mfa.targets:factory"`. |
@@ -263,12 +264,12 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
 | M1: Self-healing MFA services | yes | `MfaServicesSlot.ready()`, `get_ready_mfa_services()`, `MfaServices.permanent`, `AUTH_MFA_RETRY_INTERVAL` (int s, fallback **15**), single-flight `asyncio.Lock`. | — |
 | M2: Lock-scoped connection discipline | yes | `user_lock(user_id)` timeout `AUTH_MFA_LOCK_TIMEOUT` (float s, fallback **5.0**) via `asyncio.wait_for` on acquire + `SET LOCAL lock_timeout`; `LOCK_CONNECTION` ContextVar; `conn=` kw-only params listed in §3 M2. | — |
 | M3: Transactional security_transition | yes | Always yields a connection; `MfaUnavailable` before yield; `TransitionAborted` rollback; same bump/revoke/audit order as today. | — |
-| M4: Credential-change call sites | yes | Two-phase pattern; 409 `credentials_changed` on hash drift; 503 `mfa_unavailable`; recovery order fixed in §3 M4. | — |
+| M4: Credential-change call sites | yes | Two-phase pattern; transactional recovery consumption and OAuth generation; strict session revocation; recovery order fixed in §3 M4. | — |
 | M5: SecondFactorGate | yes | Signatures + `GateResult`/`VerifyRefused`; verify step order fixed in §3 M5; D16 backup consume before lock. | — |
 | M6: OAuth2 login second factor | yes | Route `POST {login_uri}/mfa` name `nav_oauth2_login_mfa`, excluded from auth; template `templates/oauth/mfa.html`; `_authorize_redirect` key list identical to today's. | — |
 | M7: MFA secrets table + rotation target | yes | DDL above; `MfaSecretTarget` mirrors `IdentityTarget` (instance `table`/`name` override); entry point `mfa`. | — |
 | M8: Factor-management hardening | yes | `backup_codes` → `_strong_factor_proof` else 403 `strong_factor_proof_required`; disenroll guard under lock; pre-lock `MfaStorageError` → 503. | — |
-| M9: OAuth2 token `amr` propagation | yes | Model fields above; `_session_auth_context()`; claims `mfa`/`amr` only when `mfa` is True; refresh copies from the parent; introspection/userinfo echo. | — |
+| M9: OAuth2 token `amr` propagation | yes | Claims follow the validated token into request-local ABAC context; refresh copies from the parent; introspection/userinfo echo. | — |
 
 ### Module 1: Self-healing MFA services
 - **Path**: `navigator_auth/mfa/services.py`, `navigator_auth/conf.py`
@@ -288,7 +289,8 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
           ``services.available`` is False and not ``permanent``, at most one rebuild per
           AUTH_MFA_RETRY_INTERVAL seconds runs (single-flight under an asyncio.Lock):
           ``build_mfa_services(app, services.backend)``; on success the new object replaces
-          the old one and the old Redis pool is closed. Returns the (possibly still
+          the old one; retire its Redis pool only after all in-flight users release it.
+          Returns the (possibly still
           unavailable) services; callers fail closed on ``available is False``. Never raises.
           """
 
@@ -296,6 +298,7 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
       """Async, self-healing counterpart of get_mfa_services (verified: services.py:113)."""
   ```
   `navigator_auth/conf.py`: `AUTH_MFA_RETRY_INTERVAL = config.getint("AUTH_MFA_RETRY_INTERVAL", fallback=15)` next to the `AUTH_OTP_*` block (verified: `conf.py:659-671`).
+- Callers hold a service lease for their entire operation; swapping the slot retires the old service and closes it only when its last lease ends. Shutdown drains or cancels outstanding leases before closing pools. A raw reference without a lease must not outlive `ready()`.
 - Every MFA decision point switches from `get_mfa_services` to `await get_ready_mfa_services`: the gate (M5), `security_transition` (M3), `MfaHandler._session_user`/`challenge`, and the OAuth2 form (M6).
 
 ### Module 2: Lock-scoped connection discipline
@@ -358,7 +361,7 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
       """Yield ONE live connection inside ONE transaction.
 
       - get_ready_mfa_services(app) is None → a pooled connection from app["authdb"] in a
-        transaction; no lock, no bump, no audit; commit on clean exit.
+        transaction with the same per-user advisory lock; no bump or audit; commit on clean exit.
       - services.available is False → raise MfaUnavailable BEFORE yielding.
       - otherwise → the user_lock connection; after the body: bump_version, revoke_all (when
         revoke_devices), write_audit, commit — all on that connection.
@@ -368,7 +371,7 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
   ```
 
 ### Module 4: Credential-change call sites
-- **Path**: `navigator_auth/handlers/users/session.py`, `navigator_auth/handlers/recovery/handler.py`, `navigator_auth/backends/passkey.py`
+- **Path**: `navigator_auth/handlers/users/session.py`, `navigator_auth/handlers/recovery/{handler,store,revoke}.py`, `navigator_auth/backends/passkey.py`, `navigator_auth/backends/oauth2/{backend,models,code_backend}.py`, `navigator_auth/handlers/auth.py`, and a new SQL migration for the durable state below.
 - **Responsibility**: Two-phase credential changes. Atomic with the MFA bookkeeping; no nested acquisition.
 - **Depends on**: M3, M2
 - **Contract** (no new public signatures):
@@ -376,13 +379,19 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
     1. Phase 1, on a pooled connection that is then released: `User.get`, check the old password (403 on mismatch), capture `user.password`.
     2. Phase 2: `async with security_transition(...) as conn:` set `User.Meta.connection = conn`, re-`get`; hash ≠ captured → `TransitionAborted("credentials_changed")` → 409; set the new password, `await user.update()`.
     3. `MfaUnavailable` → 503 `mfa_unavailable`.
-  - `password_reset` (`session.py:171`): the same two-phase shape. Phase 1 is only the existence check (404). In phase 2, after `await user.update()` and still inside the transition body, it calls `await PasswordRecoveryHandler.session_revoker().revoke_user(request, user)` (G9). A revocation failure raises → rollback → 503, and the password is unchanged.
+  - `password_reset` (`session.py:171`): the same two-phase shape. Phase 1 is only the existence check (404). In phase 2, update the password and increment the OAuth credential generation on `conn`, then call strict `revoke_user` before commit. Failure rolls back both database writes and returns 503.
   - `PasswordRecoveryHandler.session_revoker()` (`recovery/handler.py`, new classmethod): calls `cls._ensure_resources()` (verified `handler.py:139`) and returns `cls._revoker` (verified `handler.py:151`). It is the single process-wide `SessionRevoker`.
   - Recovery completion (`recovery/handler.py:299`):
     1. Phase 1 (pooled, released): `peek_confirmation`, `User.get`, policy validation (422).
-    2. Phase 2 (transition connection), in this order: re-get user → hash drift → `TransitionAborted` (409) → write password → `consume_confirmation` (`None` → `TransitionAborted("invalid_confirmation")` → 400) → `revoke_user` (Redis-only; a failure raises → rollback → 503) → commit.
-    3. After commit: `drop_pair`, best effort and logged.
+    2. Phase 2 (transition connection): re-get user → hash drift → 409; revalidate the signed, unexpired Redis confirmation and its current rotation status; insert its SHA-256 digest into the transactional consumption table below; write the password and increment OAuth generation; strictly revoke sessions; commit. A duplicate consumption marker yields 400. Storage or revocation failure yields 503 and rolls back all database writes.
+    3. After commit: `drop_pair`, best effort and logged. Do not call Redis `consume_confirmation` before commit. A leftover Redis record cannot be replayed because the committed digest is authoritative.
   - Passkey register (`passkey.py:320`) / remove (`passkey.py:569`): `async with security_transition(...) as conn:` then `save_credential(stored, conn=conn)` / `delete_credential(..., conn=conn)`. `MfaUnavailable` → 503.
+
+**Durable recovery and token revocation contract:**
+- Add migration-managed `{schema}.recovery_confirm_consumptions` with a primary-key SHA-256 confirmation digest and expiry timestamp, and `{schema}.oauth_user_generation` with one row per user, default generation 0. Never store raw confirmation tokens. Insert the marker on the transition connection with a uniqueness constraint; retain it at least until the signed confirmation expires, including clock skew. Both tables are required regardless of the MFA setting and included in startup/migration readiness checks. Concurrent confirmations and confirmation rotation must serialize per user under the same database advisory transaction lock, including with MFA off. Recheck Redis confirmation validity and rotation while holding that lock; rotation must acquire it before changing Redis so it cannot invalidate a confirmation between recheck and commit.
+- Make `SessionRevoker.revoke_user(..., strict=True)` propagate underlying session-store, JTI-index and per-token revocation failures, including unavailable required storage; do not convert errors or missing required backends to successful zero counts. Preserve best-effort behavior for existing callers by default. A partial external revocation before rollback is safe but may log users out; it must not be reported as successful password change.
+- Stamp each user OAuth authorization code, device-flow carrier, access token and refresh token with the current generation. Read it under the user lock at login/carrier creation and preserve it through code exchange and refresh; never replace an old carrier's generation with the current one. In the reset/recovery transaction increment the generation. Enforce equality against the authoritative database value at code exchange, refresh, access-token authentication, introspection and userinfo; on mismatch reject or mark inactive. A database lookup failure fails closed (503, or inactive where the protocol requires it). No stale cache may authorize a request after commit. Refresh and token issuance must serialize with reset using the same user lock and recheck generation inside that lock, so a race cannot mint a usable token from an old carrier.
+- Backward compatibility: a token or stored carrier without a generation is generation 0; absent user rows also mean 0. Thus existing tokens continue to work until the first reset or recovery, after which they fail. `client_credentials` has no user generation and remains unchanged. Validation must cover all user-token paths, including any middleware session recreation, not just the token endpoint.
 
 ### Module 5: SecondFactorGate
 - **Path**: `navigator_auth/mfa/login.py` (new), `navigator_auth/backends/basic.py`, `navigator_auth/handlers/mfa.py`
@@ -419,8 +428,10 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
              BEFORE the lock (D16); False → _failed
           5. user_lock(preview.user_id) → conn: re-peek; revalidate (user_from_id(conn=conn),
              evaluate(conn=conn), version + digest compare → stale_challenge 401, discard)
-          6. provider not in evaluation.providers → _failed; provider != backup →
-             providers[provider].verify(request, user, code, challenge=record, conn=conn) → False → _failed
+          6. provider not in evaluation.providers → _failed; provider == totp →
+             providers[provider].verify(request, user, code, challenge=record, conn=conn);
+             provider == email → providers[provider].verify(request, user, code, challenge=record)
+             (email verify does not access the DB); False → _failed
           7. store.consume(token) must equal record → else invalid_challenge 401
           8. session = await issue(user, {"auth_method": <caller>, "mfa": True,
              "amr": [AMR_PASSWORD, AMR_BY_PROVIDER[provider]]}); FailedAuth → account_disabled
@@ -449,9 +460,9 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
   # navigator_auth/backends/oauth2/backend.py
   async def _create_user_session(self, request, user, response=None,
                                  extra: Optional[dict] = None):  # verified: backend.py:632
-      """``extra`` keys (mfa, amr, auth_method) are merged into session_data at top level AND mirrored
-      into a minimal AUTH_SESSION_OBJECT {user_id, username, mfa, amr, auth_method} (M9); None →
-      session_data byte-identical to today (AC5)."""
+      """Record browser-login assurance in an authentication-event-specific browser session,
+      never in an identity-shared bearer authorization context. None preserves the 2FA-off
+      browser behavior (AC5)."""
 
   def _authorize_redirect(self, request: web.Request, data: dict) -> web.HTTPFound:
       """Extracted verbatim from auth_login (backend.py:1648-1670): client_id, redirect_uri,
@@ -525,37 +536,36 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
 
 ### Module 9: OAuth2 token `amr` propagation
 - **Path**: `navigator_auth/backends/oauth2/backend.py`, `navigator_auth/backends/oauth2/models.py`
-- **Responsibility**: Carry the second-factor outcome of the OAuth2 login from the browser session, through the code and refresh token, into access-token claims, the token-bound session, introspection and userinfo (G8).
-- **Depends on**: M6 (`_create_user_session(extra=…)` writes the session pair)
+- **Responsibility**: Carry the second-factor outcome of an isolated browser authentication event through the code and refresh token to access-token claims, request-local ABAC context, introspection and userinfo (G8).
+- **Depends on**: M6 (browser authentication-event context), M4 (generation validation).
 - **Interface Skeleton**:
   ```python
   # navigator_auth/backends/oauth2/models.py  (modifies models.py:209, :245) — fields in §2 Data Models
 
   # navigator_auth/backends/oauth2/backend.py
   async def _session_auth_context(self, request: web.Request) -> dict:
-      """Return {"mfa": bool, "amr": list[str] | None} from the current browser session's top-level
-      keys (written by _create_user_session(extra=…)). Missing session/keys → {"mfa": False, "amr": None}.
-      Never raises."""
+      """Read assurance from the validated, browser-bound authentication event.
+      Missing or invalid event requires login; never fall back to another identity's shared session."""
 
   async def _issue_code(self, request, client, user_obj, redirect_uri, scope, state,
                         code_challenge=None, code_challenge_method=None, resource=None):  # verified: backend.py:1478
       """Unchanged signature; the OauthAuthorizationCode it builds (backend.py:1494) gets
       **await self._session_auth_context(request)."""
 
-  async def _token_session_claims(self, request: web.Request, user_id: int,
-                                  extra: Optional[dict] = None) -> dict:  # verified: backend.py:688
-      """``extra`` is forwarded to _create_user_session(request, user, extra=extra) so the token-bound
-      session exposes mfa/amr in AUTH_SESSION_OBJECT; None → unchanged."""
+  async def _token_session_claims(self, request: web.Request, user_id: int) -> dict:  # verified: backend.py:688
+      """Bind identity as today; never put token assurance into an identity-shared session."""
   ```
   - **Device carrier** (`backend.py:2775`): `OauthAuthorizationCode(..., **await self._session_auth_context(request))`.
   - **Code exchange** (`token_data` at `backend.py:1822`):
     - When `auth_code.mfa` is True, set `token_data["mfa"] = True` and `token_data["amr"] = auth_code.amr`.
-    - Pass `extra={"mfa": True, "amr": auth_code.amr, "auth_method": "oauth2"}` to `_token_session_claims`.
     - Copy both fields onto the `OauthRefreshToken` (`backend.py:1873`).
   - **Refresh grant** (`token_data` at `backend.py:2040`, rotation at `backend.py:2082`): the same, sourced from the presented refresh token `rt`. The rotated token copies `rt.mfa` / `rt.amr`.
   - **client_credentials** (`token_data` at `backend.py:1929`): no user, so no `mfa`/`amr`. Unchanged.
   - **Introspection** (`claims` dict at `backend.py:2468`): adds `"amr": token_payload["amr"]` and `"mfa": True` when the token payload carries `amr`. For a refresh token, they come from `rt`.
   - **userinfo** (`claims = {"sub": …}` at `backend.py:2222`): adds `"amr"` when the access-token payload carries it. This is not scope-gated, because `amr` describes the authentication rather than the profile.
+  - **Browser event isolation**: an MFA login's authorization context must belong to that browser authentication event, not the identity-keyed shared session. Issue an opaque, unguessable, expiring browser-event handle bound to the authenticated browser and user; validate it at authorization and consent and bind device approval to the approving event. A later login must not upgrade an older browser event. If the event context is missing, stale or invalid, require login again rather than borrowing another event's assurance. Keep the existing 2FA-off path unchanged.
+  - **ABAC**: after signature, expiry, revocation, audience and generation validation, bearer middleware exposes an immutable request-local copy of the token's `mfa`/`amr` and identity. Update both `abac/decorators.py` and `abac/guardian.py` to use this copy for bearer requests, removing any session-derived assurance before applying token claims. Missing claims deny fresh-factor rules. Cookie-only requests retain their existing session behavior; never trust unvalidated JWT data or client headers.
+  - **Generation encoding**: represent generation 0 by an absent claim/field for legacy and 2FA-off payload compatibility; encode positive values explicitly. On validation, missing means 0. Apply this convention to codes, device carriers, access tokens and refresh tokens.
 
 ---
 
@@ -564,14 +574,15 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
 ### Unit Tests
 | Test | Module | Description |
 |---|---|---|
-| `test_ready_rebuilds_after_interval` | M1 | Unavailable services become available on the first `ready()` after the interval; old Redis pool closed. |
+| `test_ready_rebuilds_after_interval` | M1 | Services recover; the retired Redis pool closes only after its final in-flight lease ends. |
+| `test_ready_rebuild_inflight` | M1 | Hold an old-service lease across a swap; its Redis operation completes and the pool closes after release. |
 | `test_ready_single_flight` | M1 | 20 concurrent `ready()` calls trigger exactly one rebuild. |
 | `test_ready_permanent_not_retried` | M1 | Missing secret / authdb → `permanent=True`, no rebuild. |
 | `test_user_lock_timeout` | M2 | A held advisory lock makes a second `user_lock` raise `MfaStorageError` after `AUTH_MFA_LOCK_TIMEOUT`. |
 | `test_lock_connection_published` | M2 | `LOCK_CONNECTION` is the lock connection inside the scope, `None` after. |
 | `test_consume_and_rotate_on_caller_conn` | M2 | With `conn`, rotation and replay revocation commit only with the caller's transaction. |
 | `test_transition_unavailable_fails_closed` | M3 | 2FA on + unavailable → `MfaUnavailable` before the body runs. |
-| `test_transition_not_configured_yields_tx` | M3 | No slot → plain transaction; body rollback on exception. |
+| `test_transition_not_configured_yields_tx` | M3 | No slot → transaction and per-user advisory lock; body rollback on exception. |
 | `test_transition_aborted_rolls_back` | M3 | `TransitionAborted` → no bump, no audit, no write. |
 | `test_mfa_secret_target_context_matches_seed` | M7 | `context_for(row, "ciphertext_db")` == `mfa_seed_context(user_id)`. |
 | `test_mfa_target_factory_requires_pool` | M7 | `factory({})` is None. |
@@ -603,6 +614,11 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
 | `test_oauth2_introspect_and_userinfo_echo_amr` | AC26. |
 | `test_abac_fresh_factor_grants_mfa_oauth2_token` | AC27. |
 | `test_password_reset_revokes_sessions` | AC28. |
+| `test_oauth_assurance_isolation` | AC29. |
+| `test_oauth_reset_generation` | AC30. |
+| `test_strict_revocation_failures` | AC31. |
+| `test_recovery_confirmation_transactional` | AC32. |
+| `test_email_gate_verify` | AC33. |
 
 ### Validation Contract
 
@@ -679,12 +695,18 @@ Reuse `tests/fixtures/mfa.py` (`mfa_db`, `mfa_redis_pool`, `frozen_totp_clock`, 
   - A storage error in a pre-lock disenroll check answers 503, not 500.
 - [ ] **AC21** — Every existing `tests/test_mfa_*.py` suite passes. Tests updated for intended behavior changes (backup regeneration proof, MFA secrets table) say so in their docstrings.
 - [ ] **AC22** — No new runtime dependency. The 2FA-off BasicAuth login is unchanged (FEAT-106 AC4 sweep still green).
-- [ ] **AC23** — After an OAuth2 login that passed TOTP (M6), the authorization-code exchange returns an access token whose payload has `mfa: true` and `amr: ["pwd","totp"]`. The token-bound session's `AUTH_SESSION_OBJECT` has the same `mfa`/`amr`. The same holds for the device-flow carrier.
-- [ ] **AC24** — An OAuth2 login with no factor owed, or with 2FA off, yields tokens with **no** `mfa`/`amr` claim. With 2FA off, the token payload keys match `origin/dev`.
+- [ ] **AC23** — After a TOTP OAuth2 login, the code exchange returns an access token with `mfa: true` and `amr: ["pwd","totp"]`; the validated request-local ABAC context has the same values. The device-flow carrier preserves the approving event's assurance.
+- [ ] **AC24** — An OAuth2 login with no factor owed, or with 2FA off, yields tokens with **no** `mfa`/`amr` claim. At generation 0, 2FA-off token payload keys match `origin/dev`; after a reset or recovery the generation claim is necessarily present.
 - [ ] **AC25** — A `refresh_token` grant from an MFA'd chain issues an access token with the original `amr`, and the rotated refresh token keeps it. A trusted-device login's chain keeps `["pwd","trusted_device"]`.
 - [ ] **AC26** — `/oauth2/introspect` returns `amr` (and `mfa: true`) for an MFA'd access or refresh token, and omits them otherwise. `/oauth2/userinfo` returns `amr` for an MFA'd access token.
 - [ ] **AC27** — With the FEAT-106 policy pack and `requires_fresh_factor`, a request bearing an OAuth2 access token from a TOTP-verified login is **granted**. Tokens from a trusted-device login and from a no-MFA login are **denied**.
-- [ ] **AC28** — `password_reset` revokes the target user's session and jtis inside the transition: their pre-reset token is rejected 401 afterwards. A fault in `revoke_user` leaves the password unchanged (503).
+- [ ] **AC28** — `password_reset` strictly revokes the target's session and indexed jtis and commits the generation increment with the password. Pre-reset user tokens are rejected afterwards. A revocation failure leaves the password and generation unchanged (503).
+- [ ] **AC29** — A password-only or trusted-device OAuth token remains denied by fresh-factor ABAC after a later TOTP login and token mint for the same user, in either mint order and after session recreation. A separate browser event likewise cannot inherit another event's MFA; TOTP token access remains granted.
+- [ ] **AC30** — After reset or recovery, pre-change OAuth access tokens, authorization codes, device carriers and refresh tokens (including legacy generation-0 artifacts) fail at every validation endpoint; refresh cannot mint a replacement. New logins work. Concurrent refresh/code exchange versus reset cannot issue a usable old-generation token; unavailable generation storage fails closed.
+- [ ] **AC31** — Inject actual session Redis, JTI-index and individual token-storage errors inside strict revocation: reset and recovery return 503 and leave the password and generation unchanged. Cover partial revocation and retry.
+- [ ] **AC32** — Inject revocation, audit and commit failures after the recovery marker insertion: password, generation and marker roll back, and the same unexpired confirmation can be retried. Concurrent reuse succeeds exactly once, including with MFA disabled; a committed marker rejects replay even if Redis cleanup fails.
+- [ ] **AC33** — Email OTP verifies successfully through both BasicAuth and OAuth2 gate adapters without a `conn` argument; TOTP still uses the lock connection.
+- [ ] **AC34** — An in-flight request holding old MFA services survives a successful rebuild; the retired Redis pool closes only after its last lease ends.
 
 ---
 
@@ -847,7 +869,7 @@ PostgresTarget SELECT has no row filter (scans every row incl. soft-deleted)    
 - ~~`get_ready_mfa_services`~~, ~~`MfaUnavailable`~~, ~~`TransitionAborted`~~, ~~`LOCK_CONNECTION`~~, ~~`AUTH_MFA_RETRY_INTERVAL`~~, ~~`AUTH_MFA_LOCK_TIMEOUT`~~ — created by this spec.
 - ~~an MFA second factor anywhere in `navigator_auth/backends/oauth2/`~~ — none today (the #1 bypass).
 - ~~`OauthAuthorizationCode.amr` / `.mfa`~~, ~~`OauthRefreshToken.amr` / `.mfa`~~, ~~`Oauth2Provider._session_auth_context`~~, ~~`PasswordRecoveryHandler.session_revoker`~~ — created by this spec (M9, M4).
-- ~~`AUTH_SESSION_OBJECT` in OAuth2 sessions~~ — absent today; M9 adds it only when `extra` is passed.
+- ~~Request-local OAuth bearer assurance~~ — absent today; M9 introduces it without modifying the shared session.
 - ~~an OIDC `id_token`~~ — not issued by this provider today; no `amr` in ID tokens (non-goal).
 
 ### Edit Sites (Blueprint Anchors)
@@ -922,7 +944,7 @@ Verified against: `3f14b3c`
 - **D6 — Credential changes fail closed when MFA is configured but down.** This extends FEAT-106 G7/S5 ("fail the logins, not the process") to credential changes. Allowing them would skip device revocation.
 - **D7 — Backup-code regeneration needs factor proof.** This amends FEAT-106 M5/AC14 and the S8 cross-check row "re-auth on regeneration". The password alone is no longer enough.
 - **D8 — `amr` follows the OIDC meaning, across refreshes too.** `amr` records how the user originally authenticated, so refresh rotations copy it unchanged and never re-derive it. The claims appear only when the login actually passed MFA. A missing claim means "not MFA'd" to every consumer, which keeps the deny-by-default posture.
-- **D9 — ABAC sees OAuth2 `amr` through the bound session, not the JWT.** ABAC reads `session[AUTH_SESSION_OBJECT]` everywhere (`abac/decorators.py:50`, `abac/guardian.py:88`). Teaching the PDP to read JWT claims would be a wider change. M9 therefore mirrors the pair into the token-bound session's `AUTH_SESSION_OBJECT`, and only when it exists.
+- **D9 — ABAC sees validated OAuth `amr` per request.** Bearer middleware supplies assurance from the validated token to ABAC; shared session data must never upgrade it. Browser login events are independently bound.
 
 ### Patterns to Follow
 - Keep FEAT-106's fail-closed posture: any dependency error on a security path → 503 `mfa_unavailable`, never a bypass.
@@ -935,10 +957,9 @@ Verified against: `3f14b3c`
 - **`User.Meta.connection` is class-level shared state** (`session.py`, `recovery/handler.py`, `idp/__init__.py`). Two-phase writes set it twice. Set it immediately before each model call and never `await` anything else in between. This is a pre-existing hazard, not introduced here.
 - **Multi-statement migration atomicity.** asyncdb `execute` of a multi-statement string runs as one implicit transaction under the simple query protocol. The move (INSERT … SELECT, then DELETE) relies on that. `test_mfa_secrets_migration_moves_rows` must also inject a failure between the two statements and assert that no row was lost.
 - **Entry-point discovery reads installed metadata.** The new `mfa` target is visible to `discover_targets()` only after reinstalling the package (`uv pip install -e .`). Tests construct `MfaSecretTarget` directly and assert the pyproject declaration separately.
-- **Single-flight rebuild and the old services object.** Swapping `slot.services` while requests hold the old object is safe: the old pools stay valid until closed. Close the old Redis pool only after the swap.
+- **Single-flight rebuild and the old services object.** A swap retires the old object; lease tracking defers pool closure until its last in-flight user releases it.
 - **The `LOCK_CONNECTION` guard is a test aid.** Production code must not branch on it except `user_lock` itself. The guard proves G3; it does not enforce it at runtime.
-- **One session per user identity (OAuth2).** `_create_user_session` keys the session by identity (`backend.py:632-680`), so each token mint rewrites the user's single session. The bound session therefore reflects the **latest** mint's `amr`, while each JWT keeps its own claim. Example: a token from a trusted-device login, minted after a TOTP one, downgrades what ABAC sees for both tokens to `trusted_device`. That direction is safe (deny). The reverse can upgrade an older token's session view. This is accepted and documented in `docs/two_factor_auth.rst`. Making ABAC read per-token claims is a follow-up.
-- **A session recreated from a token loses `amr`.** When the bound session expires, `auth_middleware` rebuilds one from the token (`auth.py:1147`) without `mfa`/`amr`, so fresh-factor rules deny it (fail closed; a non-goal).
+- **One session per user identity (OAuth2).** The shared session cannot be an assurance authority. Bearer requests use validated per-token claims, and browser authorization uses a separate event-bound context, even after session recreation.
 - **The OAuth2 MFA page echoes authorize parameters.** Every value must be HTML-escaped by the template engine. The parameters are client-controlled, as they already are in `oauth/login.html`.
 
 ### External Dependencies
@@ -957,13 +978,14 @@ Verified against: `3f14b3c`
   - M5 → M1, M5 → M2 (`user_from_id`/`verify`/`consume_and_rotate` `conn=`);
   - M6 → M5 (`SecondFactorGate`);
   - M8 → M2 (lock connection for the guard);
-  - M9 → M6 (`_create_user_session(extra=…)` writes the session pair that M9 reads and mirrors).
+  - M9 → M6 (browser-event context); M9 → M4 (generation validation).
   - M7 is independent.
 - **Shared files** (tasks touching them are serialized):
   - `navigator_auth/handlers/mfa.py` — M5, M8;
   - `navigator_auth/mfa/totp.py` — M2, M7;
   - `navigator_auth/conf.py` — M1, M2;
-  - `navigator_auth/backends/oauth2/backend.py` — M6, M9;
+  - `navigator_auth/backends/oauth2/backend.py` — M4, M6, M9; serialize edits and integrate generation checks with event isolation;
+  - `navigator_auth/backends/oauth2/models.py` and `navigator_auth/handlers/auth.py` — M4, M9; serialize shared interface changes;
   - `navigator_auth/handlers/recovery/handler.py` — M4 only (`session_revoker` + recovery transition), so M4 keeps both edits in one task.
 - **Exclusive resources**: M7 adds a DDL migration that every live-DB test applies, so its task is `parallel: false`.
 - **Cross-feature dependencies**: none beyond FEAT-106 itself (same branch).
@@ -1002,7 +1024,8 @@ Summary: **0** confirmed · **0** rejected · **0** escalated (step skipped).
     - `AUTH_MFA_RETRY_INTERVAL` and `AUTH_MFA_LOCK_TIMEOUT`;
     - the `user_mfa_secrets` table and the `mfa` vault-target entry point (with the reinstall note for `navigator-vault`);
     - backup-code regeneration now needing factor proof;
-    - `mfa`/`amr` in OAuth2 access tokens, refresh chains, introspection and userinfo, including the one-session-per-identity caveat (§7);
+    - `mfa`/`amr` in OAuth2 access tokens, refresh chains, introspection and userinfo, including request-local assurance isolation;
+    - OAuth generation invalidation, transactional recovery confirmation consumption, and strict revocation failure behavior;
     - admin `password_reset` now ending the target's sessions.
   - `CHANGELOG.md` — a 0.30.0 entry for these fixes.
 - **API modules**: `navigator_auth.mfa` (`login`, `targets`, `events`, `services`).
@@ -1015,3 +1038,4 @@ Summary: **0** confirmed · **0** rejected · **0** escalated (step skipped).
 |---|---|---|---|
 | 0.1 | 2026-11-11 | Jesus Lara | Initial draft from the PR #633 review (Claude subagent + codex verification). |
 | 0.2 | 2026-11-11 | Jesus Lara | Open questions resolved: defaults 5 s / 15 s; Module 9 (OAuth2 token `amr`); `password_reset` revokes sessions. Added G8, G9, D8, D9 and AC23–AC28. |
+| 0.3 | 2026-11-11 | Codex | Resolve review findings: isolate OAuth assurance, revoke OAuth generations, enforce strict revocation, make recovery consumption transactional, fix email provider dispatch, and drain retired services safely. |

@@ -3,13 +3,17 @@
 DB is the source of truth; the Session Vault is used as a per-session
 cache of the decrypted credential to avoid database round-trips.
 """
+import asyncio
 import json
-from typing import Any, Optional
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from typing import Any, AsyncGenerator, Optional
 from datetime import datetime, timezone
 
 from asyncdb.exceptions import NoDataFound
 from navconfig.logging import logging
 
+from ..exceptions import AuthException
 from ..models import UserIdentity
 from .crypto import IdentityCipher
 from .types import TokenResponse
@@ -18,6 +22,27 @@ logger = logging.getLogger("navigator.identity")
 
 # Session Vault key for the cached credential of a provider:
 IDENTITY_VAULT_KEY = "identity:{provider}"
+
+# Cross-process refresh lock (IdentityStore.refresh_lock). The key text is
+# hashed by Postgres (hashtextextended, PostgreSQL 11+) into the advisory lock
+# id; a collision only makes two unrelated refreshes take turns.
+_REFRESH_LOCK_KEY = "navigator_auth.identity_refresh:{provider}:{user_id}:{provider_user_id}"
+_REFRESH_TRY_LOCK = "SELECT pg_try_advisory_lock(hashtextextended($1, 0))"
+_REFRESH_UNLOCK = "SELECT pg_advisory_unlock(hashtextextended($1, 0))"
+_REFRESH_LOCK_POLL = 0.1  # seconds between attempts while another worker refreshes
+
+# (pool, connection) holding this task's refresh lock. IdentityStore calls made
+# inside the lock reuse that connection instead of taking a second one.
+_REFRESH_CONNECTION: ContextVar[Optional[tuple[Any, Any]]] = ContextVar(
+    "navigator_auth_identity_refresh_connection", default=None
+)
+
+
+class IdentityRefreshBusy(AuthException):
+    """Another worker kept refreshing this credential past the lock timeout."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, status=503)
 
 # Read projection for auth.user_identities.
 #
@@ -213,6 +238,84 @@ class IdentityStore:
         self._pool = db_pool
         self._cipher = cipher if cipher is not None else IdentityCipher()
 
+    @asynccontextmanager
+    async def _connection(self) -> AsyncGenerator[Any, None]:
+        """A pooled connection, or the one holding this task's refresh lock.
+
+        Inside ``refresh_lock`` every call on a store over the same pool reuses
+        the lock's connection, so a refresh needs one connection, not two, and
+        a burst of refreshes cannot exhaust the pool waiting on each other.
+        Calls inside the lock must therefore run one at a time (no
+        ``asyncio.gather`` of store calls there).
+        """
+        held = _REFRESH_CONNECTION.get()
+        if held is not None and held[0] is self._pool:
+            yield held[1]
+            return
+        async with await self._pool.acquire() as conn:
+            yield conn
+
+    @asynccontextmanager
+    async def refresh_lock(
+        self,
+        provider: str,
+        user_id: Any,
+        provider_user_id: Any,
+        *,
+        timeout: Optional[float] = None,
+    ) -> AsyncGenerator[None, None]:
+        """Hold the cross-process lock for refreshing one stored credential.
+
+        A Postgres advisory lock keyed by ``(provider, user, external account)``:
+        every worker shares this database, so workers refreshing the same
+        credential take turns. It is a session lock held on one connection, not
+        a transaction, so the refreshed tokens are committed as soon as they
+        are written; and it goes away with the connection if the worker dies.
+
+        The lock is polled (``pg_try_advisory_lock``) rather than waited on, so
+        the wait is bounded by ``timeout`` and not by the pool's
+        ``statement_timeout``.
+
+        Args:
+            provider: Backend service name (``auth_provider`` of the row).
+            user_id: Local Navigator user id.
+            provider_user_id: External account id the row is bound to.
+            timeout: Seconds to wait for another worker's refresh to finish.
+                Defaults to ``IDENTITY_REFRESH_LOCK_TIMEOUT``.
+
+        Raises:
+            IdentityRefreshBusy: The lock stayed taken for ``timeout`` seconds.
+        """
+        if timeout is None:
+            from ..conf import IDENTITY_REFRESH_LOCK_TIMEOUT
+
+            timeout = IDENTITY_REFRESH_LOCK_TIMEOUT
+        key = _REFRESH_LOCK_KEY.format(
+            provider=provider, user_id=user_id, provider_user_id=provider_user_id
+        )
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        async with await self._pool.acquire() as conn:
+            while not await conn.fetchval(_REFRESH_TRY_LOCK, key):
+                if loop.time() >= deadline:
+                    raise IdentityRefreshBusy(
+                        f"{provider}: another worker is still refreshing this "
+                        f"credential after {timeout:g}s; try again."
+                    )
+                await asyncio.sleep(_REFRESH_LOCK_POLL)
+            held = _REFRESH_CONNECTION.set((self._pool, conn))
+            try:
+                yield
+            finally:
+                _REFRESH_CONNECTION.reset(held)
+                try:
+                    await conn.fetchval(_REFRESH_UNLOCK, key)
+                except Exception as err:  # pylint: disable=W0703
+                    # Returning the connection to the pool runs
+                    # pg_advisory_unlock_all(), and a dead connection drops its
+                    # locks: never let a failed unlock mask the refresh result.
+                    logger.warning("identity refresh lock: unlock failed (%s)", err)
+
     # ------------------------------------------------------------------
     # Context-bound sealing helpers
     # ------------------------------------------------------------------
@@ -303,7 +406,7 @@ class IdentityStore:
             "key_version": self._cipher.key_id,
             "auth_data": self._identity_profile(userinfo),
         }
-        async with await self._pool.acquire() as conn:
+        async with self._connection() as conn:
             UserIdentity.Meta.connection = conn
             existing = None
             try:
@@ -367,7 +470,7 @@ class IdentityStore:
 
     async def list_for_user(self, user_id: Any) -> list[dict]:
         """All linked identities for a user, with secrets masked out."""
-        async with await self._pool.acquire() as conn:
+        async with self._connection() as conn:
             rows = await _filter_identities(
                 conn, user_id=_user_id_param(user_id)
             )
@@ -377,7 +480,7 @@ class IdentityStore:
         self, user_id: Any, identity_id: Any
     ) -> Optional[UserIdentity]:
         """One identity by PK, restricted to its owner."""
-        async with await self._pool.acquire() as conn:
+        async with self._connection() as conn:
             UserIdentity.Meta.connection = conn
             try:
                 return await UserIdentity.get(
@@ -390,7 +493,7 @@ class IdentityStore:
         self, user_id: Any, provider: str
     ) -> Optional[UserIdentity]:
         """The newest enabled credential-bearing identity for a provider."""
-        async with await self._pool.acquire() as conn:
+        async with self._connection() as conn:
             rows = await _filter_identities(
                 conn,
                 user_id=_user_id_param(user_id),
@@ -431,7 +534,7 @@ class IdentityStore:
         """
         if not provider_user_id:
             return None
-        async with await self._pool.acquire() as conn:
+        async with self._connection() as conn:
             rows = await _filter_identities(
                 conn,
                 user_id=_user_id_param(user_id),
@@ -461,7 +564,7 @@ class IdentityStore:
         return rows[0]
 
     async def delete(self, user_id: Any, identity_id: Any) -> bool:
-        async with await self._pool.acquire() as conn:
+        async with self._connection() as conn:
             UserIdentity.Meta.connection = conn
             try:
                 row = await UserIdentity.get(
@@ -527,7 +630,7 @@ class IdentityStore:
         if token.scopes:
             identity.scopes = list(token.scopes)
             changes["scopes"] = identity.scopes
-        async with await self._pool.acquire() as conn:
+        async with self._connection() as conn:
             written = await _update_identity_row(conn, identity.identity_id, puid, changes)
         if not written:
             raise NoDataFound(
@@ -600,7 +703,7 @@ class IdentityStore:
         rows are filtered in Python. Returns ``None`` on miss or when only
         disabled rows match.
         """
-        async with await self._pool.acquire() as conn:
+        async with self._connection() as conn:
             rows = await _filter_identities(
                 conn,
                 auth_provider=provider,

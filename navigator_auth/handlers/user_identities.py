@@ -24,6 +24,7 @@ from ..identity.crypto import IdentityCipher
 from ..identity.refresh import refresh_linked_identity
 from ..identity.store import (
     IdentityCredentialError,
+    IdentityRefreshBusy,
     IdentityStore,
     cache_credential,
     cached_credential,
@@ -113,6 +114,8 @@ class BaseIdentityView(web.View, CorsViewMixin):
             _json_error(404, f"{provider}: identity {identity.identity_id} is no longer linked.")
         except (ConfigError, IdentityCredentialError):
             _json_error(409, f"{provider}: stored credential cannot be refreshed; re-link the identity.")
+        except IdentityRefreshBusy as err:
+            _json_error(503, str(err))
         except AuthException as err:
             _json_error(502, f"Provider refresh failed: {err}")
 

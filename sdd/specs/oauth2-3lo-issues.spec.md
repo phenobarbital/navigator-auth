@@ -15,7 +15,7 @@ docs:
 **Feature ID**: FEAT-108
 **Date**: 2026-11-11
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 0.30.0
 **Proposal**: `sdd/proposals/oauth2-3lo-issues.proposal.md` (research state `sdd/state/FEAT-108/`)
 **Merge after**: FEAT-106 (PR #633, including the `basicauth-otp-2fa-review-fixes` modules) — see Worktree Strategy
@@ -73,7 +73,7 @@ fixing only the examples would turn the 500 into a 401 and hide them again.
 
 ### Overview
 
-Seven independent fixes in three layers. No new public API, no configuration flag, no data model change.
+Seven fixes in three layers, plus a public identity-store failure exception. No new configuration flag or data model change.
 
 **Examples (G1, G2).** Both examples pass `backends=[…Oauth2Provider]` and `authz_backends=[]` to
 `AuthHandler`, the documented way to make an application's backend list independent of
@@ -96,6 +96,13 @@ with the same technique as `oauth2_3lo_app.html` (`crypto.subtle` S256, verifier
   - keeps `except AuthException: continue`;
   - adds `except Exception: logger.exception(…); continue`;
   - returns the first truthy, non-redirect result.
+- Before either wrapper's existing `request["authenticated"]` shortcut, reject a restored
+  `AnonymousUser` with the existing 401. Apply this after the exclude/`allow_anonymous`
+  checks. `NoAuth` stores that concrete class in the encoded session; check the restored
+  identity, not its mutable `is_authenticated` flag, display name, or Guest group. Both
+  cookie and bearer paths must be exercised with real serialized pre-change sessions.
+  Preserve the class on session rehydration; if it cannot be reliably recovered, add a
+  trusted server-side provenance marker and a migration for legacy sessions before shipping.
 - The `allow_hosts` exempt branch of `_auth_middleware` sets `request["userdata"] = payload` next to
   `request.user`, exactly as the main path does at `auth.py:1139-1142`.
 
@@ -109,13 +116,34 @@ and enforces `user_is_active`. It raises `UserNotFound` (unknown user, or `Valid
 - **The consent POST.** On failure it answers 401 `access_denied` and issues no code.
 - **`device_verification`.** On failure it redirects to login with `device_user_code` and does not
   approve the device code.
-- **`_token_session_claims`**, which no longer swallows the failure. The code grant turns the
-  exception into `invalid_grant`; the code is already consumed. The refresh grant also revokes the
-  presented refresh token's chain.
+- **`_token_session_claims`**, which no longer swallows the failure. The code grant turns a
+  confirmed missing/disabled owner into `invalid_grant` and consumes the code. The refresh
+  grant also revokes the presented refresh token's chain for that confirmed condition.
 
 `_token_session_claims` still returns `{}` when the session itself cannot be created (storage
 unavailable): that is an infrastructure state, not an unknown owner.
 `userinfo` sets a profile/email claim only when it has a non-empty value.
+
+`IdentityProvider.user_from_id` must distinguish a missing row from an identity-store outage:
+retain `UserNotFound` for `NoDataFound` and empty results, retain `ValidationError`, and
+raise a new `IdentityStoreUnavailable` (an `AuthException`, status 503, with the original
+exception chained) for other storage errors. Never include database details in HTTP responses.
+Custom IdPs must raise `UserNotFound` only for a confirmed missing user and use
+`IdentityStoreUnavailable` for infrastructure failures. At authorize, consent, device
+verification and token grants, an unavailable store returns a generic 503 `server_error`;
+it never redirects to login, issues a code or token, or revokes a refresh chain. Resolve the
+code grant's owner after validating the code and client but **before consuming the code**, so
+the client can retry after a transient outage; a confirmed missing or disabled owner still
+consumes the code and returns `invalid_grant`. Preserve single-use and concurrent redemption
+guarantees when moving this check. The refresh owner check must occur before rotation.
+
+Device login must actually resume verification: carry `device_user_code` through the login
+form and, after successful authentication and session creation, redirect to the named device
+verification route with `user_code`. That GET shows the pre-filled verification form; the user
+must submit it again, so login alone never approves a device. Accept only the device code as
+data, never an arbitrary return URL. The existing no-session and unknown-owner branches use
+the same path. For device login, hide upstream and passkey options until they support this
+same return path; normal authorization login remains unchanged.
 
 ### Decisions taken in this spec
 
@@ -126,7 +154,7 @@ unavailable): that is an infrastructure state, not an unknown owner.
 | D3 | An unknown/disabled session owner at `/oauth2/authorize` triggers the login redirect **without invalidating the session** | Sessions live in the shared Redis store keyed by cookie. Invalidating one created by another Navigator app on the same host would log the user out of that app. `auth_login` already replaces this browser's session and cookie through `_create_user_session` (`backend.py:632`). This refines the proposal's "drop it": the session is dropped *for this authorization*, not destroyed. |
 | D4 | `is_active` is enforced together with existence in `_resolve_resource_owner` | Today it is checked only in `auth_login` (`backend.py:1644`), so a user disabled after login keeps getting codes and tokens through the session cookie. This is the same fail-closed rule as G6. |
 | D5 | `device_verification` gets the same owner check | Third consumer of the session user (`backend.py:2685-2697`); an approved device code yields tokens for that `user_id`. |
-| D6 | The refresh grant revokes the presented token's chain when the owner cannot be resolved | Failing at `backend.py:2046` happens before rotation (`:2080`/`:2094`), so the old refresh token would stay live. `revoke_chain` is already used at `:2005`/`:2015`. |
+| D6 | The refresh grant revokes the presented token's chain only for a confirmed missing or disabled owner; an identity-store outage returns 503 without revocation | `user_from_id` currently wraps database errors as `UserNotFound`; separate these outcomes before applying revocation. |
 | D7 | Error texts: `invalid_grant` / "The resource owner of this grant cannot be resolved." (token grants); `access_denied` / "Unknown or disabled resource owner." (consent, 401) | Matches the existing `_error_response` vocabulary; reveals no account detail. |
 
 ### Component Diagram
@@ -134,7 +162,8 @@ unavailable): that is an infrastructure state, not an unknown owner.
 browser ──/oauth2/authorize──→ Oauth2Provider.authorize ──→ _resolve_resource_owner ──→ self._idp.user_from_id
    │                                   │ unknown/disabled → 302 nav_oauth2_login (session kept)
    │──/oauth2/token (code|refresh)──→ _handle_* ──→ _token_session_claims ──→ _resolve_resource_owner
-   │                                   │ UserNotFound/FailedAuth → 400 invalid_grant (+ revoke_chain on refresh)
+   │                                   │ missing/disabled → 400 invalid_grant (+ revoke_chain on refresh)
+   │                                   │ identity store unavailable → 503, retain code or refresh chain
    │──/api/v1/me (Bearer)──→ AuthHandler._auth_middleware ─┬─ main path: userdata + user (unchanged)
    │                                                        └─ allow_hosts exempt: + request["userdata"]  (G5)
    │                                   └──→ @is_authenticated ──→ _authenticate_with_backends
@@ -157,12 +186,15 @@ browser ──/oauth2/authorize──→ Oauth2Provider.authorize ──→ _res
 | FEAT-106 `MfaSignal` | preserves | `except MfaSignal: break` stays first in the backend loop |
 
 ### Data Models
-No new or changed data model.
+No new or changed data model. Add the public `IdentityStoreUnavailable` exception to
+`navigator_auth.exceptions`; custom IdPs must distinguish missing users from store failures.
 
 ### New Public Interfaces
-None. Everything new is private (`_`-prefixed) or example code. Two **public behaviour changes** are documented in `CHANGELOG.md` (§10):
+The `IdentityStoreUnavailable` exception is public. Document the custom IdP contract and these
+**public behaviour changes** in `CHANGELOG.md` (§10):
 1. `@is_authenticated()` no longer admits a request through `NoAuth`; anonymous routes must use the exclude list or `allow_anonymous`.
 2. The OAuth2 token endpoint answers `invalid_grant` instead of issuing a session-less token when the resource owner cannot be resolved.
+3. Identity-store failures return 503 without revoking refresh chains; `user_from_id` no longer reports infrastructure failures as `UserNotFound`.
 
 ---
 
@@ -252,8 +284,9 @@ None. Everything new is private (`_`-prefixed) or example code. Two **public beh
   ```
 
 ### Module 4: is_authenticated backend loop
-- **Path**: `navigator_auth/decorators.py`, `navigator_auth/backends/abstract.py`, `navigator_auth/backends/noauth.py`
+- **Path**: `navigator_auth/decorators.py`, `navigator_auth/backends/abstract.py`, `navigator_auth/backends/noauth.py`, and session rehydration code if required to preserve guest identity provenance.
 - **Responsibility**: One helper drives the backend loop for both wrappers (D1, D2), preserving FEAT-106's `MfaSignal` stop.
+- Before the authenticated shortcut in both wrappers, reject restored `AnonymousUser` identities, including legacy cookie and bearer sessions; exclusions and `allow_anonymous` remain earlier. Verify the real serialization round trip rather than assuming the class survives it.
 - **Depends on**: FEAT-106 merged (`MfaSignal` import in `decorators.py`).
 - **Interface Skeleton**:
   ```python
@@ -298,8 +331,8 @@ None. Everything new is private (`_`-prefixed) or example code. Two **public beh
   ```
 
 ### Module 6: OAuth2 provider fails closed on an unknown resource owner
-- **Path**: `navigator_auth/backends/oauth2/backend.py`, `tests/test_oauth2_3lo_session_binding.py`
-- **Responsibility**: D3–D7. One resolver; four call paths; the two token grants answer `invalid_grant`.
+- **Path**: `navigator_auth/backends/oauth2/backend.py`, `navigator_auth/backends/idp/__init__.py`, `navigator_auth/exceptions.py`, `templates/oauth/login.html`, `tests/test_oauth2_3lo_session_binding.py`, and the associated regression tests.
+- **Responsibility**: D3–D7. One resolver; four call paths; the two token grants answer `invalid_grant` for confirmed missing or disabled owners and 503 for store outages.
 - **Depends on**: FEAT-106 merged (`_token_session_claims` gains `extra=` in its M9).
 - **Interface Skeleton**:
   ```python
@@ -336,8 +369,16 @@ None. Everything new is private (`_`-prefixed) or example code. Two **public beh
       #   token_data (:1829); UserNotFound/FailedAuth → _error_response("invalid_grant",
       #   "The resource owner of this grant cannot be resolved.").
       # _handle_refresh_token (backend.py:1973): same at :2046, plus
-      #   await self.refresh_token_storage.revoke_chain(refresh_token) before returning (D6).
+      #   await self.refresh_token_storage.revoke_chain(refresh_token) only for confirmed
+      #   missing/disabled owners (D6). IdentityStoreUnavailable → generic 503, no revocation.
+      # auth_login: preserve device_user_code through the form and redirect after session
+      #   creation to the device verification GET with user_code, not authorize.
   ```
+
+The authorization-code owner lookup must happen before code consumption for outage retries,
+while keeping atomic single-use redemption. On a confirmed missing/disabled owner consume the
+code atomically before returning `invalid_grant`. All owner-check call sites map
+`IdentityStoreUnavailable` to a generic 503 `server_error`; never treat it as a missing user.
 
 ### Module 7: userinfo omits claims it cannot supply
 - **Path**: `navigator_auth/backends/oauth2/backend.py`, `tests/test_oauth2_userinfo_logout.py`
@@ -387,6 +428,7 @@ None. Everything new is private (`_`-prefixed) or example code. Two **public beh
 | `test_unexpected_error_only_backend_gives_401` | M4 | the only backend raises `TypeError` ⇒ `HTTPUnauthorized`, never 500 |
 | `test_mfa_signal_still_stops_the_loop` | M4 | first backend raises `MfaSignal`, second would succeed ⇒ 401, second not awaited |
 | `test_method_wrapper_same_semantics` | M4 | the three cases above on a class-based `web.View` |
+| `test_existing_guest_sessions_rejected` | M4 | real pre-change NoAuth session serialization, cookie and bearer paths, function and method wrappers ⇒ 401; normal authenticated sessions and explicit anonymous exemptions still work |
 | `test_exempt_branch_publishes_userdata` | M5 | `verify_exceptions` → True, bearer resolves a session user ⇒ `request["userdata"] == payload`, plus `user`, `authenticated` and the mechanism |
 | `test_exempt_branch_invalid_token_unchanged` | M5 | invalid bearer ⇒ handler runs unauthenticated, no `userdata` |
 | `test_resolve_resource_owner_*` | M6 | found & active ⇒ user; `UserNotFound` / `ValidationError` ⇒ `UserNotFound`; inactive ⇒ `FailedAuth` |
@@ -396,6 +438,8 @@ None. Everything new is private (`_`-prefixed) or example code. Two **public beh
 | `test_device_verification_unknown_owner_redirects` | M6 | ⇒ login redirect with `device_user_code`; device code not approved |
 | `test_code_grant_unknown_owner_invalid_grant` | M6 | ⇒ 400 `invalid_grant`, no `access_token`, code consumed |
 | `test_refresh_grant_unknown_owner_revokes_chain` | M6 | ⇒ 400 `invalid_grant`; `revoke_chain(refresh_token)` awaited once |
+| `test_owner_store_outage` | M6 | actual IdP database acquire/query errors ⇒ `IdentityStoreUnavailable`, generic 503 at every owner-check endpoint, no refresh revocation or token/code issuance; retry succeeds after recovery |
+| `test_code_owner_lookup_outage_retry` | M6 | valid code survives outage and succeeds on retry; missing/disabled owner consumes it; concurrent redemption remains single-use |
 | `test_unknown_user_raises` (replaces `test_unknown_user_degrades_without_raising`) | M6 | `_token_session_claims(request, 404)` with `user_from_id` raising ⇒ `UserNotFound` |
 | `test_session_storage_unavailable_still_returns_empty` | M6 | resolvable owner, no session storage ⇒ `{}` (unchanged) |
 | `test_userinfo_omits_unknown_claims` | M7 | `user_from_id` fails ⇒ body is `{"sub": "35"}` (plus `amr` only if in the token) |
@@ -410,6 +454,7 @@ None. Everything new is private (`_`-prefixed) or example code. Two **public beh
 | `test_3lo_userinfo_profile` | M8: `/oauth2/userinfo` ⇒ `sub == "1"`, `username == "demo"`, `email == "demo@example.com"` |
 | `test_3lo_refresh_binds_session` | M8: refresh grant ⇒ new access token that `/api/v1/me` accepts; no "cannot bind" warning logged |
 | `test_3lo_foreign_session_forces_login` | M8: a pre-existing session for a user the demo IdP does not know ⇒ `/oauth2/authorize` redirects to the login form (S5 regression) |
+| `test_device_login_resumes_verification` | M6: no session and unknown-owner session each redirect to login; submit real login form, follow redirect to pre-filled device verification, explicitly approve, and redeem the device code. Confirm login alone does not approve it and alternate login options are hidden for this flow. |
 
 ### Validation Contract
 
@@ -428,6 +473,8 @@ tests:
 - tests/test_oauth2_access_gate.py
 - tests/test_oauth2_refresh.py
 - tests/test_oauth2_pkce.py
+- tests/test_device_verification.py
+- tests/test_oauth2_introspection_device_integration.py
 markers: none
 
 ### Test Data / Fixtures
@@ -456,16 +503,18 @@ markers: none
 - [ ] **AC4** The `oauth2_server.py` walk-through (`/login` → Authorize → callback → Get Token) returns an `access_token`. The index page sends `code_challenge` (S256) and a random `state`; the callback page refuses a mismatched `state` and sends `code_verifier`. The startup hint no longer prints `<S256_hash>` for the 3LO flow.
 - [ ] **AC5** `APIKeyAuth.authenticate` returns `None` for a bearer whose token info is `False`/`None`/`{}`; `check_token_info(request, None)` returns `False`; a dict missing `device_id` still raises `InvalidAuth`.
 - [ ] **AC6** `@is_authenticated()` never calls a backend whose class sets `_anonymous_auth = True`; `NoAuth` sets it. With backends `[Oauth2Provider, NoAuth]`, a request without credentials gets 401 and NoAuth creates no session.
+- [ ] **AC6a** Previously issued NoAuth cookie and bearer sessions are rejected with 401 before both authenticated shortcuts, even when middleware marks them authenticated. Real serialized legacy sessions are tested; authenticated non-guest sessions and explicit anonymous exemptions continue to work.
 - [ ] **AC7** A non-`AuthException` raised by one backend is logged with `logger.exception` (backend name only, no credential) and the loop continues; when no backend succeeds the response is 401, never 500. This holds for function handlers and class-based views.
 - [ ] **AC8** `MfaSignal` from a backend still stops the loop with 401 (FEAT-106 behaviour preserved).
 - [ ] **AC9** The exclude list and `allow_anonymous` still admit anonymous callers (`tests/unit/test_is_authenticated_exclude.py` passes unchanged).
 - [ ] **AC10** In `_auth_middleware`'s exempt branch, a bearer that resolves a session user sets `request["userdata"]` to the decoded payload, besides `request.user`, `request["authenticated"]` and the bearer mechanism.
 - [ ] **AC11** `/oauth2/authorize` with a session whose user is unknown (`UserNotFound` or `ValidationError` from `user_from_id`) or disabled answers 302 to `nav_oauth2_login`, carrying the whole authorization request (`client_id`, `redirect_uri`, `state`, `scope`, `code_challenge`, `code_challenge_method`). No code is issued and the session is not invalidated in the store.
 - [ ] **AC12** The consent POST (`action=approve`) for such a session answers 401 `access_denied` "Unknown or disabled resource owner." and stores no code.
-- [ ] **AC13** `device_verification` for such a session redirects to login with `device_user_code` and leaves the device code pending.
+- [ ] **AC13** `device_verification` for such a session redirects to login with `device_user_code` and leaves the device code pending. Both this path and no-session login return to the pre-filled device verification form after login; only explicit subsequent approval permits redemption. Passkey and upstream choices are hidden for device login until they support the same resume contract.
 - [ ] **AC14** The authorization-code grant answers 400 `invalid_grant` "The resource owner of this grant cannot be resolved." when the owner cannot be resolved; no access token is returned and the code remains consumed.
 - [ ] **AC15** The refresh grant answers the same `invalid_grant` and awaits `refresh_token_storage.revoke_chain(<presented refresh token>)` once.
 - [ ] **AC16** `_token_session_claims` raises `UserNotFound` / `FailedAuth` instead of returning `{}` for an unresolvable owner, and still returns `{}` when the session cannot be created. `test_unknown_user_degrades_without_raising` is replaced by `test_unknown_user_raises`.
+- [ ] **AC16a** Identity-store outages produce `IdentityStoreUnavailable` and generic 503 `server_error` at all owner-check endpoints, with no issuance or refresh-chain revocation. A validated authorization code remains redeemable after recovery; confirmed missing/disabled owners consume it. Concurrent code redemption remains single-use.
 - [ ] **AC17** `/oauth2/userinfo` never returns an empty-string claim: when the user cannot be loaded the body contains `sub` (and FEAT-106's `amr` only if the token carries it). With a resolvable user, the profile and email claims are present as today.
 - [ ] **AC18** With the fixed 3LO example, after login as `demo` / `demo123`:
   - `/api/v1/me` with a bearer answers 200 with `token_claims.client_id`, `scope` and `jti` non-null;
@@ -474,7 +523,7 @@ markers: none
   - `/oauth2/userinfo` returns the demo profile;
   - a refresh grant logs no "cannot bind a session" warning.
 - [ ] **AC19** All files in the §4 Validation Contract pass (`source .venv/bin/activate && pytest <files> -q`); `ruff check` is clean on every changed Python file.
-- [ ] **AC20** `CHANGELOG.md` records the two behaviour changes (§2 New Public Interfaces) and how to keep anonymous access (exclude list / `allow_anonymous`); `examples/README.md` documents the pinned backends and the PKCE walk-through.
+- [ ] **AC20** `CHANGELOG.md` records the behaviour changes and custom IdP exception contract (§2 New Public Interfaces) and how to keep anonymous access (exclude list / `allow_anonymous`); `examples/README.md` documents the pinned backends and the PKCE walk-through.
 
 ---
 
@@ -610,6 +659,9 @@ Verified against: `1d06621` (re-verify after FEAT-106 merges).
 | `navigator_auth/decorators.py` | MODIFY | `from .exceptions import AuthException` (FEAT-106 makes it `…, MfaSignal`) | `:10` | 1 |
 | `navigator_auth/auth.py` | MODIFY | `pass  # Best-effort: if token is invalid, proceed unauthenticated` — insert `request["userdata"] = payload` after the `request.user = user` at `:1072` inside this `try` (that line also occurs at `:1139`, `:1171`) | `:1076` | 1 |
 | `navigator_auth/backends/oauth2/backend.py` | MODIFY | `async def _token_session_claims(self, request: web.Request, user_id: int) -> dict:` | `:688` | 1 |
+| `navigator_auth/backends/idp/__init__.py` | MODIFY | `async def user_from_id(self, uid: int) -> Identity:` | `:126` | 1 |
+| `navigator_auth/exceptions.py` | MODIFY | `class UserNotFound(AuthException):` | `:32` | 1 |
+| `templates/oauth/login.html` | MODIFY | `<form name="authForm"` | login form | 1 |
 | `navigator_auth/backends/oauth2/backend.py` | MODIFY | `self.logger.warning(f"Oauth2: cannot bind a session to the token for user_id={user_id}: {exc}")` | `:700` | 1 |
 | `navigator_auth/backends/oauth2/backend.py` | MODIFY | `gate_user = self._decode_session_user(session)` | `:1433` | 1 |
 | `navigator_auth/backends/oauth2/backend.py` | MODIFY | `return self._error_response("access_denied", "Cannot resolve user from session.", status=401)` | `:1545` | 1 |
@@ -646,7 +698,9 @@ Verified against: `1d06621` (re-verify after FEAT-106 merges).
 - **FEAT-106 overlap.** It edits the same loop (`except MfaSignal: break` at both loops), `auth.py`, and plans `_token_session_claims(extra=)`, `amr` in `token_data`/`userinfo`. Implement on top of the merged FEAT-106: keep `MfaSignal` first, pass `extra` through, keep the `amr` echo. Anchors in §6 move.
 - **Swallowing backend errors could hide bugs.** `logger.exception` keeps the traceback; tests assert the log call.
 - **Shared Redis sessions (D3).** Invalidating would log the user out of other apps; the redirect is enough because `auth_login` replaces this browser's cookie.
-- **Refresh failure before rotation (D6).** Without `revoke_chain` the old refresh token would stay valid.
+- **Refresh failure before rotation (D6).** Revoke for confirmed missing/disabled owners only; outages must retain the chain for retry. Custom IdPs must honor the new exception contract.
+- **Legacy guest sessions.** Verify the actual serialized `AnonymousUser` survives rehydration for cookie and bearer paths; do not infer anonymity from a Guest group or display name. If provenance is lost, ship a trusted migration before claiming AC6a.
+- **Device login resume.** Preserve the code as data through the form; do not accept caller-supplied return URLs. Exercise the complete flow with FEAT-106 changes present.
 - **`crypto.subtle`** needs a secure context: `http://localhost` qualifies, a LAN IP does not. Document it in the README.
 - **Line drift.** FEAT-107 already moved `conf.py`/`auth.py` lines once since the proposal; anchors are textual for this reason.
 - **Follow-ups found during research (out of scope):**
@@ -706,7 +760,7 @@ Summary: **0** confirmed · **0** rejected · **0** escalated.
 - **Policy**: `required`
 - **Pages**: no `wiki/` tree exists in this repository. Deliver instead:
   - `examples/README.md` — update: 3LO section explains the pinned backends, `authz_backends=[]` and the short-key warning (mirrors the identity-vault warning at `:141-148`); `oauth2_server.py` section describes the PKCE walk-through.
-  - `CHANGELOG.md` — update: the two behaviour changes in §2 and the anonymous-access migration.
+- `CHANGELOG.md` — update: the behaviour changes and custom IdP exception contract in §2, and the anonymous-access migration.
 - **API modules** (docstring completeness): `navigator_auth.decorators`, `navigator_auth.backends.api`, `navigator_auth.backends.oauth2.backend`.
 
 ---
@@ -716,3 +770,4 @@ Summary: **0** confirmed · **0** rejected · **0** escalated.
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-11-11 | Jesus Lara | Initial draft from `sdd/proposals/oauth2-3lo-issues.proposal.md` (FEAT-108) |
+| 0.2 | 2026-11-11 | Codex | Address review findings on restored guest sessions, identity-store outages, and device login resumption. |
