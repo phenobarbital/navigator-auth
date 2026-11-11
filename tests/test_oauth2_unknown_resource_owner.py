@@ -377,6 +377,9 @@ async def _grant_provider(provider, claims_effect):
         yield MagicMock(), 0
 
     provider._user_generation = _generation
+    # The code grant resolves the owner itself (TASK-225) and binds the session after
+    # consuming the code; the refresh grant still resolves inside _token_session_claims.
+    provider._resolve_resource_owner = AsyncMock(**claims_effect)
     provider._token_session_claims = AsyncMock(**claims_effect)
     provider._gate_permits = AsyncMock(return_value=True)
     provider._idp.create_token = MagicMock(return_value=("tok", None, time.time() + 60, "Bearer"))
@@ -430,12 +433,13 @@ class TestCodeGrantOwnerCheck:
         assert provider.code_storage.calls == ["claim", "release"]
 
     @pytest.mark.asyncio
-    async def test_unexpected_failure_releases_the_claim(self, provider):
-        await _grant_provider(provider, {"side_effect": RuntimeError("session store down")})
+    async def test_unexpected_owner_lookup_failure_releases_the_claim(self, provider):
+        await _grant_provider(provider, {"side_effect": RuntimeError("lookup blew up")})
         provider.code_storage = _GrantCodes(_auth_code())
         with pytest.raises(RuntimeError):
             await provider._handle_authorization_code(_code_payload(), MagicMock())
         assert provider.code_storage.calls == ["claim", "release"]
+        provider._token_session_claims.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_a_held_claim_on_a_consumed_code_is_already_used(self, provider):

@@ -2,17 +2,26 @@
 
 TASK-224 (issue:cf77c0161ff6): ``AuthorizationCodeStorage.mark_used`` is atomic and
 the claim TTL comes from ``OAUTH_CODE_CLAIM_TTL``.
+
+TASK-225 (issue:42d67472eccd): the code grant binds the (per-identity, shared)
+session only after it consumed the code, so a losing redeemer never touches it.
 """
 
 import asyncio
+import contextlib
+import json
+import time
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from navigator_auth.backends.oauth2 import code_backend
+from navigator_auth.backends.oauth2.backend import Oauth2Provider
+from navigator_auth.backends.oauth2.client_backend import MemoryClientStorage
 from navigator_auth.backends.oauth2.code_backend import AuthorizationCodeStorage
 from navigator_auth.backends.oauth2.models import OAuthClient, OauthAuthorizationCode
+from navigator_auth.backends.oauth2.pkce import generate_challenge
 
 CODE = "code-redemption-1"
 
@@ -142,3 +151,133 @@ class TestClaimTtl:
 
         assert await storage.claim_code(CODE) is True
         assert await storage.claim_code(CODE) is False
+
+
+# --- TASK-225: session binding after the code is consumed ------------------------------------
+CLIENT_UID = "cli_redemption"
+REDIRECT_URI = "https://app.example.com/cb"
+VERIFIER = "v" * 50
+
+
+def _grant_code():
+    code = MagicMock()
+    code.used = False
+    code.expires_at = datetime.now() + timedelta(minutes=5)
+    code.client = MagicMock()
+    code.client.client_id = CLIENT_UID
+    code.redirect_uri = REDIRECT_URI
+    code.code_challenge = generate_challenge(VERIFIER)
+    code.code_challenge_method = "S256"
+    code.user_id = 35
+    code.generation = 0
+    code.scope = "default"
+    code.mfa = False
+    code.amr = None
+    code.resource = None
+    return code
+
+
+class _OrderedCodes:
+    """Code storage double that records calls into a shared, ordered log."""
+
+    def __init__(self, log, *, wins=True):
+        self.log = log
+        self.wins = wins
+
+    async def get_code(self, code):
+        return _grant_code()
+
+    async def claim_code(self, code):
+        self.log.append("claim")
+        return True
+
+    async def release_claim(self, code):
+        self.log.append("release")
+
+    async def mark_used(self, code):
+        self.log.append("mark_used")
+        return self.wins
+
+    async def delete_code(self, code):
+        self.log.append("delete")
+
+
+async def _redeeming_provider(log, *, wins=True):
+    provider = Oauth2Provider(user_model=MagicMock(), identity=MagicMock())
+    provider.logger = MagicMock()
+    storage = MemoryClientStorage()
+    await storage.save_client(
+        OAuthClient(
+            client_id=CLIENT_UID,
+            client_name="App",
+            client_type="public",
+            redirect_uris=[REDIRECT_URI],
+            enforce_access_gate=False,
+        )
+    )
+    provider.client_storage = storage
+    provider.code_storage = _OrderedCodes(log, wins=wins)
+
+    @contextlib.asynccontextmanager
+    async def _generation(request, user_id):
+        yield MagicMock(), 0
+
+    owner = MagicMock(name="owner")
+
+    async def _resolve(user_id):
+        log.append("resolve")
+        return owner
+
+    async def _create_session(request, user, *args, **kwargs):
+        log.append("session")
+        assert user is owner  # bound to the owner resolved before consumption
+        return None
+
+    provider._user_generation = _generation
+    provider._resolve_resource_owner = AsyncMock(side_effect=_resolve)
+    provider._create_user_session = AsyncMock(side_effect=_create_session)
+    provider._idp.create_token = MagicMock(return_value=("tok", None, time.time() + 60, "Bearer"))
+    provider.access_token_storage = None
+    return provider
+
+
+def _payload():
+    return {"code": "code-1", "client_id": CLIENT_UID, "redirect_uri": REDIRECT_URI, "code_verifier": VERIFIER}
+
+
+class TestSessionAfterConsume:
+    @pytest.mark.asyncio
+    async def test_the_session_is_bound_after_the_code_is_consumed(self):
+        log = []
+        provider = await _redeeming_provider(log)
+
+        response = await provider._handle_authorization_code(_payload(), MagicMock())
+
+        assert response.status == 200
+        assert log == ["claim", "resolve", "mark_used", "delete", "session"]
+        provider._resolve_resource_owner.assert_awaited_once()  # no second lookup
+
+    @pytest.mark.asyncio
+    async def test_a_redeemer_that_loses_mark_used_never_touches_the_session(self):
+        log = []
+        provider = await _redeeming_provider(log, wins=False)
+
+        response = await provider._handle_authorization_code(_payload(), MagicMock())
+
+        assert response.status == 400
+        assert json.loads(response.body)["error_description"] == "Authorization code already used."
+        assert log == ["claim", "resolve", "mark_used"]
+        provider._create_user_session.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_token_session_claims_skips_the_lookup_for_a_resolved_owner(self):
+        provider = Oauth2Provider(user_model=MagicMock(), identity=MagicMock())
+        provider._resolve_resource_owner = AsyncMock()
+        provider._create_user_session = AsyncMock(return_value=None)
+        owner = MagicMock()
+
+        assert await provider._token_session_claims(MagicMock(), 35, user=owner) == {}
+
+        provider._resolve_resource_owner.assert_not_awaited()
+        provider._create_user_session.assert_awaited_once()
+        assert provider._create_user_session.await_args.args[1] is owner

@@ -841,7 +841,14 @@ class Oauth2Provider(BaseAuthBackend):
             return None
         return record if isinstance(record, dict) else None
 
-    async def _token_session_claims(self, request: web.Request, user_id: int, *, conn: Any = None) -> dict:
+    async def _token_session_claims(
+        self,
+        request: web.Request,
+        user_id: int,
+        *,
+        conn: Any = None,
+        user: Any = None,
+    ) -> dict:
         """Bind a freshly issued access token to a session.
 
         Returns the extra JWT claims (``id``, ``session_id``, ``username``)
@@ -849,12 +856,23 @@ class Oauth2Provider(BaseAuthBackend):
         user — from the bearer token alone. Returns an empty dict when a
         session cannot be created. An unresolvable owner raises so grants can
         fail closed without consuming state during an identity-store outage.
+
+        Args:
+            request: The token request.
+            user_id: The resource owner's id.
+            conn: The per-user lock connection, when the caller holds it.
+            user: An owner the caller already resolved with
+                ``_resolve_resource_owner``; skips the second lookup.
+
+        Returns:
+            dict: The session-binding claims, or ``{}`` without a session.
         """
 
         # FEAT-108: an unresolvable or disabled owner must not get a token.
         # UserNotFound, FailedAuth and IdentityStoreUnavailable propagate to
         # the grant handler, which maps each outcome without leaking details.
-        user = await self._resolve_resource_owner(user_id)
+        if user is None:
+            user = await self._resolve_resource_owner(user_id)
         session = await self._create_user_session(request, user)
         if not session:
             return {}
@@ -2264,7 +2282,7 @@ class Oauth2Provider(BaseAuthBackend):
                     )
                 release = getattr(self.code_storage, "release_claim", None)
                 try:
-                    session_claims = await self._token_session_claims(request, user_id, conn=conn)
+                    owner = await self._resolve_resource_owner(user_id)
                 except (UserNotFound, FailedAuth):
                     await self.code_storage.mark_used(code)
                     await self.code_storage.delete_code(code)
@@ -2284,6 +2302,10 @@ class Oauth2Provider(BaseAuthBackend):
                     # A concurrent exchange already consumed this code (RFC 6749 §4.1.2: single use).
                     return self._error_response("invalid_grant", "Authorization code already used.")
                 await self.code_storage.delete_code(code)
+                # Bind the session only once this request owns the code: the
+                # session is shared per identity, so a redeemer that lost
+                # mark_used must not have rewritten it (issue:42d67472eccd).
+                session_claims = await self._token_session_claims(request, user_id, conn=conn, user=owner)
 
                 scope = auth_code.scope
                 # TASK-027: mint jti.
