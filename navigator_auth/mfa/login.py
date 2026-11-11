@@ -120,7 +120,9 @@ class SecondFactorGate:
                     device = {"token": device_token, "max_age": evaluation.policy.remember_days * 86400}
                     return GateResult(session=session, device=device)
                 if not evaluation.providers:
-                    raise MFARefused("no_factor_available", "No second factor is available for this account", status=403)
+                    raise MFARefused(
+                        "no_factor_available", "No second factor is available for this account", status=403
+                    )
                 code_hash = None
                 if evaluation.preferred == PROVIDER_EMAIL:
                     issued = await services.providers[PROVIDER_EMAIL].challenge(request, fresh)

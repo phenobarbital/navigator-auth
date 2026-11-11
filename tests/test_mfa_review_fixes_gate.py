@@ -59,8 +59,11 @@ class FakeStore:
     async def issue(self, user, providers, preferred, **kwargs):
         """Persist and return a deterministic challenge."""
         self.record = _record(
-            providers=tuple(providers), preferred=preferred, security_version=kwargs["security_version"],
-            context_digest=kwargs["context_digest"], email_code_hash=kwargs["email_code_hash"]
+            providers=tuple(providers),
+            preferred=preferred,
+            security_version=kwargs["security_version"],
+            context_digest=kwargs["context_digest"],
+            email_code_hash=kwargs["email_code_hash"],
         )
         return "challenge", self.record
 
@@ -121,7 +124,11 @@ def _services(**over) -> MfaServices:
     services.backup_codes = over.pop("backup_codes", SimpleNamespace(consume=AsyncMock(return_value=True)))
     services.providers = over.pop(
         "providers",
-        {"email": SimpleNamespace(challenge=AsyncMock(return_value={"code_hash": "code-hash"}), verify=AsyncMock(return_value=True))},
+        {
+            "email": SimpleNamespace(
+                challenge=AsyncMock(return_value={"code_hash": "code-hash"}), verify=AsyncMock(return_value=True)
+            )
+        },
     )
     services.evaluate = over.pop("evaluate", AsyncMock(return_value=_evaluation()))
     for key, value in over.items():
@@ -152,7 +159,9 @@ async def test_login_refused_when_password_changed_mid_flight():
 @pytest.mark.asyncio
 async def test_trusted_device_session_issued_under_lock():
     """AC18: a trusted-device issuer runs with the lock connection published."""
-    services = _services(evaluate=AsyncMock(return_value=_evaluation(has_strong_factor=True, policy=SimpleNamespace(remember_days=2))))
+    services = _services(
+        evaluate=AsyncMock(return_value=_evaluation(has_strong_factor=True, policy=SimpleNamespace(remember_days=2)))
+    )
     services.trusted_devices.consume_and_rotate = AsyncMock(return_value=(7, "replacement"))
 
     async def issue(user, extra):
@@ -205,13 +214,19 @@ async def test_decide_lock_timeout_is_mfa_unavailable():
 async def test_email_gate_verify_and_totp_uses_lock_connection():
     """AC33: email receives no conn while TOTP receives the lock connection."""
     services = _services()
-    await SecondFactorGate(services).verify(_request(), "challenge", "email", "correct", AsyncMock(return_value="session"))
+    await SecondFactorGate(services).verify(
+        _request(), "challenge", "email", "correct", AsyncMock(return_value="session")
+    )
     assert "conn" not in services.providers["email"].verify.await_args.kwargs
 
     record = _record(providers=("totp",), preferred="totp")
-    services = _services(store=FakeStore(record), providers={"totp": SimpleNamespace(verify=AsyncMock(return_value=True))})
+    services = _services(
+        store=FakeStore(record), providers={"totp": SimpleNamespace(verify=AsyncMock(return_value=True))}
+    )
     services.evaluate = AsyncMock(return_value=_evaluation(providers=("totp",), preferred="totp"))
-    await SecondFactorGate(services).verify(_request(), "challenge", "totp", "correct", AsyncMock(return_value="session"))
+    await SecondFactorGate(services).verify(
+        _request(), "challenge", "totp", "correct", AsyncMock(return_value="session")
+    )
     assert services.providers["totp"].verify.await_args.kwargs["conn"] is services.security.conn
 
 
@@ -227,7 +242,11 @@ async def test_backup_consumed_before_lock_and_last_code_verifies():
         return True
 
     services.backup_codes.consume = AsyncMock(side_effect=consume)
-    assert (await SecondFactorGate(services).verify(_request(), "challenge", "backup", "last", AsyncMock(return_value="session"))).session == "session"
+    assert (
+        await SecondFactorGate(services).verify(
+            _request(), "challenge", "backup", "last", AsyncMock(return_value="session")
+        )
+    ).session == "session"
 
 
 @pytest.mark.asyncio
@@ -266,7 +285,9 @@ async def test_gate_logs_no_secrets(caplog):
     services = _services()
     services.store.peek = AsyncMock(side_effect=RuntimeError(secret_token))
     with pytest.raises(VerifyRefused):
-        await SecondFactorGate(services).verify(_request(cookies={"nav_mfa_device": secret_device}), secret_token, "email", secret_code, AsyncMock())
+        await SecondFactorGate(services).verify(
+            _request(cookies={"nav_mfa_device": secret_device}), secret_token, "email", secret_code, AsyncMock()
+        )
     text = caplog.text
     assert secret_token not in text
     assert secret_code not in text
