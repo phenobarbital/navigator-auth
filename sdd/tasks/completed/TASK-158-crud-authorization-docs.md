@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-107 — Write-envelope hardening for the remaining auth CRUD handlers
 **Spec**: `sdd/specs/auth-model-crud-hardening.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-150, TASK-153, TASK-154, TASK-155, TASK-156
@@ -260,10 +260,7 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: documents gated reads and PUT-based creation | other
+**Completed by**: sdd-worker (orchestrator)
+**Date**: 2026-11-11
+**Seat**: Backend: codex · Model: gpt-5.6-terra
+**Notes**: docs/auth_crud_authorization.rst, docs/index.rst toctree, CHANGELOG breaking-change entry. Docs only. Review: zero fixes (feedback coder-review:6f340814539081aac9e30508).

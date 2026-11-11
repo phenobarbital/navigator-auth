@@ -5,7 +5,7 @@
   "type": "feature",
   "base_branch": "dev",
   "created_at": "2026-11-11T00:00:00-04:00",
-  "completed_at": null,
+  "completed_at": "2026-11-11T02:16:59+00:00",
   "decomposition_notes": "Spec deviations recorded at /sdd-task time (2026-11-11), each detailed in the owning task: (1) ABAC actions must be object:verb - ActionKey splits on ':' and a bare 'read' raises (abac/policies/abstract.py:28), so the admin path would fail closed; names fixed in TASK-150. (2) UserGroupManager is also mounted at /api/v1/usergroups (handlers/__init__.py:35). (3) On the ModelView base PUT creates and POST needs a PK (400 otherwise), so user creation is PUT and the required_by_* lists follow the verbs (TASK-153). (4) The handlers/model.py base writes through post and delete as well as put/patch (TASK-155). (5) User decision: GET/HEAD are gated too on all five handlers. (6) Installed navigator-api 3.2.2 interpolates _filter into SQL; overridden in TASK-151. (7) The §1 probe script no longer exists; TASK-157 rebuilds it. (8) The role route must be registered before UserManager.configure (TASK-156). No Delegation Contracts: the parrot-targeted-writer MCP server is not configured in this repo.",
   "tasks": [
     {
@@ -184,7 +184,7 @@
       "feature_id": "FEAT-107",
       "feature": "auth-model-crud-hardening",
       "spec": "sdd/specs/auth-model-crud-hardening.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -198,8 +198,9 @@
       "parallelism_notes": "Spec Module 7 (AC1 file). Test-only; exercises every handler and the shipped pack through the real router, so it runs after all of them. Can run alongside TASK-158.",
       "assigned_to": null,
       "started_at": "2026-11-11T00:20:19+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-157-crud-write-envelope-e2e.md"
+      "completed_at": "2026-11-11T02:16:59+00:00",
+      "file": "sdd/tasks/completed/TASK-157-crud-write-envelope-e2e.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-158",
@@ -208,7 +209,7 @@
       "feature_id": "FEAT-107",
       "feature": "auth-model-crud-hardening",
       "spec": "sdd/specs/auth-model-crud-hardening.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [
@@ -222,8 +223,9 @@
       "parallelism_notes": "Spec Module 8 (AC15). Docs only (docs/*.rst, CHANGELOG.md); describes shipped behaviour, so it follows the code tasks. Can run alongside TASK-157.",
       "assigned_to": null,
       "started_at": "2026-11-11T00:20:19+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-158-crud-authorization-docs.md"
+      "completed_at": "2026-11-11T02:16:59+00:00",
+      "file": "sdd/tasks/completed/TASK-158-crud-authorization-docs.md",
+      "verification": "verified"
     }
   ]
 }
