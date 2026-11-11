@@ -205,7 +205,6 @@ class PDP:
         # Load into evaluator
         self._evaluator.load_policies(resource_policies)
 
-
     async def _get_tenant_evaluator(
         self, org_id: int, client_id: int
     ) -> PolicyEvaluator:

@@ -58,9 +58,7 @@ def test_add_policy_returns_adapted_resources(pdp_with_storage):
 
 def test_add_policy_empty_subject_allows_dashboard(pdp_with_storage):
     pdp_with_storage.add_policy(_dashboard_policy())
-    result = pdp_with_storage.evaluator.check_access(
-        _ctx(), ResourceType.URI, "/dashboard/", "uri:read"
-    )
+    result = pdp_with_storage.evaluator.check_access(_ctx(), ResourceType.URI, "/dashboard/", "uri:read")
     assert result.allowed
 
 
@@ -89,9 +87,7 @@ def test_constructor_policies_registered(pdp_with_storage):
     pdp = PDP(storage=pdp_with_storage.storage, policies=policies)
     pdp._auditlog = MagicMock(log=AsyncMock())
 
-    result = pdp.evaluator.check_access(
-        _ctx(), ResourceType.URI, "/dashboard/", "uri:read"
-    )
+    result = pdp.evaluator.check_access(_ctx(), ResourceType.URI, "/dashboard/", "uri:read")
 
     assert result.allowed
     assert pdp._policies is not policies
@@ -122,9 +118,7 @@ def test_add_policy_rejection_is_atomic(pdp_with_storage):
     pdp_with_storage.add_policy(_dashboard_policy())
     tenant_evaluator = MagicMock()
     pdp_with_storage._tenant_evaluators[(5, 7)] = tenant_evaluator
-    pdp_with_storage.evaluator.check_access(
-        _ctx(), ResourceType.URI, "/unrelated", "uri:read"
-    )
+    pdp_with_storage.evaluator.check_access(_ctx(), ResourceType.URI, "/unrelated", "uri:read")
     snapshots = (
         [id(policy) for policy in pdp_with_storage._registered],
         [id(policy) for policy in pdp_with_storage._policies],
@@ -148,16 +142,12 @@ def test_add_policy_rejection_is_atomic(pdp_with_storage):
     assert pdp_with_storage.evaluator._policies_json == snapshots[3]
     assert pdp_with_storage.evaluator._cache == snapshots[4]
     assert dict(pdp_with_storage._tenant_evaluators) == snapshots[5]
-    denied = pdp_with_storage.evaluator.check_access(
-        _ctx(), ResourceType.URI, "/unrelated", "uri:read"
-    )
+    denied = pdp_with_storage.evaluator.check_access(_ctx(), ResourceType.URI, "/unrelated", "uri:read")
     assert not denied.allowed
 
 
 def test_add_policy_invalidates_cache(pdp_with_storage):
-    before = pdp_with_storage.evaluator.check_access(
-        _ctx(), ResourceType.URI, "/cache-target", "uri:read"
-    )
+    before = pdp_with_storage.evaluator.check_access(_ctx(), ResourceType.URI, "/cache-target", "uri:read")
     assert not before.allowed
     assert pdp_with_storage.evaluator._cache
 
@@ -165,9 +155,7 @@ def test_add_policy_invalidates_cache(pdp_with_storage):
         Policy(name="cache_target", effect=PolicyEffect.ALLOW, resource=["urn:uri:/cache-target"])
     )
 
-    after = pdp_with_storage.evaluator.check_access(
-        _ctx(), ResourceType.URI, "/cache-target", "uri:read"
-    )
+    after = pdp_with_storage.evaluator.check_access(_ctx(), ResourceType.URI, "/cache-target", "uri:read")
     assert after.allowed
 
 
