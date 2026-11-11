@@ -1226,3 +1226,280 @@ class TestRecoveryEndToEnd:
 
         resp2 = await client.get(f"/api/v1/password-recovery/{recovery_token}")
         assert resp2.status == 400
+
+
+# ---------------------------------------------------------------------------
+# FEAT-106 review fixes — transactional recovery completion (spec §3 M4)
+# ---------------------------------------------------------------------------
+import asyncio  # noqa: E402
+import contextlib  # noqa: E402
+import json as _json_mod  # noqa: E402
+
+
+@pytest_asyncio.fixture(loop_scope="module")
+async def single_connection_authdb():
+    """One-connection authdb on the module event loop (the recovery_app loop), recording nested acquires."""
+    from tests.fixtures.mfa import _LockAwarePool, default_dsn, ensure_mfa_tables
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            import asyncdb
+
+            pool = asyncdb.AsyncPool("pg", dsn=default_dsn, max_clients=1, min_size=1)
+        await pool.connect()
+        await ensure_mfa_tables(pool)
+    except Exception as err:  # pylint: disable=W0703
+        pytest.skip(f"Postgres unavailable: {type(err).__name__}: {err}")
+    wrapped = _LockAwarePool(pool)
+    wrapped.strict = True
+    yield wrapped
+    await pool.close()
+
+
+async def _fetchval(db_pool, sql, *args):
+    async with await db_pool.acquire() as conn:
+        return await conn.fetchval(sql, *args)
+
+
+async def _recovery_state(db_pool, username):
+    """Return (password_hash, generation, marker_count) for ``username``."""
+    user_id = await _fetchval(db_pool, "SELECT user_id FROM auth.users WHERE username = $1", username)
+    pwd = await _fetchval(db_pool, "SELECT password FROM auth.users WHERE user_id = $1", user_id)
+    gen = await _fetchval(
+        db_pool, "SELECT COALESCE(MAX(generation), 0) FROM auth.oauth_user_generation WHERE user_id = $1", user_id
+    )
+    marks = await _fetchval(
+        db_pool, "SELECT count(*) FROM auth.recovery_confirm_consumptions WHERE user_id = $1", user_id
+    )
+    return pwd, int(gen), int(marks)
+
+
+async def _post_confirm(client, token, password):
+    return await client.post(
+        "/api/v1/password-recovery/confirm",
+        json={"password": password, "confirm_password": password, "token": token},
+    )
+
+
+class TestRecoveryTransactional:
+    """FEAT-106 review fixes — transactional recovery completion (spec §3 M4)."""
+
+    pytestmark = [
+        pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning"),
+        pytest.mark.filterwarnings("ignore::DeprecationWarning"),
+        pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning"),
+        pytest.mark.asyncio(loop_scope="module"),
+    ]
+
+    async def test_recovery_success_records_marker_and_generation(self, recovery_app, e2e_user):
+        """AC15: success changes the password, records the digest, increments the generation, revokes sessions/jtis."""
+        import jwt as pyjwt
+
+        client, db_pool = recovery_app
+        login = await client.post(
+            "/api/v1/login",
+            json={"username": e2e_user["username"], "password": e2e_user["password"]},
+            headers={"X-Auth-Method": "BasicAuth"},
+        )
+        assert login.status == 200, await login.text()
+        old_jti = pyjwt.decode((await login.json())["token"], options={"verify_signature": False})["jti"]
+        before = await _recovery_state(db_pool, e2e_user["username"])
+
+        _, confirm_token = await _request_and_confirm_token(client, email=e2e_user["email"])
+        resp = await _post_confirm(client, confirm_token, "TxSuccessPw1!")
+        assert resp.status == 202
+        after = await _recovery_state(db_pool, e2e_user["username"])
+        assert after[0] != before[0]
+        assert after[1] == before[1] + 1
+        assert after[2] == before[2] + 1
+
+        from navigator_auth.backends.oauth2.code_backend import AccessTokenStorage
+        from navigator_auth.handlers.recovery.handler import PasswordRecoveryHandler
+
+        storage = AccessTokenStorage()
+        try:
+            assert await storage.is_revoked(old_jti) is True
+        finally:
+            await storage.redis.aclose()
+        async with aioredis.Redis(connection_pool=PasswordRecoveryHandler._pool) as r:
+            assert await r.get(f"user:{e2e_user['username']}") is None
+
+    async def test_recovery_revocation_failure_rolls_back(self, recovery_app, e2e_user, monkeypatch):
+        """AC15/AC31/AC32: a strict revoke_user failure -> 503; nothing changes; same confirmation retries OK."""
+        from navigator_auth.handlers.recovery.revoke import RevocationError, SessionRevoker
+
+        client, db_pool = recovery_app
+        before = await _recovery_state(db_pool, e2e_user["username"])
+        _, confirm_token = await _request_and_confirm_token(client, email=e2e_user["email"])
+
+        original = SessionRevoker.revoke_user
+
+        async def failing(self, request, user, *, strict=False):
+            if strict:
+                raise RevocationError("injected")
+            return await original(self, request, user, strict=strict)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(SessionRevoker, "revoke_user", failing)
+            resp = await _post_confirm(client, confirm_token, "TxRollbackPw1!")
+        assert resp.status == 503
+        assert (await resp.json()) == {"error": "temporarily_unavailable"}
+        assert await _recovery_state(db_pool, e2e_user["username"]) == before
+
+        retry = await _post_confirm(client, confirm_token, "TxRollbackPw1!")
+        assert retry.status == 202
+        after = await _recovery_state(db_pool, e2e_user["username"])
+        assert after[1] == before[1] + 1 and after[2] == before[2] + 1
+
+    async def test_recovery_hash_drift_409(self, recovery_app, e2e_user, monkeypatch):
+        """AC15: a hash change between phase 1 and phase 2 answers 409 and consumes nothing."""
+        from navigator_auth.handlers.recovery import handler as handler_module
+
+        client, db_pool = recovery_app
+        _, confirm_token = await _request_and_confirm_token(client, email=e2e_user["email"])
+        real_transition = handler_module.security_transition
+        drifted = set_basic_password("DriftedByOther1!")
+
+        @contextlib.asynccontextmanager
+        async def drifting(*args, **kwargs):
+            await db_pool.execute(
+                f"UPDATE auth.users SET password = '{drifted}' WHERE username = '{e2e_user['username']}'"
+            )
+            async with real_transition(*args, **kwargs) as conn:
+                yield conn
+
+        with monkeypatch.context() as patch:
+            patch.setattr(handler_module, "security_transition", drifting)
+            resp = await _post_confirm(client, confirm_token, "TxDriftPw1!")
+        assert resp.status == 409
+        assert (await resp.json()) == {"error": "credentials_changed"}
+        pwd, _gen, marks = await _recovery_state(db_pool, e2e_user["username"])
+        assert pwd == drifted and marks == 0
+        # Nothing was consumed: the same confirmation still completes.
+        assert (await _post_confirm(client, confirm_token, "TxDriftPw1!")).status == 202
+
+    async def test_recovery_confirmation_transactional(self, recovery_app, e2e_user, monkeypatch):
+        """AC32: concurrent reuse succeeds exactly once; a committed marker rejects replay even if drop_pair fails."""
+        from navigator_auth.handlers.recovery.store import RecoveryTokenStore
+
+        client, _db_pool = recovery_app
+        _, confirm_token = await _request_and_confirm_token(client, email=e2e_user["email"])
+        resps = await asyncio.gather(
+            _post_confirm(client, confirm_token, "TxConcurrent1!"),
+            _post_confirm(client, confirm_token, "TxConcurrent1!"),
+        )
+        statuses = sorted(r.status for r in resps)
+        assert statuses.count(202) == 1
+        assert all(s in (400, 409) for s in statuses if s != 202)
+
+        async def broken_drop(self, recovery_key, confirm_key):
+            raise ConnectionError("redis cleanup down")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(RecoveryTokenStore, "drop_pair", broken_drop)
+            _, confirm2 = await _request_and_confirm_token(client, email=e2e_user["email"])
+            assert (await _post_confirm(client, confirm2, "TxFirstPw1!")).status == 202
+            replay = await _post_confirm(client, confirm2, "TxReplayPw2!")
+        assert replay.status == 400
+
+    async def test_recovery_mfa_failures_503(self, recovery_app, e2e_user, monkeypatch):
+        """AC13/AC14 (recovery): MFA unavailable -> 503 mfa_unavailable; audit fault -> 503; nothing changes."""
+        from types import SimpleNamespace
+
+        from navigator_auth.mfa import events as events_module
+        from navigator_auth.mfa.exceptions import MfaStorageError
+        from navigator_auth.mfa.security import advisory_user_lock
+
+        client, db_pool = recovery_app
+        before = await _recovery_state(db_pool, e2e_user["username"])
+        _, confirm_token = await _request_and_confirm_token(client, email=e2e_user["email"])
+
+        @contextlib.asynccontextmanager
+        async def unavailable(_app):
+            yield SimpleNamespace(available=False)
+
+        class _AuditFails:
+            @contextlib.asynccontextmanager
+            async def user_lock(self, uid):
+                async with advisory_user_lock(db_pool, uid) as conn:
+                    yield conn
+
+            async def bump_version(self, conn, uid):
+                return 1
+
+            async def write_audit(self, conn, entry):
+                raise MfaStorageError("audit write failed")
+
+        async def _revoke_all(*_args, **_kwargs):
+            return 0
+
+        @contextlib.asynccontextmanager
+        async def audit_fails(_app):
+            yield SimpleNamespace(
+                available=True,
+                security=_AuditFails(),
+                trusted_devices=SimpleNamespace(revoke_all=_revoke_all),
+            )
+
+        with monkeypatch.context() as patch:
+            patch.setattr(events_module, "mfa_services_lease", unavailable)
+            resp = await _post_confirm(client, confirm_token, "TxMfaPw1!x")
+        assert resp.status == 503
+        assert (await resp.json()) == {"error": "mfa_unavailable"}
+        assert await _recovery_state(db_pool, e2e_user["username"]) == before
+
+        with monkeypatch.context() as patch:
+            patch.setattr(events_module, "mfa_services_lease", audit_fails)
+            resp = await _post_confirm(client, confirm_token, "TxMfaPw1!x")
+        assert resp.status == 503
+        assert (await resp.json()) == {"error": "temporarily_unavailable"}
+        assert await _recovery_state(db_pool, e2e_user["username"]) == before
+
+        assert (await _post_confirm(client, confirm_token, "TxMfaPw1!x")).status == 202
+
+    async def test_recovery_single_connection(self, recovery_app, e2e_user, single_connection_authdb):
+        """AC10: recovery completion finishes on a one-connection authdb within 10 s; no acquire under the lock."""
+        from aiohttp.test_utils import make_mocked_request
+
+        from navigator_auth.handlers.recovery.handler import PasswordRecoveryHandler
+
+        client, db_pool = recovery_app
+        _CAPTURED_NOTIFICATIONS.clear()
+        resp = await client.post("/api/v1/password-recovery", json={"email": e2e_user["email"]})
+        assert resp.status == 200
+        recovery_token = _CAPTURED_NOTIFICATIONS[0].token
+
+        app = web.Application()
+        app["authdb"] = single_connection_authdb
+        app["auth"] = client.server.app["auth"]
+
+        async def run(method, path, handler_name, body=None, match_info=None):
+            request = make_mocked_request(method, path, app=app, match_info=match_info or {})
+            view = PasswordRecoveryHandler(request)
+
+            async def _body():
+                return body
+
+            view.json_data = _body
+            return await asyncio.wait_for(getattr(view, handler_name)(), 10)
+
+        step2 = await run(
+            "GET",
+            f"/api/v1/password-recovery/{recovery_token}",
+            "_step2_validate",
+            match_info={"token": recovery_token},
+        )
+        assert step2.status == 200
+        confirm_token = _json_mod.loads(step2.text)["token"]
+        pw = "TxSingleConn1!"
+        step3 = await run(
+            "POST",
+            "/api/v1/password-recovery/confirm",
+            "_step3_confirm",
+            body={"password": pw, "confirm_password": pw, "token": confirm_token},
+        )
+        assert step3.status == 202, step3.text
+        assert single_connection_authdb.acquires_inside_lock == []
+        _pwd, gen, marks = await _recovery_state(db_pool, e2e_user["username"])
+        assert gen >= 1 and marks == 1

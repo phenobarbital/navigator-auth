@@ -195,6 +195,45 @@ class RecoveryTokenStore:
             return None
         return self._decode_confirmation(raw)
 
+    async def current_confirmation(self, token: str) -> Optional[ConfirmationPayload]:
+        """Return the confirmation only if it is still valid for completion; never consumes it.
+
+        Valid means: the stage-2 record exists, its HMAC signature verifies, it has not
+        outlived ``AUTH_RECOVERY_CONFIRM_TTL``, and it is the CURRENT rotation of its
+        stage-1 recovery record (the record's ``confirm_key`` back-pointer equals this
+        token's hash). Called by step 3 while the per-user advisory lock is held.
+        A missing stage-1 record fails closed (the user re-requests recovery).
+
+        Args:
+            token: The raw stage-2 confirmation token.
+
+        Returns:
+            The verified payload, or None when it is missing, forged, expired or rotated out.
+        """
+        confirm_hash = _hash_token(token)
+        async with aioredis.Redis(connection_pool=self._pool) as redis:
+            raw = await redis.get(f"{CONFIRM_KEY_PREFIX}{confirm_hash}")
+            if not raw:
+                return None
+            try:
+                confirmation = self._decode_confirmation(raw)
+            except (KeyError, ValueError, TypeError):
+                return None
+            if confirmation is None:
+                return None
+            recovery_raw = await redis.get(f"{RECOVERY_KEY_PREFIX}{confirmation.recovery_key}")
+        if float(confirmation.issued_at) + AUTH_RECOVERY_CONFIRM_TTL < time.time():
+            return None
+        if not recovery_raw:
+            return None
+        try:
+            pointer = json_decoder(recovery_raw).get("confirm_key")
+        except (KeyError, ValueError, TypeError, AttributeError):
+            return None
+        if not pointer or not secrets.compare_digest(str(pointer), confirm_hash):
+            return None
+        return confirmation
+
     async def consume_confirmation(self, token: str) -> Optional[ConfirmationPayload]:
         """GETDEL — single use."""
         key = f"{CONFIRM_KEY_PREFIX}{_hash_token(token)}"
