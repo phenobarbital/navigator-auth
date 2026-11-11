@@ -169,3 +169,11 @@ env/**/.env
 # parrot runtime output (OUTPUT_DIR at the project root: generated charts, files)
 /outputs/
 # <<< parrot sdd (managed) <<<
+
+# Local tooling and agent artifacts (not part of the repo)
+.codex/config.toml
+.mcp.json
+agents/
+artifacts/logs/identity-update-tokens-timeout.txt
+artifacts/logs/sdd-coder-usage/
+plugins/
