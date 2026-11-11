@@ -35,10 +35,13 @@ RELEASED = {
     ("passkey", "001_passkey_credentials.sql"): "56ec735aed75c85101da1ef9e60ca3f227ce8a1a135f0c9a0a4e0ae8eef3c710",
 }
 
+# Sets whose files shipped before FEAT-110; newer sets (oauth2, mfa) are covered by their own tests.
+RELEASED_SETS = ["vault", "identity", "passkey"]
+
 
 def test_discover_orders_sets_then_files() -> None:
     """Real catalog: vault → identity → passkey, with ascending names."""
-    found = [(file.migration_set, file.filename) for file in discover()]
+    found = [(file.migration_set, file.filename) for file in discover(RELEASED_SETS)]
     assert found == list(RELEASED)
 
 
@@ -79,7 +82,7 @@ def test_discover_rejects_bad_filename_and_duplicate_prefix(tmp_catalog: Path) -
 
 def test_released_files_are_byte_identical() -> None:
     """Released migrations retain the recorded raw-byte checksums."""
-    found = {(file.migration_set, file.filename): file.checksum for file in discover()}
+    found = {(file.migration_set, file.filename): file.checksum for file in discover(RELEASED_SETS)}
     assert found == RELEASED
 
 
