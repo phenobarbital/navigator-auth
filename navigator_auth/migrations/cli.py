@@ -31,7 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--check", action="store_true", help="report applied/pending/changed; change nothing")
     up.add_argument("--dsn", help="admin DSN (highest precedence)")
     up.add_argument("--user", help="admin user; password from AUTH_ADMIN_PWD or a prompt")
-    up.add_argument("--set", dest="sets", action="append", choices=MIGRATION_SETS, help="restrict to one set; repeatable")
+    up.add_argument(
+        "--set", dest="sets", action="append", choices=MIGRATION_SETS, help="restrict to one set; repeatable"
+    )
     up.add_argument("--runtime-role", help="application database role; defaults to DBUSER")
     up.add_argument("--reapply-changed", action="store_true", help="also re-run files whose checksum changed")
     up.add_argument("--fail-fast", action="store_true", help="stop at the first failed file")
@@ -155,7 +157,11 @@ async def run(args: argparse.Namespace, *, connect: Callable[[str], Awaitable[An
                 missing.extend(await missing_runtime_access(conn, migration_set, runtime_role))
             for error in missing:
                 print(f"missing access: {error}")
-            return EXIT_PENDING if missing or any(status.state is not MigrationState.APPLIED for status in statuses) else EXIT_OK
+            return (
+                EXIT_PENDING
+                if missing or any(status.state is not MigrationState.APPLIED for status in statuses)
+                else EXIT_OK
+            )
 
         report = await upgrade(
             conn,

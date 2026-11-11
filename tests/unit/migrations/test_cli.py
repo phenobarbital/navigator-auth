@@ -13,7 +13,6 @@ from navigator_auth import conf
 from navigator_auth.migrations import cli
 from navigator_auth.migrations.runner import MigrationError
 
-
 ROOT = Path(__file__).parents[3]
 
 
@@ -127,6 +126,7 @@ def test_cli_exit_codes(
         argv = ["self", "upgrade", "--dsn", "postgres://a:b@db/x"]
         connector = bad_connect
     else:
+
         async def invalid_role(conn: object, role: str | None) -> str:
             raise MigrationError("invalid runtime role")
 
@@ -162,10 +162,13 @@ def test_cli_check_does_not_write(fake_conn: object, tmp_catalog: Path, monkeypa
         return fake_conn
 
     monkeypatch.setattr(cli_module, "validate_runtime_role", valid_role)
-    assert cli.main(
-        ["self", "upgrade", "--check", "--runtime-role", "runtime", "--dsn", "postgres://a:b@db/x"],
-        connect=connect,
-    ) == 1
+    assert (
+        cli.main(
+            ["self", "upgrade", "--check", "--runtime-role", "runtime", "--dsn", "postgres://a:b@db/x"],
+            connect=connect,
+        )
+        == 1
+    )
     assert fake_conn.writes() == []
 
 
@@ -185,10 +188,13 @@ def test_check_reports_missing_runtime_access_without_writes(
     fake_conn.respond("has_table_privilege", False)
     fake_conn.respond("FROM pg_depend", [])
     monkeypatch.setattr(cli_module, "validate_runtime_role", valid_role)
-    assert cli.main(
-        ["self", "upgrade", "--check", "--runtime-role", "runtime", "--dsn", "postgres://a:b@db/x"],
-        connect=connect,
-    ) == 1
+    assert (
+        cli.main(
+            ["self", "upgrade", "--check", "--runtime-role", "runtime", "--dsn", "postgres://a:b@db/x"],
+            connect=connect,
+        )
+        == 1
+    )
     assert "missing access: runtime lacks SELECT on auth.user_vault_secrets" in capsys.readouterr().out
     assert fake_conn.writes() == []
     assert all("runtime" not in sql for _, sql, _ in fake_conn.statements)
