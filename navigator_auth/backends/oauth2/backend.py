@@ -2169,7 +2169,9 @@ class Oauth2Provider(BaseAuthBackend):
                 )
                 try:
                     encoded_payload = access_token.split(".")[1]
-                    access_payload = json.loads(base64.urlsafe_b64decode(encoded_payload + "=" * (-len(encoded_payload) % 4)))
+                    access_payload = json.loads(
+                        base64.urlsafe_b64decode(encoded_payload + "=" * (-len(encoded_payload) % 4))
+                    )
                     jti = access_payload.get("jti", jti)
                 except (IndexError, TypeError, ValueError):
                     pass
@@ -2212,7 +2214,9 @@ class Oauth2Provider(BaseAuthBackend):
                     await self.access_token_storage.save(rec)
         except (SecurityStateError, MfaStorageError) as err:
             self.logger.error(f"Oauth2: token issuance unavailable: {type(err).__name__}")
-            return self._error_response("temporarily_unavailable", "Token issuance temporarily unavailable.", status=503)
+            return self._error_response(
+                "temporarily_unavailable", "Token issuance temporarily unavailable.", status=503
+            )
 
         response = {
             "access_token": access_token,
@@ -2382,7 +2386,9 @@ class Oauth2Provider(BaseAuthBackend):
                 )
                 try:
                     encoded_payload = access_token.split(".")[1]
-                    access_payload = json.loads(base64.urlsafe_b64decode(encoded_payload + "=" * (-len(encoded_payload) % 4)))
+                    access_payload = json.loads(
+                        base64.urlsafe_b64decode(encoded_payload + "=" * (-len(encoded_payload) % 4))
+                    )
                     jti = access_payload.get("jti", jti)
                 except (IndexError, TypeError, ValueError):
                     pass
@@ -3146,7 +3152,9 @@ class Oauth2Provider(BaseAuthBackend):
                 await self.code_storage.save_code(carrier)
         except (SecurityStateError, MfaStorageError) as err:
             self.logger.error(f"Oauth2: cannot read the credential generation: {type(err).__name__}")
-            return self._error_response("temporarily_unavailable", "Device approval temporarily unavailable.", status=503)
+            return self._error_response(
+                "temporarily_unavailable", "Device approval temporarily unavailable.", status=503
+            )
 
         # Stamp device record.
         dc.status = DeviceCodeStatus.APPROVED

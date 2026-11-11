@@ -26,7 +26,6 @@ from navigator_auth.backends.oauth2.models import (
     OauthGrant,
     OauthAccessTokenRecord,
     DeviceCodeStatus,
-    OauthDeviceCode,
 )
 from navigator_auth.backends.oauth2.code_backend import MemoryDeviceCodeStorage
 from navigator_auth.backends.oauth2.pkce import generate_challenge

@@ -8,19 +8,16 @@ Tests:
   test_introspect_requires_client_auth     — unauthenticated/bad secret → 401; missing token → 400
 """
 
-import asyncio
 from contextlib import asynccontextmanager
-import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
 from navigator_auth.backends.oauth2.models import (
     OAuthClient,
-    OauthUser,
     OauthAccessTokenRecord,
     OauthRefreshToken,
 )
