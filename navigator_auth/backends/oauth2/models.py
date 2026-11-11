@@ -18,7 +18,8 @@ FEAT-095:
   TASK-044 — resource (RFC 8707) on OauthAuthorizationCode.
 """
 
-from typing import Optional, Union
+from collections.abc import Mapping
+from typing import Any, Optional, Union
 from datetime import datetime, timedelta
 from enum import Enum
 import json
@@ -236,6 +237,8 @@ class OauthAuthorizationCode(BaseModel):
     # Single-use enforcement (B5).
     used: bool = Field(default=False)
     used_at: Optional[datetime] = Field(default=None)
+    # FEAT-106 review fix (M4): 0 preserves compatibility with legacy carriers.
+    generation: int = Field(default=0)
 
 
 # ---------------------------------------------------------------------------
@@ -265,9 +268,20 @@ class OauthRefreshToken(BaseModel):
     revoked_at: Optional[datetime] = Field(default=None)
     # 'rotated' | 'revoked' | 'reuse_detected' | 'cascade'
     revoked_reason: Optional[str] = Field(default=None)
+    # FEAT-106 review fix (M4): copied from the issuing carrier.
+    generation: int = Field(default=0)
 
 
 # ---------------------------------------------------------------------------
+def is_oauth_user_token(payload: Mapping[str, Any]) -> bool:
+    """Return whether ``payload`` is an OAuth access token for a user.
+
+    BasicAuth JWTs have no ``client_id`` and client-credentials tokens have no
+    ``user_id``; neither participates in OAuth credential-generation checks.
+    """
+    return bool(payload) and all(payload.get(key) not in (None, "") for key in ("client_id", "user_id", "jti"))
+
+
 # OauthGrant — durable consent record (TASK-027)
 # ---------------------------------------------------------------------------
 

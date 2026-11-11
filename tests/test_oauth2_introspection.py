@@ -8,18 +8,16 @@ Tests:
   test_introspect_requires_client_auth     — unauthenticated/bad secret → 401; missing token → 400
 """
 
-import asyncio
-import hmac
+from contextlib import asynccontextmanager
 import secrets
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
 from navigator_auth.backends.oauth2.models import (
     OAuthClient,
-    OauthUser,
     OauthAccessTokenRecord,
     OauthRefreshToken,
 )
@@ -74,6 +72,13 @@ def _make_provider(
     provider.refresh_token_storage = refresh_token_storage or MagicMock()
     provider.device_code_storage = MagicMock()
     provider.grant_storage = MagicMock()
+    # FEAT-106 review fixes TASK-185: this memory harness has no authdb.
+    @asynccontextmanager
+    async def _no_generation(request, user_id):
+        yield None, 0
+
+    provider._user_generation = _no_generation
+    provider._generation_ok = AsyncMock(return_value=True)
     provider.code_storage = MagicMock()
 
     # IDP mock

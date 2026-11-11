@@ -10,7 +10,7 @@ Supporting:
 """
 
 import contextlib
-from typing import Any, Union
+from typing import Any, Optional, Union
 from collections.abc import Awaitable, Callable, Iterable
 import fnmatch
 import importlib
@@ -38,6 +38,8 @@ from .vault.integration import (
 from .identity.migrations import setup_identity_columns
 from .security_state import setup_security_state_tables
 from .backends.idp import IdentityProvider
+from .backends.oauth2.models import is_oauth_user_token
+from .security_state.store import SecurityStateError, generation_matches, generation_of
 from .libs.expiry import expiry_fields
 from .identities import AuthUser
 from .conf import (
@@ -1066,6 +1068,15 @@ class AuthHandler:
                 self.logger.warning(f"Auth Middleware: unable to check revocation of jti={jti}: {exc}")
         return False
 
+    async def _oauth_generation_ok(self, request: web.Request, payload: Optional[dict]) -> bool:
+        """Return whether an OAuth user token carries the current credential generation."""
+        if not payload or not is_oauth_user_token(payload):
+            return True
+        pool = request.app.get("authdb") if request.app is not None else None
+        if pool is None:
+            raise SecurityStateError("authdb is not configured")
+        return await generation_matches(pool, int(payload["user_id"]), generation_of(payload))
+
     @web.middleware
     async def auth_middleware(
         self,
@@ -1104,7 +1115,11 @@ class AuthHandler:
                 try:
                     token = await self._idp.get_payload(request)
                     _, payload = self._idp.decode_token(code=token)
-                    if payload and not await self._token_is_revoked(payload):
+                    if (
+                        payload
+                        and not await self._token_is_revoked(payload)
+                        and await self._oauth_generation_ok(request, payload)
+                    ):
                         session = await get_session(request, payload, new=False)
                         if session:
                             user = await self.get_session_user(session)
@@ -1133,6 +1148,14 @@ class AuthHandler:
             raise self.Unauthorized(reason=err.message, exception=err) from err
         if payload and await self._token_is_revoked(payload):
             raise self.Unauthorized(reason="Token has been revoked")
+        if payload:
+            try:
+                generation_ok = await self._oauth_generation_ok(request, payload)
+            except (SecurityStateError, ValueError, TypeError) as err:
+                self.logger.error(f"Auth Middleware: credential generation check failed: {type(err).__name__}")
+                raise web.HTTPServiceUnavailable(reason="Authentication temporarily unavailable") from err
+            if not generation_ok:
+                raise self.Unauthorized(reason="Token has been revoked")
         try:
             if payload:
                 ## check if user has a session:
