@@ -65,7 +65,7 @@ async def test_unsupported_redis_makes_services_unavailable(monkeypatch) -> None
 
     pool = SimpleNamespace(disconnect=AsyncMock())
     monkeypatch.setattr(services.auth_conf, "AUTH_OTP_SECRET", "test-secret")
-    monkeypatch.setattr(services, "setup_mfa_tables", AsyncMock(return_value=True))
+    monkeypatch.setattr(services, "mfa_tables_present", AsyncMock(return_value=True))
     monkeypatch.setattr(services.aioredis.ConnectionPool, "from_url", lambda *args, **kwargs: pool)
     monkeypatch.setattr(MfaChallengeStore, "check_capabilities", AsyncMock(side_effect=MfaStorageError("old Redis")))
     result = await services.build_mfa_services({"authdb": object()}, object())
