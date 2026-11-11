@@ -43,10 +43,12 @@ import os
 # ---------------------------------------------------------------------------
 # Environment MUST be set before navconfig / navigator_auth get imported.
 # ---------------------------------------------------------------------------
-os.environ.setdefault(
-    "AUTHENTICATION_BACKENDS",
-    "navigator_auth.backends.oauth2.Oauth2Provider",
-)
+# Passed to AuthHandler(backends=...) — NOT only exported as AUTHENTICATION_BACKENDS,
+# because navigator_auth.conf ends with ``from settings.settings import *``: run from
+# the repository root, the local dev settings would otherwise decide the backend list
+# (they enable NoAuth, APIKeyAuth, Azure, ...). The env var is kept for tools that read it.
+_BACKENDS: list[str] = ["navigator_auth.backends.oauth2.Oauth2Provider"]
+os.environ.setdefault("AUTHENTICATION_BACKENDS", ",".join(_BACKENDS))
 # Keep OAuth2 clients in memory: no auth.clients table needed.
 os.environ.setdefault("OAUTH2_CLIENT_STORAGE", "memory")
 # Short-lived access tokens make the example easier to reason about.
@@ -64,6 +66,23 @@ from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY  # noqa: E402
 from navigator_auth.decorators import is_authenticated, user_session  # noqa: E402
 from navigator_auth.exceptions import UserNotFound  # noqa: E402
 from navigator_auth.models import User  # noqa: E402
+import navigator_auth.conf as nav_conf  # noqa: E402
+
+#: RFC 7518 §3.2: an HS256 key must be at least 32 bytes.
+_MIN_SECRET_BYTES = 32
+
+
+def _warn_on_short_secret() -> None:
+    """Log a warning when navigator_auth.conf.SECRET_KEY is shorter than 32 bytes.
+
+    The key comes from navconfig (``env/.env`` wins over ``os.environ.setdefault``),
+    so the example cannot override it; it tells the operator which variable to fix.
+    The key itself is never logged.
+    """
+    key = nav_conf.SECRET_KEY
+    key_length = len(key.encode("utf-8")) if isinstance(key, str) else len(key) if key else 0
+    if key_length < _MIN_SECRET_BYTES:
+        logging.warning("AUTH_SECRET_KEY is %d bytes; use at least %d bytes.", key_length, _MIN_SECRET_BYTES)
 
 
 HERE = Path(__file__).parent
@@ -214,8 +233,14 @@ async def me(request: web.Request, *, session=None, user=None) -> web.StreamResp
 def make_app() -> web.Application:
     app = web.Application()
 
+    _warn_on_short_secret()
+
     # No PostgreSQL for this example: memory client storage + demo IdP.
-    auth = AuthHandler(enable_authdb=False)
+    # ``backends`` pins exactly the backend this example demonstrates (see _BACKENDS),
+    # and ``authz_backends=[]`` disables *authorization* backends: an inherited
+    # ``allow_hosts`` (ALLOWED_HOSTS defaults to ``localhost*``) would let every browser
+    # request through without a session.
+    auth = AuthHandler(backends=_BACKENDS, authz_backends=[], enable_authdb=False)
 
     demo_idp = DemoIdentityProvider(DEMO_USERS)
     auth._idp = demo_idp
