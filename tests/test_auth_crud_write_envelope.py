@@ -16,6 +16,7 @@ TASK-153); membership rows are created with PUT and removed with DELETE
 (TASK-154).
 """
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -33,6 +34,7 @@ from navigator_auth.handlers import setup_handlers
 from navigator_auth.handlers.groups import GroupManager, GroupPermissionManager, UserGroupManager
 from navigator_auth.handlers.guards import OwnerOrSuperuserGuard
 from navigator_auth.handlers.permissions import PermissionHandler
+from navigator_auth.handlers.users.passwd import check_password
 from navigator_auth.handlers.users.role import UserRoleHandler
 from navigator_auth.handlers.users.session import UserSession
 from navigator_auth.handlers.users.user import UserManager
@@ -149,6 +151,50 @@ class FakeConn:
 
     async def __aexit__(self, *exc):
         return False
+
+
+class FakeTransitionConn:
+    """The connection ``security_transition`` yields to the two password paths.
+
+    Since the FEAT-106 review fixes, password writes are SQL on the transition
+    connection: a ``SELECT … FOR UPDATE`` re-read of the captured hash, then one
+    ``UPDATE … RETURNING``. ``stored`` is what the re-read returns (the handler
+    coalesces a never-set password to ``''``).
+    """
+
+    def __init__(self, stored):
+        self.stored = stored
+        self.updates = []
+
+    async def fetchval(self, sql, *args):
+        statement = sql.lstrip()
+        if statement.startswith("SELECT"):
+            return self.stored
+        if statement.startswith("UPDATE"):
+            self.updates.append((sql, args))
+            return args[0]
+        raise AssertionError(f"unexpected statement on the transition connection: {sql}")
+
+
+def _password_transition(conn, revoker=None):
+    """Patches running the password paths on ``conn`` with no MFA services or session store."""
+
+    @asynccontextmanager
+    async def _transition(app, user_id, event, **kwargs):
+        yield conn
+
+    patches = [
+        patch("navigator_auth.handlers.users.session.security_transition", new=_transition),
+        patch("navigator_auth.handlers.users.session.increment_generation", new=AsyncMock()),
+    ]
+    if revoker is not None:
+        patches.append(
+            patch(
+                "navigator_auth.handlers.users.session.PasswordRecoveryHandler.session_revoker",
+                new=MagicMock(return_value=revoker),
+            )
+        )
+    return _Ctx(patches)
 
 
 class FakeDB:
@@ -539,15 +585,19 @@ class TestLegitimateAdministration:
             app={"authdb": MagicMock(acquire=AsyncMock(return_value=db.conn))},
         )
         handler.json_data = AsyncMock(return_value={"password": "S3cret!pass"})
+        conn = FakeTransitionConn(stored="")  # created without a password
+        revoker = MagicMock(revoke_user=AsyncMock(return_value=0))
         with (
             patch("navigator_auth.handlers.users.session.get_session", new=AsyncMock(return_value=session)),
             patch.object(User, "get", new=AsyncMock(return_value=target)),
-            patch.object(User, "update", new=AsyncMock(return_value=target)) as update,
+            _password_transition(conn, revoker),
         ):
-            await handler.password_reset(request)
-        update.assert_awaited_once()
-        assert target.password
-        assert target.is_new is True
+            response = await handler.password_reset(request)
+        assert response.status == 202
+        [(sql, (user_id, new_hash))] = conn.updates
+        assert user_id == 123
+        assert "is_new = true" in sql
+        assert check_password(new_hash, "S3cret!pass")
 
     @pytest.mark.asyncio
     async def test_role_grant_end_to_end(self, app, grantor_session, admin_session, db, pdp_with_pack):
@@ -636,15 +686,20 @@ class TestPasswordPathsUnchanged:
         handler = UserSession()
         handler.get_json = AsyncMock(return_value={"password": "newpass-456", "old_password": "oldpass-123"})
         request = self._request("/api/v2/user/set_password", {}, db)
+        conn = FakeTransitionConn(stored=old_hash)
         with (
             patch("navigator_auth.handlers.users.session.get_session", new=AsyncMock(return_value=session)),
             patch.object(User, "get", new=AsyncMock(return_value=user)),
             patch.object(User, "update", new=AsyncMock(return_value=user)) as update,
+            _password_transition(conn),
         ):
             response = await handler.password_change(request)
         assert response.status == 202
-        update.assert_awaited_once()
-        assert check_password(user.password, "newpass-456")
+        # The write is one UPDATE on the transition connection, not Model.update.
+        update.assert_not_awaited()
+        [(_sql, (user_id, new_hash))] = conn.updates
+        assert user_id == OWNER_ID
+        assert check_password(new_hash, "newpass-456")
 
     @pytest.mark.asyncio
     async def test_password_change_wrong_old_password_refused(self, db):
@@ -676,14 +731,24 @@ class TestPasswordPathsUnchanged:
         handler = UserSession()
         handler.json_data = AsyncMock(return_value={"password": "reset-789"})
         request = self._request(f"/api/v2/user/password_reset/{VICTIM_ID}", {"userid": str(VICTIM_ID)}, db)
+        conn = FakeTransitionConn(stored="")
+        revoker = MagicMock(revoke_user=AsyncMock(return_value=1))
         with (
             patch("navigator_auth.handlers.users.session.get_session", new=AsyncMock(return_value=session)),
             patch.object(User, "get", new=AsyncMock(return_value=user)),
             patch.object(User, "update", new=AsyncMock(return_value=user)) as update,
+            _password_transition(conn, revoker),
         ):
-            await handler.password_reset(request)
-        update.assert_awaited_once()
-        assert user.password and user.is_new is True
+            response = await handler.password_reset(request)
+        assert response.status == 202
+        update.assert_not_awaited()
+        [(sql, (user_id, new_hash))] = conn.updates
+        assert user_id == VICTIM_ID
+        assert "is_new = true" in sql
+        assert check_password(new_hash, "reset-789")
+        # A reset revokes the target's sessions, strictly.
+        revoker.revoke_user.assert_awaited_once()
+        assert revoker.revoke_user.await_args.kwargs == {"strict": True}
 
     @pytest.mark.asyncio
     async def test_password_reset_refused_for_non_superuser(self, db):

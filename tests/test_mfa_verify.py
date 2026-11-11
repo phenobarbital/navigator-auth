@@ -256,6 +256,24 @@ async def test_mfa_verify_finalizes_session(client):
 
 
 @pytest.mark.asyncio
+async def test_verify_adapter_email_without_conn_totp_with_lock_conn(client):
+    """AC33: the handler adapter omits conn for email and forwards it for TOTP."""
+    record = _record().model_copy(update={"providers": ("totp",), "preferred": "totp"})
+    client.mfa_services.store = FakeStore(record)
+    provider = SimpleNamespace(verify=AsyncMock(return_value=True))
+    client.mfa_services.providers = {"totp": provider}
+    client.mfa_services.evaluate = AsyncMock(
+        return_value=_evaluation(state=MfaState.TOTP, providers=("totp",), preferred="totp")
+    )
+
+    response, body = await _post(client, f"{MFA_PREFIX}/verify", challenge="challenge", provider="totp", code="correct")
+
+    assert response.status == 200
+    assert body == {"ok": True}
+    assert provider.verify.await_args.kwargs["conn"] is not None
+
+
+@pytest.mark.asyncio
 async def test_remember_device_only_when_allowed(client):
     """Trusted-device issuance requires a strong factor and a positive lifetime."""
     response, _ = await _post(

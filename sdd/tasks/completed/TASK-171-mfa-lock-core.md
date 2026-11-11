@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — Review fixes: OAuth2 second factor, MFA key rotation, atomic and deadlock-free security transitions
 **Spec**: `sdd/specs/basicauth-otp-2fa-review-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -519,3 +519,9 @@ When you pick up this task:
 **Notes**: What was implemented, any deviations from scope, issues encountered.
 
 **Deviations from spec**: `AUTH_MFA_LOCK_TIMEOUT` is parsed with `float(config.get(...))` because navconfig has no `getfloat`.
+
+---
+
+## Completion Note
+
+Implemented by seat gpt-5.6-terra (codex). Merge-tier validation (chunk 2): 101 passed. File fidelity checked (no unlisted files). Closed via `parrot sdd task close` (no recorded review EvidenceRef for `finalize`).

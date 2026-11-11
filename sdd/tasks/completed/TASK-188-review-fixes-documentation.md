@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — Review fixes: OAuth2 second factor, MFA key rotation, atomic and deadlock-free security transitions
 **Spec**: `sdd/specs/basicauth-otp-2fa-review-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-178, TASK-180, TASK-183, TASK-187
@@ -386,3 +386,9 @@ When you pick up this task:
 **Notes**: What was implemented, any deviations from scope, issues encountered.
 
 **Deviations from spec**: none | describe if any
+
+---
+
+## Completion Note
+
+Haiku (native) delivered nothing (Bash blocked); gemini and codex-spark seats failed on infrastructure (missing parrot.clients.google module; unsupported codex-spark model). Implemented by the orchestrator in the a1 sub-worktree; merged by hand (`git merge --no-ff`; the engine merge looked at a stale failed a2 record). tests/test_mfa_review_fixes_docs.py: 4 passed; documented symbols verified present in navigator_auth/. Possibly stale (not in scope): docs/password_recovery.rst and docs/settings.rst. Closed via `parrot sdd task close`.

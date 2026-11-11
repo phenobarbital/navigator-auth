@@ -1,7 +1,9 @@
 """E-mail OTP — the zero-enrolment floor (FEAT-106, spec Module 4)."""
 
+import asyncio
 import hashlib
 import hmac
+import logging
 import secrets
 import string
 from collections.abc import Mapping
@@ -15,6 +17,8 @@ from navigator_auth import conf as auth_conf
 from .abstract import AbstractOTPProvider
 from .notify import invoke_callback
 from .types import PROVIDER_EMAIL, EnrollmentAuthorization, MfaChallenge, OtpNotificationPayload
+
+logger = logging.getLogger("navigator.mfa.email")
 
 
 def hash_code(code: str, secret: bytes) -> str:
@@ -100,7 +104,16 @@ class EmailOTPProvider(AbstractOTPProvider):
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=self._ttl),
             found=address is not None,
         )
-        await invoke_callback(self._callback, payload, label="otp-email")
+        # The send runs while the caller may hold the per-user advisory lock and its transaction, so a slow
+        # delivery backend must not stall every other transition for the user: bound it by the lock timeout.
+        # A timeout is contained like any other callback failure; the HTTP response stays identical.
+        try:
+            await asyncio.wait_for(
+                invoke_callback(self._callback, payload, label="otp-email"),
+                timeout=float(auth_conf.AUTH_MFA_LOCK_TIMEOUT),
+            )
+        except asyncio.TimeoutError:
+            logger.warning("MFA e-mail OTP callback timed out after %ss", auth_conf.AUTH_MFA_LOCK_TIMEOUT)
         return {"code_hash": hash_code(code, self._secret)}
 
     async def verify(

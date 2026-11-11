@@ -7,11 +7,13 @@ from navconfig.logging import logger
 from navigator_auth.conf import AUTH_SESSION_OBJECT
 from .errors import PreconditionFailed, AccessDenied
 from .policies import PolicyEffect, Environment
-from .context import EvalContext
+from .context import EvalContext, effective_userinfo
 from .decorators import groups_protected
 from .policies.resources import ResourceType
+
 if TYPE_CHECKING:
     from .policies.evaluator import FilteredResources
+
 
 class Guardian:
     """Guardian.
@@ -20,44 +22,36 @@ class Guardian:
 
     Given a PDP it can decide via several methods if an inquiry is allowed or not.
     """
+
     def __init__(self, pdp: Callable):
         self.pdp = pdp
 
     def is_authenticated(self, request: web.Request):
         if request.get("authenticated", False) is False:
             # check credentials:
-            raise AccessDenied(
-                reason="User not authenticated."
-            )
+            raise AccessDenied(reason="User not authenticated.")
 
     async def get_user(self, request: web.Request) -> tuple:
         try:
             session = await get_session(request, new=False)
         except RuntimeError as ex:
-            logger.error('NAV User Session system is not installed.')
-            raise PreconditionFailed(
-                reason="Missing User session for validating Access.",
-                exception=ex
-            ) from ex
+            logger.error("NAV User Session system is not installed.")
+            raise PreconditionFailed(reason="Missing User session for validating Access.", exception=ex) from ex
         try:
-            user = session.decode('user')
+            user = session.decode("user")
         except KeyError:
             user = None
         except AttributeError as ex:
-            logger.error(
-                f"User is not authenticated: {ex}"
-            )
+            logger.error(f"User is not authenticated: {ex}")
             user = None
         # Fallback: extract user info from session object when user is None
         if user is None:
             try:
                 userinfo = session[AUTH_SESSION_OBJECT]
+                userinfo = effective_userinfo(request, userinfo)
                 if isinstance(userinfo, dict) and userinfo:
                     user = userinfo
-                    logger.debug(
-                        "ABAC: user object not in session, "
-                        "using session userinfo as fallback."
-                    )
+                    logger.debug("ABAC: user object not in session, " "using session userinfo as fallback.")
             except (KeyError, TypeError):
                 pass
         return (session, user)
@@ -84,6 +78,7 @@ class Guardian:
         try:
             from navigator_auth.conf import AUTH_SESSION_OBJECT
             from navigator_session import get_session
+
             session = await get_session(request, new=False)
             userinfo = session.get(AUTH_SESSION_OBJECT, {}) if session else {}
         except Exception:
@@ -111,11 +106,7 @@ class Guardian:
         """
         self.is_authenticated(request=request)
         session, user = await self.get_user(request)
-        return await self.pdp.authorize(
-            request=request,
-            session=session,
-            user=user
-        )
+        return await self.pdp.authorize(request=request, session=session, user=user)
 
     async def filter_files(self, files: List[str], request: web.Request):
         """filter_files.
@@ -126,12 +117,7 @@ class Guardian:
         """
         self.is_authenticated(request=request)
         session, user = await self.get_user(request)
-        return await self.pdp.filter_files(
-            request=request,
-            session=session,
-            user=user,
-            files=files
-        )
+        return await self.pdp.filter_files(request=request, session=session, user=user, files=files)
 
     async def has_permission(self, request: web.Request, permissions: list):
         """has_permission.
@@ -146,19 +132,9 @@ class Guardian:
         """
         self.is_authenticated(request=request)
         session, user = await self.get_user(request)
-        return await self.pdp.has_permission(
-            request=request,
-            permission=permissions,
-            session=session,
-            user=user
-        )
+        return await self.pdp.has_permission(request=request, permission=permissions, session=session, user=user)
 
-    async def allowed_groups(
-            self,
-            request: web.Request,
-            groups: list,
-            effect: PolicyEffect = PolicyEffect.ALLOW
-    ):
+    async def allowed_groups(self, request: web.Request, groups: list, effect: PolicyEffect = PolicyEffect.ALLOW):
         """allowed_groups.
 
             Check if user is belong to any permitted groups.
@@ -172,19 +148,9 @@ class Guardian:
         """
         self.is_authenticated(request=request)
         session, user = await self.get_user(request)
-        return await self.pdp.allowed_groups(
-            request=request,
-            session=session,
-            user=user,
-            groups=groups,
-            effect=effect
-        )
+        return await self.pdp.allowed_groups(request=request, session=session, user=user, groups=groups, effect=effect)
 
-    async def is_allowed(
-            self,
-            request: web.Request,
-            **kwargs
-    ):
+    async def is_allowed(self, request: web.Request, **kwargs):
         """is_allowed.
 
             Check if user is allowed to access some object resources and return
@@ -199,12 +165,7 @@ class Guardian:
         self.is_authenticated(request=request)
         session, user = await self.get_user(request)
         _type = type
-        return await self.pdp.is_allowed(
-            request=request,
-            session=session,
-            user=user,
-            **kwargs
-        )
+        return await self.pdp.is_allowed(request=request, session=session, user=user, **kwargs)
 
     async def filter_resources(
         self,
@@ -237,7 +198,7 @@ class Guardian:
         session, user = await self.get_user(request)
 
         # Extract evaluator from PDP
-        evaluator = getattr(self.pdp, '_evaluator', None)
+        evaluator = getattr(self.pdp, "_evaluator", None)
         if evaluator is None or not isinstance(evaluator, PolicyEvaluator):
             # No PolicyEvaluator configured — allow all resources
             return FilteredResources(allowed=list(resources), denied=[])
@@ -245,19 +206,21 @@ class Guardian:
         # Extract userinfo from session
         try:
             from navigator_auth.conf import AUTH_SESSION_OBJECT
+
             userinfo = session[AUTH_SESSION_OBJECT]
         except (KeyError, TypeError):
             userinfo = {}
+        userinfo = effective_userinfo(request, userinfo)
 
         env = Environment()
 
         # Build a lightweight EvalContext
         ctx = EvalContext.__new__(EvalContext)
         ctx.store = {}
-        ctx.store['request'] = request
-        ctx.store['user'] = user
-        ctx.store['userinfo'] = userinfo if isinstance(userinfo, dict) else {}
-        ctx.store['session'] = session
+        ctx.store["request"] = request
+        ctx.store["user"] = user
+        ctx.store["userinfo"] = userinfo if isinstance(userinfo, dict) else {}
+        ctx.store["session"] = session
         ctx._columns = list(ctx.store.keys())
 
         return evaluator.filter_resources(
@@ -269,11 +232,7 @@ class Guardian:
         )
 
     async def filter(
-            self,
-            request: web.Request,
-            objects: list,
-            type: str = 'file',
-            effect: PolicyEffect = PolicyEffect.ALLOW
+        self, request: web.Request, objects: list, type: str = "file", effect: PolicyEffect = PolicyEffect.ALLOW
     ):
         """filter.
 
@@ -292,12 +251,7 @@ class Guardian:
         self.is_authenticated(request=request)
         session, user = await self.get_user(request)
         return await self.pdp.filter_obj(
-            request=request,
-            session=session,
-            user=user,
-            objects=objects,
-            _type=type,
-            effect=effect
+            request=request, session=session, user=user, objects=objects, _type=type, effect=effect
         )
 
 
@@ -305,31 +259,21 @@ class PEP(BaseHandler):
 
     def get_guardian(self, request: web.Request):
         try:
-            return request.app['security']
+            return request.app["security"]
         except (ValueError, KeyError):
-            self.critical(
-                reason="ABAC System is not Installed."
-            )
+            self.critical(reason="ABAC System is not Installed.")
 
-    @groups_protected(groups=['superuser'])
+    @groups_protected(groups=["superuser"])
     async def reload(self, request: web.Request) -> web.Response:
         guardian = self.get_guardian(request)
         ## reload policies:
         await guardian.pdp.reload_policies()
         policies = guardian.pdp.policies()
         if len(policies) > 0:
-            msg = {
-                "message": "Policy PDP reloaded from Storage",
-                "policies": f"{len(policies)} policies"
-            }
-            return self.json_response(
-                response=msg,
-                status=202
-            )
+            msg = {"message": "Policy PDP reloaded from Storage", "policies": f"{len(policies)} policies"}
+            return self.json_response(response=msg, status=202)
         else:
-            self.critical(
-                reason="ABAC Failed to reload Policies"
-            )
+            self.critical(reason="ABAC Failed to reload Policies")
 
     async def authorize(self, request: web.Request) -> web.Response:
         """authorize.
@@ -344,25 +288,11 @@ class PEP(BaseHandler):
         guardian = self.get_guardian(request)
         policy = await guardian.authorize(request=request)
         if policy.effect:
-            msg = {
-                "message": "Access Granted",
-                "response": policy.response,
-                "policy": policy.rule
-            }
-            return self.json_response(
-                response=msg,
-                status=202
-            )
+            msg = {"message": "Access Granted", "response": policy.response, "policy": policy.rule}
+            return self.json_response(response=msg, status=202)
         else:
-            msg = {
-                "error": "Access Denied",
-                "response": policy.response,
-                "policy": policy.rule
-            }
-            return self.json_response(
-                response=msg,
-                status=403
-            )
+            msg = {"error": "Access Denied", "response": policy.response, "policy": policy.rule}
+            return self.json_response(response=msg, status=403)
 
     async def is_allowed(self, request: web.Request) -> web.Response:
         """is_allowed.
@@ -377,43 +307,25 @@ class PEP(BaseHandler):
         guardian = self.get_guardian(request)
         data = await self.data(request)
         try:
-            action = data['action']
+            action = data["action"]
         except KeyError:
-            self.error(
-                reason="IS_ALLOWED Method requires *actions* list on request",
-                status=401
-            )
-        args = {
-            "action": action,
-            "request": request
-        }
+            self.error(reason="IS_ALLOWED Method requires *actions* list on request", status=401)
+        args = {"action": action, "request": request}
         try:
-            args['resource'] = data['resource']
+            args["resource"] = data["resource"]
         except KeyError:
             pass
-        policy = await guardian.is_allowed(
-            **args
-        )
+        policy = await guardian.is_allowed(**args)
         if policy.effect:
-            msg = {
-                "message": f"Action(s) {action!s} Granted",
-                "response": policy.response,
-                "policy": policy.rule
-            }
-            return self.json_response(
-                response=msg,
-                status=202
-            )
+            msg = {"message": f"Action(s) {action!s} Granted", "response": policy.response, "policy": policy.rule}
+            return self.json_response(response=msg, status=202)
         else:
             msg = {
                 "error": f"Access Denied: Action {action!s} not allowed",
                 "response": policy.response,
-                "policy": policy.rule
+                "policy": policy.rule,
             }
-            return self.json_response(
-                response=msg,
-                status=403
-            )
+            return self.json_response(response=msg, status=403)
 
     async def check(self, request: web.Request) -> web.Response:
         """POST /api/v1/abac/check — PBAC decision endpoint.
@@ -429,35 +341,26 @@ class PEP(BaseHandler):
         try:
             data = await self.data(request)
         except Exception as exc:
-            return self.json_response(
-                response={"error": f"Invalid request body: {exc}"},
-                status=400
-            )
+            return self.json_response(response={"error": f"Invalid request body: {exc}"}, status=400)
 
-        user_id = data.get('user', '')
-        resource = data.get('resource', '')
-        action = data.get('action', '')
+        user_id = data.get("user", "")
+        resource = data.get("resource", "")
+        action = data.get("action", "")
 
         if not resource or not action:
-            return self.json_response(
-                response={"error": "Both 'resource' and 'action' are required."},
-                status=400
-            )
+            return self.json_response(response={"error": "Both 'resource' and 'action' are required."}, status=400)
 
         # Try resource-based evaluation via PolicyEvaluator first
         try:
-            pdp = request.app.get('abac')
+            pdp = request.app.get("abac")
             if pdp is None:
-                return self.json_response(
-                    response={"error": "ABAC system not configured"},
-                    status=503
-                )
+                return self.json_response(response={"error": "ABAC system not configured"}, status=503)
 
             # Build a lightweight EvalContext for the check
             userinfo = {
-                'username': user_id,
-                'groups': data.get('groups', []),
-                'roles': data.get('roles', []),
+                "username": user_id,
+                "groups": data.get("groups", []),
+                "roles": data.get("roles", []),
             }
 
             # If the request is authenticated, enrich from session
@@ -465,15 +368,16 @@ class PEP(BaseHandler):
                 try:
                     session = await get_session(request, new=False)
                     from navigator_auth.conf import AUTH_SESSION_OBJECT
+
                     session_userinfo = session.get(AUTH_SESSION_OBJECT, {})
                     if session_userinfo:
                         # Merge — session data wins for groups/roles if not provided
-                        if not userinfo.get('groups'):
-                            userinfo['groups'] = session_userinfo.get('groups', [])
-                        if not userinfo.get('roles'):
-                            userinfo['roles'] = session_userinfo.get('roles', [])
-                        if not userinfo.get('username'):
-                            userinfo['username'] = session_userinfo.get('username', '')
+                        if not userinfo.get("groups"):
+                            userinfo["groups"] = session_userinfo.get("groups", [])
+                        if not userinfo.get("roles"):
+                            userinfo["roles"] = session_userinfo.get("roles", [])
+                        if not userinfo.get("username"):
+                            userinfo["username"] = session_userinfo.get("username", "")
                 except Exception:
                     pass
 
@@ -484,10 +388,10 @@ class PEP(BaseHandler):
             from navigator_auth.abac.policies.evaluator import PolicyEvaluator
 
             # Check if PDP has an evaluator attribute
-            evaluator = getattr(pdp, '_evaluator', None)
+            evaluator = getattr(pdp, "_evaluator", None)
             if evaluator and isinstance(evaluator, PolicyEvaluator):
                 # Parse resource type
-                parts = resource.split(':', 1)
+                parts = resource.split(":", 1)
                 if len(parts) == 2:
                     try:
                         resource_type = ResourceType(parts[0])
@@ -508,7 +412,7 @@ class PEP(BaseHandler):
                                 "policy": result.matched_policy or "",
                                 "reason": result.reason,
                             },
-                            status=200
+                            status=200,
                         )
                     except (ValueError, KeyError):
                         pass
@@ -517,20 +421,16 @@ class PEP(BaseHandler):
             # Create a mock EvalContext from the provided data
             guardian = self.get_guardian(request)
             try:
-                policy = await guardian.is_allowed(
-                    request=request,
-                    resource=resource,
-                    action=action
-                )
+                policy = await guardian.is_allowed(request=request, resource=resource, action=action)
                 allowed = bool(policy.effect)
                 return self.json_response(
                     response={
                         "allowed": allowed,
                         "effect": PolicyEffect(policy.effect).name if policy.effect else "DENY",
-                        "policy": getattr(policy, 'rule', ''),
-                        "reason": getattr(policy, 'response', ''),
+                        "policy": getattr(policy, "rule", ""),
+                        "reason": getattr(policy, "response", ""),
                     },
-                    status=200
+                    status=200,
                 )
             except (AccessDenied, PreconditionFailed) as exc:
                 return self.json_response(
@@ -540,7 +440,7 @@ class PEP(BaseHandler):
                         "policy": "",
                         "reason": str(exc),
                     },
-                    status=200
+                    status=200,
                 )
 
         except Exception as exc:
@@ -552,5 +452,5 @@ class PEP(BaseHandler):
                     "policy": "",
                     "reason": f"Internal error: {exc}",
                 },
-                status=500
+                status=500,
             )

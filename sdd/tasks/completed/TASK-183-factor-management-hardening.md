@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — Review fixes: OAuth2 second factor, MFA key rotation, atomic and deadlock-free security transitions
 **Spec**: `sdd/specs/basicauth-otp-2fa-review-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-182
@@ -443,3 +443,9 @@ When you pick up this task:
 **Notes**: What was implemented, any deviations from scope, issues encountered.
 
 **Deviations from spec**: none | describe if any
+
+---
+
+## Completion Note
+
+Implemented by seat gpt-5.6-terra (codex), 1 attempt. Merge-tier validation: 231 passed, 4 failed — all 4 are baseline reds (test_oauth2_3lo_session_binding x3, test_oauth2_mcp_conformance google e2e; short AUTH_SECRET_KEY env issue), gate reported pass. File fidelity checked. Closed via `parrot sdd task close`.

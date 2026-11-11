@@ -88,7 +88,7 @@ ORGS = f"{AUTH_DB_SCHEMA}.organizations"
 ORG_USERS = f"{AUTH_DB_SCHEMA}.organization_users"
 USERS = f"{AUTH_DB_SCHEMA}.users"
 USER_MFA = f"{AUTH_DB_SCHEMA}.user_mfa"
-VAULT = "auth.user_vault_secrets"
+VAULT = f"{AUTH_DB_SCHEMA}.user_mfa_secrets"  # FEAT-106 review fix #2: seeds moved out of the user vault (spec M7)
 CHALLENGE_KEYS = {"mfa_required", "challenge", "providers", "preferred", "expires_in"}
 FRESH_FACTORS = {"otp", "totp", "backup"}
 # The BasicAuth login body with 2FA off (unchanged by FEAT-106; no ``mfa``/``amr``).
@@ -715,8 +715,8 @@ async def test_cross_tenant_isolation(live):
     secret, _ = await live.enrol_totp(user, body["token"])
     other = await live.user()
     copied = await live.one(
-        f"INSERT INTO {VAULT} (user_id, key, ciphertext_db, key_version) "
-        f"SELECT $2, key, ciphertext_db, key_version FROM {VAULT} "
+        f"INSERT INTO {VAULT} (user_id, provider, key, ciphertext_db, key_version) "
+        f"SELECT $2, provider, key, ciphertext_db, key_version FROM {VAULT} "
         "WHERE user_id = $1 AND key = 'mfa:totp' AND deleted_at IS NULL RETURNING 1",
         user["user_id"],
         other["user_id"],

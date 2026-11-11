@@ -4,7 +4,9 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Optional
 
-from navigator_auth.mfa.services import get_mfa_services
+from navigator_auth.mfa.exceptions import MfaStorageError, MfaUnavailable
+from navigator_auth.mfa.security import advisory_user_lock
+from navigator_auth.mfa.services import mfa_services_lease
 from navigator_auth.mfa.types import MfaAuditEntry
 
 logger = logging.getLogger("navigator.mfa.events")
@@ -21,6 +23,14 @@ SECURITY_EVENTS = frozenset(
 )
 
 
+class TransitionAborted(Exception):
+    """Raised by a transition body to roll back with a client-facing reason (logged at info)."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 @asynccontextmanager
 async def security_transition(
     app: Any,
@@ -31,59 +41,58 @@ async def security_transition(
     revoke_devices: bool = True,
     detail: Optional[dict] = None,
     request_id: Optional[str] = None,
-) -> AsyncIterator[Optional[Any]]:
-    """Run a credential change under the user's MFA security lock."""
+) -> AsyncIterator[Any]:
+    """Yield one live connection inside one transaction for a credential change.
+
+    No configured MFA service takes an advisory-locked ``authdb`` transaction without
+    bookkeeping. Available MFA services use their security lock and perform version,
+    device, and audit bookkeeping after the body on the yielded connection.
+    """
     if event not in SECURITY_EVENTS:
         raise ValueError(f"unknown MFA security event {event!r}")
-    services = get_mfa_services(app)
-    if services is None:
-        yield None
-        return
-    if not services.available:
-        logger.error("MFA security transition unavailable: event=%s user_id=%s", event, user_id)
-        yield None
-        return
+    uid = int(user_id)
+    async with mfa_services_lease(app) as services:
+        if services is None:
+            db_pool = app.get("authdb") if app is not None else None
+            if db_pool is None:
+                raise MfaStorageError("security transition requires app['authdb']")
+            async with advisory_user_lock(db_pool, uid) as conn:
+                try:
+                    yield conn
+                except BaseException as exc:
+                    _log_failure(event, uid, exc)
+                    raise
+            return
+        if not services.available:
+            logger.error("MFA security transition unavailable: event=%s user_id=%s", event, uid)
+            raise MfaUnavailable("MFA services unavailable")
+        async with services.security.user_lock(uid) as conn:
+            try:
+                yield conn
+                await services.security.bump_version(conn, uid)
+                if revoke_devices:
+                    await services.trusted_devices.revoke_all(uid, event, conn=conn)
+                await services.security.write_audit(
+                    conn,
+                    MfaAuditEntry(
+                        actor_user_id=actor_user_id,
+                        target_user_id=uid,
+                        org_id=None,
+                        action=event,
+                        method=None,
+                        request_id=request_id,
+                        outcome="success",
+                        detail=dict(detail or {}),
+                    ),
+                )
+            except BaseException as exc:
+                _log_failure(event, uid, exc)
+                raise
 
-    lock_cm = services.security.user_lock(int(user_id))
-    try:
-        conn = await lock_cm.__aenter__()
-    except BaseException as exc:
-        # Fail closed: never run the credential change without the lock, version bump and audit.
-        logger.error(
-            "MFA security transition lock failed: event=%s user_id=%s error=%s", event, user_id, type(exc).__name__
-        )
-        raise
 
-    try:
-        yield conn
-        await services.security.bump_version(conn, int(user_id))
-        if revoke_devices:
-            await services.trusted_devices.revoke_all(int(user_id), event, conn=conn)
-        await services.security.write_audit(
-            conn,
-            MfaAuditEntry(
-                actor_user_id=actor_user_id,
-                target_user_id=int(user_id),
-                org_id=None,
-                action=event,
-                method=None,
-                request_id=request_id,
-                outcome="success",
-                detail=dict(detail or {}),
-            ),
-        )
-    except BaseException as exc:
-        try:
-            await lock_cm.__aexit__(type(exc), exc, exc.__traceback__)
-        except BaseException:
-            pass
-        logger.error("MFA security transition failed: event=%s user_id=%s error=%s", event, user_id, type(exc).__name__)
-        # Propagate: a failing body (or failing bump/revoke/audit) must never look like success.
-        raise
-    try:
-        await lock_cm.__aexit__(None, None, None)
-    except BaseException as exc:
-        logger.error(
-            "MFA security transition commit failed: event=%s user_id=%s error=%s", event, user_id, type(exc).__name__
-        )
-        raise
+def _log_failure(event: str, user_id: int, exc: BaseException) -> None:
+    """Log a rolled-back transition without exposing exception details."""
+    if isinstance(exc, TransitionAborted):
+        logger.info("MFA security transition aborted: event=%s user_id=%s reason=%s", event, user_id, exc.reason)
+        return
+    logger.error("MFA security transition failed: event=%s user_id=%s error=%s", event, user_id, type(exc).__name__)

@@ -1,14 +1,21 @@
 """MFA security primitives (FEAT-106, spec section 3 security contracts)."""
 
+import asyncio
 import hashlib
 import hmac
 import json
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from typing import Any
+from contextvars import ContextVar
+from typing import Any, Optional
 
-from navigator_auth.conf import AUTH_DB_SCHEMA, AUTH_PASSWORD_ATTRIBUTE, AUTH_USERID_ATTRIBUTE
+from navigator_auth.conf import (
+    AUTH_DB_SCHEMA,
+    AUTH_MFA_LOCK_TIMEOUT,
+    AUTH_PASSWORD_ATTRIBUTE,
+    AUTH_USERID_ATTRIBUTE,
+)
 from navigator_auth.mfa.exceptions import MfaStorageError
 from navigator_auth.mfa.types import MfaAuditEntry, MfaState, TenantMfaPolicy
 
@@ -40,6 +47,103 @@ def _lock_key(user_id: int) -> int:
     return user_id if user_id <= _INT4_MAX else user_id % _INT4_MAX
 
 
+LOCK_CONNECTION: ContextVar[Optional[Any]] = ContextVar("navigator_auth_mfa_lock_connection", default=None)
+
+
+async def _acquire(db_pool: Any) -> Any:
+    """Await the pool's acquire so it can be bounded by ``asyncio.wait_for``."""
+    return await db_pool.acquire()
+
+
+def _release_when_settled(acquire_task: "asyncio.Task[Any]") -> None:
+    """Close a pooled connection whose acquire finishes after its caller gave up.
+
+    Args:
+        acquire_task: The pending (or finished) pool-acquire task.
+    """
+
+    async def _close(conn_cm: Any) -> None:
+        try:
+            async with conn_cm:
+                pass
+        except Exception:  # pylint: disable=W0703
+            pass
+
+    def _on_done(task: "asyncio.Task[Any]") -> None:
+        if task.cancelled() or task.exception() is not None:
+            return
+        asyncio.ensure_future(_close(task.result()))
+
+    acquire_task.add_done_callback(_on_done)
+
+
+@asynccontextmanager
+async def advisory_user_lock(db_pool: Any, user_id: int, *, timeout: Optional[float] = None) -> AsyncIterator[Any]:
+    """Yield one pooled connection in one transaction holding the user's advisory lock.
+
+    Args:
+        db_pool: asyncdb pool exposing ``acquire()``.
+        user_id: Non-negative user id, folded into an int4 key by ``_lock_key``.
+        timeout: Seconds bounding the pool acquire and the lock wait; ``None`` uses
+            ``AUTH_MFA_LOCK_TIMEOUT``.
+
+    Yields:
+        The lock connection, published in ``LOCK_CONNECTION`` for the scope.
+
+    Raises:
+        MfaStorageError: The acquire or lock work failed, timed out, or could not commit.
+    """
+    key = _lock_key(user_id)
+    limit = AUTH_MFA_LOCK_TIMEOUT if timeout is None else float(timeout)
+    acquire_task = asyncio.create_task(_acquire(db_pool))
+    try:
+        conn_cm = await asyncio.wait_for(asyncio.shield(acquire_task), timeout=limit)
+    except asyncio.TimeoutError as err:
+        acquire_task.cancel()
+        try:
+            conn_cm = await acquire_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        else:
+            try:
+                async with conn_cm:
+                    pass
+            except Exception:  # pylint: disable=W0703
+                pass
+        raise MfaStorageError("MFA user lock acquire timed out") from err
+    except asyncio.CancelledError:
+        # The caller was cancelled (e.g. client disconnect) while the shielded acquire is still pending:
+        # hand the connection back to the pool as soon as the acquire settles, then propagate.
+        _release_when_settled(acquire_task)
+        raise
+    except Exception as err:
+        raise MfaStorageError(f"MFA user lock acquire failed: {type(err).__name__}") from err
+    async with conn_cm as conn:
+        try:
+            await conn.transaction()
+            await conn.fetchval("SELECT set_config('lock_timeout', $1, true)", f"{max(int(limit * 1000), 1)}ms")
+            await conn.fetchval("SELECT pg_advisory_xact_lock($1::int4, $2::int4)", LOCK_NAMESPACE, key)
+        except Exception as err:
+            try:
+                await conn.rollback()
+            except Exception:  # pylint: disable=W0703
+                pass
+            raise MfaStorageError(f"MFA user lock failed: {type(err).__name__}") from err
+        token = LOCK_CONNECTION.set(conn)
+        try:
+            try:
+                yield conn
+            except BaseException:
+                await conn.rollback()
+                raise
+            try:
+                await conn.commit()
+            except Exception as err:
+                raise MfaStorageError(f"MFA user lock commit failed: {type(err).__name__}") from err
+        finally:
+            LOCK_CONNECTION.reset(token)
+
+
 class MfaSecurity:
     """Per-user lock, security version, durable audit and context digest."""
 
@@ -53,27 +157,13 @@ class MfaSecurity:
 
     @asynccontextmanager
     async def user_lock(self, user_id: int) -> AsyncIterator[Any]:
-        """Yield a transaction holding a PostgreSQL advisory lock for one user."""
-        key = _lock_key(user_id)
-        async with await self._pool.acquire() as conn:
-            try:
-                await conn.transaction()
-                await conn.fetchval("SELECT pg_advisory_xact_lock($1::int4, $2::int4)", LOCK_NAMESPACE, key)
-            except Exception as err:
-                try:
-                    await conn.rollback()
-                except Exception:
-                    pass
-                raise MfaStorageError(f"MFA user lock failed: {type(err).__name__}") from err
-            try:
-                yield conn
-            except BaseException:
-                await conn.rollback()
-                raise
-            try:
-                await conn.commit()
-            except Exception as err:
-                raise MfaStorageError(f"MFA user lock commit failed: {type(err).__name__}") from err
+        """Yield a transaction holding the user's bounded advisory lock.
+
+        The lock is published in ``LOCK_CONNECTION`` for the scope; see
+        :func:`advisory_user_lock`.
+        """
+        async with advisory_user_lock(self._pool, user_id) as conn:
+            yield conn
 
     async def current_version(self, conn: Any, user_id: int) -> int:
         """Return the user's security version, atomically creating it at zero."""

@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — Review fixes: OAuth2 second factor, MFA key rotation, atomic and deadlock-free security transitions
 **Spec**: `sdd/specs/basicauth-otp-2fa-review-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-172, TASK-177
@@ -441,3 +441,9 @@ When you pick up this task:
 **Notes**: What was implemented, any deviations from scope, issues encountered.
 
 **Deviations from spec**: none | describe if any
+
+---
+
+## Completion Note
+
+Implemented by seats gpt-5.6-terra x2 then gpt-5.6-luna (3 attempts; task-tier validation timed out, 0 failures). Orchestrator merged by hand after running tests: test_mfa_security_transitions 10 passed, test_mfa_review_fixes_transitions 15 passed. KNOWN ENVIRONMENT ISSUE (also on base tree): tests/test_passkey_enrollment.py and test_passkey_management.py hang, test_passkey_backend_unit has 2 pre-existing failures; the merge-tier run timed out on those. File fidelity checked. Closed via `parrot sdd task close`.

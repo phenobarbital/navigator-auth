@@ -1,8 +1,8 @@
--- FEAT-106 second factor for BasicAuth — six tables.
+-- FEAT-106 second factor for BasicAuth — MFA tables.
 -- {schema} / {users_table} are substituted by mfa/migrations.py.
 -- Additive and idempotent: safe to run on every startup.
--- The TOTP seed is NOT here: it lives sealed in {schema}.user_vault_secrets
--- under the reserved 'mfa:' namespace (TASK-136 / TASK-143).
+-- The TOTP seed is NOT here: it lives sealed in {schema}.user_mfa_secrets
+-- (002_mfa_secrets.sql; rotated by navigator_auth.mfa.targets.MfaSecretTarget).
 CREATE SCHEMA IF NOT EXISTS {schema};
 
 -- Per-tenant policy: DATA, not configuration. Absent row == mode 'off'.
