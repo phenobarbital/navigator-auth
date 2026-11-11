@@ -38,6 +38,7 @@ from .vault.integration import (
 from .identity.migrations import setup_identity_columns
 from .backends.idp import IdentityProvider
 from .libs.expiry import expiry_fields
+from .libs.hmac_keys import warn_short_hmac_keys
 from .identities import AuthUser
 from .conf import (
     AUTH_MECHANISM_KEY,
@@ -668,6 +669,8 @@ class AuthHandler:
         logging.debug(":::: Auth Handler Loaded ::::")
         # Seed the per-app exclude list from defaults (avoids global mutation)
         self.app[AUTH_EXCLUDE_LIST_KEY] = list(exclude_list)
+        # FEAT-109: one security WARNING per configured HMAC key under 32 bytes.
+        warn_short_hmac_keys()
         # register the Auth extension into the app
         self.app[self.name] = self
         ## Configure Routes
