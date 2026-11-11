@@ -672,6 +672,8 @@ AUTH_OTP_EMAIL_CALLBACK = config.get("AUTH_OTP_EMAIL_CALLBACK")
 # Bound (seconds) on the MFA per-user lock: pool acquire AND advisory-lock wait (FEAT-106 review fixes, M2).
 # navconfig has no getfloat(): parse explicitly.
 AUTH_MFA_LOCK_TIMEOUT = float(config.get("AUTH_MFA_LOCK_TIMEOUT", fallback=5.0))
+# Minimum seconds between two rebuild attempts of transiently unavailable MFA services (FEAT-106 review fixes, M1).
+AUTH_MFA_RETRY_INTERVAL = config.getint("AUTH_MFA_RETRY_INTERVAL", fallback=15)
 AUTH_TOTP_ISSUER = config.get("AUTH_TOTP_ISSUER", fallback="Navigator")
 AUTH_MFA_BACKUP_CODE_COUNT = config.getint("AUTH_MFA_BACKUP_CODE_COUNT", fallback=10)
 AUTH_MFA_BACKUP_CODE_LENGTH = config.getint("AUTH_MFA_BACKUP_CODE_LENGTH", fallback=8)
