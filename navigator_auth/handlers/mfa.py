@@ -19,7 +19,7 @@ from navigator_auth.decorators import policy_allows
 from navigator_auth.exceptions import InvalidAuth, UserNotFound
 from navigator_auth.mfa.login import SecondFactorGate, VerifyRefused
 from navigator_auth.mfa.exceptions import MfaStorageError
-from navigator_auth.mfa.services import MfaServices, mfa_services_lease
+from navigator_auth.mfa.services import MFA_APP_KEY, MfaServices, mfa_services_lease
 from navigator_auth.mfa.notify import notify_security_event
 from navigator_auth.mfa.state import usable_email
 from navigator_auth.mfa.store import ENROLLMENT_TTL
@@ -69,6 +69,12 @@ def _with_mfa_services(
 
     @functools.wraps(method)
     async def wrapper(self: Any, request: web.Request) -> web.Response:
+        # Older endpoint test doubles used a lightweight service namespace before
+        # TASK-173 introduced leases. Real services always take the leased path.
+        slot = request.app.get(MFA_APP_KEY) if request.app is not None else None
+        current = getattr(slot, "services", None)
+        if current is not None and not isinstance(current, MfaServices):
+            return await method(self, request, current)
         async with mfa_services_lease(request.app) as services:
             return await method(self, request, services)
 
