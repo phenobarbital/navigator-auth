@@ -9,6 +9,7 @@ from ...libs.cipher import Cipher
 from ...models import User
 from ...conf import PARTNER_KEY, PREFERRED_AUTH_SCHEME, TROCTOKEN_REDIRECT_URI
 from .passwd import check_password, set_basic_password
+from ...mfa.events import security_transition
 
 
 class UserSession(BaseHandler):
@@ -127,8 +128,11 @@ class UserSession(BaseHandler):
                 user = await User.get(user_id=user_id)
                 if check_password(user.password, old_password):
                     # valid, can change password
-                    user.password = set_basic_password(new_password)
-                    await user.update()
+                    async with security_transition(
+                        request.app, user.user_id, "password_change", actor_user_id=user.user_id
+                    ):
+                        user.password = set_basic_password(new_password)
+                        await user.update()
                     headers = {"x-status": "OK", "x-message": "Session OK"}
                     response = {"action": "Password Changed", "status": "OK"}
                     return self.json_response(response=response, headers=headers, status=202)
@@ -168,9 +172,12 @@ class UserSession(BaseHandler):
                 if not user:
                     return self.error(reason="User not found", status=404)
                 ## Reset Password:
-                user.password = set_basic_password(new_password)
-                user.is_new = True
-                await user.update()
+                async with security_transition(
+                    request.app, user.user_id, "password_reset", actor_user_id=userinfo.get("user_id")
+                ):
+                    user.password = set_basic_password(new_password)
+                    user.is_new = True
+                    await user.update()
                 headers = {"x-status": "OK", "x-message": "Session OK"}
                 response = {
                     "action": "Password was changed successfully",

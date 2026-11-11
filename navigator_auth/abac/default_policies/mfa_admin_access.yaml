@@ -1,0 +1,24 @@
+# FEAT-106 (spec §3 Module 11) — administrative OTP disenrolment.
+#
+# Separation of duties, verifiably real:
+#   * admin_full_access.yaml wildcards RESOURCES (uri:*) at priority 100 but
+#     ENUMERATES its actions with no wildcard, so `mfa:disenroll` falls outside it.
+#   * policy_allows() fails closed, so a deployment that never ships this file
+#     has NOBODY able to disenrol — the escape hatch is an explicit operator decision.
+# WARNING: adding `mfa:*` or "*" to admin_full_access.yaml collapses this separation.
+# `security_admin` is a provisional default group; it is not created by navigator-auth.
+version: "1.0"
+defaults:
+  effect: deny
+policies:
+  - name: mfa_admin_access
+    effect: allow
+    description: >-
+      Switch a user's OTP off. Grants nothing else: no password reset, no
+      account edit. Deliberately NOT granted to `superuser`.
+    resources: ["uri:/auth/mfa/*"]
+    actions: ["mfa:disenroll"]
+    subjects:
+      groups: ["security_admin"]
+    priority: 90
+    enforcing: true

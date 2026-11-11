@@ -10,6 +10,7 @@ import hmac
 import json
 import secrets
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -31,6 +32,12 @@ from ..passkey.migrations import ensure_passkey_tables
 from ..responses import JSONResponse
 from .abstract import user_is_active
 from .basic import BasicAuth
+from ..mfa.events import security_transition
+from ..mfa.exceptions import MfaStorageError
+from ..mfa.notify import notify_security_event
+from ..mfa.services import get_mfa_services
+from ..mfa.state import usable_email
+from ..mfa.types import MfaSecurityNotice
 
 PASSKEY_PREFIX = "/api/v1/auth/passkey"
 
@@ -310,7 +317,10 @@ class PasskeyAuth(BasicAuth):
         try:
             if await self._store.get_credential(stored.credential_id) is not None:
                 raise web.HTTPConflict(reason="Passkey: credential already registered")
-            await self._store.save_credential(stored)
+            async with security_transition(
+                request.app, user.user_id, "passkey_registered", actor_user_id=user.user_id, revoke_devices=False
+            ):
+                await self._store.save_credential(stored)
         except web.HTTPException:
             raise
         except Exception as err:  # pylint: disable=W0703
@@ -554,12 +564,36 @@ class PasskeyAuth(BasicAuth):
         if credential_id not in {c.credential_id for c in owned}:
             raise web.HTTPNotFound(reason="Passkey: credential not found")
         guard_last = not await self._has_other_login_method(user.user_id)
-        # With no other login method the store deletes only if another passkey remains,
-        # atomically (two concurrent deletes cannot both succeed).
-        if not await self._store.delete_credential(user.user_id, credential_id, keep_last=guard_last):
-            if guard_last:
-                raise web.HTTPConflict(reason="Passkey: cannot delete the last login method")
-            raise web.HTTPNotFound(reason="Passkey: credential not found")
+        services = get_mfa_services(request.app)
+        record, guard_strong = await self._mfa_strong_factor_guard(services, user.user_id)
+        async with security_transition(
+            request.app, user.user_id, "passkey_removed", actor_user_id=user.user_id
+        ) as conn:
+            if guard_strong:
+                if conn is None:
+                    raise web.HTTPServiceUnavailable(
+                        text=json.dumps({"error": "mfa_unavailable", "reason": "Passkey: MFA storage unavailable"}),
+                        content_type="application/json",
+                    )
+                totp = await services.state.totp_confirmed(user.user_id, conn=conn)
+                count = await services.state.passkey_count(user.user_id, conn=conn)
+                if not totp and count <= 1:
+                    raise web.HTTPConflict(
+                        text=json.dumps(
+                            {
+                                "error": "strong_factor_required",
+                                "reason": "Passkey: cannot delete the last strong factor",
+                            }
+                        ),
+                        content_type="application/json",
+                    )
+            # With no other login method the store deletes only if another passkey remains,
+            # atomically (two concurrent deletes cannot both succeed).
+            if not await self._store.delete_credential(user.user_id, credential_id, keep_last=guard_last):
+                if guard_last:
+                    raise web.HTTPConflict(reason="Passkey: cannot delete the last login method")
+                raise web.HTTPNotFound(reason="Passkey: credential not found")
+        await self._notify_if_downgraded(services, record)
         return web.Response(status=204)
 
     async def _has_other_login_method(self, user_id: int) -> bool:
@@ -579,3 +613,46 @@ class PasskeyAuth(BasicAuth):
             self.logger.warning(f"Passkey: cannot check linked identities: {err}")
             return False
         return bool(identities)
+
+    async def _mfa_strong_factor_guard(self, services: Any, user_id: int) -> tuple[Any, bool]:
+        """Return a fresh user and whether an enforced strong factor is required."""
+        if services is None:
+            return None, False
+        if not services.available:
+            raise web.HTTPServiceUnavailable(
+                text=json.dumps({"error": "mfa_unavailable", "reason": "Passkey: MFA storage unavailable"}),
+                content_type="application/json",
+            )
+        try:
+            record = await self._idp.user_from_id(user_id)
+            policy = await services.resolver.effective(record)
+            return record, await services.state.requires_strong_factor(record, policy)
+        except MfaStorageError as err:
+            self.logger.warning("Passkey: MFA strong-factor check failed: %s", type(err).__name__)
+            raise web.HTTPServiceUnavailable(
+                text=json.dumps({"error": "mfa_unavailable", "reason": "Passkey: MFA storage unavailable"}),
+                content_type="application/json",
+            ) from err
+
+    async def _notify_if_downgraded(self, services: Any, record: Any) -> None:
+        """Notify the user after deletion when no strong factor remains."""
+        if services is None or record is None or not services.available:
+            return
+        try:
+            strong = await services.state.has_strong_factor(record)
+        except MfaStorageError as err:
+            self.logger.warning("Passkey: could not check factor downgrade: %s", type(err).__name__)
+            return
+        if not strong:
+            display_name = getattr(record, "display_name", None) or getattr(record, "username", "")
+            username = getattr(record, "username", "")
+            await notify_security_event(
+                MfaSecurityNotice(
+                    email=usable_email(record),
+                    display_name=display_name,
+                    username=username,
+                    event="passkey_removed_last_strong_factor",
+                    occurred_at=datetime.now(timezone.utc),
+                    actor=None,
+                )
+            )

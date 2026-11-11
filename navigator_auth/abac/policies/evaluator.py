@@ -130,6 +130,22 @@ class PolicyIndex:
         """Get all policies sorted by priority."""
         return self._all_policies
 
+    def copy(self) -> "PolicyIndex":
+        """Return a shallow copy that can change without touching this index.
+
+        The policy objects are shared; the containers are new. Order and the
+        ``_by_name`` mapping (last added wins) are kept exactly.
+
+        Returns:
+            A new ``PolicyIndex`` with the same contents.
+        """
+        clone = PolicyIndex()
+        clone._by_type = defaultdict(list, {rtype: list(items) for rtype, items in self._by_type.items()})
+        clone._by_name = dict(self._by_name)
+        clone._enforcing = list(self._enforcing)
+        clone._all_policies = list(self._all_policies)
+        return clone
+
 
 class PolicyLoader:
     """
@@ -238,11 +254,27 @@ class PolicyEvaluator:
         }
 
     def load_policies(self, policies: List[ResourcePolicy]) -> None:
-        """Load policies into evaluator."""
+        """Add policies to the evaluator, all or nothing.
+
+        The policies are added to a copy of the current index, which is then
+        finalized and serialized for the Rust engine. The evaluator switches to
+        the new index and JSON only when every step succeeded.
+
+        Args:
+            policies: The ``ResourcePolicy`` objects to add.
+
+        Raises:
+            Exception: Whatever ``PolicyIndex.add``/``finalize`` or the JSON
+                serialization raised. The evaluator is left unchanged.
+        """
+        policies = list(policies)
+        staged = self._index.copy()
         for policy in policies:
-            self._index.add(policy)
-        self._index.finalize()
-        self._rebuild_json_cache()
+            staged.add(policy)
+        staged.finalize()
+        staged_json = self._serialize_policies_from_index(staged)
+        self._index = staged
+        self._policies_json = staged_json
         logger.info("Loaded %d policies", len(policies))
 
     def _rebuild_json_cache(self) -> None:

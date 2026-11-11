@@ -11,12 +11,15 @@ Security Note:
     Vault failures MUST NOT block authentication. All integration functions
     catch exceptions and log errors rather than propagating them.
 """
+
 import logging
 from typing import Any, Optional
 
 from navigator_session.vault import KeyRing
-from navigator_session.vault.session_vault import SessionVault
+from .reserved import ReservedPrefixSessionVault
 from .migrations import ensure_vault_tables
+
+SessionVault = ReservedPrefixSessionVault
 
 logger = logging.getLogger("navigator.vault")
 
@@ -78,9 +81,7 @@ async def load_vault_for_session(
     try:
         user_id = int(user_id)
     except (TypeError, ValueError):
-        logger.debug(
-            "Skipping vault load: non-integer user_id %r", user_id
-        )
+        logger.debug("Skipping vault load: non-integer user_id %r", user_id)
         return None
     try:
         session_uuid = str(session.session_id)
@@ -113,9 +114,7 @@ async def setup_vault_tables(db_pool: Any) -> None:
         logger.error("Failed to create vault tables: %s", err)
 
 
-async def get_session_vault(
-    request: Any, session: Any, user_id: Any
-) -> Optional[SessionVault]:
+async def get_session_vault(request: Any, session: Any, user_id: Any) -> Optional[SessionVault]:
     """Get the session's vault, loading it on demand.
 
     Returns the vault stored in the session when present; otherwise
