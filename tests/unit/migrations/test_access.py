@@ -25,8 +25,11 @@ def test_scope_matches_spec_and_excludes_unrelated_tables() -> None:
         (AUTH_DB_SCHEMA, "user_passkey_handles"),
     ]
     assert scope_for("mfa") == []
-    assert all(table not in {"users", "schema_migrations"} for tables in [scope_for("vault"), scope_for("identity")]
-               for _, table in tables)
+    assert all(
+        table not in {"users", "schema_migrations"}
+        for tables in [scope_for("vault"), scope_for("identity")]
+        for _, table in tables
+    )
 
 
 @pytest.mark.asyncio
@@ -53,9 +56,7 @@ async def test_grants_are_scoped_quoted_and_include_owned_sequences(fake_conn) -
     fake_conn.respond(
         "pg_depend",
         lambda _sql, args: (
-            [{"schema": "auth", "name": "user_vault_audit_id_seq"}]
-            if "user_vault_audit" in args[0]
-            else []
+            [{"schema": "auth", "name": "user_vault_audit_id_seq"}] if "user_vault_audit" in args[0] else []
         ),
     )
 
