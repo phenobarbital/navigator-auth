@@ -175,6 +175,10 @@ async def run(args: argparse.Namespace, *, connect: Callable[[str], Awaitable[An
     except (MigrationError, MigrationCatalogError) as error:
         print(f"navauth: configuration error: {error}", file=sys.stderr)
         return EXIT_CONFIG
+    except Exception as error:  # pylint: disable=W0718
+        # Unexpected database failures must never surface as a traceback (exit 1 == "pending").
+        print(f"navauth: unexpected error ({type(error).__name__}): {_sanitized_error(error, dsn)}", file=sys.stderr)
+        return EXIT_FAILED
     finally:
         await conn.close()
 

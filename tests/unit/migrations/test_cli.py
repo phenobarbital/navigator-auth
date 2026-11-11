@@ -222,3 +222,26 @@ def test_wheel_contains_sql(tmp_path: Path) -> None:
         assert "navigator_auth/migrations/sql/identity/004_identity_base_columns.sql" in names
         entry_points = next(name for name in names if name.endswith(".dist-info/entry_points.txt"))
         assert "navauth = navigator_auth.migrations.cli:console_entry" in wheel.read(entry_points).decode()
+
+
+def test_cli_unexpected_error_is_failed_not_pending(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A non-MigrationError database failure exits EXIT_FAILED (never the EXIT_PENDING code 1)."""
+    closed: list[bool] = []
+
+    class Conn:
+        async def close(self) -> None:
+            closed.append(True)
+
+    async def connect(_: str) -> Conn:
+        return Conn()
+
+    async def boom(conn: object, role: str | None) -> str:
+        raise RuntimeError("permission denied for schema auth")
+
+    monkeypatch.setattr(cli, "validate_runtime_role", boom)
+    code = cli.main(["self", "upgrade", "--check", "--dsn", "postgres://a:b@db/n"], connect=connect)
+    assert code == cli.EXIT_FAILED
+    assert "unexpected error (RuntimeError)" in capsys.readouterr().err
+    assert closed == [True]
