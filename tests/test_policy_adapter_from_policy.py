@@ -117,3 +117,100 @@ def test_from_policy_environment_normalization():
         rejected = PolicyAdapter.from_policy(Policy(name="invalid", environment=invalid_environment))
         assert rejected.skipped
         assert rejected.policy is None and rejected.additional_policies == []
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({"objects": ["report_*"]}, ["object:report_*"]),
+        ({"objects": "report_*"}, ["object:report_*"]),
+        ({"objects": ("a", "b")}, ["object:a", "object:b"]),
+        ({"objects": ["x"], "type": "deployment"}, ["deployment:x"]),
+        ({"objects": ["urn:navigator:deployment::prod"]}, ["deployment:prod"]),
+    ],
+)
+def test_from_policy_objects_converted(kwargs, expected):
+    """Valid objects= become type:pattern resources; type= is honoured."""
+    result = PolicyAdapter.from_policy(ObjectPolicy(name="objs", actions=["object:read"], **kwargs))
+
+    assert not result.skipped, result.reason
+    assert _resources(result.policy) == expected
+    assert result.additional_policies == []
+
+
+@pytest.mark.parametrize("effect", [PolicyEffect.ALLOW, PolicyEffect.DENY])
+@pytest.mark.parametrize(
+    ("policy_class", "kwargs"),
+    [
+        (ObjectPolicy, {"objects": ["bad["]}),
+        (ObjectPolicy, {"resource": ["urn:uri:/a"], "objects": ["secret"]}),
+        (ObjectPolicy, {"objects": ["!x"]}),
+        (ObjectPolicy, {"objects": {"deployment": ["a", "b"]}}),
+        (ObjectPolicy, {"objects": [5]}),
+        (ObjectPolicy, {"objects": [""]}),
+        (ObjectPolicy, {"objects": ["x"], "type": ""}),
+        (ObjectPolicy, {"objects": ["x"], "type": "a:b"}),
+        (ObjectPolicy, {"objects": ["x"], "type": "!deployment"}),
+        (ObjectPolicy, {"objects": ["x"], "type": "urn"}),
+        (ObjectPolicy, {"objects": ["x"], "type": "dep loy"}),
+        (ObjectPolicy, {"objects": ["x"], "type": "dep*"}),
+        (ObjectPolicy, {"objects": ["x"], "type": 5}),
+        (Policy, {"objects": ["x"]}),
+        (FilePolicy, {"objects": ["x"]}),
+    ],
+)
+def test_from_policy_objects_rejected(policy_class, kwargs, effect):
+    """objects= that would be dropped, retyped, de-negated or invalid rejects the policy."""
+    policy = policy_class(name="objs", effect=effect, **kwargs)
+    before = copy.deepcopy(policy.objects)
+
+    result = PolicyAdapter.from_policy(policy)
+
+    assert result.skipped
+    assert "object" in result.reason.lower()
+    assert result.policy is None and result.additional_policies == []
+    assert policy.objects == before
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"is_business_hours": True},
+        {"is_manager": True},
+        {"dow": [0, 1, 2, 3, 4], "hour": {"min": 8, "max": 18}},
+        {"day_segment": "morning"},
+    ],
+)
+def test_from_policy_resource_policy_environment_valid(environment):
+    """Valid native environments pass through as the same, unmodified object."""
+    resource_policy = ResourcePolicy(name="rp", resources=["tool:*"], environment=environment)
+    before = copy.deepcopy(resource_policy._env_conditions)
+
+    result = PolicyAdapter.from_policy(resource_policy)
+
+    assert not result.skipped, result.reason
+    assert result.policy is resource_policy
+    assert resource_policy._env_conditions == before
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"weekday": 1},
+        {"day_of_week": 1},
+        {"hour": "nine"},
+        {"hour": True},
+        {"is_manager": "yes"},
+        {"is_weekend": "no"},
+        ["dow"],
+    ],
+)
+def test_from_policy_resource_policy_environment_rejected(environment):
+    """Unknown keys and unsupported shapes reject a native ResourcePolicy."""
+    result = PolicyAdapter.from_policy(ResourcePolicy(name="rp", resources=["tool:*"], environment=environment))
+
+    assert result.skipped
+    assert result.reason
+    assert result.policy is None and result.additional_policies == []
+    if environment == {"day_of_week": 1}:
+        assert "'dow'" in result.reason

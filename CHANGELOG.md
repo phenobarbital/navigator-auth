@@ -22,6 +22,16 @@
   WARNING on startup and reload (both stay enforced). `PDP(policies=...)`
   accepts any iterable and raises `TypeError` for strings, mappings and
   non-iterables instead of silently ignoring a tuple.
+- **`PolicyAdapter.from_policy` validates `ObjectPolicy(objects=...)` (FEAT-111).**
+  Objects are converted with the policy's `type=` (default `object`) and
+  validated like `resource=`. A policy is rejected (`add_policy` raises
+  `ValueError`) instead of losing objects silently: `resource=` combined with
+  `objects=`, `!`-negated objects, dict-shaped or non-string objects, and
+  `objects=` on `Policy` / `FilePolicy`. A `ResourcePolicy` passed to
+  `add_policy` now has its `environment` checked too: keys other than `hour`,
+  `dow`, `is_business_hours`, `is_weekend`, `day_segment` and `is_manager`, or
+  unsupported value shapes, raise `ValueError` instead of being silently
+  ignored by the engine (use `dow`, not `day_of_week`, on native policies).
 - **`abac_middleware` no longer mishandles unrouted requests (FEAT-109).** The
   404 skip swallowed `HTTPNotFound`, ran the 404 handler twice and logged
   `Access to <path> is not Authenticated.` at WARNING for browser probes
