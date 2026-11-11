@@ -53,7 +53,7 @@
       "feature_id": "FEAT-107",
       "feature": "auth-model-crud-hardening",
       "spec": "sdd/specs/auth-model-crud-hardening.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -63,8 +63,9 @@
       "parallelism_notes": "Spec Module 1 (coverage, handler.py base) plus gated reads. New file guard_hooks.py; calls TASK-149's guard API. Disjoint files from TASK-152 and TASK-155, which may proceed concurrently once TASK-149 is done.",
       "assigned_to": null,
       "started_at": "2026-11-11T00:20:19+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-151-guard-modelview-hooks.md"
+      "completed_at": "2026-11-11T02:02:14+00:00",
+      "file": "sdd/tasks/completed/TASK-151-guard-modelview-hooks.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-152",
@@ -73,7 +74,7 @@
       "feature_id": "FEAT-107",
       "feature": "auth-model-crud-hardening",
       "spec": "sdd/specs/auth-model-crud-hardening.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -83,8 +84,9 @@
       "parallelism_notes": "Spec Module 9 (guard side). Edits guards.py after TASK-149 (same file) and conf.py (shared with FEAT-106, trivial conflict expected). Disjoint from TASK-151 and TASK-155.",
       "assigned_to": null,
       "started_at": "2026-11-11T00:20:19+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-152-protected-groups.md"
+      "completed_at": "2026-11-11T02:02:14+00:00",
+      "file": "sdd/tasks/completed/TASK-152-protected-groups.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-153",
@@ -136,7 +138,7 @@
       "feature_id": "FEAT-107",
       "feature": "auth-model-crud-hardening",
       "spec": "sdd/specs/auth-model-crud-hardening.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -146,8 +148,9 @@
       "parallelism_notes": "Spec Module 4 (PermissionHandler) and the model.py half of AC13. Edits only handlers/permissions.py and its own test; uses TASK-149's guard API. Can run concurrently with TASK-151..154 once TASK-149 is done.",
       "assigned_to": null,
       "started_at": "2026-11-11T00:20:19+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-155-permission-handler-guard.md"
+      "completed_at": "2026-11-11T02:02:15+00:00",
+      "file": "sdd/tasks/completed/TASK-155-permission-handler-guard.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-156",
