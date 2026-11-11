@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-114 — Live end-to-end OAuth2 MFA tests for the FEAT-106 review fixes
 **Spec**: `sdd/specs/tests-test-mfa-review-fixes-oauth2-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-215
@@ -242,10 +242,27 @@ async def test_oauth2_live_assurance_isolation(oauth_live):
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: agent:sdd-fix:c9cd5387 (Claude Opus 5.5, /sdd-fix issue:1a329591f638)
+**Date**: 2026-11-11
+**Notes**: Implemented code commit `19feb9b`. `test_oauth2_live_abac_fresh_factor` (AC5 = FEAT-106 AC27)
+and `test_oauth2_live_assurance_isolation` (AC6 = FEAT-106 AC29), plus helpers `_oauth_claims`,
+`_drop_session`, `_totp_mint` and `_plain_mint`. Both run live and pass. AC29 asserts its precondition:
+- all four tokens share one session id;
+- that session carries `mfa`/`amr` from the later BasicAuth TOTP login.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
+Mutation check: with `effective_userinfo` short-circuited to `return userinfo`, both tests fail:
+- AC27: the TOTP token loses its assurance;
+- AC29: the password-only token borrows the session's TOTP assurance (`fresh: True`).
 
-**Deviations from spec**: none | describe if any
+The file was restored afterwards.
+
+AC7 check: pointing `tests.fixtures.mfa.default_dsn` at an unreachable Postgres through a
+throwaway plugin gives 12 passed and 5 skipped, with no failures.
+
+Validation: the module gives 17 passed; `tests/test_mfa_review_fixes_oauth2_tokens.py` gives 12 passed;
+`tests/test_mfa_e2e.py` gives 21 passed, 1 xfailed; `flake8` is clean.
+
+**Deviations from spec**:
+- Added `_plain_mint`, which covers both the no-factor and the trusted-device login.
+- Session recreation drops the session before EACH token's request, not once. That is stronger:
+  every token rebuilds the session from its own claims.

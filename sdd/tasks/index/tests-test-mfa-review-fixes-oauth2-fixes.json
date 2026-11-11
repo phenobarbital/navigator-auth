@@ -5,7 +5,7 @@
   "type": "feature",
   "base_branch": "dev",
   "created_at": "2026-11-11T21:58:00+00:00",
-  "completed_at": null,
+  "completed_at": "2026-11-11T22:04:16+00:00",
   "parallel_semantics": "exclusive",
   "validation_contract": "required",
   "test_contract": {
@@ -54,11 +54,11 @@
     {
       "id": "TASK-216",
       "slug": "live-oauth2-abac-assurance-tests",
-      "title": "End-to-end AC27/AC29 \u2014 fresh-factor ABAC with really minted OAuth2 tokens",
+      "title": "End-to-end AC27/AC29 — fresh-factor ABAC with really minted OAuth2 tokens",
       "feature_id": "FEAT-114",
       "feature": "tests-test-mfa-review-fixes-oauth2-fixes",
       "spec": "sdd/specs/tests-test-mfa-review-fixes-oauth2-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -68,9 +68,10 @@
       "parallelism_notes": "uses OAuthLive/oauth_live/live_test from TASK-215 and appends to the same file tests/test_mfa_review_fixes_oauth2.py",
       "assigned_to": "agent:sdd-fix:c9cd5387",
       "started_at": "2026-11-11T22:01:48+00:00",
-      "completed_at": null,
+      "completed_at": "2026-11-11T22:04:16+00:00",
       "discovered_from": "issue:1a329591f638",
-      "file": "sdd/tasks/active/TASK-216-live-oauth2-abac-assurance-tests.md"
+      "file": "sdd/tasks/completed/TASK-216-live-oauth2-abac-assurance-tests.md",
+      "verification": "verified"
     }
   ]
 }
