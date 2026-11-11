@@ -23,7 +23,7 @@ import pytest
 
 from navigator_auth.backends.idp import IdentityProvider
 from navigator_auth.backends.oauth2.backend import Oauth2Provider
-
+from navigator_auth.exceptions import UserNotFound
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates" / "oauth"
 
@@ -125,10 +125,17 @@ class TestTokenSessionBinding:
         assert session_data[provider.session_key_property] == "demo"
 
     @pytest.mark.asyncio
-    async def test_unknown_user_degrades_without_raising(self, provider):
-        provider._idp.user_from_id = AsyncMock(side_effect=RuntimeError("no such user"))
+    async def test_unknown_user_raises(self, provider):
+        provider._idp.user_from_id = AsyncMock(side_effect=UserNotFound("no such user"))
         request = make_request(MagicMock())
-        assert await provider._token_session_claims(request, 404) == {}
+        with pytest.raises(UserNotFound):
+            await provider._token_session_claims(request, 404)
+
+    @pytest.mark.asyncio
+    async def test_session_storage_unavailable_still_returns_empty(self, provider):
+        provider._idp.user_from_id = AsyncMock(return_value=DummyUser(user_id=11, username="demo"))
+        request = make_request(None)
+        assert await provider._token_session_claims(request, 11) == {}
 
 
 # ---------------------------------------------------------------------------

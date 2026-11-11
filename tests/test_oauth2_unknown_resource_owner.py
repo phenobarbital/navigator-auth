@@ -13,6 +13,7 @@ from datamodel.exceptions import ValidationError
 
 from navigator_auth.backends.idp import IdentityProvider
 from navigator_auth.backends.oauth2.backend import Oauth2Provider
+from navigator_auth.backends.oauth2.code_backend import AuthorizationCodeStorage
 from navigator_auth.backends.oauth2.client_backend import MemoryClientStorage
 from navigator_auth.backends.oauth2.models import OAuthClient
 from navigator_auth.backends.oauth2.pkce import generate_challenge
@@ -259,3 +260,26 @@ class TestConsentUnknownOwner:
         assert response.status == 503
         assert json.loads(response.body)["error"] == "server_error"
         assert provider.code_storage.codes == {}
+
+
+# --- TASK-204: authorization-code claim storage ----------------------------------------------
+class TestCodeStorageClaim:
+    @pytest.mark.asyncio
+    async def test_claim_code_uses_atomic_set_nx_with_ttl(self):
+        storage = AuthorizationCodeStorage.__new__(AuthorizationCodeStorage)
+        storage.prefix = "oauth2:code:"
+        storage.redis = MagicMock()
+        storage.redis.set = AsyncMock(return_value=True)
+
+        assert await storage.claim_code("code-1") is True
+        storage.redis.set.assert_awaited_once_with("oauth2:code:claim:code-1", "1", nx=True, ex=30)
+
+    @pytest.mark.asyncio
+    async def test_release_claim_deletes_claim_key(self):
+        storage = AuthorizationCodeStorage.__new__(AuthorizationCodeStorage)
+        storage.prefix = "oauth2:code:"
+        storage.redis = MagicMock()
+        storage.redis.delete = AsyncMock()
+
+        await storage.release_claim("code-1")
+        storage.redis.delete.assert_awaited_once_with("oauth2:code:claim:code-1")
