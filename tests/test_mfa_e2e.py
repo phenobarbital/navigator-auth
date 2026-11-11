@@ -16,6 +16,7 @@ import navigator_auth.conf as conf
 from navigator_auth import AuthHandler
 from navigator_auth.mfa.services import get_mfa_services
 from navigator_auth.mfa.types import TRUSTED_COOKIE
+from tests.fixtures.mfa import mfa_db, mfa_redis_pool, mfa_secret, otp_callback_spy  # noqa: F401
 
 pytestmark = [
     pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning"),
