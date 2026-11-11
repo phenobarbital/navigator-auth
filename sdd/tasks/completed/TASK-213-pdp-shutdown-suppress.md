@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-113 — PDP shutdown — replace nonexistent `asyncio.suppress`
 **Spec**: `sdd/specs/abac-pdp-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -205,7 +205,12 @@ When you pick up this task:
 ## Completion Note
 *(Agent fills this in when done)*
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: Claude Code (/sdd-fix, actor agent:sdd-fix:03fdff77)
+**Date**: 2026-11-11
+**Notes**: Implemented as blueprinted in commit ceca9db: `import contextlib`, `contextlib.suppress` in
+`on_shutdown`, CHANGELOG bullet. `test_on_shutdown_cancels_reload_task_and_closes_storages` failed on the
+base code with `AttributeError: module 'asyncio' has no attribute 'suppress'` and passes now. Tests keep
+local handles on the storage mocks instead of reading them back through typed PDP attributes.
+Validation: test_pdp_shutdown (2), test_pdp_add_policy (13), test_pdp_registry_hardening (18) — all
+passed. black -l 120 / flake8 clean on the changed files.
 **Deviations from spec**: none
