@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-108 — OAuth2 3LO examples work end-to-end — auth paths fail closed on misconfiguration and unknown users
 **Spec**: `sdd/specs/oauth2-3lo-issues.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-195, TASK-199, TASK-202, TASK-204
@@ -259,3 +259,7 @@ When you pick up this task:
 **Notes**:
 
 **Deviations from spec**: none
+
+## Completion Note
+
+Delivered by gpt-5.6-terra (1 attempt), engine task-tier validation passed, merged.

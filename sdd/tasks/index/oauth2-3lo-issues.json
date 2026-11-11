@@ -270,7 +270,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -283,8 +283,9 @@
       "parallelism_notes": "TASK-195: extends its tests/test_oauth2_3lo_example.py and _load_example(). TASK-199: asserts the grants list that needs request['userdata']. TASK-202: asserts 401 without credentials (anonymous rejection). TASK-204: asserts refresh binds a session and the foreign-session login redirect (TASK-203 transitively). Exclusive: drives the example over the shared local Redis.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-206-3lo-example-app-test.md"
+      "completed_at": "2026-11-11T22:15:36+00:00",
+      "file": "sdd/tasks/completed/TASK-206-3lo-example-app-test.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-207",
