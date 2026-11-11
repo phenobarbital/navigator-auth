@@ -13,7 +13,9 @@ def _record(password: str = "hash") -> SimpleNamespace:
 
 
 def test_fresh_password_is_required_and_malformed_hash_fails() -> None:
-    checker = SimpleNamespace(backend=SimpleNamespace(_idp=SimpleNamespace(check_password=lambda *args, **kwargs: True)))
+    checker = SimpleNamespace(
+        backend=SimpleNamespace(_idp=SimpleNamespace(check_password=lambda *args, **kwargs: True))
+    )
     assert not MfaHandler._fresh_password_ok(checker, _record(), None)
     assert MfaHandler._fresh_password_ok(checker, _record(), "password")
 
@@ -34,6 +36,7 @@ async def test_strong_factor_proof_rejects_email() -> None:
         return False
 
     services = SimpleNamespace(providers={"totp": Provider()}, backup_codes=SimpleNamespace(consume=consume))
+
     class Session(dict):
         created = 0
 

@@ -120,7 +120,9 @@ class MfaHandler:
         except (InvalidAuth, ValueError, TypeError, AttributeError):
             return False
 
-    async def _strong_factor_proof(self, request: web.Request, services: Any, session: Any, record: Any, body: dict) -> bool:
+    async def _strong_factor_proof(
+        self, request: web.Request, services: Any, session: Any, record: Any, body: dict
+    ) -> bool:
         """Accept current TOTP, an unused backup code, or a fresh passkey session."""
         uid = int(record["user_id"] if isinstance(record, dict) else getattr(record, "user_id"))
         code = body.get("code")
@@ -131,7 +133,9 @@ class MfaHandler:
             return True
         session_data = session[AUTH_SESSION_OBJECT] if hasattr(session, "__getitem__") else {}
         created = getattr(session, "created", 0)
-        return session_data.get("auth_method") == "passkey" and int(time.time()) - int(created) <= AUTH_OTP_CHALLENGE_TTL
+        return (
+            session_data.get("auth_method") == "passkey" and int(time.time()) - int(created) <= AUTH_OTP_CHALLENGE_TTL
+        )
 
     async def _security_context(self, services: Any, record: Any, conn: Any) -> tuple[Any, MfaState, bool, str]:
         """Return policy, state, strong-factor status, and the current context digest."""
@@ -332,7 +336,9 @@ class MfaHandler:
         if not isinstance(token, str) or not token or not isinstance(code, str) or not code:
             return _error("invalid_body", 400)
         uid = int(record["user_id"] if isinstance(record, dict) else getattr(record, "user_id"))
-        if not await services.user_limiter.check(f"enroll:{uid}") or not await services.ip_limiter.check(_remote(request)):
+        if not await services.user_limiter.check(f"enroll:{uid}") or not await services.ip_limiter.check(
+            _remote(request)
+        ):
             return _error("rate_limited", 429)
         try:
             async with services.security.user_lock(uid) as conn:
@@ -352,9 +358,14 @@ class MfaHandler:
                 await services.security.write_audit(
                     conn,
                     MfaAuditEntry(
-                        actor_user_id=uid, target_user_id=uid, org_id=policy.org_id or None,
-                        action="totp_confirm", old_state=old_state.value, new_state="totp",
-                        method="totp", outcome="success",
+                        actor_user_id=uid,
+                        target_user_id=uid,
+                        org_id=policy.org_id or None,
+                        action="totp_confirm",
+                        old_state=old_state.value,
+                        new_state="totp",
+                        method="totp",
+                        outcome="success",
                     ),
                 )
             payload = {"status": "confirmed"}
@@ -394,15 +405,27 @@ class MfaHandler:
                 await services.trusted_devices.revoke_all(uid, "totp_disenrolled", conn=conn)
                 await services.security.write_audit(
                     conn,
-                    MfaAuditEntry(actor_user_id=uid, target_user_id=uid, org_id=policy.org_id or None,
-                                  action="totp_disenroll", old_state=old_state.value, new_state="none",
-                                  method="totp", outcome="success"),
+                    MfaAuditEntry(
+                        actor_user_id=uid,
+                        target_user_id=uid,
+                        org_id=policy.org_id or None,
+                        action="totp_disenroll",
+                        old_state=old_state.value,
+                        new_state="none",
+                        method="totp",
+                        outcome="success",
+                    ),
                 )
-            await notify_security_event(MfaSecurityNotice(
-                email=usable_email(record), display_name=str(getattr(record, "display_name", "") or ""),
-                username=str(getattr(record, "username", uid)), event="totp_disenrolled",
-                occurred_at=datetime.now(timezone.utc), actor=None,
-            ))
+            await notify_security_event(
+                MfaSecurityNotice(
+                    email=usable_email(record),
+                    display_name=str(getattr(record, "display_name", "") or ""),
+                    username=str(getattr(record, "username", uid)),
+                    event="totp_disenrolled",
+                    occurred_at=datetime.now(timezone.utc),
+                    actor=None,
+                )
+            )
             return JSONResponse({"status": "disenrolled"}, status=200, headers=NO_STORE)
         except MfaStorageError:
             return _error("mfa_unavailable", 503)
@@ -422,9 +445,16 @@ class MfaHandler:
                 codes = await services.backup_codes.generate(uid, conn=conn)
                 await services.security.write_audit(
                     conn,
-                    MfaAuditEntry(actor_user_id=uid, target_user_id=uid, org_id=policy.org_id or None,
-                                  action="backup_codes_regenerate", old_state=state.value, new_state=state.value,
-                                  method="backup", outcome="success"),
+                    MfaAuditEntry(
+                        actor_user_id=uid,
+                        target_user_id=uid,
+                        org_id=policy.org_id or None,
+                        action="backup_codes_regenerate",
+                        old_state=state.value,
+                        new_state=state.value,
+                        method="backup",
+                        outcome="success",
+                    ),
                 )
             return JSONResponse({"backup_codes": codes, "count": len(codes)}, status=201, headers=NO_STORE)
         except MfaStorageError:
