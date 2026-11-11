@@ -335,26 +335,30 @@ class MfaHandler:
 
     @_with_mfa_services
     async def disenroll_totp(self, request: web.Request, services: Optional[MfaServices]) -> web.Response:
-        """Disenrol TOTP after fresh password and strong-factor proof."""
+        """Disenrol TOTP after fresh password and proof; guard the last factor under the lock (AC20)."""
         services, session, record = await self._session_user(request, services)
         body = await _json_body(request)
         uid = int(record["user_id"] if isinstance(record, dict) else getattr(record, "user_id"))
         if not self._fresh_password_ok(services, record, body.get("password")):
             return _error("invalid_credentials", 403)
-        if not await services.providers[PROVIDER_TOTP].is_enrolled(record):
-            return _error("not_enrolled", 404)
-        policy = await services.resolver.effective(record)
-        if await services.state.requires_strong_factor(record, policy) and await services.state.passkey_count(uid) == 0:
-            return _error("strong_factor_required", 409)
-        proof = body.get("code")
-        valid = bool(proof and await services.providers[PROVIDER_TOTP].verify(request, record, proof))
-        if not valid and body.get("backup_code"):
-            valid = await services.backup_codes.consume(uid, body["backup_code"])
+        try:
+            if not await services.providers[PROVIDER_TOTP].is_enrolled(record):
+                return _error("not_enrolled", 404)
+            proof = body.get("code")
+            valid = bool(proof and await services.providers[PROVIDER_TOTP].verify(request, record, proof))
+            if not valid and body.get("backup_code"):
+                valid = await services.backup_codes.consume(uid, body["backup_code"])
+        except MfaStorageError:
+            return _error("mfa_unavailable", 503)
         if not valid:
             return _error("strong_factor_proof_required", 403)
         try:
             async with services.security.user_lock(uid) as conn:
                 policy, old_state, _, _ = await self._security_context(services, record, conn)
+                if await services.state.requires_strong_factor(record, policy) and (
+                    await services.state.passkey_count(uid, conn=conn) == 0
+                ):
+                    raise _StrongFactorRequired()
                 await services.providers[PROVIDER_TOTP].disenroll(record, conn=conn)
                 await services.security.bump_version(conn, uid)
                 await services.trusted_devices.revoke_all(uid, "totp_disenrolled", conn=conn)
@@ -382,19 +386,26 @@ class MfaHandler:
                 )
             )
             return JSONResponse({"status": "disenrolled"}, status=200, headers=NO_STORE)
+        except _StrongFactorRequired:
+            return _error("strong_factor_required", 409)
         except MfaStorageError:
             return _error("mfa_unavailable", 503)
 
     @_with_mfa_services
     async def backup_codes(self, request: web.Request, services: Optional[MfaServices]) -> web.Response:
-        """Generate and return a replacement backup-code set once."""
-        services, _, record = await self._session_user(request, services)
+        """Generate replacement backup codes after a fresh strong-factor proof (AC19)."""
+        services, session, record = await self._session_user(request, services)
         body = await _json_body(request)
         uid = int(record["user_id"] if isinstance(record, dict) else getattr(record, "user_id"))
         if not self._fresh_password_ok(services, record, body.get("password")):
             return _error("invalid_credentials", 403)
-        if not await services.state.has_strong_factor(record):
-            return _error("strong_factor_required", 403)
+        try:
+            if not await services.state.has_strong_factor(record):
+                return _error("strong_factor_required", 403)
+            if not await self._strong_factor_proof(request, services, session, record, body):
+                return _error("strong_factor_proof_required", 403)
+        except MfaStorageError:
+            return _error("mfa_unavailable", 503)
         try:
             async with services.security.user_lock(uid) as conn:
                 policy, state, _, _ = await self._security_context(services, record, conn)
@@ -519,3 +530,7 @@ class _EnrollmentFailed(Exception):
 
     def __init__(self, remaining: int) -> None:
         self.remaining = remaining
+
+
+class _StrongFactorRequired(Exception):
+    """Internal rollback sentinel when TOTP removal would leave no strong factor (AC20)."""

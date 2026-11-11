@@ -532,7 +532,9 @@ async def test_factor_transitions_write_durable_audit(env):
     code, _ = env.code(started["secret_b32"])
     response, _ = await env.confirm(user, session, started["enrollment_token"], code)
     assert response.status == 200
-    response, _ = await env.call("backup_codes", uid, {"password": user["password_plain"]}, session)
+    response, _ = await env.call(
+        "backup_codes", uid, {"password": user["password_plain"], "code": env.code(started["secret_b32"])[0]}, session
+    )
     assert response.status == 201
 
     device = await env.services.trusted_devices.issue(uid, 30, "laptop")
@@ -633,7 +635,7 @@ async def test_confirm_budget_survives_failures(env):
 
 @pytest.mark.asyncio
 async def test_disenroll_superuser_last_factor_refused(env):
-    """Enforced superuser with TOTP only ⇒ 409 before any submitted code is consumed (AC33)."""
+    """M8 supersedes AC33: the in-lock last-factor refusal consumes a valid TOTP proof before its 409."""
     user, session, secret, backup_codes = await env.enrolled_user(superuser=True)
     uid = user["user_id"]
     await env.enforced_org(uid)
@@ -645,8 +647,8 @@ async def test_disenroll_superuser_last_factor_refused(env):
     assert (response.status, reply) == (409, {"error": "strong_factor_required"})
 
     assert await env.services.backup_codes.remaining(uid) == remaining
-    # The TOTP step was never marked used: the code was not even checked.
-    assert await env.services.store.mark_totp_step(uid, step, 120)
+    # The pre-lock proof is checked before the in-lock last-factor refusal.
+    assert not await env.services.store.mark_totp_step(uid, step, 120)
     assert await env.services.state.totp_confirmed(uid)
     assert await env.audit(uid, "totp_disenroll") == []
     assert env.notices == []
@@ -654,16 +656,20 @@ async def test_disenroll_superuser_last_factor_refused(env):
 
 @pytest.mark.asyncio
 async def test_backup_codes_require_strong_factor(env):
-    """Regeneration needs a fresh password and a strong factor, and invalidates the previous set (AC-7)."""
+    """D7 adds a fresh proof to regeneration and still invalidates the previous set (AC19, AC21)."""
     plain = await env.new_user()
     response, body = await env.call("backup_codes", plain["user_id"], {"password": plain["password_plain"]})
     assert (response.status, body) == (403, {"error": "strong_factor_required"})
 
-    user, session, _, old_codes = await env.enrolled_user()
+    user, session, secret, old_codes = await env.enrolled_user()
     uid = user["user_id"]
     response, body = await env.call("backup_codes", uid, {"password": "wrong"}, session)
     assert (response.status, body) == (403, {"error": "invalid_credentials"})
     response, body = await env.call("backup_codes", uid, {"password": user["password_plain"]}, session)
+    assert (response.status, body) == (403, {"error": "strong_factor_proof_required"})
+    response, body = await env.call(
+        "backup_codes", uid, {"password": user["password_plain"], "code": env.code(secret)[0]}, session
+    )
     assert response.status == 201
     new_codes = body["backup_codes"]
     assert body["count"] == len(new_codes) == await env.services.backup_codes.remaining(uid)
@@ -692,7 +698,9 @@ async def test_enroll_response_is_only_secret_carrier(env, caplog):
     replies.append(await env.confirm(user, session, started["enrollment_token"], code))
     backup = replies[-1][1]["backup_codes"]
     secrets_seen.extend(backup)
-    regenerated = await env.call("backup_codes", uid, {"password": user["password_plain"]}, session)
+    code, _ = env.code(started["secret_b32"])
+    secrets_seen.append(code)
+    regenerated = await env.call("backup_codes", uid, {"password": user["password_plain"], "code": code}, session)
     secrets_seen.extend(regenerated[1]["backup_codes"])
     code, _ = env.code(started["secret_b32"])
     secrets_seen.append(code)
