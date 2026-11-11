@@ -1,17 +1,21 @@
 """Security-transition semantics for FEAT-106 credential changes."""
 
+from contextlib import asynccontextmanager
+
 import pytest
 
 from navigator_auth.mfa.events import SECURITY_EVENTS, security_transition
+from navigator_auth.mfa.exceptions import MfaStorageError
 
 
 @pytest.mark.asyncio
-async def test_security_transition_is_noop_without_services():
-    """A disabled MFA installation does not block the protected operation."""
-    seen = []
-    async with security_transition({}, 42, "password_change") as connection:
-        seen.append(connection)
-    assert seen == [None]
+async def test_security_transition_without_services_requires_authdb():
+    """M3 changes no MFA from yielding None to an authdb transaction, failing closed without one."""
+    ran = []
+    with pytest.raises(MfaStorageError):
+        async with security_transition({}, 42, "password_change"):
+            ran.append(True)
+    assert ran == []
 
 
 @pytest.mark.asyncio
@@ -61,7 +65,11 @@ def _fake_services(monkeypatch, *, fail_enter=False, fail_bump=False):
             calls.append("revoke")
 
     services = type("S", (), {"available": True, "security": _Security(), "trusted_devices": _Devices()})()
-    monkeypatch.setattr("navigator_auth.mfa.events.get_mfa_services", lambda app: services)
+    @asynccontextmanager
+    async def _lease(app):
+        yield services
+
+    monkeypatch.setattr("navigator_auth.mfa.events.mfa_services_lease", _lease)
     return calls, exits
 
 
