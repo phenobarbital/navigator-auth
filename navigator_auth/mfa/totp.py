@@ -112,8 +112,7 @@ class TOTPProvider(AbstractOTPProvider):
 
     async def _load_seed(self, user_id: int, *, conn: Any = None) -> Optional[bytes]:
         sql = (
-            f"SELECT ciphertext_db FROM {VAULT_SECRETS_TABLE} "
-            "WHERE user_id = $1 AND key = $2 AND deleted_at IS NULL"
+            f"SELECT ciphertext_db FROM {VAULT_SECRETS_TABLE} " "WHERE user_id = $1 AND key = $2 AND deleted_at IS NULL"
         )
         try:
             if conn is not None:

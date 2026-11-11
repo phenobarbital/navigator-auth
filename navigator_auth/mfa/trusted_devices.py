@@ -68,9 +68,7 @@ class TrustedDeviceStore:
             raise MfaStorageError("trusted device issue returned no row")
         return raw
 
-    async def consume_and_rotate(
-        self, raw_token: str, user_id: int, *, conn: Any = None
-    ) -> Optional[tuple[int, str]]:
+    async def consume_and_rotate(self, raw_token: str, user_id: int, *, conn: Any = None) -> Optional[tuple[int, str]]:
         """Validate and rotate a live token, or revoke its family on replay.
 
         When ``conn`` is given, all statements run inside the caller's transaction and this method
@@ -99,9 +97,7 @@ class TrustedDeviceStore:
         except Exception as err:
             raise MfaStorageError(f"trusted device rotation failed: {type(err).__name__}") from err
 
-    async def _rotate_on(
-        self, conn: Any, raw_token: str, user_id: int
-    ) -> tuple[Optional[tuple[int, str]], bool]:
+    async def _rotate_on(self, conn: Any, raw_token: str, user_id: int) -> tuple[Optional[tuple[int, str]], bool]:
         """Run rotation statements on ``conn`` without transaction control."""
         row = await conn.fetch_one(
             f"SELECT id, user_id, family_id, label, expires_at, rotated_at, revoked_at "

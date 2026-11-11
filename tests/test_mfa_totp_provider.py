@@ -11,7 +11,6 @@ from navigator_auth.mfa.exceptions import MfaStorageError
 from navigator_auth.vault.integration import VAULT_KEYRING_APP_KEY
 from navigator_session.vault import KeyRing, seal_value
 
-
 def _provider() -> TOTPProvider:
     return TOTPProvider(app={}, db_pool=None, store=None, clock=lambda: 1_700_000_010)
 
