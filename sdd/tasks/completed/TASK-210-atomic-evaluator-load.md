@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-112 — PDP policy registry hardening
 **Spec**: `sdd/specs/abac-pdp-tech-debt.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
