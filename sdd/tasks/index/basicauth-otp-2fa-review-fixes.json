@@ -126,7 +126,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
@@ -134,8 +134,9 @@
       "parallelism_notes": "exclusive: applies DDL (security_state/sql/001_security_state.sql) against the shared live test database; no dependencies",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-175-security-state-tables.md"
+      "completed_at": "2026-11-11T16:16:52+00:00",
+      "file": "sdd/tasks/completed/TASK-175-security-state-tables.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-176",
