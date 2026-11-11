@@ -740,7 +740,7 @@ Verified against: `1d06621` (re-verify after FEAT-106 merges).
 - [x] When one backend raises an unexpected (non-`AuthException`) error, what does the loop do? — *Resolved at spec time*: "Log and continue (Recommended)"; 401 if no backend succeeds. → D2, AC7.
 - [x] Is the unknown owner's session destroyed? — *Decided at spec time (D3), review at approval*: no; the authorization redirects to login and `auth_login` replaces this browser's session, so the shared store entry used by other apps survives.
 - [x] Are `device_verification` and `is_active` in scope? — *Decided at spec time (D4, D5), review at approval*: yes, same fail-closed rule.
-- [ ] Where did the user-35 session come from? — *Owner: Jesus Lara*. Non-blocking (G6 covers every source). New lead: `examples/oauth2_server.py` logs in against the real user table on the same `localhost:5000` + Redis, and its placeholder resource owner is `user_id=35` (`oauth2_server.py:83-88`).
+- [x] Where did the user-35 session come from? — *Owner: Jesus Lara*. Non-blocking (G6 covers every source). New lead: `examples/oauth2_server.py` logs in against the real user table on the same `localhost:5000` + Redis, and its placeholder resource owner is `user_id=35` (`oauth2_server.py:83-88`): that's my account (jesuslara user_id=35)
 
 ---
 
