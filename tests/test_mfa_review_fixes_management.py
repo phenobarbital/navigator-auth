@@ -2,6 +2,8 @@
 
 import asyncio
 import secrets
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -108,6 +110,69 @@ async def test_management_wrong_password_and_proof_share_budget(env, monkeypatch
     )
     assert (response.status, body) == (429, {"error": "rate_limited"})
     assert await env.active_seed_row(uid) == active
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["disenroll_totp", "backup_codes"])
+@pytest.mark.parametrize("failure", ["account", "limit", "factor", "proof", "mutation", "commit"])
+async def test_management_storage_failures_preserve_credentials(env, monkeypatch, method: str, failure: str) -> None:
+    """Storage failures at each management phase return 503 without committing credentials."""
+    user, session, secret, _ = await env.enrolled_user()
+    uid = user["user_id"]
+    seed = await env.active_seed_row(uid)
+    version = await env.version(uid)
+    audit = await env.audit(uid)
+    sql = f"SELECT * FROM {AUTH_DB_SCHEMA}.user_mfa_backup_codes WHERE user_id=$1 ORDER BY id"
+    backups = await env.rows(sql, uid)
+    unavailable = AsyncMock(side_effect=MfaStorageError("injected storage outage"))
+    if failure == "account":
+        monkeypatch.setattr(env.services.backend._idp, "user_from_id", unavailable)
+    elif failure == "limit":
+        monkeypatch.setattr(env.services.user_limiter, "check", unavailable)
+    elif failure == "factor":
+        if method == "disenroll_totp":
+            monkeypatch.setattr(env.services.providers["totp"], "is_enrolled", unavailable)
+        else:
+            monkeypatch.setattr(env.services.state, "has_strong_factor", unavailable)
+    elif failure == "proof":
+        monkeypatch.setattr(env.services.providers["totp"], "verify", unavailable)
+    elif failure == "mutation":
+        # Both handlers write their audit after changing the credential rows.
+        monkeypatch.setattr(env.services.security, "write_audit", unavailable)
+    else:
+        original_lock = env.services.security.user_lock
+
+        @asynccontextmanager
+        async def failing_commit(user_id: int) -> AsyncIterator[Any]:
+            """Exercise the real lock's commit-error translation after a definite transaction abort."""
+            conn = None
+            original_commit = None
+            try:
+                async with original_lock(user_id) as conn:
+                    original_commit = conn.commit
+
+                    async def abort_commit() -> None:
+                        """Model a server rejecting commit with no durable transaction changes."""
+                        await conn.rollback()
+                        raise RuntimeError("injected commit rejection")
+
+                    monkeypatch.setattr(conn, "commit", abort_commit)
+                    yield conn
+            finally:
+                if conn is not None and original_commit is not None:
+                    monkeypatch.setattr(conn, "commit", original_commit)
+
+        monkeypatch.setattr(env.services.security, "user_lock", failing_commit)
+
+    response, body = await env.call(
+        method, uid, {"password": user["password_plain"], "code": env.code(secret)[0]}, session
+    )
+    assert (response.status, body) == (503, {"error": "mfa_unavailable"})
+    assert response.headers["Cache-Control"] == "no-store"
+    assert await env.active_seed_row(uid) == seed
+    assert await env.rows(sql, uid) == backups
+    assert await env.version(uid) == version
+    assert await env.audit(uid) == audit
 
 
 @pytest.mark.asyncio

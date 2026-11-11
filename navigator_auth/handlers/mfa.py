@@ -79,6 +79,8 @@ def _with_mfa_services(
                 return await method(self, request, services)
         except MFARefused as err:
             return JSONResponse(err.payload(), status=err.status, headers=NO_STORE)
+        except MfaStorageError:
+            return _error("mfa_unavailable", 503)
 
     return wrapper
 
