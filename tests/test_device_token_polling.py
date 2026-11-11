@@ -23,7 +23,6 @@ import pytest
 from navigator_auth.backends.oauth2.models import (
     OAuthClient,
     OauthAuthorizationCode,
-    OauthUser,
     DeviceCodeStatus,
     OauthDeviceCode,
 )

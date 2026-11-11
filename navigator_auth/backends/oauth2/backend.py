@@ -841,6 +841,7 @@ class Oauth2Provider(BaseAuthBackend):
         session cannot be created. An unresolvable owner raises so grants can
         fail closed without consuming state during an identity-store outage.
         """
+
         # FEAT-108: an unresolvable or disabled owner must not get a token.
         # UserNotFound, FailedAuth and IdentityStoreUnavailable propagate to
         # the grant handler, which maps each outcome without leaking details.
@@ -2232,9 +2233,7 @@ class Oauth2Provider(BaseAuthBackend):
                 except (UserNotFound, FailedAuth):
                     await self.code_storage.mark_used(code)
                     await self.code_storage.delete_code(code)
-                    return self._error_response(
-                        "invalid_grant", "The resource owner of this grant cannot be resolved."
-                    )
+                    return self._error_response("invalid_grant", "The resource owner of this grant cannot be resolved.")
                 except IdentityStoreUnavailable:
                     release = getattr(self.code_storage, "release_claim", None)
                     if release is not None:
@@ -2508,9 +2507,7 @@ class Oauth2Provider(BaseAuthBackend):
                     session_claims = await self._token_session_claims(request, user_id, conn=conn)
                 except (UserNotFound, FailedAuth):
                     await self.refresh_token_storage.revoke_chain(refresh_token)
-                    return self._error_response(
-                        "invalid_grant", "The resource owner of this grant cannot be resolved."
-                    )
+                    return self._error_response("invalid_grant", "The resource owner of this grant cannot be resolved.")
                 except IdentityStoreUnavailable:
                     return self._owner_store_unavailable()
 

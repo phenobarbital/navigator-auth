@@ -25,7 +25,6 @@ from navigator_auth.backends.idp import IdentityProvider
 from navigator_auth.backends.oauth2.backend import Oauth2Provider
 from navigator_auth.exceptions import UserNotFound
 
-
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates" / "oauth"
 
 
