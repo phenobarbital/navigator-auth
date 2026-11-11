@@ -290,14 +290,12 @@ class MfaHandler:
             return _error("rate_limited", 429)
         try:
             async with services.security.user_lock(uid) as conn:
-                policy, old_state, _, _ = await self._security_context(services, record, conn)
-                ok = await services.providers[PROVIDER_TOTP].confirm_enrollment(
-                    record, code, token, session.session_id, conn=conn
+                policy, old_state, _, digest = await self._security_context(services, record, conn)
+                result = await services.providers[PROVIDER_TOTP].confirm_enrollment_result(
+                    record, code, token, session.session_id, conn=conn, context_digest=digest
                 )
-                if not ok:
-                    pending = await services.store.peek_enrollment(token)
-                    remaining = 0 if pending is not None else -1
-                    raise _EnrollmentFailed(remaining)
+                if not result.confirmed:
+                    raise _EnrollmentFailed(result.attempts_remaining)
                 await services.security.bump_version(conn, uid)
                 await services.trusted_devices.revoke_all(uid, "totp_enrolled", conn=conn)
                 codes = None

@@ -226,12 +226,20 @@ class MfaChallengeStore:
             raise MfaStorageError("MFA storage unavailable") from exc
 
     async def put_enrollment(
-        self, token: str, *, user_id: int, session_id: str, security_version: int, sealed_seed: bytes
+        self,
+        token: str,
+        *,
+        user_id: int,
+        session_id: str,
+        security_version: int,
+        context_digest: str,
+        sealed_seed: bytes,
     ) -> PendingEnrollment:
         fields = {
             "user_id": int(user_id),
             "session_hash": hashlib.sha256(session_id.encode()).hexdigest(),
             "security_version": int(security_version),
+            "context_digest": context_digest,
             "sealed_seed": base64.b64encode(sealed_seed).decode("ascii"),
             "issued_at": time.time(),
         }
