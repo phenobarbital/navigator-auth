@@ -1,4 +1,5 @@
 """HMAC key-length startup warning (FEAT-109 M4)."""
+
 import logging
 import warnings
 from unittest.mock import MagicMock
@@ -9,7 +10,10 @@ from aiohttp import web
 import navigator_auth.auth as auth_mod
 from navigator_auth import conf
 from navigator_auth.libs.hmac_keys import (
-    SECURITY_LOGGER, configured_hmac_keys, short_hmac_keys, warn_short_hmac_keys,
+    SECURITY_LOGGER,
+    configured_hmac_keys,
+    short_hmac_keys,
+    warn_short_hmac_keys,
 )
 
 LONG = "k" * 48

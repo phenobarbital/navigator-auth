@@ -5,6 +5,7 @@ output (RFC 7518 §3.2). ``warn_short_hmac_keys`` checks the configured keys
 once at setup and logs one WARNING per short key on the security logger,
 naming the setting and its byte length — never the value.
 """
+
 from __future__ import annotations
 
 import logging
@@ -79,6 +80,8 @@ def warn_short_hmac_keys(logger: logging.Logger | None = None) -> list[str]:
     for label, size in short:
         log.warning(
             "%s is %d bytes; HMAC keys should be at least %d bytes (RFC 7518 §3.2).",
-            label, size, MIN_HMAC_KEY_BYTES,
+            label,
+            size,
+            MIN_HMAC_KEY_BYTES,
         )
     return [label for label, _ in short]
