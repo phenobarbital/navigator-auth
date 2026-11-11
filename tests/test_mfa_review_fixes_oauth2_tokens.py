@@ -97,9 +97,9 @@ def event_provider(monkeypatch):
             return_value=SimpleNamespace(
                 session_id="session-1",
                 **{
-                    "get": lambda key, default=None: {
-                        "user": '{"__dict__": {"user_id": 7, "username": "alice"}}'
-                    }.get(key, default)
+                    "get": lambda key, default=None: {"user": '{"__dict__": {"user_id": 7, "username": "alice"}}'}.get(
+                        key, default
+                    )
                 },
             )
         ),
