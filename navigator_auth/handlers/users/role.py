@@ -1,6 +1,6 @@
 """The only way to change a privileged user flag (FEAT-107, spec M5)."""
 
-from typing import Any, Optional
+from typing import Optional
 
 from aiohttp import web
 
@@ -76,11 +76,11 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
             await self.audit_decision(_ACTION, False, target_id, f"self-targeted role change by {actor_id}")
             self._refuse()
         target_id = int(target_id)
-        columns = ', '.join(f'"{column}"' for column in ("user_id",) + _ROLE_COLUMNS)
+        columns = ", ".join(f'"{column}"' for column in ("user_id",) + _ROLE_COLUMNS)
         schema = User.Meta.schema
         table = User.Meta.name
         qualified = f'"{schema}"."{table}"'
-        select = f"SELECT {columns} FROM {qualified} WHERE \"user_id\" = $1"
+        select = f'SELECT {columns} FROM {qualified} WHERE "user_id" = $1'
         db = self.request.app["authdb"]
         async with await db.acquire() as conn:
             actor = await conn.fetch_one(select, actor_id)
@@ -96,16 +96,20 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
                 target_role = target_role.value
             for column in payload:
                 held = (
-                    actor_is_superuser if column == "is_superuser" else
-                    bool(actor.get("is_staff")) if column == "is_staff" else
-                    actor_role is not None and actor_role >= max(target_role, payload[column])
+                    actor_is_superuser
+                    if column == "is_superuser"
+                    else (
+                        bool(actor.get("is_staff"))
+                        if column == "is_staff"
+                        else actor_role is not None and actor_role >= max(target_role, payload[column])
+                    )
                 )
                 if not held:
                     await self.audit_decision(_ACTION, False, target_id, f"{column}: actor does not hold it")
                     self._refuse()
-            assignments = ', '.join(f'"{column}" = ${index}' for index, column in enumerate(payload, 2))
-            returning = ', '.join(f'"{column}"' for column in ("user_id",) + _ROLE_COLUMNS)
-            sql = f"UPDATE {qualified} SET {assignments} WHERE \"user_id\" = $1 RETURNING {returning}"
+            assignments = ", ".join(f'"{column}" = ${index}' for index, column in enumerate(payload, 2))
+            returning = ", ".join(f'"{column}"' for column in ("user_id",) + _ROLE_COLUMNS)
+            sql = f'UPDATE {qualified} SET {assignments} WHERE "user_id" = $1 RETURNING {returning}'
             updated = await conn.fetch_one(sql, target_id, *payload.values())
             if not updated:
                 await self.audit_decision(_ACTION, False, target_id, "write failed")
