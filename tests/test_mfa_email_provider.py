@@ -79,7 +79,9 @@ async def test_verify_rejects_wrong_missing_or_malformed():
     challenge = SimpleNamespace(user_id=USER["user_id"], email_code_hash=hash_code("123456", SECRET))
     assert not await provider.verify(None, USER, "000000", challenge)
     assert not await provider.verify(None, USER, "123456", None)
-    assert not await provider.verify(None, USER, "123456", SimpleNamespace(user_id=1, email_code_hash=challenge.email_code_hash))
+    assert not await provider.verify(
+        None, USER, "123456", SimpleNamespace(user_id=1, email_code_hash=challenge.email_code_hash)
+    )
     assert not await provider.verify(None, USER, "12a456", challenge)
     assert not await provider.verify(None, USER, "1234567", challenge)
 
