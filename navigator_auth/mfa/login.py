@@ -118,9 +118,11 @@ class SecondFactorGate:
                         raise FailedAuth("credentials_changed", status=401)
                     evaluation = await services.evaluate(fresh, conn=conn)
                     if evaluation.state == MfaState.NONE:
+                        await services.security.commit_before_session(conn)
                         return GateResult(session=await issue(fresh, {}))
                     device_token = await self._trusted_device(request, conn, evaluation)
                     if device_token is not None:
+                        await services.security.commit_before_session(conn)
                         session = await issue(fresh, {"mfa": True, "amr": [AMR_PASSWORD, AMR_TRUSTED_DEVICE]})
                         device = {"token": device_token, "max_age": evaluation.policy.remember_days * 86400}
                         return GateResult(session=session, device=device)
@@ -210,11 +212,12 @@ class SecondFactorGate:
                 consumed = await services.store.consume(token)
                 if consumed is None or consumed != record:
                     raise VerifyRefused("invalid_challenge", 401)
+                device = await self._maybe_trust_device(conn, evaluation, remember_device, device_label)
+                await services.security.commit_before_session(conn)
                 try:
                     session = await issue(user, {"mfa": True, "amr": [AMR_PASSWORD, AMR_BY_PROVIDER[provider]]})
                 except FailedAuth as err:
                     raise VerifyRefused("account_disabled", err.status) from err
-                device = await self._maybe_trust_device(conn, evaluation, remember_device, device_label)
         except (VerifyRefused, web.HTTPException):
             raise
         except Exception as err:  # pylint: disable=W0718 -- security dependencies fail closed.

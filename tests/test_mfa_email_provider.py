@@ -1,5 +1,8 @@
 """Unit tests for the FEAT-106 email OTP provider and callbacks."""
 
+import asyncio
+import sys
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -97,3 +100,72 @@ async def test_notify_security_event_uses_configured_callback(monkeypatch):
     notice = SimpleNamespace(event="disenrolled", username="otp_user")
     await notify.invoke_callback(callback("capture"), notice, label="security-notice")
     assert CAPTURED == [notice]
+
+
+@pytest.mark.asyncio
+async def test_sync_callback_allows_loop_progress_and_timeout(monkeypatch) -> None:
+    """A blocked synchronous delivery cannot block the loop or prevent a caller's timeout."""
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    release, finished = threading.Event(), threading.Event()
+
+    def blocking(payload: object) -> None:
+        """Model a blocked external delivery and always signal its thread has settled."""
+        loop.call_soon_threadsafe(started.set)
+        try:
+            release.wait(2)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(sys.modules[__name__], "blocking", blocking, raising=False)
+    task = asyncio.create_task(notify.invoke_callback(callback("blocking"), SimpleNamespace(), label="test"))
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        assert not finished.is_set()
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(task, 0.01)
+        assert task.cancelled()
+        assert not finished.is_set()
+    finally:
+        release.set()
+        assert await asyncio.to_thread(finished.wait, 1)
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_callback_awaitables_stay_on_event_loop(monkeypatch) -> None:
+    """Async callbacks and awaitables returned by sync callbacks execute on the calling loop."""
+    loop_thread = threading.get_ident()
+    seen = []
+
+    async def on_loop(payload: object) -> None:
+        """Record where async work executes."""
+        assert threading.get_ident() == loop_thread
+        seen.append(payload)
+
+    def returns_awaitable(payload: object) -> object:
+        """Return async work from a synchronous I/O callback's worker thread."""
+        assert threading.get_ident() != loop_thread
+        return on_loop(payload)
+
+    monkeypatch.setattr(sys.modules[__name__], "on_loop", on_loop, raising=False)
+    monkeypatch.setattr(sys.modules[__name__], "returns_awaitable", returns_awaitable, raising=False)
+    payload = SimpleNamespace()
+    assert await notify.invoke_callback(callback("on_loop"), payload, label="test")
+    assert await notify.invoke_callback(callback("returns_awaitable"), payload, label="test")
+    assert seen == [payload, payload]
+
+
+def test_shared_field_helpers_preserve_none_semantics() -> None:
+    """Factor reads retain explicit None, while email/security reads apply their supplied default."""
+    from navigator_auth.mfa import email_otp, security, state, totp
+
+    for user in ({"value": None}, SimpleNamespace(value=None)):
+        assert state._field(user, "value", "fallback") is None
+        assert totp._field(user, "value", "fallback") is None
+        assert email_otp._field(user, "value", "fallback") == "fallback"
+        assert security._user_field(user, "value", "fallback") == "fallback"
+    assert totp._field is state._field
+    assert email_otp._field is security._user_field

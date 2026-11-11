@@ -1,5 +1,6 @@
 """FEAT-106 review fixes — SecondFactorGate core (spec §3 M5; AC11, AC17, AC18, AC33, D16)."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -10,9 +11,10 @@ from navigator_auth.exceptions import FailedAuth, MFARefused
 from navigator_auth.backends.basic import BasicAuth
 from navigator_auth.mfa.exceptions import MfaStorageError
 from navigator_auth.mfa.login import SecondFactorGate, VerifyRefused
-from navigator_auth.mfa.security import LOCK_CONNECTION
+from navigator_auth.mfa.security import LOCK_CONNECTION, LOCK_NAMESPACE, MfaSecurity, _lock_key
 from navigator_auth.mfa.services import MFA_APP_KEY, MfaServices, MfaServicesSlot
 from navigator_auth.mfa.types import MfaChallenge, MfaMode, MfaState, TenantMfaPolicy
+from tests.fixtures.mfa import mfa_db, mfa_secret, mfa_user_factory  # noqa: F401
 
 USER = {"user_id": 7, "username": "alice", "email": "alice@example.test", "password": "hash", "is_active": True}
 
@@ -98,6 +100,12 @@ class FakeLock:
     def __init__(self, fail: bool = False) -> None:
         self.conn = object()
         self.fail = fail
+        self.committed = False
+
+    async def commit_before_session(self, conn: object) -> None:
+        """Model committing bookkeeping while keeping the user lock held."""
+        assert conn is self.conn
+        self.committed = True
 
     @asynccontextmanager
     async def user_lock(self, user_id: int):
@@ -167,6 +175,7 @@ async def test_trusted_device_session_issued_under_lock():
 
     async def issue(user, extra):
         assert LOCK_CONNECTION.get() is services.security.conn
+        assert services.security.committed
         assert extra["amr"] == ["pwd", "trusted_device"]
         return "session"
 
@@ -182,6 +191,7 @@ async def test_no_factor_owed_issued_under_lock_with_empty_extra():
 
     async def issue(user, extra):
         assert LOCK_CONNECTION.get() is services.security.conn
+        assert services.security.committed
         assert extra == {}
         return "session"
 
@@ -315,3 +325,109 @@ async def test_gate_logs_no_secrets(caplog):
     assert secret_token not in text
     assert secret_code not in text
     assert secret_device not in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["none", "trusted", "verify"])
+async def test_commit_failure_prevents_every_session_issuer(path: str) -> None:
+    """No gate path creates credentials when its bookkeeping transaction cannot commit."""
+    services = _services()
+    services.security.commit_before_session = AsyncMock(side_effect=MfaStorageError("commit rejected"))
+    issuer = AsyncMock()
+    request = _request(cookies={"nav_mfa_device": "old"})
+    if path == "none":
+        services.evaluate.return_value = _evaluation(state=MfaState.NONE)
+    elif path == "trusted":
+        services.evaluate.return_value = _evaluation(has_strong_factor=True, policy=SimpleNamespace(remember_days=2))
+        services.trusted_devices.consume_and_rotate.return_value = (7, "rotated")
+    if path == "verify":
+        with pytest.raises(VerifyRefused) as error:
+            await SecondFactorGate(services).verify(request, "challenge", "email", "code", issuer)
+        assert services.store.record is None
+    else:
+        with pytest.raises(MFARefused) as error:
+            await SecondFactorGate(services).decide(request, USER, issuer)
+    assert (error.value.code, error.value.status) == ("mfa_unavailable", 503)
+    issuer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_device_bookkeeping_failure_precedes_session_issuer() -> None:
+    """Trusted-device creation must finish before any verified session is issued."""
+    services = _services(
+        evaluate=AsyncMock(return_value=_evaluation(has_strong_factor=True, policy=SimpleNamespace(remember_days=2)))
+    )
+    services.trusted_devices.issue.side_effect = MfaStorageError("device write failed")
+    issuer = AsyncMock()
+    with pytest.raises(VerifyRefused):
+        await SecondFactorGate(services).verify(_request(), "challenge", "email", "code", issuer, remember_device=True)
+    issuer.assert_not_awaited()
+    assert not services.security.committed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "cancel", "commit_failure", "unlock_failure", "unlock_cancel"])
+async def test_promoted_lock_serializes_and_releases(
+    mfa_db, mfa_secret, mfa_user_factory, monkeypatch, outcome: str
+) -> None:
+    """A different PostgreSQL connection stays excluded until issuance ends, including cancellation."""
+    user = await mfa_user_factory()
+    uid = user["user_id"]
+    security = MfaSecurity(mfa_db, mfa_secret)
+    ready = asyncio.Event()
+    finish = asyncio.Event()
+    unlocking = asyncio.Event()
+    connections = []
+
+    async def issue_scope() -> None:
+        """Exercise promotion and cleanup with real transaction/session advisory locks."""
+        async with security.user_lock(uid) as conn:
+            connections.append(conn)
+            if outcome == "commit_failure":
+                monkeypatch.setattr(conn, "commit", AsyncMock(side_effect=RuntimeError("commit rejected")))
+            await security.commit_before_session(conn)
+            if outcome in ("unlock_failure", "unlock_cancel"):
+                original = conn.fetchval
+
+                async def fetchval(sql: str, *args: object) -> object:
+                    """Fail only explicit unlock so cleanup must terminate the socket."""
+                    if "pg_advisory_unlock" in sql:
+                        if outcome == "unlock_cancel":
+                            unlocking.set()
+                            await asyncio.Event().wait()
+                        raise RuntimeError("unlock unavailable")
+                    return await original(sql, *args)
+
+                monkeypatch.setattr(conn, "fetchval", fetchval)
+            ready.set()
+            await finish.wait()
+
+    async with await mfa_db.acquire() as observer:
+        task = asyncio.create_task(issue_scope())
+        if outcome == "commit_failure":
+            with pytest.raises(MfaStorageError):
+                await asyncio.wait_for(task, 5)
+        else:
+            await asyncio.wait_for(ready.wait(), 5)
+            assert not await observer.fetchval(
+                "SELECT pg_try_advisory_xact_lock($1::int4, $2::int4)", LOCK_NAMESPACE, _lock_key(uid)
+            )
+            if outcome == "cancel":
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            else:
+                finish.set()
+                if outcome == "unlock_cancel":
+                    await asyncio.wait_for(unlocking.wait(), 5)
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+                else:
+                    await asyncio.wait_for(task, 5)
+        assert await observer.fetchval(
+            "SELECT pg_try_advisory_xact_lock($1::int4, $2::int4)", LOCK_NAMESPACE, _lock_key(uid)
+        )
+        if outcome in ("unlock_failure", "unlock_cancel"):
+            assert connections[0].engine() is None
+    assert LOCK_CONNECTION.get() is None

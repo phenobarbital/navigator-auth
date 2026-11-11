@@ -20,6 +20,7 @@ from navigator_auth.vault.integration import VAULT_KEYRING_APP_KEY
 
 from .abstract import AbstractOTPProvider
 from .exceptions import MfaStorageError
+from .state import _field
 from .store import ENROLLMENT_TTL, MfaChallengeStore, _hash_token, new_opaque_token
 from .types import PROVIDER_TOTP, EnrollmentAuthorization, EnrollmentConfirmation, MfaChallenge, PendingEnrollment
 
@@ -55,17 +56,6 @@ def pending_seed_context(
             ("enrollment", enrollment_hash),
         ),
     )
-
-
-def _field(user: Any, name: str, default: Any = None) -> Any:
-    """Read a field from a mapping or model-like object."""
-    try:
-        return user[name]
-    except (KeyError, TypeError, AttributeError):
-        try:
-            return user.get(name, default)
-        except (AttributeError, TypeError):
-            return getattr(user, name, default)
 
 
 class TOTPProvider(AbstractOTPProvider):

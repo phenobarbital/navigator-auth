@@ -1141,8 +1141,10 @@ def otp_callback_spy(): ...             # captures OtpNotificationPayload, asser
   on the existing login paths).
 - [ ] **AC4** — **No new runtime dependency.** `pyproject.toml`'s `dependencies`
   list is unchanged; TOTP comes from `cryptography`.
-- [ ] **AC5** — **No path from a provider to a session.** `grep -n
-  "remember\|create_token\|open_session" navigator_auth/mfa/` returns nothing.
+- [ ] **AC5** — **No path from a provider to a session.**
+  `rg -n '\b(remember|create_token|open_session)\s*\(' navigator_auth/mfa/`
+  returns no session-issuing calls. Policy fields such as `remember_days`
+  are allowed; the shared gate delegates issuance to the backend callback.
 - [ ] **AC6** — A `BasicAuth` login owing a factor returns **no** token: the
   response body has no `token`, `refresh_token` or session id, and no session is
   stored.

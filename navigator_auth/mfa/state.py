@@ -38,7 +38,10 @@ def _field(user: Any, name: str, default: Any = None) -> Any:
     try:
         return user[name]
     except (KeyError, TypeError, AttributeError, IndexError):
-        return getattr(user, name, default)
+        try:
+            return user.get(name, default)
+        except (AttributeError, TypeError):
+            return getattr(user, name, default)
 
 
 def _user_id(user: Any) -> int:

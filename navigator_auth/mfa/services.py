@@ -243,10 +243,12 @@ async def build_mfa_services(app: Any, backend: Any) -> MfaServices:
     if db_pool is None:
         logger.critical("MFA: no 'authdb' pool; BasicAuth logins will be refused")
         return MfaServices(backend=backend, available=False, permanent=True)
+    redis_pool = None
     try:
         available = await setup_mfa_tables(db_pool)
         redis_pool = aioredis.ConnectionPool.from_url(auth_conf.REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
         store = MfaChallengeStore(redis_pool, secret)
+        await store.check_capabilities()
         backup_codes = BackupCodeStore(db_pool, secret)
         user_limiter = StrictRateLimiter(redis_pool, auth_conf.AUTH_OTP_RATE_USER, "user")
         ip_limiter = StrictRateLimiter(redis_pool, auth_conf.AUTH_OTP_RATE_IP, "ip")
@@ -260,6 +262,11 @@ async def build_mfa_services(app: Any, backend: Any) -> MfaServices:
             PROVIDER_BACKUP: BackupCodeProvider(backup_codes),
         }
     except Exception as err:  # pylint: disable=W0703
+        if redis_pool is not None:
+            try:
+                await redis_pool.disconnect()
+            except Exception:
+                logger.error("MFA: failed to disconnect unavailable Redis pool")
         logger.critical("MFA: could not build services (%s); BasicAuth logins will be refused", type(err).__name__)
         return MfaServices(backend=backend, available=False)
     if not available:

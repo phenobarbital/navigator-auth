@@ -363,6 +363,7 @@ class MfaHandler:
                 ):
                     raise _StrongFactorRequired()
                 await services.providers[PROVIDER_TOTP].disenroll(record, conn=conn)
+                await services.backup_codes.invalidate_all(uid, conn=conn)
                 await services.security.bump_version(conn, uid)
                 await services.trusted_devices.revoke_all(uid, "totp_disenrolled", conn=conn)
                 await services.security.write_audit(

@@ -14,7 +14,11 @@ logger = logging.getLogger("navigator.mfa")
 
 
 async def invoke_callback(path: Optional[str], payload: MfaModel, *, label: str) -> bool:
-    """Import and invoke a sync or async dotted-path callback without raising."""
+    """Invoke callbacks without blocking the loop; cancellation propagates to the caller.
+
+    Synchronous I/O runs in a worker thread. Cancelling its await cannot stop that
+    thread, so a timed-out callback may still finish its external delivery later.
+    """
     if not path:
         logger.warning("MFA: no %s callback configured; dropping hand-off", label)
         return False
@@ -24,7 +28,7 @@ async def invoke_callback(path: Optional[str], payload: MfaModel, *, label: str)
         if asyncio.iscoroutinefunction(callback):
             await callback(payload)
         else:
-            result = callback(payload)
+            result = await asyncio.to_thread(callback, payload)
             if inspect.isawaitable(result):
                 await result
         return True

@@ -104,6 +104,10 @@ class FakeStore:
 class FakeSecurity:
     """Track the single transaction-like lock used by the handler."""
 
+    async def commit_before_session(self, conn: object) -> None:
+        """Model the successful pre-issuance commit boundary."""
+        assert conn is not None
+
     @asynccontextmanager
     async def user_lock(self, user_id: int):
         """Yield a sentinel connection for the expected user."""

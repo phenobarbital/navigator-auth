@@ -29,6 +29,13 @@ REQUIRED_TERMS = (
     "password_reset",
     "mfa_unavailable",
     "credentials_changed",
+    "Redis 6.2",
+    "GETDEL",
+    "KEEPTTL",
+    "worker thread",
+    "may finish later",
+    "per-user budget",
+    "before issuing a session",
 )
 STALE_STATEMENTS = (
     "TOTP seeds are sealed by the vault kernel in ``auth.user_vault_secrets``",
@@ -67,3 +74,13 @@ def test_changelog_has_0_30_0_entry():
     text = _normalized(CHANGELOG)
     assert "0.30.0" in text
     assert "FEAT-106 review fixes" in text
+
+
+def test_ac5_checks_calls_instead_of_policy_field_names() -> None:
+    """The documented provider boundary allows remember_days while rejecting issuance calls."""
+    text = _normalized(ROOT / "sdd/specs/basicauth-otp-2fa.spec.md")
+    pattern = r"\b(remember|create_token|open_session)\s*\("
+    assert pattern in text
+    assert re.search(pattern, "remember_days = 30") is None
+    for call in ("remember(user)", "auth.create_token(user)", "backend.open_session(request, user)"):
+        assert re.search(pattern, call)

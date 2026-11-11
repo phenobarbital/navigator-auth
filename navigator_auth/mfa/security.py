@@ -10,6 +10,8 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import Any, Optional
 
+from pydantic import BaseModel, ConfigDict
+
 from navigator_auth.conf import (
     AUTH_DB_SCHEMA,
     AUTH_MFA_LOCK_TIMEOUT,
@@ -35,7 +37,7 @@ def _user_field(user: Mapping, name: str, default: Any = None) -> Any:
     """Read a field from either a mapping or an attribute-based user model."""
     try:
         value = user[name]
-    except (KeyError, TypeError, AttributeError):
+    except (KeyError, TypeError, AttributeError, IndexError):
         value = getattr(user, name, default)
     return default if value is None else value
 
@@ -48,6 +50,43 @@ def _lock_key(user_id: int) -> int:
 
 
 LOCK_CONNECTION: ContextVar[Optional[Any]] = ContextVar("navigator_auth_mfa_lock_connection", default=None)
+
+
+class _LockState(BaseModel):
+    """Request-local transaction and promoted session-lock ownership."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    conn: Any
+    key: int
+    timeout: float
+    committed: bool = False
+    session_lock: bool = False
+
+
+_LOCK_STATE: ContextVar[Optional[_LockState]] = ContextVar("navigator_auth_mfa_lock_state", default=None)
+
+
+async def _release_session_lock(state: _LockState) -> None:
+    """Release the promoted lock, terminating the socket if release cannot be confirmed."""
+    task = asyncio.create_task(
+        state.conn.fetchval("SELECT pg_advisory_unlock($1::int4, $2::int4)", LOCK_NAMESPACE, state.key)
+    )
+    try:
+        released = await asyncio.wait_for(asyncio.shield(task), timeout=state.timeout)
+        if not released:
+            raise MfaStorageError("MFA session lock was not released")
+    except (Exception, asyncio.CancelledError) as err:
+        # asyncdb disables asyncpg's reset query. A pooled close/release therefore
+        # cannot guarantee unlock; terminate the actual socket before returning it.
+        state.conn.engine().terminate()
+        # Termination detaches asyncpg's pool proxy immediately. Use asyncdb's
+        # public setter so its __aexit__ does not inspect that released proxy.
+        state.conn.set_connection(None)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        if isinstance(err, asyncio.CancelledError):
+            raise
+        logger.error("MFA session lock release failed; connection terminated: %s", type(err).__name__)
 
 
 async def _acquire(db_pool: Any) -> Any:
@@ -130,18 +169,27 @@ async def advisory_user_lock(db_pool: Any, user_id: int, *, timeout: Optional[fl
                 pass
             raise MfaStorageError(f"MFA user lock failed: {type(err).__name__}") from err
         token = LOCK_CONNECTION.set(conn)
+        state = _LockState(conn=conn, key=key, timeout=limit)
+        state_token = _LOCK_STATE.set(state)
         try:
             try:
                 yield conn
             except BaseException:
-                await conn.rollback()
+                if not state.committed:
+                    await conn.rollback()
                 raise
             try:
-                await conn.commit()
+                if not state.committed:
+                    await conn.commit()
             except Exception as err:
                 raise MfaStorageError(f"MFA user lock commit failed: {type(err).__name__}") from err
         finally:
-            LOCK_CONNECTION.reset(token)
+            try:
+                if state.session_lock:
+                    await _release_session_lock(state)
+            finally:
+                _LOCK_STATE.reset(state_token)
+                LOCK_CONNECTION.reset(token)
 
 
 class MfaSecurity:
@@ -164,6 +212,25 @@ class MfaSecurity:
         """
         async with advisory_user_lock(self._pool, user_id) as conn:
             yield conn
+
+    async def commit_before_session(self, conn: Any) -> None:
+        """Commit all credential bookkeeping while retaining the user's lock through issuance.
+
+        Only the gate calls this, after its last database mutation and before the
+        session issuer. Other user_lock callers retain their normal atomic scope.
+        """
+        state = _LOCK_STATE.get()
+        if state is None or state.conn is not conn or state.committed:
+            raise MfaStorageError("MFA session commit requires the active user lock")
+        # The transaction lock is already ours. The matching session lock extends
+        # serialization past commit; mark ownership before await for cancellation.
+        state.session_lock = True
+        try:
+            await conn.fetchval("SELECT pg_advisory_lock($1::int4, $2::int4)", LOCK_NAMESPACE, state.key)
+            await conn.commit()
+        except Exception as err:
+            raise MfaStorageError(f"MFA pre-session commit failed: {type(err).__name__}") from err
+        state.committed = True
 
     async def current_version(self, conn: Any, user_id: int) -> int:
         """Return the user's security version, atomically creating it at zero."""

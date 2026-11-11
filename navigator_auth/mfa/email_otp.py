@@ -16,6 +16,7 @@ from navigator_auth import conf as auth_conf
 
 from .abstract import AbstractOTPProvider
 from .notify import invoke_callback
+from .security import _user_field as _field
 from .types import PROVIDER_EMAIL, EnrollmentAuthorization, MfaChallenge, OtpNotificationPayload
 
 logger = logging.getLogger("navigator.mfa.email")
@@ -32,15 +33,6 @@ def mask_email(email: str) -> str:
     if not separator or not local or not domain:
         return "***"
     return f"{local[0]}***@{domain}"
-
-
-def _field(user: Any, name: str, default: Any = None) -> Any:
-    """Read a user field from mapping or model-like records."""
-    try:
-        value = user[name]
-    except (KeyError, TypeError, IndexError):
-        value = getattr(user, name, default)
-    return default if value is None else value
 
 
 def _usable_email(user: Any) -> Optional[str]:

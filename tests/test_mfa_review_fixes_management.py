@@ -261,3 +261,17 @@ async def test_management_single_connection_pool(single_connection_authdb):
     """AC10: the lock-aware one-connection fixture detects no nested acquire attempts in this task's lock guard."""
     single_connection_authdb.strict = True
     assert single_connection_authdb.acquires_inside_lock == []
+
+
+@pytest.mark.asyncio
+async def test_self_disenrollment_invalidates_all_backup_codes(env) -> None:
+    """Removing TOTP revokes unused backup credentials in the same security transition."""
+    user, session, secret, codes = await env.enrolled_user()
+    uid = user["user_id"]
+    response, body = await env.call(
+        "disenroll_totp", uid, {"password": user["password_plain"], "code": env.code(secret)[0]}, session
+    )
+    assert (response.status, body) == (200, {"status": "disenrolled"})
+    assert await env.services.backup_codes.remaining(uid) == 0
+    for code in codes:
+        assert not await env.services.backup_codes.consume(uid, code)

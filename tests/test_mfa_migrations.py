@@ -18,11 +18,12 @@ from tests.fixtures.mfa import mfa_db  # noqa: F401
 class _FakeConn:
     """Fake connection returning configurable asyncdb-style values."""
 
-    def __init__(self, execute_result=("CREATE", None), present=len(MFA_TABLES), raise_on=None):
+    def __init__(self, execute_result=("CREATE", None), present=len(MFA_TABLES), raise_on=None, missing=None):
         self.executed = []
         self._result = execute_result
         self._present = present
         self._raise_on = raise_on
+        self._missing = missing
 
     async def execute(self, sql):
         """Record SQL and return the configured execution value."""
@@ -35,6 +36,10 @@ class _FakeConn:
         """Return the configured relation count or raise as requested."""
         if self._raise_on == "fetchval":
             raise RuntimeError("fetchval")
+        if "pg_attribute" in sql:
+            return len(args[0]) - int(self._missing == "column")
+        if "pg_index" in sql:
+            return len(args[0]) - int(self._missing == "index")
         return self._present
 
 
@@ -111,6 +116,13 @@ async def test_setup_returns_true_when_all_present():
     pool = _FakePool()
     assert await setup_mfa_tables(pool) is True
     assert len(pool.conn.executed) == len(_MIGRATION_FILES)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["column", "index"])
+async def test_schema_readiness_requires_columns_and_indexes(missing: str) -> None:
+    """Relation names alone cannot make an incomplete MFA schema available."""
+    assert not await mfa_tables_present(_FakePool(missing=missing))
 
 
 @pytest.mark.asyncio

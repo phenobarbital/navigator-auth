@@ -79,7 +79,11 @@ def _services(evaluation=None, available=True) -> MfaServices:
         yield object()
 
     backend = SimpleNamespace(_idp=SimpleNamespace(user_from_id=AsyncMock(return_value=_user())))
-    services = MfaServices(backend=backend, available=available, security=SimpleNamespace(user_lock=user_lock))
+    services = MfaServices(
+        backend=backend,
+        available=available,
+        security=SimpleNamespace(user_lock=user_lock, commit_before_session=AsyncMock()),
+    )
     services.evaluate = AsyncMock(return_value=evaluation or _evaluation())
     services.store = SimpleNamespace(issue=AsyncMock(return_value=("challenge", object())))
     services.trusted_devices = SimpleNamespace(consume_and_rotate=AsyncMock(return_value=None))
