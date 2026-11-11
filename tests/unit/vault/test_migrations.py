@@ -1,4 +1,5 @@
 """Unit tests for navigator_auth.vault.migrations module."""
+
 import warnings
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,10 +11,10 @@ warnings.filterwarnings("ignore", message=".*extra keyword arguments on.*Field.*
 
 from navigator_auth.vault.migrations import ensure_vault_tables, SQL_DIR
 
-
 # ---------------------------------------------------------------------------
 # SQL file existence and content
 # ---------------------------------------------------------------------------
+
 
 class TestMigrationSQL:
     def test_sql_dir_exists(self):
@@ -34,6 +35,7 @@ class TestMigrationSQL:
 # ---------------------------------------------------------------------------
 # Table definitions
 # ---------------------------------------------------------------------------
+
 
 class TestTableDefinitions:
     @pytest.fixture
@@ -108,6 +110,7 @@ class TestTableDefinitions:
 # ensure_vault_tables function
 # ---------------------------------------------------------------------------
 
+
 class TestEnsureVaultTables:
     @pytest.mark.asyncio
     async def test_reads_and_executes_sql(self):
@@ -137,6 +140,7 @@ class TestEnsureVaultTables:
     async def test_callable(self):
         """ensure_vault_tables is an async callable."""
         import asyncio
+
         assert asyncio.iscoroutinefunction(ensure_vault_tables)
 
 
@@ -146,10 +150,12 @@ class TestCryptoHardeningMigration:
     @pytest.fixture
     def sql(self):
         from navigator_auth.vault.migrations import SQL_DIR
+
         return (SQL_DIR / "002_vault_crypto_hardening.sql").read_text()
 
     def test_registered_after_001(self):
         from navigator_auth.vault.migrations import MIGRATION_FILES
+
         assert MIGRATION_FILES == ("001_create_vault_tables.sql", "002_vault_crypto_hardening.sql")
 
     def test_widens_session_id_to_64(self, sql):
@@ -162,8 +168,11 @@ class TestCryptoHardeningMigration:
 
     def test_key_versions_become_integer_only_when_smallint(self, sql):
         assert "data_type = 'smallint'" in sql
-        for pair in ("('user_vault_secrets', 'key_version')", "('user_vault_audit', 'key_version')",
-                     "('vault_key_registry', 'key_id')"):
+        for pair in (
+            "('user_vault_secrets', 'key_version')",
+            "('user_vault_audit', 'key_version')",
+            "('vault_key_registry', 'key_id')",
+        ):
             assert pair in sql
 
     def test_every_change_is_guarded(self, sql):

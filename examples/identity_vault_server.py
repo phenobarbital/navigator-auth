@@ -100,16 +100,12 @@ PROVIDERS = {
     "okta": ("navigator_auth.backends.OktaAuth", "OKTA_CLIENT_ID"),
 }
 
-CONFIGURED = {
-    name: dotted
-    for name, (dotted, setting) in PROVIDERS.items()
-    if config.get(setting)
-}
+CONFIGURED = {name: dotted for name, (dotted, setting) in PROVIDERS.items() if config.get(setting)}
 
 _BACKENDS = [
-    "navigator_auth.backends.BasicAuth",          # username / password login
+    "navigator_auth.backends.BasicAuth",  # username / password login
     "navigator_auth.backends.oauth2.Oauth2Provider",  # this app as OAuth2 AS
-    *CONFIGURED.values(),                         # SSO + identity linking
+    *CONFIGURED.values(),  # SSO + identity linking
 ]
 # The list is passed to AuthHandler(backends=...) instead of being exported as
 # AUTHENTICATION_BACKENDS: navigator_auth.conf ends with
@@ -194,9 +190,7 @@ DEMO_USER = {
 DEMO_PASSWORD_IS_DEFAULT = DEMO_USER["password"] == DEFAULT_DEMO_PASSWORD
 
 #: What to show instead of an operator-supplied password.
-DEMO_PASSWORD_DISPLAY = (
-    DEFAULT_DEMO_PASSWORD if DEMO_PASSWORD_IS_DEFAULT else "<$EXAMPLE_PASSWORD>"
-)
+DEMO_PASSWORD_DISPLAY = DEFAULT_DEMO_PASSWORD if DEMO_PASSWORD_IS_DEFAULT else "<$EXAMPLE_PASSWORD>"
 
 #: Where to ask "who am I?" with a linked credential. This is what a real
 #: consumer (a Graph client, an Odoo RPC client, ...) would call.
@@ -210,6 +204,7 @@ PROVIDER_USERINFO = {
 # ---------------------------------------------------------------------------
 # Database bootstrap (example convenience — a real deployment has the schema)
 # ---------------------------------------------------------------------------
+
 
 async def bootstrap_database() -> None:
     """Apply the example schema and upsert the demo user.
@@ -257,6 +252,7 @@ async def bootstrap_database() -> None:
 # Application handlers
 # ---------------------------------------------------------------------------
 
+
 async def index(request: web.Request) -> web.StreamResponse:
     """Serve the single-page application (also handles /callback)."""
     return web.FileResponse(STATIC_DIR / "identity_vault_app.html")
@@ -291,11 +287,8 @@ async def example_config(request: web.Request) -> web.StreamResponse:
                 "provider": backend._service_name,
                 "description": backend._description,
                 "login_uri": f"/api/v1/auth/{backend._service_name}/",
-                "link_uri": (
-                    f"/api/v1/user/identities/link/{backend._service_name}"
-                ),
-                "can_call_api": backend._service_name in PROVIDER_USERINFO
-                or backend._service_name == "odoo",
+                "link_uri": (f"/api/v1/user/identities/link/{backend._service_name}"),
+                "can_call_api": backend._service_name in PROVIDER_USERINFO or backend._service_name == "odoo",
             }
         )
     return web.json_response(
@@ -366,9 +359,7 @@ def local_user_id(user, session) -> Any:
         return None
 
 
-async def provider_authorization(
-    request: web.Request, session, user, auth_method: str
-) -> dict:
+async def provider_authorization(request: web.Request, session, user, auth_method: str) -> dict:
     """The provider credential this session was logged in with, if any.
 
     Only external (SSO) logins have one: a Basic or navigator-auth OAuth2
@@ -413,9 +404,7 @@ async def provider_authorization(
             "token": token.access_token,
             "type": token.token_type or "Bearer",
             "provider": auth_method,
-            "expires_at": (
-                token.expires_at.isoformat() if token.expires_at else None
-            ),
+            "expires_at": (token.expires_at.isoformat() if token.expires_at else None),
             "scopes": list(token.scopes or []),
             "source": "vault",
         }
@@ -446,18 +435,14 @@ async def me(request: web.Request, *, session=None, user=None) -> web.StreamResp
         "auth_method": auth_method,
         "session_id": getattr(session, "session_id", None),
     }
-    if authorization := await provider_authorization(
-        request, session, user, auth_method
-    ):
+    if authorization := await provider_authorization(request, session, user, auth_method):
         payload["authorization"] = authorization
     return web.json_response(payload)
 
 
 @is_authenticated()
 @user_session()
-async def provider_whoami(
-    request: web.Request, *, session=None, user=None
-) -> web.StreamResponse:
+async def provider_whoami(request: web.Request, *, session=None, user=None) -> web.StreamResponse:
     """Call a provider's API with the *linked* credential of this user.
 
     This is what the vault is for: no interactive flow, no token in the
@@ -484,9 +469,7 @@ async def provider_whoami(
         url = f"{(ODOO_DOMAIN or '').rstrip('/')}{ODOO_USERINFO_PATH}"
     if not url:
         raise web.HTTPBadRequest(
-            text=json.dumps(
-                {"error": f"no demo API call defined for {provider}"}
-            ),
+            text=json.dumps({"error": f"no demo API call defined for {provider}"}),
             content_type="application/json",
         )
     headers = {
@@ -552,9 +535,7 @@ def _jwt_claims(token: str) -> dict:
 
 @is_authenticated()
 @user_session()
-async def token_claims(
-    request: web.Request, *, session=None, user=None
-) -> web.StreamResponse:
+async def token_claims(request: web.Request, *, session=None, user=None) -> web.StreamResponse:
     """Timing claims of the session's provider access token — never the token.
 
     The instrument for the FEAT-103 §8 Q1 experiment: *does ``max_age``
@@ -591,8 +572,7 @@ async def token_claims(
             text=json.dumps(
                 {
                     "error": str(err),
-                    "hint": "this provider issues opaque access tokens "
-                    "(GitHub does); only a JWT carries iat/exp",
+                    "hint": "this provider issues opaque access tokens " "(GitHub does); only a JWT carries iat/exp",
                 }
             ),
             content_type="application/json",
@@ -604,8 +584,7 @@ async def token_claims(
     readable = {
         name: datetime.fromtimestamp(value, timezone.utc).isoformat()
         for name, value in present.items()
-        if name in ("iat", "exp", "nbf", "auth_time", "xms_pftexp")
-        and isinstance(value, int)
+        if name in ("iat", "exp", "nbf", "auth_time", "xms_pftexp") and isinstance(value, int)
     }
     userdata = request.get("userdata") or {}
     now = datetime.now(timezone.utc)
@@ -653,6 +632,7 @@ async def token_claims(
 # Startup helpers
 # ---------------------------------------------------------------------------
 
+
 async def register_demo_client(app: web.Application) -> None:
     """Register the PKCE client used by the "OAuth2 login" button."""
     from navigator_auth.backends.oauth2.models import OAuthClient
@@ -662,7 +642,7 @@ async def register_demo_client(app: web.Application) -> None:
         client_id=CLIENT_ID,
         client_pk=None,
         client_name="Navigator Identity Vault Example",
-        client_secret=None,           # public client -> PKCE S256 required
+        client_secret=None,  # public client -> PKCE S256 required
         client_type="public",
         redirect_uris=[REDIRECT_URI],
         policy_uri="",
@@ -716,6 +696,7 @@ def print_banner(app: web.Application) -> None:
 # Application factory
 # ---------------------------------------------------------------------------
 
+
 def make_app() -> web.Application:
     app = web.Application()
 
@@ -746,9 +727,7 @@ def make_app() -> web.Application:
         provider_whoami,
         name="demo_whoami",
     )
-    app.router.add_get(
-        "/api/v1/demo/token-claims", token_claims, name="demo_token_claims"
-    )
+    app.router.add_get("/api/v1/demo/token-claims", token_claims, name="demo_token_claims")
 
     # the page shell and its configuration are public; everything else is not.
     app[AUTH_EXCLUDE_LIST_KEY].extend(["/", "/callback", "/example-config"])

@@ -25,6 +25,7 @@ from navigator_auth.migrations.runner import (
     upgrade,
 )
 
+
 class AwaitableAcquire:
     """Awaitable pool-acquire result without async-context-manager methods."""
 
