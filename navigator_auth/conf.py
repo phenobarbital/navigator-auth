@@ -110,6 +110,10 @@ AUTH_MECHANISM_APIKEY = "apikey"
 AUTH_MECHANISM_PARTNER = "partner"
 AUTH_MECHANISM_TOKEN = "token"
 AUTH_MECHANISM_DJANGO = "django"
+# FEAT-106 review fixes (M9, D9): request key holding the immutable, request-local
+# assurance (mfa/amr/auth_method) and identity of the VALIDATED bearer token. ABAC
+# uses it instead of the identity-shared session for bearer requests.
+AUTH_BEARER_CONTEXT_KEY = "auth_bearer_context"
 
 # Version / Deployment Headers:
 import platform  # noqa: E402

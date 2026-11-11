@@ -15,7 +15,7 @@ from navigator_session import get_session
 from navigator_auth.conf import AUTH_SESSION_OBJECT
 from navigator_auth.decorators import _apply_decorator
 
-from navigator_auth.abac.context import EvalContext
+from navigator_auth.abac.context import EvalContext, effective_userinfo
 from navigator_auth.abac.policies.resources import ResourceType
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -50,7 +50,7 @@ async def _get_userinfo(request: web.Request) -> tuple:
         userinfo = session[AUTH_SESSION_OBJECT]
     except (KeyError, TypeError):
         pass
-    return session, userinfo
+    return session, effective_userinfo(request, userinfo)
 
 
 def groups_protected(

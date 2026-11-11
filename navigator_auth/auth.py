@@ -45,6 +45,7 @@ from .identities import AuthUser
 from .conf import (
     AUTH_MECHANISM_KEY,
     AUTH_MECHANISM_BEARER,
+    AUTH_BEARER_CONTEXT_KEY,
     AUTH_MECHANISM_COOKIE,
     AUTH_EXCLUDE_LIST_KEY,
     AUTHORIZED_KEY,
@@ -84,6 +85,7 @@ from .middlewares.security import security_middleware
 from .middlewares.csrf import csrf_middleware
 from .middlewares.version import version_middleware
 from .abac.middleware import abac_middleware
+from .abac.context import bearer_context_from_claims
 
 url = logging.getLogger("urllib3.connectionpool")
 url.setLevel(logging.WARNING)
@@ -1127,6 +1129,7 @@ class AuthHandler:
                                 request.user = user
                                 request["authenticated"] = True
                                 request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
+                                request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
                 except Exception:
                     pass  # Best-effort: if token is invalid, proceed unauthenticated
             return await handler(request)
@@ -1203,6 +1206,7 @@ class AuthHandler:
                         request["userdata"] = payload
                         request["authenticated"] = True
                         request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
+                        request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
 
                     except web.HTTPException:
                         raise
@@ -1235,6 +1239,7 @@ class AuthHandler:
                         request["userdata"] = payload
                         request["authenticated"] = True
                         request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
+                        request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
                     except web.HTTPException:
                         raise
                     except Exception as ex:  # pylint: disable=W0703
