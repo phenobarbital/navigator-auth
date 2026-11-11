@@ -205,3 +205,39 @@ async def test_rotate_master_key_rotates_mfa_seeds(
     )
     code = TOTP(seed, 6, SHA1(), 30).generate(frozen_totp_clock()).decode("ascii")
     assert await new_provider.verify(None, user, code) is True
+
+
+@pytest.mark.asyncio
+async def test_mfa_secrets_migration_keeps_rows_skipped_by_conflict(mfa_db, mfa_user_factory):
+    """A vault seed whose copy is skipped by a unique-index conflict must NOT be deleted."""
+    await setup_vault_tables(mfa_db)
+    user = await mfa_user_factory()
+    existing_id, vault_id = uuid.uuid4(), uuid.uuid4()
+    async with await mfa_db.acquire() as conn:
+        await conn.fetchval(
+            f"INSERT INTO {SECRETS} (id, user_id, provider, key, ciphertext_db, key_version) "
+            "VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            existing_id,
+            user["user_id"],
+            PROVIDER_TOTP,
+            "mfa:totp",
+            b"already-moved",
+            41101,
+        )
+        await conn.fetchval(
+            f"INSERT INTO {VAULT} (id, user_id, key, ciphertext_db, key_version) "
+            "VALUES ($1, $2, $3, $4, $5) RETURNING id",
+            vault_id,
+            user["user_id"],
+            "mfa:totp",
+            b"conflicting-vault-copy",
+            41102,
+        )
+    try:
+        await ensure_mfa_tables(mfa_db)
+        assert await _fetch_rows(mfa_db, f"SELECT id FROM {SECRETS} WHERE id = $1", vault_id) == []
+        survivors = await _fetch_rows(mfa_db, f"SELECT ciphertext_db FROM {VAULT} WHERE id = $1", vault_id)
+        assert survivors == [{"ciphertext_db": b"conflicting-vault-copy"}]
+    finally:
+        async with await mfa_db.acquire() as conn:
+            await conn.fetchval(f"DELETE FROM {VAULT} WHERE id = $1 RETURNING id", vault_id)

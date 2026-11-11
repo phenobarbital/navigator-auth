@@ -145,9 +145,11 @@ class UserSession(BaseHandler):
                 current = await conn.fetchval(f"SELECT password FROM {_USERS} WHERE user_id = $1 FOR UPDATE", target_id)
                 if current is None or not secrets.compare_digest(str(current), str(captured or "")):
                     raise TransitionAborted("credentials_changed")
-                await conn.fetchval(
+                updated = await conn.fetchval(
                     f"UPDATE {_USERS} SET password = $2 WHERE user_id = $1 RETURNING user_id", target_id, new_hash
                 )
+                if updated is None:
+                    raise TransitionAborted("credentials_changed")
             headers = {"x-status": "OK", "x-message": "Session OK"}
             response = {"action": "Password Changed", "status": "OK"}
             return self.json_response(response=response, headers=headers, status=202)

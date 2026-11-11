@@ -55,6 +55,28 @@ async def _acquire(db_pool: Any) -> Any:
     return await db_pool.acquire()
 
 
+def _release_when_settled(acquire_task: "asyncio.Task[Any]") -> None:
+    """Close a pooled connection whose acquire finishes after its caller gave up.
+
+    Args:
+        acquire_task: The pending (or finished) pool-acquire task.
+    """
+
+    async def _close(conn_cm: Any) -> None:
+        try:
+            async with conn_cm:
+                pass
+        except Exception:  # pylint: disable=W0703
+            pass
+
+    def _on_done(task: "asyncio.Task[Any]") -> None:
+        if task.cancelled() or task.exception() is not None:
+            return
+        asyncio.ensure_future(_close(task.result()))
+
+    acquire_task.add_done_callback(_on_done)
+
+
 @asynccontextmanager
 async def advisory_user_lock(db_pool: Any, user_id: int, *, timeout: Optional[float] = None) -> AsyncIterator[Any]:
     """Yield one pooled connection in one transaction holding the user's advisory lock.
@@ -89,6 +111,11 @@ async def advisory_user_lock(db_pool: Any, user_id: int, *, timeout: Optional[fl
             except Exception:  # pylint: disable=W0703
                 pass
         raise MfaStorageError("MFA user lock acquire timed out") from err
+    except asyncio.CancelledError:
+        # The caller was cancelled (e.g. client disconnect) while the shielded acquire is still pending:
+        # hand the connection back to the pool as soon as the acquire settles, then propagate.
+        _release_when_settled(acquire_task)
+        raise
     except Exception as err:
         raise MfaStorageError(f"MFA user lock acquire failed: {type(err).__name__}") from err
     async with conn_cm as conn:

@@ -103,38 +103,47 @@ class SecondFactorGate:
         services = self._services
         uid = int(_field(user, self._uid_attr))
         try:
+            # A refusal raised inside the lock would roll the lock transaction back, and with it a
+            # trusted-device family revocation done on replay. Capture it, leave the lock scope normally
+            # (committing), then re-raise.
+            deferred: Optional[Exception] = None
             async with services.security.user_lock(uid) as conn:
-                fresh = await services.backend._idp.user_from_id(uid, conn=conn)  # pylint: disable=W0212
-                if not _field(fresh, "is_active", True):
-                    raise FailedAuth("User account is disabled", status=403)
-                if not secrets.compare_digest(
-                    str(_field(fresh, self._pwd_attr, "")), str(_field(user, self._pwd_attr, ""))
-                ):
-                    raise FailedAuth("credentials_changed", status=401)
-                evaluation = await services.evaluate(fresh, conn=conn)
-                if evaluation.state == MfaState.NONE:
-                    return GateResult(session=await issue(fresh, {}))
-                device_token = await self._trusted_device(request, conn, evaluation)
-                if device_token is not None:
-                    session = await issue(fresh, {"mfa": True, "amr": [AMR_PASSWORD, AMR_TRUSTED_DEVICE]})
-                    device = {"token": device_token, "max_age": evaluation.policy.remember_days * 86400}
-                    return GateResult(session=session, device=device)
-                if not evaluation.providers:
-                    raise MFARefused(
-                        "no_factor_available", "No second factor is available for this account", status=403
+                try:
+                    fresh = await services.backend._idp.user_from_id(uid, conn=conn)  # pylint: disable=W0212
+                    if not _field(fresh, "is_active", True):
+                        raise FailedAuth("User account is disabled", status=403)
+                    if not secrets.compare_digest(
+                        str(_field(fresh, self._pwd_attr, "")), str(_field(user, self._pwd_attr, ""))
+                    ):
+                        raise FailedAuth("credentials_changed", status=401)
+                    evaluation = await services.evaluate(fresh, conn=conn)
+                    if evaluation.state == MfaState.NONE:
+                        return GateResult(session=await issue(fresh, {}))
+                    device_token = await self._trusted_device(request, conn, evaluation)
+                    if device_token is not None:
+                        session = await issue(fresh, {"mfa": True, "amr": [AMR_PASSWORD, AMR_TRUSTED_DEVICE]})
+                        device = {"token": device_token, "max_age": evaluation.policy.remember_days * 86400}
+                        return GateResult(session=session, device=device)
+                    if not evaluation.providers:
+                        raise MFARefused(
+                            "no_factor_available", "No second factor is available for this account", status=403
+                        )
+                    code_hash = None
+                    if evaluation.preferred == PROVIDER_EMAIL:
+                        issued = await services.providers[PROVIDER_EMAIL].challenge(request, fresh)
+                        code_hash = issued.get("code_hash")
+                    token, _record = await services.store.issue(
+                        fresh,
+                        list(evaluation.providers),
+                        evaluation.preferred,
+                        security_version=evaluation.security_version,
+                        context_digest=evaluation.context_digest,
+                        email_code_hash=code_hash,
                     )
-                code_hash = None
-                if evaluation.preferred == PROVIDER_EMAIL:
-                    issued = await services.providers[PROVIDER_EMAIL].challenge(request, fresh)
-                    code_hash = issued.get("code_hash")
-                token, _record = await services.store.issue(
-                    fresh,
-                    list(evaluation.providers),
-                    evaluation.preferred,
-                    security_version=evaluation.security_version,
-                    context_digest=evaluation.context_digest,
-                    email_code_hash=code_hash,
-                )
+                except Exception as err:  # pylint: disable=W0718 -- re-raised after the lock commits.
+                    deferred = err
+            if deferred is not None:
+                raise deferred
         except (MfaSignal, FailedAuth, InvalidAuth):
             raise
         except Exception as err:  # pylint: disable=W0718 -- security dependencies fail closed.
@@ -178,6 +187,9 @@ class SecondFactorGate:
                 raise VerifyRefused("rate_limited", 429)
             if provider not in preview.providers or provider not in services.providers:
                 await self._failed(token)
+            # D16 (deliberate): a backup code is burned on the store's OWN connection, outside the lock, so no
+            # later failure (stale challenge, issuer error, rollback) can ever restore a used code. A stale
+            # challenge therefore costs the user one code; that is fail-safe, never a bypass.
             if provider == PROVIDER_BACKUP and not await services.backup_codes.consume(preview.user_id, code):
                 await self._failed(token)
             async with services.security.user_lock(preview.user_id) as conn:

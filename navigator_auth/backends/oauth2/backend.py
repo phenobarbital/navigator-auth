@@ -2425,6 +2425,15 @@ class Oauth2Provider(BaseAuthBackend):
                 if rt.generation != generation:
                     await self.refresh_token_storage.revoke_chain(refresh_token)
                     return self._error_response("invalid_grant", "Refresh token is no longer valid.")
+                # Re-read under the user lock: a concurrent refresh of the same token may have rotated it
+                # after the pre-lock read above (rotation race / reuse detection).
+                current = await self.refresh_token_storage.get_token(refresh_token)
+                if not current:
+                    return self._error_response("invalid_grant", "Invalid refresh token.")
+                if current.revoked:
+                    if current.revoked_reason == "rotated" and OAUTH_REFRESH_ROTATION:
+                        await self.refresh_token_storage.revoke_chain(refresh_token)
+                    return self._error_response("invalid_grant", "Refresh token has been revoked.")
                 scope = payload.get("scope", rt.scope)
                 # Scope narrowing only.
                 if set(scope.split()) - set(rt.scope.split()):
