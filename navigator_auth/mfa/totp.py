@@ -35,15 +35,24 @@ SECURITY_TABLE = f"{AUTH_DB_SCHEMA}.user_mfa_security"
 
 def mfa_seed_context(user_id: int, provider: str = PROVIDER_TOTP, key: str = TOTP_VAULT_KEY) -> VaultContext:
     """Build the AAD context for an active seed."""
-    return VaultContext(purpose=MFA_SEED_PURPOSE, layer="db", fields=(("user_id", int(user_id)), ("provider", provider), ("key", key)))
+    return VaultContext(
+        purpose=MFA_SEED_PURPOSE, layer="db", fields=(("user_id", int(user_id)), ("provider", provider), ("key", key))
+    )
 
 
-def pending_seed_context(*, user_id: int, session_hash: str, security_version: int, enrollment_hash: str) -> VaultContext:
+def pending_seed_context(
+    *, user_id: int, session_hash: str, security_version: int, enrollment_hash: str
+) -> VaultContext:
     """Build the AAD context for a pending seed."""
     return VaultContext(
         purpose=MFA_PENDING_PURPOSE,
         layer="db",
-        fields=(("user_id", int(user_id)), ("session", session_hash), ("version", int(security_version)), ("enrollment", enrollment_hash)),
+        fields=(
+            ("user_id", int(user_id)),
+            ("session", session_hash),
+            ("version", int(security_version)),
+            ("enrollment", enrollment_hash),
+        ),
     )
 
 
@@ -64,7 +73,15 @@ class TOTPProvider(AbstractOTPProvider):
     _provider_name = PROVIDER_TOTP
     _is_strong = True
 
-    def __init__(self, *, app: Any, db_pool: Any, store: MfaChallengeStore, issuer: str = AUTH_TOTP_ISSUER, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        *,
+        app: Any,
+        db_pool: Any,
+        store: MfaChallengeStore,
+        issuer: str = AUTH_TOTP_ISSUER,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
         self._app, self._db, self._store = app, db_pool, store
         self._issuer, self._clock = issuer, clock
         self.logger = logger
@@ -96,7 +113,11 @@ class TOTPProvider(AbstractOTPProvider):
     async def _load_seed(self, user_id: int) -> Optional[bytes]:
         try:
             async with await self._db.acquire() as conn:
-                row = await conn.fetch_one(f"SELECT ciphertext_db FROM {VAULT_SECRETS_TABLE} WHERE user_id = $1 AND key = $2 AND deleted_at IS NULL", user_id, TOTP_VAULT_KEY)
+                row = await conn.fetch_one(
+                    f"SELECT ciphertext_db FROM {VAULT_SECRETS_TABLE} WHERE user_id = $1 AND key = $2 AND deleted_at IS NULL",
+                    user_id,
+                    TOTP_VAULT_KEY,
+                )
         except Exception as err:
             raise MfaStorageError(f"totp seed read failed: {type(err).__name__}") from err
         if not row:
@@ -117,7 +138,12 @@ class TOTPProvider(AbstractOTPProvider):
         user_id = int(_field(user, "user_id"))
         try:
             async with await self._db.acquire() as conn:
-                row = await conn.fetch_one(f"SELECT m.enabled, m.confirmed_at FROM {USER_MFA_TABLE} m WHERE m.user_id=$1 AND m.provider=$2 AND EXISTS (SELECT 1 FROM {VAULT_SECRETS_TABLE} v WHERE v.user_id=$1 AND v.key=$3 AND v.deleted_at IS NULL)", user_id, PROVIDER_TOTP, TOTP_VAULT_KEY)
+                row = await conn.fetch_one(
+                    f"SELECT m.enabled, m.confirmed_at FROM {USER_MFA_TABLE} m WHERE m.user_id=$1 AND m.provider=$2 AND EXISTS (SELECT 1 FROM {VAULT_SECRETS_TABLE} v WHERE v.user_id=$1 AND v.key=$3 AND v.deleted_at IS NULL)",
+                    user_id,
+                    PROVIDER_TOTP,
+                    TOTP_VAULT_KEY,
+                )
         except Exception as err:
             raise MfaStorageError(f"totp enrollment read failed: {type(err).__name__}") from err
         return bool(row and row["enabled"] and row["confirmed_at"] is not None)
@@ -128,17 +154,35 @@ class TOTPProvider(AbstractOTPProvider):
         if authorization.user_id != user_id or authorization.expires_at <= datetime.now(timezone.utc):
             raise ValueError("invalid enrollment authorization")
         seed, token = os.urandom(TOTP_SEED_BYTES), new_opaque_token()
-        context = pending_seed_context(user_id=user_id, session_hash=_hash_token(authorization.session_id), security_version=authorization.security_version, enrollment_hash=_hash_token(token))
+        context = pending_seed_context(
+            user_id=user_id,
+            session_hash=_hash_token(authorization.session_id),
+            security_version=authorization.security_version,
+            enrollment_hash=_hash_token(token),
+        )
         sealed = seal_value(seed, context, self._keyring())
-        await self._store.put_enrollment(token, user_id=user_id, session_id=authorization.session_id, security_version=authorization.security_version, sealed_seed=sealed)
+        await self._store.put_enrollment(
+            token,
+            user_id=user_id,
+            session_id=authorization.session_id,
+            security_version=authorization.security_version,
+            sealed_seed=sealed,
+        )
         account = str(_field(user, "username") or user_id)
-        return {"enrollment_token": token, "uri": self._totp(seed).get_provisioning_uri(account, self._issuer), "secret_b32": base64.b32encode(seed).decode("ascii").rstrip("="), "expires_in": ENROLLMENT_TTL}
+        return {
+            "enrollment_token": token,
+            "uri": self._totp(seed).get_provisioning_uri(account, self._issuer),
+            "secret_b32": base64.b32encode(seed).decode("ascii").rstrip("="),
+            "expires_in": ENROLLMENT_TTL,
+        }
 
     async def challenge(self, request: web.Request, user: Mapping) -> dict:
         """Return no challenge because the authenticator app is the channel."""
         return {}
 
-    async def confirm_enrollment(self, user: Mapping, code: str, enrollment_token: str, session_id: str, *, conn: Any = None) -> bool:
+    async def confirm_enrollment(
+        self, user: Mapping, code: str, enrollment_token: str, session_id: str, *, conn: Any = None
+    ) -> bool:
         """Confirm and install a pending seed on the caller's connection."""
         if conn is None:
             raise ValueError("confirm_enrollment requires conn")
@@ -163,7 +207,9 @@ class TOTPProvider(AbstractOTPProvider):
         await self._install_seed(conn, user_id, seed)
         return True
 
-    async def verify(self, request: web.Request, user: Mapping, code: str, challenge: Optional[MfaChallenge] = None) -> bool:
+    async def verify(
+        self, request: web.Request, user: Mapping, code: str, challenge: Optional[MfaChallenge] = None
+    ) -> bool:
         """Verify a code against the active seed, failing closed on storage errors."""
         user_id = int(_field(user, "user_id"))
         seed = await self._load_seed(user_id)
@@ -174,7 +220,11 @@ class TOTPProvider(AbstractOTPProvider):
             return False
         try:
             async with await self._db.acquire() as conn:
-                await conn.fetchval(f"UPDATE {USER_MFA_TABLE} SET last_used_at = now() WHERE user_id=$1 AND provider=$2 RETURNING 1", user_id, PROVIDER_TOTP)
+                await conn.fetchval(
+                    f"UPDATE {USER_MFA_TABLE} SET last_used_at = now() WHERE user_id=$1 AND provider=$2 RETURNING 1",
+                    user_id,
+                    PROVIDER_TOTP,
+                )
         except Exception as err:
             self.logger.warning("MFA last-used touch failed: %s", type(err).__name__)
         return True
@@ -189,11 +239,24 @@ class TOTPProvider(AbstractOTPProvider):
             await self._disenroll_on(conn, user_id)
 
     async def _disenroll_on(self, conn: Any, user_id: int) -> None:
-        await conn.fetchval(f"UPDATE {VAULT_SECRETS_TABLE} SET deleted_at = now() WHERE user_id=$1 AND key=$2 AND deleted_at IS NULL RETURNING 1", user_id, TOTP_VAULT_KEY)
-        await conn.fetchval(f"UPDATE {USER_MFA_TABLE} SET enabled=false, confirmed_at=NULL WHERE user_id=$1 AND provider=$2 RETURNING 1", user_id, PROVIDER_TOTP)
+        await conn.fetchval(
+            f"UPDATE {VAULT_SECRETS_TABLE} SET deleted_at = now() WHERE user_id=$1 AND key=$2 AND deleted_at IS NULL RETURNING 1",
+            user_id,
+            TOTP_VAULT_KEY,
+        )
+        await conn.fetchval(
+            f"UPDATE {USER_MFA_TABLE} SET enabled=false, confirmed_at=NULL WHERE user_id=$1 AND provider=$2 RETURNING 1",
+            user_id,
+            PROVIDER_TOTP,
+        )
 
     def _open_pending(self, pending: PendingEnrollment, token: str) -> bytes:
-        context = pending_seed_context(user_id=pending.user_id, session_hash=pending.session_hash, security_version=pending.security_version, enrollment_hash=_hash_token(token))
+        context = pending_seed_context(
+            user_id=pending.user_id,
+            session_hash=pending.session_hash,
+            security_version=pending.security_version,
+            enrollment_hash=_hash_token(token),
+        )
         try:
             seed = open_value(base64.b64decode(pending.sealed_seed), context, self._keyring())
         except (VaultCryptoError, ValueError) as err:
@@ -205,5 +268,15 @@ class TOTPProvider(AbstractOTPProvider):
     async def _install_seed(self, conn: Any, user_id: int, seed: bytes) -> None:
         keyring = self._keyring()
         ciphertext = seal_value(seed, mfa_seed_context(user_id), keyring)
-        await conn.fetchval(f"INSERT INTO {VAULT_SECRETS_TABLE} (user_id,key,ciphertext_db,key_version) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id,key) WHERE deleted_at IS NULL DO UPDATE SET ciphertext_db=EXCLUDED.ciphertext_db,key_version=EXCLUDED.key_version,updated_at=NOW() RETURNING 1", user_id, TOTP_VAULT_KEY, ciphertext, keyring.active_key_id)
-        await conn.fetchval(f"INSERT INTO {USER_MFA_TABLE} (user_id,provider,enabled,confirmed_at) VALUES ($1,$2,true,now()) ON CONFLICT (user_id,provider) DO UPDATE SET enabled=true,confirmed_at=now() RETURNING 1", user_id, PROVIDER_TOTP)
+        await conn.fetchval(
+            f"INSERT INTO {VAULT_SECRETS_TABLE} (user_id,key,ciphertext_db,key_version) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id,key) WHERE deleted_at IS NULL DO UPDATE SET ciphertext_db=EXCLUDED.ciphertext_db,key_version=EXCLUDED.key_version,updated_at=NOW() RETURNING 1",
+            user_id,
+            TOTP_VAULT_KEY,
+            ciphertext,
+            keyring.active_key_id,
+        )
+        await conn.fetchval(
+            f"INSERT INTO {USER_MFA_TABLE} (user_id,provider,enabled,confirmed_at) VALUES ($1,$2,true,now()) ON CONFLICT (user_id,provider) DO UPDATE SET enabled=true,confirmed_at=now() RETURNING 1",
+            user_id,
+            PROVIDER_TOTP,
+        )
