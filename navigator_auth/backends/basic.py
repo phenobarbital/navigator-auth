@@ -22,23 +22,15 @@ from ..exceptions import (
     FailedAuth,
     UserNotFound,
     InvalidAuth,
-    MfaSignal,
     MFARequired,
     MFARefused,
 )
 from ..responses import JSONResponse
 from ..libs.expiry import expiry_fields
 from ..identities import AuthUser
-from ..mfa.services import MFA_APP_KEY, MfaServicesSlot, build_mfa_services, get_mfa_services
-from ..mfa.trusted_devices import may_offer_trusted_device
-from ..mfa.types import (
-    AMR_PASSWORD,
-    AMR_TRUSTED_DEVICE,
-    MFA_DEVICE_TOKEN_KEY,
-    PROVIDER_EMAIL,
-    TRUSTED_COOKIE,
-    MfaState,
-)
+from ..mfa.login import SecondFactorGate
+from ..mfa.services import MFA_APP_KEY, MfaServicesSlot, build_mfa_services, mfa_services_lease
+from ..mfa.types import MFA_DEVICE_TOKEN_KEY
 
 # FEAT-098 — per-user index of live jti's, so a password reset (or any
 # future admin action) can find and revoke every outstanding JWT for a
@@ -354,68 +346,35 @@ class BasicAuth(BaseAuthBackend):
                 return False
 
     async def _second_factor(self, request: web.Request, user) -> Optional[dict]:
-        """Decide whether this password login owes a second factor."""
+        """Run the shared second-factor gate for this password login (spec §3 M5)."""
         if not user_is_active(user):
             raise FailedAuth("User account is disabled", status=403)
-        services = get_mfa_services(request.app)
-        if services is None or not services.available:
-            raise MFARefused("mfa_unavailable", "Second factor is temporarily unavailable", status=503)
-        uid = user[self.userid_attribute]
-        try:
-            evaluation = await services.evaluate(user)
-            if evaluation.state == MfaState.NONE:
-                return None
-            device_token = await self._trusted_device(request, services, evaluation)
-            if device_token is not None:
-                extra = {"auth_method": "basic", "mfa": True, "amr": [AMR_PASSWORD, AMR_TRUSTED_DEVICE]}
-                result = await self.open_session(request, user, extra=extra)
-                result[MFA_DEVICE_TOKEN_KEY] = {
-                    "token": device_token,
-                    "max_age": evaluation.policy.remember_days * 86400,
-                }
-                return result
-            if not evaluation.providers:
-                raise MFARefused("no_factor_available", "No second factor is available for this account", status=403)
-            code_hash = None
-            if evaluation.preferred == PROVIDER_EMAIL:
-                issued = await services.providers[PROVIDER_EMAIL].challenge(request, user)
-                code_hash = issued.get("code_hash")
-            token, _record = await services.store.issue(
-                user,
-                list(evaluation.providers),
-                evaluation.preferred,
-                security_version=evaluation.security_version,
-                context_digest=evaluation.context_digest,
-                email_code_hash=code_hash,
+        async with mfa_services_lease(request.app) as services:
+            if services is None or not services.available:
+                raise MFARefused("mfa_unavailable", "Second factor is temporarily unavailable", status=503)
+            gate = SecondFactorGate(
+                services,
+                userid_attribute=self.userid_attribute,
+                password_attribute=self.pwd_atrribute,
             )
-        except (MfaSignal, FailedAuth, InvalidAuth):
-            raise
-        except Exception as err:  # pylint: disable=W0703
-            self.logger.error(f"BasicAuth: second factor unavailable for user {uid}: {type(err).__name__}")
-            raise MFARefused("mfa_unavailable", "Second factor is temporarily unavailable", status=503) from err
-        raise MFARequired(
-            challenge=token,
-            providers=list(evaluation.providers),
-            preferred=evaluation.preferred,
-            expires_in=auth_conf.AUTH_OTP_CHALLENGE_TTL,
-        )
 
-    async def _trusted_device(self, request: web.Request, services, evaluation) -> Optional[str]:
-        """Rotate a trusted-device cookie and return the replacement token."""
-        raw = request.cookies.get(TRUSTED_COOKIE)
-        if not raw or not may_offer_trusted_device(
-            has_strong_factor=evaluation.has_strong_factor,
-            remember_days=evaluation.policy.remember_days,
-        ):
-            return None
-        try:
-            rotated = await services.trusted_devices.consume_and_rotate(raw, evaluation.user_id)
-        except Exception as err:  # pylint: disable=W0703
-            self.logger.warning(f"BasicAuth: trusted device unavailable: {type(err).__name__}")
-            return None
-        if rotated is None or rotated[0] != evaluation.user_id:
-            return None
-        return rotated[1]
+            async def _issue(fresh, extra: dict) -> dict:
+                """Open the Basic session inside the gate's user lock."""
+                session_extra = {"auth_method": "basic", **extra} if extra else None
+                return await self.open_session(request, fresh, extra=session_extra)
+
+            result = await gate.decide(request, user, _issue)
+        if result.challenge is not None:
+            raise MFARequired(
+                challenge=result.challenge.token,
+                providers=list(result.challenge.providers),
+                preferred=result.challenge.preferred,
+                expires_in=result.challenge.expires_in,
+            )
+        session = result.session
+        if result.device is not None:
+            session[MFA_DEVICE_TOKEN_KEY] = result.device
+        return session
 
     async def check_credentials(self, request):
         """Using for check the user credentials to the backend."""
