@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-108 — OAuth2 3LO examples work end-to-end — auth paths fail closed on misconfiguration and unknown users
 **Spec**: `sdd/specs/oauth2-3lo-issues.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-198
@@ -240,3 +240,7 @@ When you pick up this task:
 **Notes**:
 
 **Deviations from spec**: none
+
+## Completion Note
+
+Merged manually from attempt 3 (luna). Task-tier validation: 18 passed, 1 failed — test_existing_guest_sessions_rejected needs a live Redis (AC6a), unavailable in the sandbox (connection refused on localhost:6379). NOT verified here; must be re-run with Redis before release.

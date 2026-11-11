@@ -186,7 +186,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -196,8 +196,9 @@
       "parallelism_notes": "TASK-198: inserts _is_restored_guest above TASK-198's _authenticate_with_backends in navigator_auth/decorators.py and appends to TASK-198's tests/test_is_authenticated_backend_loop.py. Exclusive: its AC6a tests write real guest sessions to the shared local Redis.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-202-reject-restored-guest-sessions.md"
+      "completed_at": "2026-11-11T22:00:31+00:00",
+      "file": "sdd/tasks/completed/TASK-202-reject-restored-guest-sessions.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-203",
