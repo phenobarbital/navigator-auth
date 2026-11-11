@@ -529,9 +529,7 @@ class Oauth2Provider(BaseAuthBackend):
 
     def _owner_store_unavailable(self) -> web.StreamResponse:
         """Generic 503 for an identity-store outage (FEAT-108 D6) — no database detail."""
-        return self._error_response(
-            "server_error", "The identity service is temporarily unavailable.", status=503
-        )
+        return self._error_response("server_error", "The identity service is temporarily unavailable.", status=503)
 
     def _redirect_to_login(self, request: web.Request, data: dict) -> NoReturn:
         """Raise HTTPFound to nav_oauth2_login carrying the authorization request (FEAT-108).
@@ -1781,9 +1779,7 @@ class Oauth2Provider(BaseAuthBackend):
                 try:
                     await self._resolve_resource_owner(user_obj.user_id)
                 except (UserNotFound, FailedAuth):
-                    return self._error_response(
-                        "access_denied", "Unknown or disabled resource owner.", status=401
-                    )
+                    return self._error_response("access_denied", "Unknown or disabled resource owner.", status=401)
                 except IdentityStoreUnavailable:
                     return self._owner_store_unavailable()
                 try:

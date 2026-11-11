@@ -18,7 +18,6 @@ from navigator_auth.backends.oauth2.models import OAuthClient
 from navigator_auth.backends.oauth2.pkce import generate_challenge
 from navigator_auth.exceptions import FailedAuth, IdentityStoreUnavailable, UserNotFound
 
-
 def _idp(*, get=None, acquire_error=None) -> IdentityProvider:
     """IdentityProvider over a fake pool: `async with await db.acquire() as conn`."""
     idp = IdentityProvider()
