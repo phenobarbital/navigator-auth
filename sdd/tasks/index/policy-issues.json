@@ -1,0 +1,158 @@
+{
+  "feature": "policy-issues",
+  "feature_id": "FEAT-109",
+  "spec": "sdd/specs/policy-issues.spec.md",
+  "type": "feature",
+  "base_branch": "dev",
+  "created_at": "2026-11-11T16:55:00-05:00",
+  "completed_at": null,
+  "parallel_semantics": "exclusive",
+  "validation_contract": "required",
+  "test_contract": {
+    "schema": 2,
+    "runners": [
+      {
+        "kind": "pytest",
+        "targets": [
+          "tests/test_policy_adapter_from_policy.py",
+          "tests/test_pdp_add_policy.py",
+          "tests/test_abac_middleware_404.py",
+          "tests/test_hmac_key_strength.py",
+          "tests/test_policy_server_example.py",
+          "tests/test_yaml_storage_double_load.py",
+          "tests/test_tenant_sql_filtering.py",
+          "tests/test_abac_middleware_order.py",
+          "tests/test_protected_paths.py",
+          "tests/test_probes.py"
+        ],
+        "settings": {
+          "markers": ""
+        },
+        "tiers": [
+          "task",
+          "merge",
+          "feature"
+        ]
+      }
+    ],
+    "digest": "sha256:09c55603e21880b0182880b3617de2ad76bf13ad2513bcff6d217d82721a511e"
+  },
+  "tasks": [
+    {
+      "id": "TASK-189",
+      "slug": "policy-adapter-from-policy",
+      "title": "Policy-object adapter — raw_resources + PolicyAdapter.from_policy",
+      "feature_id": "FEAT-109",
+      "feature": "policy-issues",
+      "spec": "sdd/specs/policy-issues.spec.md",
+      "status": "pending",
+      "priority": "high",
+      "effort": "M",
+      "depends_on": [],
+      "parallel": true,
+      "parallelism_notes": "Root of the PBAC fix: no dependencies; sole owner of navigator_auth/abac/policies/abstract.py, navigator_auth/abac/policies/adapter.py and tests/test_policy_adapter_from_policy.py, so it runs alongside TASK-191 and TASK-192.",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "file": "sdd/tasks/active/TASK-189-policy-adapter-from-policy.md"
+    },
+    {
+      "id": "TASK-190",
+      "slug": "pdp-add-policy-registration",
+      "title": "PDP registration of programmatic policies (add_policy enforced)",
+      "feature_id": "FEAT-109",
+      "feature": "policy-issues",
+      "spec": "sdd/specs/policy-issues.spec.md",
+      "status": "pending",
+      "priority": "high",
+      "effort": "M",
+      "depends_on": [
+        "TASK-189"
+      ],
+      "parallel": true,
+      "parallelism_notes": "PDP.add_policy calls PolicyAdapter.from_policy created by TASK-189 (navigator_auth/abac/policies/adapter.py), and its tests construct Policy(resource=str), which only works after TASK-189 fixes AbstractPolicy.__init__ (abstract.py).",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "file": "sdd/tasks/active/TASK-190-pdp-add-policy-registration.md"
+    },
+    {
+      "id": "TASK-191",
+      "slug": "abac-middleware-404-skip",
+      "title": "abac_middleware 404 skip fix and DEBUG log level",
+      "feature_id": "FEAT-109",
+      "feature": "policy-issues",
+      "spec": "sdd/specs/policy-issues.spec.md",
+      "status": "pending",
+      "priority": "medium",
+      "effort": "S",
+      "depends_on": [],
+      "parallel": true,
+      "parallelism_notes": "Independent log-noise fix: touches only navigator_auth/abac/middleware.py and creates tests/test_abac_middleware_404.py; no symbol from any other FEAT-109 task is used.",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "file": "sdd/tasks/active/TASK-191-abac-middleware-404-skip.md"
+    },
+    {
+      "id": "TASK-192",
+      "slug": "hmac-key-length-warning",
+      "title": "HMAC key-length startup warning",
+      "feature_id": "FEAT-109",
+      "feature": "policy-issues",
+      "spec": "sdd/specs/policy-issues.spec.md",
+      "status": "pending",
+      "priority": "medium",
+      "effort": "S",
+      "depends_on": [],
+      "parallel": true,
+      "parallelism_notes": "Independent startup check: creates navigator_auth/libs/hmac_keys.py and tests/test_hmac_key_strength.py, edits navigator_auth/auth.py and docs/settings.rst, none of which another FEAT-109 task touches before TASK-194.",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "file": "sdd/tasks/active/TASK-192-hmac-key-length-warning.md"
+    },
+    {
+      "id": "TASK-193",
+      "slug": "policy-server-example-readme",
+      "title": "PBAC example cleanup (add_policy only) and README section",
+      "feature_id": "FEAT-109",
+      "feature": "policy-issues",
+      "spec": "sdd/specs/policy-issues.spec.md",
+      "status": "pending",
+      "priority": "medium",
+      "effort": "M",
+      "depends_on": [
+        "TASK-190"
+      ],
+      "parallel": true,
+      "parallelism_notes": "The example's registration only works once PDP.add_policy loads into the evaluator (TASK-190, navigator_auth/abac/pdp.py); its test also adapts the example policies with PolicyAdapter.from_policy from TASK-189, implied through TASK-190. The README only names the HMAC startup warning in prose, so no edge to TASK-192.",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "file": "sdd/tasks/active/TASK-193-policy-server-example-readme.md"
+    },
+    {
+      "id": "TASK-194",
+      "slug": "policy-issues-documentation",
+      "title": "Documentation — CHANGELOG entry + API docstrings (no wiki pages)",
+      "feature_id": "FEAT-109",
+      "feature": "policy-issues",
+      "spec": "sdd/specs/policy-issues.spec.md",
+      "status": "pending",
+      "priority": "low",
+      "effort": "S",
+      "depends_on": [
+        "TASK-190",
+        "TASK-191",
+        "TASK-192"
+      ],
+      "parallel": true,
+      "parallelism_notes": "Last in the graph: documents add_policy from TASK-190 (shares navigator_auth/abac/pdp.py; from_policy and adapter.py via TASK-189 are implied), the abac_middleware fix from TASK-191 (navigator_auth/abac/middleware.py, described in CHANGELOG.md), and edits docstrings in navigator_auth/libs/hmac_keys.py created by TASK-192.",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "file": "sdd/tasks/active/TASK-194-policy-issues-documentation.md"
+    }
+  ]
+}
