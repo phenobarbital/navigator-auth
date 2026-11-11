@@ -1,10 +1,18 @@
 """FEAT-106 review fix #1 (spec M6): the OAuth2 password form enforces the second factor.
 
-These tests drive ``Oauth2Provider`` with a real aiohttp router/request and a stubbed
-``SecondFactorGate`` / MFA lease, so they need neither Postgres nor Redis. Settings are
-patched with ``monkeypatch`` (restored automatically); no process-wide state is mutated.
+The first part drives ``Oauth2Provider`` with a real aiohttp router/request and a stubbed
+``SecondFactorGate`` / MFA lease; it needs neither Postgres nor Redis. The "Live Postgres +
+Redis" part (FEAT-114) drives a real ``AuthHandler(BasicAuth + Oauth2Provider)`` over HTTP and
+skips when Postgres, Redis, the MFA services or the Vault keyring are unavailable. Settings are
+patched with ``monkeypatch`` (restored automatically).
 """
 
+import asyncio
+import hashlib
+import html
+import re
+import secrets
+import warnings
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,19 +20,39 @@ from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlparse
 
 import jinja2
+import jwt
 import pytest
+import pytest_asyncio
+import redis.asyncio as aioredis
 from aiohttp import web
-from aiohttp.test_utils import make_mocked_request
+from aiohttp.test_utils import TestClient, TestServer, make_mocked_request
+from navigator_session import AUTH_SESSION_OBJECT, get_session
 
 import navigator_auth.conf as conf
+from navigator_auth import AuthHandler
+from navigator_auth.abac.context import EvalContext
 from navigator_auth.backends.oauth2 import backend as oauth_backend
 from navigator_auth.backends.oauth2.backend import (
     OAUTH2_EVENT_COOKIE,
     OAUTH2_EVENT_KEY_PREFIX,
     Oauth2Provider,
 )
+from navigator_auth.backends.oauth2.client_backend import MemoryClientStorage
+from navigator_auth.backends.oauth2.models import OAuthClient, OauthGrant
+from navigator_auth.backends.oauth2.pkce import generate_challenge
+from navigator_auth.conf import AUTH_MECHANISM_KEY
 from navigator_auth.mfa.login import GateResult, LoginChallenge, VerifyRefused
-from navigator_auth.mfa.types import TRUSTED_COOKIE
+from navigator_auth.mfa.services import get_mfa_services
+from navigator_auth.mfa.types import PROVIDER_EMAIL, PROVIDER_TOTP, TRUSTED_COOKIE, MfaMode
+from tests.fixtures.mfa import (  # noqa: F401
+    frozen_totp_clock,
+    mfa_db,
+    mfa_redis_pool,
+    mfa_secret,
+    mfa_user_factory,
+    single_connection_authdb,
+)
+from tests.test_mfa_e2e import CAPTURED, Live, _patch_settings, _stop, requires_fresh_factor
 
 AUTHORIZE_PARAMS = {
     "client_id": "mfa-oauth-client",
@@ -314,3 +342,330 @@ def test_mfa_template_escapes_authorize_parameters():
     assert "<script>alert(1)</script>" not in html
     assert "&#34;&gt;&lt;script&gt;" in html
     assert "<b>" not in html
+
+
+# ---------------------------------------------------------------------------
+# Live Postgres + Redis (FEAT-114, issue:1a329591f638)
+#
+# A real AuthHandler(BasicAuth + Oauth2Provider) on live Postgres + Redis with
+# AUTH_BASIC_2FA_ENABLED, driven over HTTP. Test-only seams, all installed after
+# startup and none bypassing a security check: the client storage is an in-memory
+# store holding one public PKCE client, each user gets a pre-seeded consent grant
+# (consent is not under test), the TOTP clock is frozen and the e-mail OTP
+# callback captures payloads (both as in tests/test_mfa_e2e.py).
+# ---------------------------------------------------------------------------
+
+OAUTH_CLIENT_ID = "mfa-live-oauth-client"
+OAUTH_REDIRECT = "https://app.example/cb"
+OAUTH_BACKENDS = ("navigator_auth.backends.BasicAuth", "navigator_auth.backends.Oauth2Provider")
+EVALCTX_PATH = "/_test/oauth/evalctx"
+_CHALLENGE_INPUT = re.compile(r'name="challenge" value="([^"]*)"')
+
+
+def live_test(func):
+    """Mark a live async test with the warning filters tests/test_mfa_e2e.py applies module-wide."""
+    func = pytest.mark.filterwarnings("ignore::DeprecationWarning")(func)
+    func = pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning")(func)
+    return pytest.mark.asyncio(func)
+
+
+async def _oauth_evalctx_view(request: web.Request) -> web.Response:
+    """Test-only bearer route: the EvalContext the PDP builds, plus the raw session's assurance.
+
+    Not in the auth exclude list, so ``_auth_middleware`` authenticates the bearer token and
+    publishes its request-local assurance before this runs.
+    """
+    session = await get_session(request, new=False)
+    raw = session.get(AUTH_SESSION_OBJECT) if session else None
+    raw = raw if isinstance(raw, dict) else {}
+    ctx = EvalContext(request, raw, raw, session)
+    effective = ctx.userinfo if isinstance(ctx.userinfo, dict) else {}
+    return web.json_response(
+        {
+            "mechanism": request.get(AUTH_MECHANISM_KEY),
+            "mfa": bool(ctx.mfa),
+            "amr": list(effective.get("amr") or []),
+            "fresh": requires_fresh_factor(ctx),
+            "session_mfa": bool(raw.get("mfa")),
+            "session_amr": list(raw.get("amr") or []),
+        }
+    )
+
+
+async def _start_oauth(app: web.Application, *, enable_authdb: bool = True) -> tuple[AuthHandler, TestClient]:
+    """Start AuthHandler(BasicAuth + Oauth2Provider); swap in a MemoryClientStorage with one PKCE client.
+
+    ``secure_cookies=True`` because the session storage only writes the session cookie when it
+    is set, and the ``/oauth2/login`` -> ``/oauth2/authorize`` hop needs that cookie.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        auth = AuthHandler(secure_cookies=True, backends=OAUTH_BACKENDS, enable_authdb=enable_authdb)
+        auth.setup(app)
+        client = TestClient(TestServer(app))
+        await client.start_server()
+    provider = auth.backends["Oauth2Provider"]
+    # Production AUTH_SUCCESSFUL_CALLBACKS reach services unavailable here (see test_mfa_e2e._start).
+    auth.backends["BasicAuth"]._callbacks = None
+    provider._callbacks = None
+    storage = MemoryClientStorage()
+    await storage.save_client(
+        OAuthClient(
+            client_id=OAUTH_CLIENT_ID,
+            client_name="MFA live client",
+            client_type="public",
+            redirect_uris=[OAUTH_REDIRECT],
+            default_scopes=["default"],
+        )
+    )
+    provider.client_storage = storage
+    return auth, client
+
+
+async def _stop_oauth(auth: AuthHandler, client: TestClient) -> None:
+    """Disconnect the provider's lazily built flow-store pool, then the standard live teardown."""
+    provider = auth.backends.get("Oauth2Provider")
+    store = getattr(provider, "_flow_store", None)
+    if provider is not None and store is not None:
+        await store._pool.disconnect()
+        provider._flow_store = None
+    await _stop(auth, client)
+
+
+class OAuthLive(Live):
+    """Live app plus OAuth2 browser-leg helpers (explicit cookies, never the client jar)."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.granted: list[int] = []
+
+    @property
+    def provider(self) -> Oauth2Provider:
+        """The application's Oauth2Provider backend."""
+        return self.auth.backends["Oauth2Provider"]
+
+    def authorize_params(self) -> tuple[dict, str]:
+        """Return (the 9 authorize parameters with a real S256 challenge, the code_verifier)."""
+        verifier = secrets.token_urlsafe(48)
+        params = {
+            "client_id": OAUTH_CLIENT_ID, "redirect_uri": OAUTH_REDIRECT, "response_type": "code",
+            "state": secrets.token_urlsafe(8), "scope": "default",
+            "code_challenge": generate_challenge(verifier), "code_challenge_method": "S256",
+            "nonce": secrets.token_urlsafe(8), "prompt": "login",
+        }  # fmt: skip
+        return params, verifier
+
+    async def grant(self, user: dict) -> None:
+        """Pre-seed a consent grant so /oauth2/authorize issues the code directly."""
+        await self.provider.grant_storage.save_grant(
+            OauthGrant(user_id=user["user_id"], client_id=OAUTH_CLIENT_ID, scopes=["default"])
+        )
+        self.granted.append(user["user_id"])
+
+    async def oauth_login(self, user: dict, params: dict, *, cookies: dict | None = None):
+        """POST /oauth2/login (form); returns the raw response, redirects not followed."""
+        self._no_jar()
+        form = {**params, "username": user["username"], "password": user["password_current"]}
+        return await self.client.post("/oauth2/login", data=form, cookies=cookies, allow_redirects=False)
+
+    async def oauth_mfa(self, params: dict, challenge: str, provider: str, code: str, *, remember: bool = False):
+        """POST /oauth2/login/mfa (form); returns the raw response, redirects not followed."""
+        self._no_jar()
+        form = {**params, "challenge": challenge, "provider": provider, "code": code}
+        if remember:
+            form["remember_device"] = "1"
+        return await self.client.post("/oauth2/login/mfa", data=form, allow_redirects=False)
+
+    @staticmethod
+    async def challenge_of(response) -> str:
+        """The challenge token carried by the rendered oauth/mfa.html form."""
+        match = _CHALLENGE_INPUT.search(await response.text())
+        assert match and match.group(1), "no challenge on the MFA page"
+        return html.unescape(match.group(1))
+
+    async def mint(self, login_response, verifier: str) -> str:
+        """Follow a login 302 through /oauth2/authorize and the token endpoint; return the access token."""
+        assert login_response.status == 302, await login_response.text()
+        cookies = {name: morsel.value for name, morsel in login_response.cookies.items()}
+        self._no_jar()
+        authorize = await self.client.get(
+            login_response.headers["Location"], cookies=cookies, allow_redirects=False
+        )
+        assert authorize.status == 302, await authorize.text()
+        target = urlparse(authorize.headers["Location"])
+        assert f"{target.scheme}://{target.netloc}{target.path}" == OAUTH_REDIRECT, target
+        code = parse_qs(target.query)["code"][0]
+        self._no_jar()
+        response = await self.client.post(
+            "/oauth2/token",
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": OAUTH_REDIRECT,
+                "client_id": OAUTH_CLIENT_ID,
+                "code_verifier": verifier,
+            },
+        )
+        body = await response.json()
+        assert response.status == 200, body
+        return body["access_token"]
+
+    async def evalctx(self, token: str) -> dict:
+        """GET the test bearer route with ``token``; returns its JSON."""
+        self._no_jar()
+        response = await self.client.get(EVALCTX_PATH, headers={"Authorization": f"Bearer {token}"})
+        assert response.status == 200, await response.text()
+        return await response.json()
+
+    async def cleanup(self) -> None:
+        """Drop the pre-seeded grants (Redis), then the standard live cleanup."""
+        storage = self.provider.grant_storage
+        for user_id in self.granted:
+            await storage.redis.delete(
+                f"{storage.prefix}{user_id}:{OAUTH_CLIENT_ID}", f"{storage.user_index_prefix}{user_id}"
+            )
+        await super().cleanup()
+
+
+@asynccontextmanager
+async def _oauth_env(monkeypatch, *, db, clock, factory, secret, authdb=None):
+    """Yield a started OAuthLive (2FA on, live Postgres + Redis) or skip; always tear down.
+
+    ``authdb`` (AC10): a pool installed as ``app["authdb"]`` before startup instead of the
+    one AuthHandler would create.
+    """
+    _patch_settings(monkeypatch, enabled=True, secret=secret)
+    monkeypatch.setattr(conf, "AUTHENTICATION_BACKENDS", OAUTH_BACKENDS)
+    CAPTURED.clear()
+    app = web.Application()
+    abac = SimpleNamespace(policies=[])
+    app["abac"] = abac
+    app.router.add_get(EVALCTX_PATH, _oauth_evalctx_view)
+    if authdb is not None:
+        app["authdb"] = authdb
+    try:
+        auth, client = await _start_oauth(app, enable_authdb=authdb is None)
+    except Exception as err:  # pylint: disable=W0718
+        pytest.skip(f"OAuth2 live application unavailable: {type(err).__name__}: {err}")
+    services = get_mfa_services(app)
+    if services is None or not services.available:
+        await _stop_oauth(auth, client)
+        pytest.skip("MFA services unavailable (tables, Redis or AUTH_OTP_SECRET)")
+    if app.get("vault_keyring") is None:
+        await _stop_oauth(auth, client)
+        pytest.skip("Vault KeyRing not configured (VAULT_MASTER_KEY_v*): TOTP seeds cannot be sealed")
+    services.providers[PROVIDER_TOTP]._clock = clock  # type: ignore[attr-defined]
+    services.providers[PROVIDER_EMAIL]._callback = "tests.test_mfa_e2e._capture_otp"  # type: ignore[attr-defined]
+    env = OAuthLive(app, auth, client, services, db, clock, factory, abac)
+    try:
+        yield env
+    finally:
+        await env.cleanup()
+        await _stop_oauth(auth, client)
+        CAPTURED.clear()
+
+
+@pytest_asyncio.fixture
+async def oauth_live(monkeypatch, mfa_db, mfa_redis_pool, mfa_secret, mfa_user_factory, frozen_totp_clock):  # noqa: F811
+    """A real AuthHandler(BasicAuth + Oauth2Provider) app with 2FA on, on live Postgres + Redis."""
+    async with _oauth_env(
+        monkeypatch, db=mfa_db, clock=frozen_totp_clock, factory=mfa_user_factory, secret=mfa_secret
+    ) as env:
+        yield env
+
+
+async def _email_challenge(live: OAuthLive, user: dict, params: dict):
+    """OAuth password POST for an e-mail-OTP user; returns (MFA page response, challenge, code)."""
+    page = await live.oauth_login(user, params)
+    assert page.status == 200, await page.text()
+    return page, await live.challenge_of(page), live.email_code(user)
+
+
+@live_test
+async def test_oauth2_live_email_otp_single_delivery_and_replay(oauth_live):
+    """FEAT-106 AC1/AC2 live: one e-mail OTP and no session for the challenge; 302 with the 9
+    authorize parameters for the code; the same challenge replayed is refused."""
+    live = oauth_live
+    user = await live.user()
+    await live.org(user["user_id"], mode=MfaMode.ENFORCED)
+    params, _ = live.authorize_params()
+
+    page, challenge, code = await _email_challenge(live, user, params)
+    assert page.headers["Cache-Control"] == "no-store"
+    assert "Set-Cookie" not in page.headers
+    assert "Location" not in page.headers
+    sent = live.emails(user)
+    assert len(sent) == 1
+    assert sent[0].email == user["email"]
+    assert sent[0].code not in repr(sent[0])
+
+    response = await live.oauth_mfa(params, challenge, PROVIDER_EMAIL, code)
+    assert response.status == 302, await response.text()
+    location = urlparse(response.headers["Location"])
+    assert location.path == "/oauth2/authorize"
+    assert {key: values[0] for key, values in parse_qs(location.query).items()} == params
+
+    replay = await live.oauth_mfa(params, challenge, PROVIDER_EMAIL, code)
+    assert replay.status == 401, await replay.text()
+    assert "Location" not in replay.headers
+    assert "Set-Cookie" not in replay.headers
+    assert len(live.emails(user)) == 1
+
+
+@live_test
+async def test_oauth2_live_event_record(oauth_live):
+    """FEAT-106 AC2 live: the event cookie names a Redis record with the user, mfa true, amr [pwd, otp]."""
+    live = oauth_live
+    user = await live.user()
+    await live.org(user["user_id"], mode=MfaMode.ENFORCED)
+    params, _ = live.authorize_params()
+    _, challenge, code = await _email_challenge(live, user, params)
+
+    response = await live.oauth_mfa(params, challenge, PROVIDER_EMAIL, code)
+    assert response.status == 302, await response.text()
+    handle = response.cookies[OAUTH2_EVENT_COOKIE].value
+    key = OAUTH2_EVENT_KEY_PREFIX + hashlib.sha256(handle.encode("utf-8")).hexdigest()
+    assert handle not in key
+    record = await live.provider.flow_store.get(key)
+    assert record is not None
+    assert record["user_id"] == user["user_id"]
+    assert record["mfa"] is True
+    assert record["amr"] == ["pwd", "otp"]
+    assert record["auth_method"] == "oauth2"
+    assert record["session_id"]
+
+
+@live_test
+async def test_oauth2_login_single_connection_pool(
+    monkeypatch, single_connection_authdb, mfa_db, mfa_redis_pool, mfa_secret, mfa_user_factory, frozen_totp_clock  # noqa: F811
+):
+    """FEAT-106 AC10 (OAuth rows): /oauth2/login and /oauth2/login/mfa finish within 10 s on an
+    authdb capped at one connection, with no acquire() while LOCK_CONNECTION is set."""
+    async with _oauth_env(
+        monkeypatch,
+        db=mfa_db,
+        clock=frozen_totp_clock,
+        factory=mfa_user_factory,
+        secret=mfa_secret,
+        authdb=single_connection_authdb,
+    ) as live:
+        user = await live.user()
+        await live.org(user["user_id"], mode=MfaMode.ENFORCED)
+        params, _ = live.authorize_params()
+        # Startup and the test-data helpers acquire legitimately; measure only the two calls.
+        single_connection_authdb.acquires_inside_lock.clear()
+        before = len(single_connection_authdb.acquires)
+        single_connection_authdb.strict = True
+        try:
+            page = await asyncio.wait_for(live.oauth_login(user, params), 10)
+            assert page.status == 200, await page.text()
+            challenge = await live.challenge_of(page)
+            response = await asyncio.wait_for(
+                live.oauth_mfa(params, challenge, PROVIDER_EMAIL, live.email_code(user)), 10
+            )
+            assert response.status == 302, await response.text()
+        finally:
+            single_connection_authdb.strict = False
+        # Non-vacuous: the measured calls really ran on the one-connection pool.
+        assert len(single_connection_authdb.acquires) > before
+        assert single_connection_authdb.acquires_inside_lock == []
