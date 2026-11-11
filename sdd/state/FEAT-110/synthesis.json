@@ -1,0 +1,616 @@
+{
+  "schema_version": "1.0",
+  "feat_id": "FEAT-110",
+  "mode": "enrichment",
+  "summary_oneline": "Add a `navauth self upgrade` CLI that applies navigator-auth's SQL migrations with admin credentials, replacing three silent startup runners and hand-applied patches.",
+  "localization": [
+    {
+      "path": "navigator_auth/identity/migrations.py",
+      "symbol": "ensure_identity_columns",
+      "lines": "52-94",
+      "role": "identity runner: applies 001-006 to auth.user_identities, collects failures, raises once",
+      "evidence": [
+        "F003",
+        "F013"
+      ]
+    },
+    {
+      "path": "navigator_auth/identity/migrations.py",
+      "symbol": "_MIGRATION_FILES",
+      "lines": "18-31",
+      "role": "hand-maintained ordered registry of identity SQL files (a file not listed is inert)",
+      "evidence": [
+        "F003",
+        "F013"
+      ]
+    },
+    {
+      "path": "navigator_auth/identity/migrations.py",
+      "symbol": "_run_sql",
+      "lines": "34-49",
+      "role": "per-file executor, duplicated verbatim in all three runners; ignores the result of conn.execute()",
+      "evidence": [
+        "F003",
+        "F004",
+        "F019"
+      ]
+    },
+    {
+      "path": "navigator_auth/vault/migrations.py",
+      "symbol": "ensure_vault_tables",
+      "lines": "45-57",
+      "role": "vault runner: 2 files, stops at first failure, no schema templating",
+      "evidence": [
+        "F004",
+        "F014"
+      ]
+    },
+    {
+      "path": "navigator_auth/passkey/migrations.py",
+      "symbol": "render_sql",
+      "lines": "11-22",
+      "role": "only runner that substitutes {schema} / {users_table} from conf",
+      "evidence": [
+        "F005"
+      ]
+    },
+    {
+      "path": "navigator_auth/passkey/migrations.py",
+      "symbol": "ensure_passkey_tables",
+      "lines": "43-52",
+      "role": "passkey runner, executed only when the passkey backend is enabled",
+      "evidence": [
+        "F005",
+        "F014"
+      ]
+    },
+    {
+      "path": "navigator_auth/auth.py",
+      "symbol": "auth_startup",
+      "lines": "178-192",
+      "role": "startup hook that runs vault + identity migrations on the runtime pool app['authdb']",
+      "evidence": [
+        "F002"
+      ]
+    },
+    {
+      "path": "navigator_auth/vault/integration.py",
+      "symbol": "setup_vault_tables",
+      "lines": "102-113",
+      "role": "log-only startup wrapper for the vault runner",
+      "evidence": [
+        "F002"
+      ]
+    },
+    {
+      "path": "navigator_auth/identity/migrations.py",
+      "symbol": "setup_identity_columns",
+      "lines": "97-107",
+      "role": "log-only startup wrapper for the identity runner",
+      "evidence": [
+        "F003",
+        "F013"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/passkey.py",
+      "symbol": "on_startup",
+      "lines": "103-106",
+      "role": "passkey startup hook; raises ConfigError when the migration fails",
+      "evidence": [
+        "F002",
+        "F005"
+      ]
+    },
+    {
+      "path": "navigator_auth/conf.py",
+      "symbol": "default_dsn",
+      "lines": "39-45",
+      "role": "the single runtime DB credential set (DBUSER/DBPWD/...); no admin credential setting exists",
+      "evidence": [
+        "F007"
+      ]
+    },
+    {
+      "path": "navigator_auth/conf.py",
+      "symbol": "AUTH_DB_SCHEMA",
+      "lines": "33-36",
+      "role": "configurable schema / table names that migration SQL should honour",
+      "evidence": [
+        "F007",
+        "F005"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/oauth2/ddl.sql",
+      "symbol": "(auth.clients patch)",
+      "lines": "7-33",
+      "role": "hand-applied auth.clients patch that no runner loads \u2014 the manual workflow the source describes",
+      "evidence": [
+        "F008",
+        "F001"
+      ]
+    },
+    {
+      "path": "pyproject.toml",
+      "symbol": "[tool.setuptools.packages.find]",
+      "lines": "79-89",
+      "role": "packaging scope (navigator_auth* only); where a first [project.scripts] entry would be added",
+      "evidence": [
+        "F012",
+        "F015",
+        "F006"
+      ]
+    },
+    {
+      "path": "tests/unit/identity/test_identity_migrations.py",
+      "symbol": "TestEnsureIdentityColumns",
+      "lines": "156-217",
+      "role": "existing runner tests (mocked pool, SQL-text assertions) that import SQL_DIR from the runner module",
+      "evidence": [
+        "F010"
+      ]
+    },
+    {
+      "path": "sdd/tasks/active/TASK-130-mfa-migrations.md",
+      "symbol": null,
+      "lines": null,
+      "role": "pending FEAT-106 task that will add a fourth runner (MFA) and documents the execute() never-raises contract",
+      "evidence": [
+        "F019",
+        "F016"
+      ]
+    }
+  ],
+  "constraints": [
+    {
+      "statement": "asyncdb's conn.execute() never raises; it returns [None, <error>] and the existing `_run_sql` copies ignore that value",
+      "evidence": [
+        "F019",
+        "F003"
+      ],
+      "implication": "the new command must use a fail-closed execution path (check the result or use a raising call) and verify the outcome, otherwise 'applied' is unreliable"
+    },
+    {
+      "statement": "Every existing SQL file is idempotent by construction (IF NOT EXISTS + catalog-guarded DO blocks) and is designed to be re-run",
+      "evidence": [
+        "F009",
+        "F003"
+      ],
+      "implication": "new files under the migrations folder must keep that style; re-running everything is safe, so a ledger adds reporting rather than correctness"
+    },
+    {
+      "statement": "Only `navigator_auth*` is packaged in `pyproject.toml`; a repo-root docs/ folder is outside the wheel",
+      "evidence": [
+        "F012",
+        "F011"
+      ],
+      "implication": "an installed `navauth` cannot read docs/migrations/ unless the SQL also ships inside the package"
+    },
+    {
+      "statement": "Two SQL conventions coexist: identity/vault hard-code `auth.`, passkey (and the planned MFA file) use {schema}/{users_table} rendered by `render_sql`",
+      "evidence": [
+        "F005",
+        "F009",
+        "F019"
+      ],
+      "implication": "a single runner needs one rendering rule that leaves hard-coded files untouched"
+    },
+    {
+      "statement": "Existing tests import `SQL_DIR` and the file tuples from `navigator_auth/identity/migrations.py`, `navigator_auth/vault/migrations.py` and `navigator_auth/passkey/migrations.py`",
+      "evidence": [
+        "F010",
+        "F012"
+      ],
+      "implication": "moving SQL files or removing `ensure_identity_columns` / `ensure_vault_tables` / `ensure_passkey_tables` breaks tests unless shims are kept"
+    },
+    {
+      "statement": "`navigator_auth/conf.py` exposes one credential set via `default_dsn`",
+      "evidence": [
+        "F007"
+      ],
+      "implication": "admin credentials need a new input (flag, env var or setting); the DSN must never be printed"
+    },
+    {
+      "statement": "Base tables of the auth schema are created by the Navigator platform, not by this library",
+      "evidence": [
+        "F002",
+        "F008"
+      ],
+      "implication": "the command applies additive changes on top of an existing schema; it does not bootstrap a database"
+    },
+    {
+      "statement": "TASK-130 (FEAT-106, pending) will add an MFA runner in the per-subsystem style",
+      "evidence": [
+        "F019"
+      ],
+      "implication": "the two features must agree on where MFA SQL lives and who runs it, or the new command lands already incomplete"
+    },
+    {
+      "statement": "No console script, argparse, click or typer usage exists in the package or its history",
+      "evidence": [
+        "F006",
+        "F015",
+        "F017"
+      ],
+      "implication": "`navauth` is the first CLI; the navigator-vault design in TASK-076 (other repo) is the only precedent"
+    }
+  ],
+  "investigation": null,
+  "enrichment": {
+    "new": [
+      "Console script `navauth` (first `[project.scripts]` entry) with a `self upgrade` subcommand; async entry via asyncio.run, `main(argv) -> int`, explicit exit codes",
+      "One central migration runner that discovers ordered SQL files, renders {schema}/{users_table}, executes fail-closed and reports per-file status",
+      "A `self upgrade --check` / dry-run mode that reports pending work without changing the database",
+      "`docs/migrations/` folder (SQL-based changes plus a README explaining how to add one)",
+      "An admin-credential input for DDL (e.g. `--dsn`, then an env var, then navconfig), separate from the runtime DBUSER",
+      "Migration files for changes that are manual today (the auth.clients patch)"
+    ],
+    "modified": [
+      {
+        "path": "pyproject.toml",
+        "change": "add `[project.scripts] navauth = ...`; ensure SQL files ship as package data",
+        "evidence": [
+          "F012",
+          "F015"
+        ]
+      },
+      {
+        "path": "navigator_auth/identity/migrations.py",
+        "change": "`ensure_identity_columns` delegates to the central runner; `_MIGRATION_FILES` registry replaced by discovery",
+        "evidence": [
+          "F003",
+          "F013"
+        ]
+      },
+      {
+        "path": "navigator_auth/vault/migrations.py",
+        "change": "`ensure_vault_tables` delegates to the central runner",
+        "evidence": [
+          "F004"
+        ]
+      },
+      {
+        "path": "navigator_auth/passkey/migrations.py",
+        "change": "`ensure_passkey_tables` delegates; `render_sql` becomes the shared rendering rule",
+        "evidence": [
+          "F005"
+        ]
+      },
+      {
+        "path": "navigator_auth/auth.py",
+        "change": "`auth_startup` behaviour for migrations (keep, check-only, or remove) per the answer to U3",
+        "evidence": [
+          "F002"
+        ]
+      },
+      {
+        "path": "navigator_auth/backends/oauth2/ddl.sql",
+        "change": "converted into a numbered migration and retired as a loose patch (if in scope, U4)",
+        "evidence": [
+          "F008"
+        ]
+      },
+      {
+        "path": "navigator_auth/conf.py",
+        "change": "optional admin DSN / credential settings",
+        "evidence": [
+          "F007"
+        ]
+      }
+    ],
+    "untouched": [
+      "Creation of the base auth schema and tables (owned by the Navigator platform)",
+      "Data migrations and vault key rotation (the `navigator-vault` CLI in navigator-session)",
+      "Down / rollback migrations",
+      "The content of already-released SQL files (001-006 identity, vault 001-002, passkey 001)",
+      "Non-PostgreSQL databases"
+    ],
+    "patterns": [
+      {
+        "pattern": "Idempotent SQL: header comment with FEAT id, `ADD COLUMN IF NOT EXISTS`, DO blocks guarded on to_regclass / catalog lookups",
+        "evidence": [
+          "F009"
+        ]
+      },
+      {
+        "pattern": "Collect failures, keep running later files, raise once naming every failed file",
+        "evidence": [
+          "F003",
+          "F013"
+        ]
+      },
+      {
+        "pattern": "CLI shape from the navigator-vault precedent: DSN from `--dsn` then env then navconfig, injectable factories, explicit exit codes, DSN never printed",
+        "evidence": [
+          "F018"
+        ]
+      },
+      {
+        "pattern": "Fail-closed execution with a `to_regclass` / fetchval confirmation, as TASK-130 specifies for MFA",
+        "evidence": [
+          "F019"
+        ]
+      },
+      {
+        "pattern": "Runner tests with a mocked pool plus SQL-text assertions",
+        "evidence": [
+          "F010"
+        ]
+      }
+    ],
+    "risks": [
+      {
+        "risk": "Silent success: execute() swallows errors, so the command could report 'upgraded' on a failed file",
+        "mitigation": "inspect the result / use a raising call and verify with catalog probes",
+        "evidence": [
+          "F019",
+          "F003"
+        ]
+      },
+      {
+        "risk": "docs/migrations/ is not in the wheel, so the command works only from a checkout",
+        "mitigation": "keep the SQL inside the package and expose docs/migrations/ as the documented view (U1)",
+        "evidence": [
+          "F012"
+        ]
+      },
+      {
+        "risk": "Collision with FEAT-106 TASK-130, which adds a fourth per-subsystem runner",
+        "mitigation": "sequence the two features or have TASK-130 target the central runner",
+        "evidence": [
+          "F019"
+        ]
+      },
+      {
+        "risk": "Removing startup migrations breaks deployments that rely on them",
+        "mitigation": "keep the startup call as a shim or a check-only warning for one release (U3)",
+        "evidence": [
+          "F002",
+          "F013"
+        ]
+      },
+      {
+        "risk": "Applying optional-feature tables (passkey, MFA) to databases that do not use them",
+        "mitigation": "explicit selection rule or documented 'apply all' decision (U4)",
+        "evidence": [
+          "F005"
+        ]
+      },
+      {
+        "risk": "006 removes a legacy column; running it with elevated credentials on an unexpected schema is destructive",
+        "mitigation": "keep its catalog guards, offer `--check`, never weaken the guard",
+        "evidence": [
+          "F003",
+          "F013"
+        ]
+      }
+    ]
+  },
+  "confidence_map": [
+    {
+      "id": "C1",
+      "statement": "Three independent migration runners exist (identity 6 files, vault 2, passkey 1), each with its own sql/ folder and a duplicated `_run_sql`",
+      "evidence": [
+        "F001",
+        "F003",
+        "F004",
+        "F005"
+      ],
+      "confidence": "high",
+      "reasoning": "Files read directly; citations probe-verified."
+    },
+    {
+      "id": "C2",
+      "statement": "Vault and identity migrations already run automatically at every app startup through `auth_startup`, with the runtime pool, and failures are only logged",
+      "evidence": [
+        "F002",
+        "F003"
+      ],
+      "confidence": "high",
+      "reasoning": "Direct read of auth.py:178-192 and the wrappers. This contradicts the source's premise that every change is applied by hand."
+    },
+    {
+      "id": "C3",
+      "statement": "The local auth.user_identities lag is most likely a startup migration that failed silently (insufficient DDL rights, lock timeout, or an error swallowed by execute())",
+      "evidence": [
+        "F002",
+        "F013",
+        "F019"
+      ],
+      "confidence": "low",
+      "reasoning": "Inferred from several findings; the local database was not inspected."
+    },
+    {
+      "id": "C4",
+      "statement": "No applied-migrations ledger table exists; correctness rests on idempotent SQL",
+      "evidence": [
+        "F003",
+        "F009"
+      ],
+      "confidence": "high",
+      "reasoning": "Negative grep over navigator_auth/, docs/, documentation/ plus runner comments."
+    },
+    {
+      "id": "C5",
+      "statement": "navigator-auth has no CLI and never had a console script; `navauth` would be the first",
+      "evidence": [
+        "F006",
+        "F015",
+        "F017"
+      ],
+      "confidence": "high",
+      "reasoning": "Negative grep plus pickaxe over full git history."
+    },
+    {
+      "id": "C6",
+      "statement": "There is no admin/DDL credential setting; only DBUSER/DBPWD via `default_dsn`",
+      "evidence": [
+        "F007"
+      ],
+      "confidence": "high",
+      "reasoning": "Direct read of conf.py:39-45."
+    },
+    {
+      "id": "C7",
+      "statement": "`navigator_auth/backends/oauth2/ddl.sql` is a hand-applied patch referenced by no Python code",
+      "evidence": [
+        "F008"
+      ],
+      "confidence": "medium",
+      "reasoning": "Grep found no loader; a dynamic loader outside the searched paths cannot be fully excluded."
+    },
+    {
+      "id": "C8",
+      "statement": "A repo-root docs/migrations/ folder would not be available to a pip-installed navauth",
+      "evidence": [
+        "F012",
+        "F011"
+      ],
+      "confidence": "medium",
+      "reasoning": "packages.find includes only navigator_auth*; whether in-package *.sql currently ships as package data was not verified against a built wheel."
+    },
+    {
+      "id": "C9",
+      "statement": "asyncdb conn.execute() never raises, so the current runners can report success without applying anything",
+      "evidence": [
+        "F019"
+      ],
+      "confidence": "medium",
+      "reasoning": "Recorded as verified in TASK-130 and in session memory; not re-run in this research."
+    },
+    {
+      "id": "C10",
+      "statement": "A hand-maintained file registry has already caused an inert migration (006 added but not registered)",
+      "evidence": [
+        "F013"
+      ],
+      "confidence": "high",
+      "reasoning": "Commit 95d98e0 message states it."
+    },
+    {
+      "id": "C11",
+      "statement": "The navigator-vault CLI (TASK-076) is a usable design precedent for DSN resolution and exit codes, but its code lives in another repository",
+      "evidence": [
+        "F018"
+      ],
+      "confidence": "medium",
+      "reasoning": "Task document only; the sibling repo was not read."
+    },
+    {
+      "id": "C12",
+      "statement": "FEAT-106 TASK-130 will add a fourth runner in the same per-subsystem style",
+      "evidence": [
+        "F019",
+        "F016"
+      ],
+      "confidence": "high",
+      "reasoning": "Active task document read via wiki."
+    },
+    {
+      "id": "C13",
+      "statement": "A central runner plus thin `ensure_*` shims can satisfy the request without rewriting released SQL",
+      "evidence": [
+        "F003",
+        "F004",
+        "F005",
+        "F010"
+      ],
+      "confidence": "medium",
+      "reasoning": "Design inference from the identical runner shapes; depends on the answers to U1-U4."
+    }
+  ],
+  "unknowns": [
+    {
+      "id": "U1",
+      "question": "Where should the SQL files physically live, given that docs/ is not packaged in the wheel?",
+      "blocks_claims": [
+        "C8",
+        "C13"
+      ],
+      "plausible_answers": [
+        "inside the package (navigator_auth/migrations/), with docs/migrations/ holding the README/index",
+        "docs/migrations/ only, command works from a source checkout",
+        "docs/migrations/ as source of truth, copied into the package at build time"
+      ],
+      "ask_user": true,
+      "user_answer": "In package + docs index: SQL lives inside the package (e.g. navigator_auth/migrations/) so an installed navauth always finds it; docs/migrations/ holds the README and index of changes."
+    },
+    {
+      "id": "U2",
+      "question": "How should `self upgrade` decide what is pending?",
+      "blocks_claims": [
+        "C4",
+        "C13"
+      ],
+      "plausible_answers": [
+        "ledger table recording applied files + checksum",
+        "no ledger: re-run every idempotent file and verify via catalog probes",
+        "ledger for reporting plus idempotent re-run for safety"
+      ],
+      "ask_user": true,
+      "user_answer": "Ledger + idempotent SQL: a small table records each applied file with checksum and timestamp; files stay idempotent as a safety net."
+    },
+    {
+      "id": "U3",
+      "question": "Once the command exists, what should app startup do about migrations?",
+      "blocks_claims": [
+        "C2",
+        "C13"
+      ],
+      "plausible_answers": [
+        "keep applying at startup (command is an extra path)",
+        "startup only checks and warns; DDL only via the command",
+        "remove startup migrations entirely"
+      ],
+      "ask_user": true,
+      "user_answer": "Check and warn only: startup no longer runs DDL; it detects pending migrations and logs a warning telling the operator to run navauth self upgrade."
+    },
+    {
+      "id": "U4",
+      "question": "Which change sets does the first version cover?",
+      "blocks_claims": [
+        "C7",
+        "C12",
+        "C13"
+      ],
+      "plausible_answers": [
+        "identity + vault only",
+        "all existing sets including optional passkey/MFA",
+        "all existing sets plus the manual auth.clients patch"
+      ],
+      "ask_user": true,
+      "user_answer": "Everything incl. auth.clients: identity, vault, passkey and the manual auth.clients patch converted to a migration; MFA joins when FEAT-106 lands."
+    }
+  ],
+  "recommended_next_command": {
+    "command": "sdd-spec",
+    "rationale": "Localization is verified and the four design forks are user decisions captured as unknowns; once answered there is a single architecture (central runner + CLI + shims) to specify."
+  },
+  "overall_confidence": "medium",
+  "meta": {
+    "findings_used": [
+      "F001",
+      "F002",
+      "F003",
+      "F004",
+      "F005",
+      "F006",
+      "F007",
+      "F008",
+      "F009",
+      "F010",
+      "F011",
+      "F012",
+      "F013",
+      "F014",
+      "F015",
+      "F016",
+      "F017",
+      "F018",
+      "F019"
+    ],
+    "findings_unused": [],
+    "notes": "Admin-credential input is not asked as an unknown: the navigator-vault precedent (--dsn, then env var, then navconfig) is taken as the default and left for the spec. Follow-up worth running at spec time: build a wheel and confirm whether in-package *.sql files are included; inspect the local database to confirm C3."
+  }
+}

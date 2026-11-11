@@ -9,6 +9,33 @@ import logging
 from aiohttp import web
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+
+def parse_networks(entries: list[str], setting: str) -> tuple[IPNetwork, ...]:
+    """Build IP networks from IPs or CIDR ranges, skipping invalid entries.
+
+    Like ``parse_proxies``, a rejected entry is identified by its position
+    only: configuration also holds secrets, so its value is never logged.
+
+    Args:
+        entries: IP addresses (``10.0.0.5``) or CIDR ranges (``10.0.0.0/24``).
+        setting: Name of the setting the entries come from, for the log.
+
+    Returns:
+        The valid networks, in order.
+    """
+    networks: list[IPNetwork] = []
+    for position, entry in enumerate(entries, start=1):
+        try:
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            logging.warning(
+                "ignoring invalid IP or CIDR range at position %d of %s",
+                position,
+                setting,
+            )
+    return tuple(networks)
 
 
 def parse_proxies(entries: list[str]) -> set[IPAddress]:

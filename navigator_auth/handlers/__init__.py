@@ -3,6 +3,7 @@ from ..conf import SECURITY_CONFIG_HANDLER
 from .. import conf as auth_conf
 from .permissions import PermissionHandler
 from .users import UserManager, UserSession
+from .users.role import UserRoleHandler
 from .groups import GroupManager, GroupPermissionManager, UserGroupManager
 from .userattrs import UserAccountHandler, UserIdentityHandler
 from .user_identities import (
@@ -32,6 +33,8 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     UserGroupManager.configure(app, "/api/v1/usergroups")
     ### User Methods:
     # User:
+    # Literal role route must precede the generic users view.
+    router.add_view(r"/api/v1/users/{id:\d+}/role", UserRoleHandler, name="api_user_role")
     UserManager.configure(app, "/api/v1/users")
     # User Account:
     router.add_view(r"/api/v1/user_accounts/{id:.*}", UserAccountHandler, name="api_auth_useraccount_id")

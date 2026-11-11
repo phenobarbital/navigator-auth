@@ -1,0 +1,53 @@
+{
+  "feature": "abac-pdp-fixes",
+  "feature_id": "FEAT-113",
+  "spec": "sdd/specs/abac-pdp-fixes.spec.md",
+  "type": "feature",
+  "base_branch": "dev",
+  "created_at": "2026-11-11T18:48:56+00:00",
+  "completed_at": null,
+  "parallel_semantics": "exclusive",
+  "validation_contract": "required",
+  "test_contract": {
+    "schema": 2,
+    "runners": [
+      {
+        "kind": "pytest",
+        "targets": [
+          "tests/test_pdp_shutdown.py",
+          "tests/test_pdp_add_policy.py",
+          "tests/test_pdp_registry_hardening.py"
+        ],
+        "settings": {
+          "markers": ""
+        },
+        "tiers": [
+          "task",
+          "merge",
+          "feature"
+        ]
+      }
+    ],
+    "digest": "sha256:9870da53f528d05c8005d04e57c488ebae266a2b0060285257a0bd9a6cc42c81"
+  },
+  "tasks": [
+    {
+      "id": "TASK-213",
+      "slug": "pdp-shutdown-suppress",
+      "title": "Replace nonexistent asyncio.suppress in PDP.on_shutdown",
+      "feature_id": "FEAT-113",
+      "feature": "abac-pdp-fixes",
+      "spec": "sdd/specs/abac-pdp-fixes.spec.md",
+      "status": "pending",
+      "priority": "medium",
+      "effort": "S",
+      "depends_on": [],
+      "parallel": true,
+      "parallelism_notes": "single task; edits navigator_auth/abac/pdp.py on_shutdown and creates tests/test_pdp_shutdown.py",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "file": "sdd/tasks/active/TASK-213-pdp-shutdown-suppress.md"
+    }
+  ]
+}

@@ -160,3 +160,39 @@ override-dependencies = ["pyopenssl>=24.3.0"]
 
 [tool.parrot.sdd]
 sandbox = "required"
+
+[tool.parrot.worktree]
+# Compiled extensions are gitignored (`*.so`), so a fresh `git worktree add`
+# has none of them. `parrot sdd worktree ensure` copies these from the main
+# checkout into each worktree, and builds them in the main checkout first when
+# they are missing for the running interpreter.
+#
+# Build command: `make compile` (`python setup.py build_ext --inplace`) builds
+# the Cython modules AND rs_pep (setuptools-rust hooks build_ext). The venv
+# does not install setuptools-rust, since it is only a [build-system]
+# requirement, so it comes from a throwaway `uv run --with` overlay.
+# `--no-sync` keeps uv from changing the shared .venv. Never `maturin develop`.
+enabled = true
+
+[[tool.parrot.worktree.native_group]]
+name = "cython-libs"
+copy_globs = ["navigator_auth/libs/*.so"]
+pair_sources = ["navigator_auth/libs/*.pyx"]
+abi_scoped = true
+autobuild = true
+build = ["uv", "run", "--no-sync", "--with", "setuptools-rust>=1.10.2", "python", "setup.py", "build_ext", "--inplace"]
+build_timeout_s = 900
+manual_hint = "uv run --no-sync --with 'setuptools-rust>=1.10.2' python setup.py build_ext --inplace"
+
+[[tool.parrot.worktree.native_group]]
+name = "rs-pep"
+# `rs_pep*` only: navigator_auth/ also holds a stale navigator_auth_pep.*.so.
+copy_globs = ["navigator_auth/rs_pep*.so"]
+# PolicyEvaluator raises without it. pyo3 is not built abi3, so the .so is
+# tied to one CPython version.
+required = true
+abi_scoped = true
+autobuild = true
+build = ["uv", "run", "--no-sync", "--with", "setuptools-rust>=1.10.2", "python", "setup.py", "build_ext", "--inplace"]
+build_timeout_s = 900
+manual_hint = "uv run --no-sync --with 'setuptools-rust>=1.10.2' python setup.py build_ext --inplace"

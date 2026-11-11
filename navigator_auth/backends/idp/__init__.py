@@ -94,6 +94,7 @@ class IdentityProvider:
         the identity cipher is not configured.
         """
         from ...identity.crypto import IdentityCipher
+        from ...identity.refresh import refresh_linked_identity
         from ...identity.store import IdentityStore
         from ...conf import IDENTITY_REFRESH_LEEWAY
 
@@ -117,8 +118,9 @@ class IdentityProvider:
                 raise ConfigError(
                     f"{provider}: backend not enabled; cannot refresh."
                 )
-            token = await backend.refresh_identity_tokens(token.refresh_token)
-            await store.update_tokens(identity, token)
+            _, token = await refresh_linked_identity(
+                store, backend, identity, leeway=IDENTITY_REFRESH_LEEWAY
+            )
         return token.credential()
 
     async def user_from_id(self, uid: int) -> Identity:

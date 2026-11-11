@@ -1,6 +1,6 @@
 {
-  "next_task_id": 159,
-  "next_feature_id": 108,
-  "updated_at": "2026-11-10T23:52:15+00:00",
-  "updated_by": "auth-model-crud-hardening"
+  "next_task_id": 214,
+  "next_feature_id": 114,
+  "updated_at": "2026-11-11T18:48:22+00:00",
+  "updated_by": "abac-pdp-fixes"
 }

@@ -1,0 +1,256 @@
+{
+  "schema_version": "1.0",
+  "mode_hint": "investigation",
+  "rationale": "Bug report with six symptoms from one example run (500, wrong 200, 401, empty userinfo, repeated session-bind warning). Named entities: Oauth2Provider backend.py:700, APIKeyAuth.authenticate api.py:154, decorators._wrap:217, NoAuth, TrocToken, examples/oauth2_3lo_server.py. Token carries user_id=35 while the example's DEMO_USERS only define ids 1 and 2, and the log shows Azure/ADFS/NoAuth/TrocToken backends loaded although the example sets AUTHENTICATION_BACKENDS to Oauth2Provider only.",
+  "queries": [
+    {
+      "id": "Q001",
+      "intent": "Orient: Oauth2Provider backend, session binding and user_from_id in the graph.",
+      "type": "wiki_query",
+      "priority": 0,
+      "params": {
+        "question": "Oauth2Provider session binding user_from_id token"
+      }
+    },
+    {
+      "id": "Q002",
+      "intent": "Read the existing 3LO session-binding regression tests (what is already covered).",
+      "type": "wiki_page",
+      "priority": 0,
+      "params": {
+        "page_id": "file:tests/test_oauth2_3lo_session_binding.py"
+      }
+    },
+    {
+      "id": "Q003",
+      "intent": "Orient: is_authenticated decorator and how it iterates backends.",
+      "type": "wiki_query",
+      "priority": 0,
+      "params": {
+        "question": "is_authenticated decorator backend authenticate"
+      }
+    },
+    {
+      "id": "Q004",
+      "intent": "Orient: NoAuth anonymous backend and AUTHENTICATION_BACKENDS loading.",
+      "type": "wiki_query",
+      "priority": 0,
+      "params": {
+        "question": "NoAuth anonymous user backend AUTHENTICATION_BACKENDS"
+      }
+    },
+    {
+      "id": "Q005",
+      "intent": "Orient: OAuth2 grants listing and userinfo handlers.",
+      "type": "wiki_query",
+      "priority": 0,
+      "params": {
+        "question": "oauth2 userinfo grants handler"
+      }
+    },
+    {
+      "id": "Q006",
+      "intent": "Neighbours of the Oauth2Provider backend module.",
+      "type": "wiki_related",
+      "priority": 0,
+      "params": {
+        "page_id": "file:navigator_auth/backends/oauth2/backend.py"
+      }
+    },
+    {
+      "id": "Q010",
+      "intent": "Read the session-binding code around backend.py:700 and the code that mints the access token.",
+      "type": "read",
+      "priority": 1,
+      "params": {
+        "path": "navigator_auth/backends/oauth2/backend.py",
+        "lines": "620-760"
+      }
+    },
+    {
+      "id": "Q011",
+      "intent": "Find which IdentityProvider instance the OAuth2 login/consent and token paths use (does it honour backend._idp?).",
+      "type": "grep",
+      "priority": 1,
+      "params": {
+        "pattern": "_idp|IdentityProvider\\(|user_from_id|get_user\\(",
+        "path": "navigator_auth/backends/oauth2/",
+        "case_sensitive": true,
+        "max_results": 40
+      }
+    },
+    {
+      "id": "Q012",
+      "intent": "Read is_authenticated / user_session decorators around decorators.py:217.",
+      "type": "read",
+      "priority": 1,
+      "params": {
+        "path": "navigator_auth/decorators.py",
+        "lines": "150-300"
+      }
+    },
+    {
+      "id": "Q013",
+      "intent": "Read APIKeyAuth.authenticate / check_token_info / auth_middleware (api.py:154, :292).",
+      "type": "read",
+      "priority": 1,
+      "params": {
+        "path": "navigator_auth/backends/api.py",
+        "lines": "100-300"
+      }
+    },
+    {
+      "id": "Q014",
+      "intent": "Locate userinfo and grants endpoint handlers in the OAuth2 provider.",
+      "type": "grep",
+      "priority": 1,
+      "params": {
+        "pattern": "def (userinfo|.*grant.*)|Not authenticated",
+        "path": "navigator_auth/backends/oauth2/",
+        "case_sensitive": false,
+        "max_results": 30
+      }
+    },
+    {
+      "id": "Q015",
+      "intent": "Read NoAuth backend: does it authenticate every request as anonymous?",
+      "type": "read",
+      "priority": 2,
+      "params": {
+        "path": "navigator_auth/backends/noauth.py",
+        "lines": null
+      }
+    },
+    {
+      "id": "Q016",
+      "intent": "How AUTHENTICATION_BACKENDS and AUTH_SECRET_KEY are read (navconfig vs os.environ precedence).",
+      "type": "grep",
+      "priority": 1,
+      "params": {
+        "pattern": "AUTHENTICATION_BACKENDS|AUTH_SECRET_KEY|SECRET_KEY =|OAUTH2_CLIENT_STORAGE",
+        "path": "navigator_auth/conf.py",
+        "case_sensitive": true,
+        "max_results": 20
+      }
+    },
+    {
+      "id": "Q017",
+      "intent": "Read AuthHandler._auth_middleware and backend loading (auth.py:1040-1075).",
+      "type": "read",
+      "priority": 2,
+      "params": {
+        "path": "navigator_auth/auth.py",
+        "lines": "1000-1080"
+      }
+    },
+    {
+      "id": "Q018",
+      "intent": "Read the existing 3LO session-binding tests.",
+      "type": "read",
+      "priority": 2,
+      "params": {
+        "path": "tests/test_oauth2_3lo_session_binding.py",
+        "lines": null
+      }
+    },
+    {
+      "id": "Q019",
+      "intent": "Read the SPA buttons (List my grants, Call without credentials) to see which endpoints/headers they use.",
+      "type": "grep",
+      "priority": 2,
+      "params": {
+        "pattern": "grants|without credentials|userinfo|fetch\\(",
+        "path": "examples/static/oauth2_3lo_app.html",
+        "case_sensitive": false,
+        "max_results": 30
+      }
+    },
+    {
+      "id": "Q020",
+      "intent": "TrocToken / TokenAuth middlewares: do they act on a 3LO bearer token?",
+      "type": "read",
+      "priority": 3,
+      "params": {
+        "path": "navigator_auth/backends/troc.py",
+        "lines": "180-230"
+      }
+    },
+    {
+      "id": "Q021",
+      "intent": "IdP decode_token at idp/__init__.py:494 and the secret it uses.",
+      "type": "read",
+      "priority": 3,
+      "params": {
+        "path": "navigator_auth/backends/idp/__init__.py",
+        "lines": "440-520"
+      }
+    },
+    {
+      "id": "Q030",
+      "intent": "Recent commits on the OAuth2 provider (regression window).",
+      "type": "git_log",
+      "priority": 1,
+      "params": {
+        "path": "navigator_auth/backends/oauth2/",
+        "since": "90.days.ago",
+        "max_results": 20
+      }
+    },
+    {
+      "id": "Q031",
+      "intent": "Recent commits on decorators.py and api.py.",
+      "type": "git_log",
+      "priority": 1,
+      "params": {
+        "path": "navigator_auth/decorators.py navigator_auth/backends/api.py",
+        "since": "120.days.ago",
+        "max_results": 20
+      }
+    },
+    {
+      "id": "Q032",
+      "intent": "History of the 3LO example and its regression tests (d3f85ba).",
+      "type": "git_log",
+      "priority": 1,
+      "params": {
+        "path": "examples/oauth2_3lo_server.py tests/test_oauth2_3lo_session_binding.py",
+        "since": "180.days.ago",
+        "max_results": 10
+      }
+    },
+    {
+      "id": "Q040",
+      "intent": "Follow-up for the mid-run report: oauth2_server.py 3LO walk-through ends in 'code_verifier required'.",
+      "type": "wiki_query",
+      "priority": 0,
+      "params": {
+        "question": "oauth2_server example callback.html exchange code token code_verifier"
+      },
+      "added": "mid-run user report"
+    },
+    {
+      "id": "Q041",
+      "intent": "Read callback.html token exchange and the token endpoint PKCE check.",
+      "type": "read",
+      "priority": 1,
+      "params": {
+        "path": "examples/static/callback.html",
+        "lines": null
+      },
+      "added": "mid-run user report"
+    },
+    {
+      "id": "Q042",
+      "intent": "Locate PKCE wiring in oauth2_server.py, oauth2_index.html and the 3LO app.",
+      "type": "grep",
+      "priority": 1,
+      "params": {
+        "pattern": "code_challenge|code_verifier|nav_public_client",
+        "path": "examples/",
+        "case_sensitive": true,
+        "max_results": 40
+      },
+      "added": "mid-run user report"
+    }
+  ]
+}
