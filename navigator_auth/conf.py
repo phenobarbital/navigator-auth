@@ -709,6 +709,16 @@ POLICY_STORAGE_DIR = config.get(
 # Default effect when no policies match a request ("deny" or "allow").
 ABAC_DEFAULT_EFFECT = config.get("ABAC_DEFAULT_EFFECT", fallback="deny")
 
+# Protected groups (FEAT-107). Membership or definition of these groups can
+# only be changed by an actor holding the ``users:grant_role`` ABAC action who
+# belongs to the group; nobody can add themselves. ``superuser`` is always
+# protected, whatever this says.
+AUTH_PROTECTED_GROUPS = [
+    e.strip()
+    for e in config.get("AUTH_PROTECTED_GROUPS", fallback="superuser,security_admin").split(",")
+    if e.strip()
+]
+
 # ABAC Hot-Reload Interval (seconds). Default: 0 (disabled).
 ABAC_RELOAD_INTERVAL = config.getint("ABAC_RELOAD_INTERVAL", fallback=0)
 

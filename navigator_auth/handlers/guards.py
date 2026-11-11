@@ -19,13 +19,20 @@ from navigator_session import get_session
 from ..abac.audit import AuditLog
 from ..abac.policies import PolicyEffect
 from ..abac.policies.abstract import PolicyResponse
-from ..conf import AUTH_SESSION_OBJECT
-from ..decorators import _check_superuser, policy_allows
+from ..conf import AUTH_PROTECTED_GROUPS, AUTH_SESSION_OBJECT
+from ..decorators import SUPERUSER_GROUP, _check_superuser, policy_allows
 from .redaction import safe_fields
 
 logger = logging.getLogger("navigator.auth.guards")
 
 _BAD_FILTER = "Invalid _filter"
+_GRANT_ROLE_POLICY = "users_grant_role"
+_GRANT_ROLE_ACTION = "users:grant_role"
+
+
+def protected_groups() -> frozenset[str]:
+    """Return the effective protected group set."""
+    return frozenset(AUTH_PROTECTED_GROUPS) | {SUPERUSER_GROUP}
 
 
 class OwnerOrSuperuserGuard:
@@ -247,6 +254,53 @@ class OwnerOrSuperuserGuard:
         if named:
             body["columns"] = named
         self.error(response=body, status=403)
+
+    async def authorize_protected_group(
+        self,
+        group_names: Iterable[str],
+        *,
+        member_id: Optional[int] = None,
+    ) -> None:
+        """Gate a change that touches a protected group."""
+        involved = {str(name) for name in group_names if name}
+        protected = involved & protected_groups()
+        if not protected:
+            return
+
+        names = sorted(protected)
+        allowed, reason, _ = await policy_allows(
+            _GRANT_ROLE_POLICY,
+            self.request,
+            action=_GRANT_ROLE_ACTION,
+            resource=self.request.path,
+        )
+        if not allowed:
+            await self.audit_decision(_GRANT_ROLE_ACTION, False, member_id, f"protected {names}: {reason}")
+            self._refuse()
+
+        user_id, is_superuser = await self.acting_user()
+        if member_id is not None and str(member_id) == str(user_id):
+            await self.audit_decision(_GRANT_ROLE_ACTION, False, member_id, f"self-add to protected {names}")
+            self._refuse()
+
+        _, userinfo, user = await self._session_info()
+        for name in names:
+            if name == SUPERUSER_GROUP:
+                belongs = is_superuser
+            else:
+                groups = userinfo.get("groups") if isinstance(userinfo, dict) else None
+                belongs = isinstance(groups, (list, tuple, set, frozenset)) and name in groups
+                if not belongs and user is not None and hasattr(user, "groups"):
+                    belongs = any(
+                        (getattr(group, "group", None) or getattr(group, "group_name", None)) == name
+                        for group in user.groups
+                    )
+            if not belongs:
+                reason = f"actor does not belong to protected group '{name}'"
+                await self.audit_decision(_GRANT_ROLE_ACTION, False, member_id, reason)
+                self._refuse()
+
+        await self.audit_decision(_GRANT_ROLE_ACTION, True, member_id, f"protected {names}: {reason}")
 
     async def sanitize_query(
         self,
