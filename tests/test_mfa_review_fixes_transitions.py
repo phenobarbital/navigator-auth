@@ -289,7 +289,9 @@ async def _password_reset(pool, actor: dict, user: dict, app: dict, password: st
 async def _stored_password(pool, user_id: int) -> str:
     """Return the persisted password hash for a fixture user."""
     async with await pool.acquire() as conn:
-        return await conn.fetchval(f"SELECT password FROM {AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE} WHERE user_id = $1", user_id)
+        return await conn.fetchval(
+            f"SELECT password FROM {AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE} WHERE user_id = $1", user_id
+        )
 
 
 @pytest.mark.asyncio
@@ -303,9 +305,12 @@ async def test_password_change_two_phase_success(mfa_db, mfa_user_factory, mfa_s
     security = MfaSecurity(mfa_db, mfa_secret)
     async with await mfa_db.acquire() as conn:
         assert await security.current_version(conn, user["user_id"]) == 1
-        assert await conn.fetchval(
-            f"SELECT count(*) FROM {AUTH_DB_SCHEMA}.user_mfa_audit WHERE target_user_id = $1", user["user_id"]
-        ) == 1
+        assert (
+            await conn.fetchval(
+                f"SELECT count(*) FROM {AUTH_DB_SCHEMA}.user_mfa_audit WHERE target_user_id = $1", user["user_id"]
+            )
+            == 1
+        )
 
 
 @pytest.mark.asyncio
@@ -391,7 +396,8 @@ async def test_password_reset_revokes_sessions(mfa_db, mfa_user_factory, monkeyp
     user = await mfa_user_factory()
     revoker = _Revoker()
     monkeypatch.setattr(
-        "navigator_auth.handlers.users.session.PasswordRecoveryHandler.session_revoker", classmethod(lambda cls: revoker)
+        "navigator_auth.handlers.users.session.PasswordRecoveryHandler.session_revoker",
+        classmethod(lambda cls: revoker),
     )
     response = await _password_reset(mfa_db, actor, user, {"authdb": mfa_db})
     assert response.status == 202

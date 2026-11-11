@@ -17,7 +17,6 @@ from ...security_state.store import SecurityStateError, increment_generation
 from ..recovery.handler import PasswordRecoveryHandler
 from ..recovery.revoke import RevocationError
 
-
 _USERS = f"{AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE}"
 
 
@@ -195,7 +194,9 @@ class UserSession(BaseHandler):
             async with security_transition(
                 request.app, user.user_id, "password_reset", actor_user_id=userinfo.get("user_id")
             ) as conn:
-                current = await conn.fetchval(f"SELECT password FROM {_USERS} WHERE user_id = $1 FOR UPDATE", user.user_id)
+                current = await conn.fetchval(
+                    f"SELECT password FROM {_USERS} WHERE user_id = $1 FOR UPDATE", user.user_id
+                )
                 if current is None or not secrets.compare_digest(str(current), str(captured or "")):
                     raise TransitionAborted("credentials_changed")
                 await conn.fetchval(
