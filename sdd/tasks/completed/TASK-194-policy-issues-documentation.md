@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-109 — PBAC example policy issues
 **Spec**: `sdd/specs/policy-issues.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: low
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-190, TASK-191, TASK-192
@@ -244,3 +244,7 @@ No new tests: this task changes documentation only. The Validation Commands impo
 **Notes**: What was implemented, any deviations from scope, issues encountered.
 
 **Deviations from spec**: none | describe if any
+
+## Completion Note
+
+Merged (TASK-194 by hand after task-tier validation_failed from order-dependent legacy get_event_loop tests; fixed with loop-restoring fixtures). Merge-tier validation: completed.

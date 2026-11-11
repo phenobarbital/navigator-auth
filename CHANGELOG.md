@@ -1,5 +1,29 @@
 # Unreleased
 
+- **Behavior change — `PDP.add_policy()` and `PDP(policies=[...])` are enforced
+  (FEAT-109).** They used to append to a list `PDP.authorize` never read, so
+  programmatic policies were silently ignored (the PBAC example answered 428 for
+  `/dashboard/`). Registered policies are now adapted with the new
+  `PolicyAdapter.from_policy`, loaded into the `PolicyEvaluator`, and kept across
+  `reload_policies()` and per-tenant evaluators; `add_policy` returns the loaded
+  `ResourcePolicy` list. It now **raises `ValueError`** instead of accepting a
+  policy it cannot enforce: duplicate registered names, invalid resource
+  patterns (including `!`-negated ones), and classic `context` / `conditions` /
+  `scopes` restrictions (use `subject=[...]` for a username restriction). Classic
+  `environment` accepts `day_of_week` as an alias of `dow`; unsupported keys are
+  rejected. `Policy(resource="...")` with a single string no longer raises
+  `TypeError`.
+- **`abac_middleware` no longer mishandles unrouted requests (FEAT-109).** The
+  404 skip swallowed `HTTPNotFound`, ran the 404 handler twice and logged
+  `Access to <path> is not Authenticated.` at WARNING for browser probes
+  (`/favicon.ico`, `/.well-known/...`). Unrouted requests now pass through once
+  and silently; the unauthenticated pass-through logs at DEBUG.
+  `EXCLUDE_DEFAULTS` is unchanged.
+- **Startup warning for short HMAC keys (FEAT-109).** `AuthHandler.setup` logs
+  one WARNING on `navigator_auth.security` per configured HMAC key shorter than
+  32 bytes (`AUTH_SECRET_KEY`, `AUTH_TOKEN_SECRET` / `PARTNER_KEY`, an explicit
+  `AUTH_RECOVERY_SECRET`), naming the setting and its length, never the value.
+  See "Signing keys" in `docs/settings.rst`.
 - **`AUTH_PROBE_IGNORE_IPS`: exclude hosts from the repeated-probe warning.**
   Comma-separated IPs or CIDR ranges whose rejected requests are never
   counted by `protected_paths_middleware`, so a load balancer's health checks

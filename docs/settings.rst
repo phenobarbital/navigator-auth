@@ -102,6 +102,25 @@ back to the ``SAML_*`` name shown.
    JSON list. If set, only sessions whose ``auth_method`` is listed may
    receive assertions. Default ``[]`` (no restriction).
 
+Signing keys
+------------
+
+HMAC signing keys must be at least **32 bytes** (RFC 7518 §3.2). At startup
+``AuthHandler.setup`` logs one WARNING on the ``navigator_auth.security`` logger
+for each configured key that is shorter, naming the setting and its length in
+bytes (never the value).
+
+``AUTH_SECRET_KEY``
+   Session/token signing key (``SECRET_KEY``). Minimum 32 bytes.
+
+``AUTH_TOKEN_SECRET`` / ``PARTNER_KEY``
+   OAuth2 token signing key; falls back to ``PARTNER_KEY`` when unset.
+   Minimum 32 bytes.
+
+Generate a key with::
+
+   python -c "import secrets; print(secrets.token_urlsafe(48))"
+
 Backend-Based Password Recovery (FEAT-098)
 --------------------------------------------
 
