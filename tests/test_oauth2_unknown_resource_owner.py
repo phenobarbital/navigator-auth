@@ -438,12 +438,26 @@ class TestCodeGrantOwnerCheck:
         assert provider.code_storage.calls == ["claim", "release"]
 
     @pytest.mark.asyncio
-    async def test_a_held_claim_is_rejected_before_the_owner_lookup(self, provider):
+    async def test_a_held_claim_on_a_consumed_code_is_already_used(self, provider):
         await _grant_provider(provider, {"return_value": {}})
         provider.code_storage = _GrantCodes(_auth_code(), claimable=False)
+        # Pre-lock read sees the code; the re-read after the failed claim finds it gone.
+        provider.code_storage.get_code = AsyncMock(side_effect=[_auth_code(), None])
         response = await provider._handle_authorization_code(_code_payload(), MagicMock())
         assert response.status == 400
         assert json.loads(response.body)["error_description"] == "Authorization code already used."
+        assert provider.code_storage.calls == ["claim"]
+        provider._token_session_claims.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_held_claim_on_a_pending_code_is_retryable(self, provider):
+        # TASK-224 (issue:cf77c0161ff6): a concurrent retry while the first attempt
+        # is still in flight must not be told the code is used — it is not.
+        await _grant_provider(provider, {"return_value": {}})
+        provider.code_storage = _GrantCodes(_auth_code(), claimable=False)
+        response = await provider._handle_authorization_code(_code_payload(), MagicMock())
+        assert response.status == 503
+        assert json.loads(response.body)["error"] == "server_error"
         assert provider.code_storage.calls == ["claim"]
         provider._token_session_claims.assert_not_awaited()
 

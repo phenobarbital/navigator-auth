@@ -16,10 +16,11 @@ from datetime import datetime, timezone
 import asyncio
 import json
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from ...conf import REDIS_URL
+from ...conf import REDIS_URL, OAUTH_CODE_TTL, OAUTH_CODE_CLAIM_TTL
 
 try:
     import redis.asyncio as redis
@@ -86,11 +87,20 @@ class AuthorizationCodeStorage:
         return None
 
     async def mark_used(self, code: str) -> bool:
-        """Mark a code as used (B5 single-use enforcement).
+        """Consume a code atomically (B5 single-use enforcement).
 
-        Updates the ``used`` flag and ``used_at`` timestamp in place.
-        The caller must call delete_code() to purge from Redis after marking.
+        A ``SET NX`` marker decides the winner, so exactly one caller per code
+        gets ``True`` however many redeem it concurrently (FEAT-108). The record
+        then gets its ``used`` flag and ``used_at`` timestamp in place; the
+        caller must call delete_code() to purge it from Redis after marking.
+
+        Returns:
+            bool: ``True`` for the single caller that consumed the code;
+            ``False`` when it was already consumed or no longer exists.
         """
+        # The marker outlives any code: a code is redeemable for OAUTH_CODE_TTL at most.
+        if not await self.redis.set(f"{self.prefix}used:{code}", "1", nx=True, ex=OAUTH_CODE_TTL):
+            return False
         obj = await self.get_code(code)
         if not obj:
             return False
@@ -106,8 +116,17 @@ class AuthorizationCodeStorage:
         key = f"{self.prefix}{code}"
         await self.redis.delete(key)
 
-    async def claim_code(self, code: str, ttl: int = 30) -> bool:
-        """Atomically claim the right to redeem ``code`` (FEAT-108)."""
+    async def claim_code(self, code: str, ttl: Optional[int] = None) -> bool:
+        """Atomically claim the right to redeem ``code`` (FEAT-108).
+
+        Args:
+            code: The authorization code being redeemed.
+            ttl: Claim lifetime in seconds; ``None`` uses ``OAUTH_CODE_CLAIM_TTL``.
+
+        Returns:
+            bool: ``True`` when this caller now holds the claim.
+        """
+        ttl = OAUTH_CODE_CLAIM_TTL if ttl is None else int(ttl)
         return bool(await self.redis.set(f"{self.prefix}claim:{code}", "1", nx=True, ex=ttl))
 
     async def release_claim(self, code: str) -> None:

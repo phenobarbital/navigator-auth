@@ -809,6 +809,11 @@ OAUTH_ACCESS_TOKEN_TTL = config.getint("OAUTH_ACCESS_TOKEN_TTL", fallback=3600)
 # Authorization code TTL in seconds (default: 10 minutes).
 OAUTH_CODE_TTL = config.getint("OAUTH_CODE_TTL", fallback=600)
 
+# Seconds an in-flight authorization-code redemption holds its claim (FEAT-108).
+# Must exceed the slowest owner lookup + session creation, or a retry is told 503
+# only after the claim lapses; single use itself never depends on it.
+OAUTH_CODE_CLAIM_TTL = config.getint("OAUTH_CODE_CLAIM_TTL", fallback=30)
+
 # Refresh token sliding TTL in seconds (default: 30 days).
 OAUTH_REFRESH_TOKEN_TTL = config.getint("OAUTH_REFRESH_TOKEN_TTL", fallback=2592000)
 

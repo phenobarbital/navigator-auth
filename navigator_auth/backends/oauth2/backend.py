@@ -2250,7 +2250,18 @@ class Oauth2Provider(BaseAuthBackend):
                 # skips the claim and relies on ``mark_used`` alone.
                 claim = getattr(self.code_storage, "claim_code", None)
                 if claim is not None and not await claim(code):
-                    return self._error_response("invalid_grant", "Authorization code already used.")
+                    # A held claim does not mean the code was consumed: only a
+                    # consumed (or vanished) code is fatal for the client.
+                    current = await self.code_storage.get_code(code)
+                    if current is None or current.used:
+                        return self._error_response("invalid_grant", "Authorization code already used.")
+                    # Another redemption of this still-unconsumed code is in
+                    # flight (e.g. waiting out an outage): ask the client to retry.
+                    return self._error_response(
+                        "server_error",
+                        "The authorization code is being redeemed; retry shortly.",
+                        status=503,
+                    )
                 release = getattr(self.code_storage, "release_claim", None)
                 try:
                     session_claims = await self._token_session_claims(request, user_id, conn=conn)
