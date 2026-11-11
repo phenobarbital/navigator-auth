@@ -161,7 +161,7 @@
       "feature_id": "FEAT-107",
       "feature": "auth-model-crud-hardening",
       "spec": "sdd/specs/auth-model-crud-hardening.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -173,8 +173,9 @@
       "parallelism_notes": "Spec Module 5. New handlers/users/role.py plus a route in handlers/__init__.py (no other task edits that file). Ordered after TASK-153 per the spec's M1 -> M2 -> M5 sequence; policy names from TASK-150.",
       "assigned_to": null,
       "started_at": "2026-11-11T00:20:19+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-156-user-role-endpoint.md"
+      "completed_at": "2026-11-11T02:12:09+00:00",
+      "file": "sdd/tasks/completed/TASK-156-user-role-endpoint.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-157",
