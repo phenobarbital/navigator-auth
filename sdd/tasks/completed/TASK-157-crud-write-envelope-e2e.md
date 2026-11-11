@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-107 — Write-envelope hardening for the remaining auth CRUD handlers
 **Spec**: `sdd/specs/auth-model-crud-hardening.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-150, TASK-153, TASK-154, TASK-155, TASK-156
@@ -283,10 +283,7 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: creation scenarios use PUT | other
+**Completed by**: sdd-worker (orchestrator)
+**Date**: 2026-11-11
+**Seat**: Backend: native · Model: sonnet
+**Notes**: End-to-end write-envelope suite tests/test_auth_crud_write_envelope.py (test-only). Merge-tier: 19 passed; coder-reported 335 passed on handlers + superuser/policy tests. Pins a pre-existing password_change quirk (wrong old_password returns 500, not 403) — out of scope, to be ledgered. Review: zero fixes (feedback coder-review:a8dfd5fd059943f51b4ea68b).

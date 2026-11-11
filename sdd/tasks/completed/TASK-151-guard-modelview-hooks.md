@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-107 — Write-envelope hardening for the remaining auth CRUD handlers
 **Spec**: `sdd/specs/auth-model-crud-hardening.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-149
@@ -527,10 +527,7 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: shared mixin instead of per-handler hooks; reads gated (user decision) | other
+**Completed by**: sdd-worker (orchestrator)
+**Date**: 2026-11-11
+**Seat**: Backend: codex · Model: gpt-5.6-terra
+**Notes**: guard_hooks.py GuardedModelViewHooks verb hooks. Merge-tier validation: 45 passed (tasks 151/152/155 together). Review: zero fixes (feedback coder-review:baea508334dd772fd1239659).

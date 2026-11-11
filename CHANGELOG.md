@@ -1,5 +1,22 @@
 # Unreleased
 
+- **BREAKING — write envelope on the auth CRUD handlers (FEAT-107, no
+  deprecation window).** `/api/v1/users*`, `/api/v1/groups*`,
+  `/api/v1/user_groups*`, `/api/v1/usergroups*`, `/api/v1/group_permissions*` and
+  `/api/v1/permissions*` were authorized by authentication alone; any session
+  could set `is_superuser` / `user_role` / `is_staff`, join any group (including
+  `superuser`) or grant any permission. Privileged columns are no longer
+  writable through PATCH/PUT/POST; use `POST /api/v1/users/{id}/role` with
+  `users:grant_role`, held by `security_admin`. Passwords are no longer settable
+  through the user CRUD, including on create; use `password_change` or
+  `password_reset`. `username` is no longer updatable; users are created with
+  PUT; owners edit with PATCH; reads are gated; and `?_filter=` answers 400 on
+  the ModelView routes. Membership or definition of protected groups requires
+  `users:grant_role` (`AUTH_PROTECTED_GROUPS`). A user can no longer delete
+  their own account through `DELETE /api/v1/users/{id}`. Deploy the new
+  `abac/default_policies/auth_crud_admin_access.yaml` pack. Find affected
+  callers through the guard's audited 403s. See `docs/auth_crud_authorization.rst`.
+
 - **Owner-or-superuser access control on the auth model CRUD surfaces
   (FEAT-105, client-visible behaviour change).** `/api/v1/user_identity*`,
   `/api/v1/user_accounts*` and `/api/v1/partner/tokens*` were reachable by any
