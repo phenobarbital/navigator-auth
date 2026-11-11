@@ -29,8 +29,8 @@ def session(user_id=42, groups=("superuser", "security_admin")):
     info = {"user_id": user_id, "groups": list(groups)}
     value = {"session": info}
     result = MagicMock()
-    result.__contains__ = lambda key: key in value
-    result.__getitem__ = lambda key: value[key]
+    result.__contains__ = lambda self, key: key in value
+    result.__getitem__ = lambda self, key: value[key]
     result.decode = lambda key: None
     return result
 
@@ -43,6 +43,9 @@ class TestProtectedSet:
     def test_setting_adds_groups(self, monkeypatch):
         monkeypatch.setattr(guards, "AUTH_PROTECTED_GROUPS", ["ops"])
         assert protected_groups() == {"ops", "superuser"}
+
+    def test_conf_default_parses_to_clean_names(self):
+        assert guards.AUTH_PROTECTED_GROUPS == ["superuser", "security_admin"]
 
 
 class TestAuthorizeProtectedGroup:
