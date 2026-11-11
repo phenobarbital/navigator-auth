@@ -1,5 +1,18 @@
 # Unreleased
 
+- **Behaviour change — database migrations are now an explicit command
+  (FEAT-110).** New `navauth self upgrade` console script applies the
+  idempotent SQL catalog (vault, identity, passkey, oauth2) under a ledger
+  (`<AUTH_DB_SCHEMA>.schema_migrations`), grants the runtime role (`DBUSER` or
+  `--runtime-role`) its table/sequence privileges, and supports `--check` for
+  CI. Application startup **no longer applies DDL**: it logs a warning while
+  migrations are pending, and `PasskeyAuth` refuses to start without its
+  tables. The admin connection is configured with `AUTH_ADMIN_DSN` or
+  `AUTH_ADMIN_USER` / `AUTH_ADMIN_PWD`. The hand-applied OAuth2 `ddl.sql` was
+  replaced by a managed migration without seed data (rows with NULL
+  `client` / `client_name` must be repaired). Run `navauth self upgrade`
+  after upgrading; see `docs/migrations/README.md`.
+
 - **Two-factor authentication for BasicAuth (FEAT-106, opt-in).** TOTP
   (Google-Authenticator-compatible) and e-mail one-time codes are a second
   factor for username/password logins, enforced per tenant through the new

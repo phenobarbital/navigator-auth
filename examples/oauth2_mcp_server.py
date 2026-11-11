@@ -40,7 +40,7 @@ Notes
 -----
 * ``enable_authdb=False`` keeps the example free of PostgreSQL: clients, the
   access gate and users all live in memory. A real deployment drops this and
-  applies ``navigator_auth/backends/oauth2/ddl.sql``.
+  runs ``navauth self upgrade --set oauth2``.
 * Demo credentials: ``demo`` / ``demo123``. The demo user is pre-activated on
   the gate at startup so the flow completes end to end; comment that out to
   watch the approval queue fill up instead.

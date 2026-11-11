@@ -44,10 +44,10 @@ OAUTH_ACCESS_GATE_QUEUE=true
 OAUTH_UPSTREAM_IDP_BACKENDS=google,azure
 ```
 
-Apply the DDL once:
+Apply the schema once:
 
 ```bash
-psql "$AUTH_DB_DSN" -f navigator_auth/backends/oauth2/ddl.sql
+navauth self upgrade --set oauth2
 ```
 
 Verify discovery before touching Claude:
