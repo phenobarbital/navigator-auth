@@ -22,7 +22,9 @@
           "tests/test_mfa_email_provider.py",
           "tests/test_mfa_migrations.py",
           "tests/test_mfa_review_fixes_gate.py",
-          "tests/test_mfa_review_fixes_docs.py"
+          "tests/test_mfa_review_fixes_docs.py",
+          "tests/test_mfa_verify.py",
+          "tests/test_mfa_basic_auth_hook.py"
         ],
         "settings": {
           "markers": ""
@@ -34,7 +36,7 @@
         ]
       }
     ],
-    "digest": "sha256:11882d2bf6a28ba1d516e758d3350cec564c4e75192ddbb7aaf1fbb0450a7671"
+    "digest": "sha256:b4be61e9e978fd68288aae3d14f66819a624124357e57c66466e2eaaba1a1107"
   },
   "tasks": [
     {
