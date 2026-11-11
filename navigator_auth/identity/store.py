@@ -103,6 +103,63 @@ def _user_id_param(value: Any) -> Any:
     return value
 
 
+_JSONB_COLUMNS = frozenset({"scopes", "auth_data", "attributes"})
+
+
+async def _update_identity_row(
+    conn: Any,
+    identity_id: Any,
+    provider_user_id: Any,
+    changes: dict[str, Any],
+) -> bool:
+    """Write ``changes`` onto one identity row with a plain, keyed ``UPDATE``.
+
+    Used instead of asyncdb's ``Model.update()``, which rewrites every column,
+    builds its ``WHERE`` from old values kept in a dict shared by all
+    ``UserIdentity`` instances, and caps the statement at a hard-coded
+    2-second client timeout. That timeout reported committed writes as
+    failures ("Error on Insert over table user_identities").
+
+    Args:
+        conn: An acquired database connection.
+        identity_id: Primary key of the row.
+        provider_user_id: The external account the row is bound to, as the
+            caller read it. Tokens are sealed for that account, so a row
+            re-bound to another account meanwhile is not written.
+        changes: ``column=value`` to set. jsonb columns take the Python value.
+
+    Returns:
+        True when the row was written; False when no row matched.
+
+    Raises:
+        ValueError: ``identity_id`` is missing (an unkeyed ``UPDATE`` would
+            rewrite every row), or a column is not declared on the model.
+    """
+    if identity_id is None:
+        raise ValueError("identity row has no identity_id to key the write on")
+    params: list[Any] = []
+    assignments: list[str] = []
+    for column, value in changes.items():
+        if column not in _IDENTITY_FIELDS:
+            raise ValueError(f"{_IDENTITY_TABLE} has no column {column!r}")
+        if column in _JSONB_COLUMNS:
+            # Bound as text and cast in SQL, so the value does not depend on
+            # whether the connection has a jsonb codec registered.
+            params.append(json.dumps(value, default=str))
+            assignments.append(f"{column} = ${len(params)}::text::jsonb")
+        else:
+            params.append(value)
+            assignments.append(f"{column} = ${len(params)}")
+    params += [identity_id, None if provider_user_id is None else str(provider_user_id)]
+    sql = (
+        f"UPDATE {_IDENTITY_TABLE} SET {', '.join(assignments)} "
+        f"WHERE identity_id = ${len(params) - 1} "
+        f"AND provider_user_id IS NOT DISTINCT FROM ${len(params)}::varchar "
+        "RETURNING identity_id"
+    )
+    return await conn.fetch_one(sql, *params) is not None
+
+
 async def _filter_identities(conn: Any, **criteria: Any) -> list[UserIdentity]:
     """Identity rows matching an equality filter, hydrated as models.
 
@@ -267,11 +324,20 @@ class IdentityStore:
                 if token.id_token is None:
                     values.pop("id_token", None)
                     kept.append("id_token")
-                if kept and getattr(existing, "provider_user_id", None) != puid:
+                bound_puid = getattr(existing, "provider_user_id", None)
+                if kept and bound_puid != puid:
                     values.update(self._reseal_kept(existing, user_id, provider, puid, tuple(kept)))
-                for key, value in values.items():
+                # A None value keeps the stored column, as the asyncdb model
+                # write did (it skipped None columns).
+                changes = {key: value for key, value in values.items() if value is not None}
+                if not await _update_identity_row(conn, getattr(existing, "identity_id", None), bound_puid, changes):
+                    raise NoDataFound(
+                        f"{provider}: identity {existing.identity_id} changed while it was "
+                        "being re-linked; the credential was not stored."
+                    )
+                for key, value in changes.items():
                     setattr(existing, key, value)
-                return await existing.update()
+                return existing
             identity = UserIdentity(
                 user_id=user_id,
                 auth_provider=provider,
@@ -415,13 +481,9 @@ class IdentityStore:
         only when the refresh actually returned one, so a provider that omits
         either on the refresh grant does not erase what is stored.
 
-        The write is a plain ``UPDATE`` of the refreshed columns only, keyed
-        by the row's own ``identity_id``. It does not use asyncdb's
-        ``Model.update()``, which rewrites every column, builds its ``WHERE``
-        from old values kept in a dict shared by all ``UserIdentity``
-        instances, and caps the statement at a hard-coded 2-second client
-        timeout. That timeout reported committed refreshes as failures
-        ("Error on Insert over table user_identities").
+        Only the refreshed columns are written, keyed by the row's own
+        ``identity_id`` (see ``_update_identity_row`` for why this is not
+        ``Model.update()``).
 
         Args:
             identity: The row to update, as read from this store.
@@ -436,6 +498,7 @@ class IdentityStore:
                 external account, so the sealed tokens would not match it.
         """
         if getattr(identity, "identity_id", None) is None:
+            # checked before sealing, so a refused write leaves the row object untouched
             raise ValueError("update_tokens: identity has no identity_id")
         user_id, provider = identity.user_id, identity.auth_provider
         puid = identity.provider_user_id
@@ -463,26 +526,10 @@ class IdentityStore:
         changes.update(refreshed_at=identity.refreshed_at, key_version=identity.key_version)
         if token.scopes:
             identity.scopes = list(token.scopes)
-            # Bound as text and cast in SQL, so the value does not depend on
-            # whether the connection has a jsonb codec registered.
-            changes["scopes"] = json.dumps(identity.scopes)
-        params = list(changes.values())
-        assignments = [
-            f"{column} = ${index}::text::jsonb" if column == "scopes" else f"{column} = ${index}"
-            for index, column in enumerate(changes, start=1)
-        ]
-        params += [identity.identity_id, None if puid is None else str(puid)]
-        sql = (
-            f"UPDATE {_IDENTITY_TABLE} SET {', '.join(assignments)} "
-            f"WHERE identity_id = ${len(params) - 1} "
-            # the tokens were sealed for this external account: never write
-            # them onto a row that was re-bound to another one meanwhile.
-            f"AND provider_user_id IS NOT DISTINCT FROM ${len(params)}::varchar "
-            "RETURNING identity_id"
-        )
+            changes["scopes"] = identity.scopes
         async with await self._pool.acquire() as conn:
-            row = await conn.fetch_one(sql, *params)
-        if row is None:
+            written = await _update_identity_row(conn, identity.identity_id, puid, changes)
+        if not written:
             raise NoDataFound(
                 f"{provider}: identity {identity.identity_id} no longer exists "
                 "for this account; the refreshed credential was not stored."

@@ -260,6 +260,7 @@ class TestCredentialEndpoint:
         )
         store = MagicMock()
         store.get_by_provider = AsyncMock(return_value=identity)
+        store.get_one = AsyncMock(return_value=identity)  # re-read under the refresh guard
         store.decrypt_credential = MagicMock(return_value=expiring)
         store.update_tokens = AsyncMock(return_value=identity)
         backend = MagicMock()

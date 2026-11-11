@@ -40,7 +40,9 @@ class FakeUserIdentity:
     existing = None
 
     def __init__(self, **kwargs):
-        self.__dict__.update({"refresh_token": None, "id_token": None, "provider_user_id": None})
+        self.__dict__.update(
+            {"refresh_token": None, "id_token": None, "provider_user_id": None, "expires_at": None}
+        )
         self.__dict__.update(kwargs)
 
     @classmethod
@@ -116,7 +118,7 @@ class TestStoreContextBinding:
         """A legacy row without provider_user_id gets one: kept tokens are re-sealed."""
         store = IdentityStore(fake_model, cipher=cipher)
         legacy = FakeUserIdentity(
-            user_id=7, auth_provider="google", provider_user_id=None,
+            identity_id="row", user_id=7, auth_provider="google", provider_user_id=None,
             refresh_token=store._seal("old-rt", 7, "google", None, "refresh_token"),
             id_token=store._seal("old-id", 7, "google", None, "id_token"),
         )
@@ -134,7 +136,7 @@ class TestStoreContextBinding:
         store = IdentityStore(fake_model, cipher=cipher)
         kept = store._seal("old-rt", 7, "google", "acc-1", "refresh_token")
         FakeUserIdentity.existing = FakeUserIdentity(
-            user_id=7, auth_provider="google", provider_user_id="acc-1", refresh_token=kept,
+            identity_id="row", user_id=7, auth_provider="google", provider_user_id="acc-1", refresh_token=kept,
         )
         row = await store.save_linked_identity(
             user_id=7, provider="google", token=TokenResponse(access_token="at", provider_user_id="acc-1")

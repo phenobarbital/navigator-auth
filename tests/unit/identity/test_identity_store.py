@@ -337,8 +337,11 @@ class TestSaveLinkedIdentityNullTokens:
         from navigator_auth.identity.types import TokenResponse
         from navigator_auth.models import UserIdentity
 
-        store = _store()
+        pool, conn = _make_pool()
+        conn.fetch_one = AsyncMock(return_value={"identity_id": "row-1"})
+        store = IdentityStore(pool, cipher=IdentityCipher(master_keys=MASTER_KEYS))
         existing = MagicMock()
+        existing.identity_id = "row-1"
         existing.provider_user_id = "99"
         existing.refresh_token = _enc(store, "old-rt", "refresh_token")
         existing.id_token = _enc(store, "old-id", "id_token")
@@ -350,7 +353,30 @@ class TestSaveLinkedIdentityNullTokens:
             await store.save_linked_identity(1, "github", token)
         assert existing.refresh_token == sealed_rt
         assert existing.id_token == sealed_id
-        existing.update.assert_awaited_once()
+        # written with a keyed UPDATE, not asyncdb's Model.update(), and the
+        # kept tokens are not part of it
+        existing.update.assert_not_awaited()
+        sql, *params = conn.fetch_one.await_args.args
+        assert "refresh_token" not in sql and "id_token" not in sql
+        assert params[-2:] == ["row-1", "99"]
+
+    @pytest.mark.asyncio
+    async def test_relink_of_a_vanished_row_raises(self):
+        """The row went away between read and write: report it, don't claim success."""
+        from asyncdb.exceptions import NoDataFound
+        from navigator_auth.identity.types import TokenResponse
+        from navigator_auth.models import UserIdentity
+
+        pool, conn = _make_pool()
+        conn.fetch_one = AsyncMock(return_value=None)
+        store = IdentityStore(pool, cipher=IdentityCipher(master_keys=MASTER_KEYS))
+        existing = MagicMock()
+        existing.identity_id = "row-1"
+        existing.provider_user_id = "99"
+        token = TokenResponse(access_token="new-at", refresh_token="rt", provider_user_id="99")
+        with patch.object(UserIdentity, "get", new=AsyncMock(return_value=existing)):
+            with pytest.raises(NoDataFound):
+                await store.save_linked_identity(1, "github", token)
 
 
 class TestFilterIdentitiesProjection:

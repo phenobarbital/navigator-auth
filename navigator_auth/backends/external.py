@@ -791,6 +791,11 @@ class ExternalAuth(BaseAuthBackend):
             if guard.users <= 0:
                 guards.pop(key, None)
 
+    # Public name for refreshes started outside the backend
+    # (identity.refresh.refresh_linked_identity): every refresh of one
+    # account's stored credential must take this same guard.
+    refresh_guard = _refresh_guard
+
     async def _live_token_binding(self, request: web.Request, user_id: Any) -> Optional[tuple]:
         """Resolve the session a live provider token may be served to.
 

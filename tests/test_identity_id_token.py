@@ -173,6 +173,7 @@ async def test_masked_hides_id_token():
 async def test_resave_without_refresh_keeps_existing_refresh():
     store = _store()
     existing = FakeUserIdentity(
+        identity_id="row-1",
         user_id=1,
         auth_provider="azure",
         provider_user_id="u1",
@@ -198,6 +199,7 @@ async def test_resave_without_refresh_keeps_existing_refresh():
 async def test_resave_with_new_refresh_overwrites_existing():
     store = _store()
     existing = FakeUserIdentity(
+        identity_id="row-1",
         user_id=1,
         auth_provider="azure",
         provider_user_id="u1",
