@@ -2789,7 +2789,16 @@ class Oauth2Provider(BaseAuthBackend):
         # Profile attributes (name, email) are not embedded in the access token,
         # so we resolve them from the user storage backend.
         user = None
-        if user_id and ("profile" in scopes or "email" in scopes):
+        if is_oauth_user_token(payload):
+            # FEAT-108 (issue:3ae0de8a2704): a bearer minted before its owner was
+            # deleted or disabled must stop answering here, not only at mint time.
+            try:
+                user = await self._resolve_resource_owner(user_id)
+            except (UserNotFound, FailedAuth):
+                return self._error_response("invalid_token", "Token is no longer valid.", status=401)
+            except IdentityStoreUnavailable:
+                return self._error_response("temporarily_unavailable", "Userinfo temporarily unavailable.", status=503)
+        elif user_id and ("profile" in scopes or "email" in scopes):
             try:
                 user = await self._idp.user_from_id(user_id)
             except Exception as e:  # noqa: BLE001
@@ -3040,6 +3049,25 @@ class Oauth2Provider(BaseAuthBackend):
         if not hmac.compare_digest(str(caller.client_id), str(token_client_id)):
             return JSONResponse({"active": False}, status=200)
 
+        # --- Owner re-check (FEAT-108, issue:3ae0de8a2704) ---
+        # Only after the same-client check, so a foreign caller never triggers a
+        # lookup. A missing or disabled owner — or an outage, which RFC 7662 has
+        # no error for — makes the token inactive (fail closed).
+        owner = None
+        owner_checked = False
+        if is_access and token_payload and is_oauth_user_token(token_payload):
+            owner_id = token_payload["user_id"]
+        elif not is_access and rt is not None and getattr(rt, "user_id", None) is not None:
+            owner_id = rt.user_id
+        else:
+            owner_id = None
+        if owner_id is not None:
+            try:
+                owner = await self._resolve_resource_owner(owner_id)
+            except (UserNotFound, FailedAuth, IdentityStoreUnavailable):
+                return JSONResponse({"active": False}, status=200)
+            owner_checked = True
+
         # --- Build active response (RFC 7662 §2.2 claims) ---
         exp = token_payload.get("exp") if token_payload else None
         iat = token_payload.get("iat") if token_payload else None
@@ -3069,10 +3097,10 @@ class Oauth2Provider(BaseAuthBackend):
             claims["amr"] = list(presented_amr)
             claims["mfa"] = True
 
-        # Resolve username for 3LO tokens.
+        # Resolve username for 3LO tokens (reusing the owner checked above).
         if user_id:
             try:
-                user = await self._idp.user_from_id(user_id)
+                user = owner if owner_checked else await self._idp.user_from_id(user_id)
                 if user:
                     username = getattr(user, "username", None) or getattr(user, "email", "")
                     claims["username"] = str(username)
