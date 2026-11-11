@@ -209,7 +209,12 @@ async def restored_guest_app():
         await client.close()
         pytest.skip(f"Redis session storage unavailable: {exc}")
 
-    yield client, auth
+    # A short AUTH_SECRET_KEY in a developer's env makes PyJWT warn (and pytest
+    # turn the warning into an error) while signing/verifying the bearer used
+    # here.  The key is irrelevant to what is under test, so sign with a
+    # properly sized one for the lifetime of this fixture.
+    with patch("navigator_auth.backends.idp.SECRET_KEY", b"x" * 32):
+        yield client, auth
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
