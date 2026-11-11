@@ -10,18 +10,28 @@ cooldown has passed.
 ``protected_paths_middleware`` (the outermost middleware) feeds the shared
 tracker through ``track_rejection``, so it works with or without ABAC.
 
+Hosts inside ``AUTH_PROBE_IGNORE_IPS`` (e.g. a load balancer's health
+checks) are never counted.
+
 State lives in memory, per worker process: with several workers each one
 counts its own share of the traffic.
 """
+import ipaddress
 import logging
 import time
 from collections import OrderedDict, deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from aiohttp import web
-from ..authorizations._client_ip import get_client_ip, parse_proxies
+from ..authorizations._client_ip import (
+    IPNetwork,
+    get_client_ip,
+    parse_networks,
+    parse_proxies,
+)
 from ..conf import (
     AUTH_PROBE_COOLDOWN,
+    AUTH_PROBE_IGNORE_IPS,
     AUTH_PROBE_MAX_HOSTS,
     AUTH_PROBE_THRESHOLD,
     AUTH_PROBE_WINDOW,
@@ -54,6 +64,8 @@ class ProbeTracker:
         cooldown: Seconds before the same host can be reported again.
         max_hosts: Hosts kept in memory; the least recently seen host is
             dropped first, so a distributed scan cannot exhaust memory.
+        ignored: Networks whose hosts are never counted (load balancer
+            health checks, monitoring probes...).
         clock: Monotonic time source, injectable for tests.
         logger: Logger for the warning; defaults to ``navigator_auth.security``.
     """
@@ -66,6 +78,7 @@ class ProbeTracker:
         window: float,
         cooldown: float,
         max_hosts: int,
+        ignored: Iterable[IPNetwork] = (),
         clock: Callable[[], float] = time.monotonic,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -73,6 +86,7 @@ class ProbeTracker:
         self.window = window
         self.cooldown = cooldown
         self.max_hosts = max(1, max_hosts)
+        self.ignored = tuple(ignored)
         self._clock = clock
         self.logger = logger or logging.getLogger(SECURITY_LOGGER)
         self._hosts: OrderedDict[str, _HostRecord] = OrderedDict()
@@ -81,6 +95,26 @@ class ProbeTracker:
     def enabled(self) -> bool:
         """Whether tracking is active (threshold greater than zero)."""
         return self.threshold > 0
+
+    def is_ignored(self, host: str) -> bool:
+        """Whether ``host`` falls inside one of the ignored networks.
+
+        Args:
+            host: Client IP address.
+
+        Returns:
+            True when the host must not be counted.
+        """
+        if not self.ignored:
+            return False
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        # Dual-stack sockets report IPv4 peers as ::ffff:a.b.c.d.
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+            address = address.ipv4_mapped
+        return any(address in network for network in self.ignored)
 
     def record(self, host: str, path: str, status: int) -> bool:
         """Record one rejected unauthenticated request from ``host``.
@@ -94,7 +128,7 @@ class ProbeTracker:
             True when this request made the host cross the threshold and a
             warning was logged.
         """
-        if not self.enabled:
+        if not self.enabled or self.is_ignored(host):
             return False
         now = self._clock()
         record = self._hosts.get(host)
@@ -145,6 +179,7 @@ probe_tracker = ProbeTracker(
     window=AUTH_PROBE_WINDOW,
     cooldown=AUTH_PROBE_COOLDOWN,
     max_hosts=AUTH_PROBE_MAX_HOSTS,
+    ignored=parse_networks(AUTH_PROBE_IGNORE_IPS, "AUTH_PROBE_IGNORE_IPS"),
 )
 trusted_proxies = parse_proxies(ALLOWED_IP_TRUSTED_PROXIES)
 

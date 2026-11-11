@@ -24,6 +24,11 @@
   32 bytes (`AUTH_SECRET_KEY`, `AUTH_TOKEN_SECRET` / `PARTNER_KEY`, an explicit
   `AUTH_RECOVERY_SECRET`), naming the setting and its length, never the value.
   See "Signing keys" in `docs/settings.rst`.
+- **`AUTH_PROBE_IGNORE_IPS`: exclude hosts from the repeated-probe warning.**
+  Comma-separated IPs or CIDR ranges whose rejected requests are never
+  counted by `protected_paths_middleware`, so a load balancer's health checks
+  (e.g. AWS ELB/ALB pinging the server) no longer show up as a scan. Matched
+  against the resolved client IP. See `documentation/protected-paths.md`.
 
 - **BREAKING — write envelope on the auth CRUD handlers (FEAT-107, no
   deprecation window).** `/api/v1/users*`, `/api/v1/groups*`,

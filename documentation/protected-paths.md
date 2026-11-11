@@ -100,6 +100,35 @@ headers sent by an untrusted peer are ignored.
 | `AUTH_PROBE_WINDOW` | `60` | Sliding window, in seconds |
 | `AUTH_PROBE_COOLDOWN` | `300` | Seconds before the same host is reported again |
 | `AUTH_PROBE_MAX_HOSTS` | `10000` | Hosts tracked in memory (the least recently seen is dropped) |
+| `AUTH_PROBE_IGNORE_IPS` | *(empty)* | Client IPs or CIDR ranges, comma-separated, that are never counted |
+
+### Ignoring load balancer health checks
+
+A load balancer health check hits the server every few seconds, and if its
+target answers 401/403/404 the balancer looks like a scanner. The best fix is
+a health check path that answers 200; otherwise list the balancer in
+`AUTH_PROBE_IGNORE_IPS`. An AWS ALB/NLB sends its health checks from the
+private IPs of its nodes, which change over time, so list the **subnets** the
+balancer lives in rather than single addresses:
+
+```ini
+# env/.env
+ALLOWED_IP_TRUSTED_PROXIES=10.0.8.15,10.0.9.22
+AUTH_PROBE_IGNORE_IPS=10.0.8.0/24,10.0.9.0/24
+```
+
+The list is matched against the **resolved client IP**, the same address the
+warning would name. Health checks carry no `X-Forwarded-For`, so they resolve
+to the balancer's own IP and are ignored, while the clients the balancer
+forwards are still counted under their own IP, as long as the balancer is in
+`ALLOWED_IP_TRUSTED_PROXIES`. If it is not, every forwarded request resolves to
+the balancer's IP and ignoring that IP turns detection off for all traffic
+coming through it.
+
+Keep the ranges tight: anything inside them can probe the server without
+being reported. Invalid entries are skipped with a warning that gives their
+position, never their value. See `docs/trusted_proxies.md` for both settings
+in detail, with AWS examples.
 
 ## Limits
 
