@@ -1,6 +1,6 @@
 {
-  "next_task_id": 171,
+  "next_task_id": 189,
   "next_feature_id": 111,
-  "updated_at": "2026-11-11T15:13:28+00:00",
-  "updated_by": "new-command-migration"
+  "updated_at": "2026-11-11T15:14:18+00:00",
+  "updated_by": "basicauth-otp-2fa-review-fixes"
 }
