@@ -24,10 +24,10 @@ from navigator_auth.backends.oauth2.models import (
 )
 from navigator_auth.backends.oauth2.code_backend import MemoryDeviceCodeStorage
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _public_client(client_id: str = "device_client") -> OAuthClient:
     return OAuthClient(
@@ -166,6 +166,7 @@ def _make_post_request(form_data: dict, remote: str = "127.0.0.1") -> MagicMock:
 # test_device_approval_binds_user
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_device_approval_binds_user():
     """Approval stamps user_id from session (owner-binding invariant), not client.user.
@@ -192,14 +193,15 @@ async def test_device_approval_binds_user():
     await grant_store.save_grant(grant)
 
     provider = _make_provider(
-        client, device_store=store, grant_store=grant_store,
-        session_user=user, code_store=code_store
+        client, device_store=store, grant_store=grant_store, session_user=user, code_store=code_store
     )
 
-    request = _make_post_request({
-        "action": "approve",
-        "user_code": dc.user_code,
-    })
+    request = _make_post_request(
+        {
+            "action": "approve",
+            "user_code": dc.user_code,
+        }
+    )
     resp = await provider.device_verification(request)
     assert resp.status == 200
 
@@ -208,12 +210,12 @@ async def test_device_approval_binds_user():
     assert updated_dc is not None
     assert updated_dc.status == DeviceCodeStatus.APPROVED
     assert updated_dc.user_id == user.user_id  # owner-binding from session
-    assert updated_dc.auth_code is not None    # D-2 carrier was minted
+    assert updated_dc.auth_code is not None  # D-2 carrier was minted
 
     # Carrier code should be in code_storage.
     carrier = await code_store.get_code(updated_dc.auth_code)
     assert carrier is not None
-    assert carrier.user_id == user.user_id     # carrier bound to session user
+    assert carrier.user_id == user.user_id  # carrier bound to session user
 
 
 @pytest.mark.asyncio
@@ -229,10 +231,12 @@ async def test_device_denial_sets_denied_status():
     provider = _make_provider(client, device_store=store, session_user=user)
     provider.grant_storage = None
 
-    request = _make_post_request({
-        "action": "deny",
-        "user_code": dc.user_code,
-    })
+    request = _make_post_request(
+        {
+            "action": "deny",
+            "user_code": dc.user_code,
+        }
+    )
     resp = await provider.device_verification(request)
     assert resp.status == 200
 
@@ -243,6 +247,7 @@ async def test_device_denial_sets_denied_status():
 # ---------------------------------------------------------------------------
 # test_device_consent_skip_with_grant
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_device_consent_skip_with_grant():
@@ -274,10 +279,12 @@ async def test_device_consent_skip_with_grant():
         code_store=code_store,
     )
 
-    request = _make_post_request({
-        "action": "approve",
-        "user_code": dc.user_code,
-    })
+    request = _make_post_request(
+        {
+            "action": "approve",
+            "user_code": dc.user_code,
+        }
+    )
     resp = await provider.device_verification(request)
     assert resp.status == 200
 
@@ -289,6 +296,7 @@ async def test_device_consent_skip_with_grant():
 # ---------------------------------------------------------------------------
 # test_device_user_code_lockout (in-memory path — no Redis)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_device_invalid_user_code_returns_error():
