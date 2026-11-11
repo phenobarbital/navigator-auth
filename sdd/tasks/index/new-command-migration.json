@@ -172,7 +172,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -183,8 +183,9 @@
       "parallelism_notes": "Calls upgrade() from TASK-163 (navigator_auth/migrations/runner.py) and validate_runtime_role/missing_runtime_access from TASK-162 (navigator_auth/migrations/access.py). Exclusive: edits pyproject.toml (shared manifest, first [project.scripts]).",
       "assigned_to": null,
       "started_at": "2026-11-11T21:35:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-165-navauth-cli.md"
+      "completed_at": "2026-11-11T22:04:44+00:00",
+      "file": "sdd/tasks/completed/TASK-165-navauth-cli.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-166",
