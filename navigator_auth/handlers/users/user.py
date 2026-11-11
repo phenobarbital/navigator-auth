@@ -1,17 +1,30 @@
+from typing import Optional
+
 from asyncdb.models import Model
-from navigator.views.model import ModelView, NotSet
+from navigator.views.model import NotSet
 from ...models import User
 from ...conf import (
     AUTH_USER_MODEL,
     AUTH_USER_VIEW
 )
-from .passwd import set_basic_password
+from ..guard_hooks import GuardedModelViewHooks
+from ..guards import OwnerOrSuperuserGuard
+from ..handler import ModelHandler
 
 
-class UserManager(ModelView):
-    """
-    Main Class for Managing Users.
-    TODO: Allow User editing own data.
+class UserManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandler):
+    """User CRUD behind the owner-or-superuser guard (FEAT-107).
+
+    Guard first in the MRO, as ``UserIdentityHandler`` (userattrs.py:363).
+
+    * An owner may PATCH ``writable_by_owner`` on their own row.
+    * A policy-approved superuser (``users_admin_access``) may PATCH/POST
+      ``writable_by_admin`` and create through PUT with ``creatable_by_admin``.
+    * ``privileged_columns`` are writable by NO CRUD path. Flags go through
+      ``POST /api/v1/users/{id}/role`` (``users:grant_role``); passwords through
+      ``UserSession.password_change`` / ``password_reset``. A user created here
+      has no password until a superuser calls ``password_reset``.
+    * Reads: a non-superuser sees only their own row.
     """
 
     model: Model = User
@@ -20,10 +33,25 @@ class UserManager(ModelView):
     model_name: str = AUTH_USER_MODEL
     pk: str = "user_id"
 
-    def required_by_put(self):
-        return ['first_name', 'last_name', 'display_name', 'username', 'email']
+    action_object: str = "user"
+    owner_column: Optional[str] = "user_id"
+    policy_name: str = "users_admin_access"
+    superuser_actions = frozenset({"user:read", "user:create", "user:update", "user:delete"})
+    writable_by_owner = frozenset({"first_name", "last_name", "display_name", "title", "avatar", "timezone"})
+    writable_by_admin = writable_by_owner | frozenset({"is_active", "email", "alt_email"})
+    #: username is set once, at creation, and never updated.
+    creatable_by_admin = writable_by_admin | frozenset({"username"})
+    privileged_columns = frozenset(
+        {"is_superuser", "user_role", "is_staff", "password", "userid", "user_id", "created_at", "last_login"}
+    )
 
-    required_by_post = required_by_put
+    def required_by_put(self):
+        """PUT creates on this base (navigator model.py:996-1007): subset creatable_by_admin."""
+        return ["first_name", "last_name", "username", "email"]
+
+    def required_by_post(self):
+        """POST is an admin upsert (approved for create AND update): subset writable_by_admin."""
+        return ["first_name", "last_name", "display_name"]
 
     async def _set_created_by(self, value, column, **kwargs):
         return await self.get_userid(session=self._session)
@@ -36,23 +64,3 @@ class UserManager(ModelView):
             except (KeyError, TypeError) as exc:
                 raise NotSet(f"{exc}") from exc
         return value
-
-    async def _set_password(self, value, column, **kwargs):
-        # TODO: add checking complexity.
-        if not value:
-            raise NotSet()
-        if value.startswith('pbkdf2_'):
-            # already encrypted:
-            return value
-        return set_basic_password(value)
-
-    async def _calculate_password(self, value, column, *args, **kwargs):
-        """Used for Password Calculation when Update/Patch operations.
-        """
-        # TODO: add checking complexity.
-        if not value:
-            raise NotSet()
-        if value.startswith('pbkdf2_'):
-            # already encrypted:
-            return value
-        return set_basic_password(value)
