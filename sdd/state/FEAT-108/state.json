@@ -14,7 +14,7 @@
   },
   "mode": "investigation",
   "wiki_available": true,
-  "phase": "proposal_drafted",
+  "phase": "committed",
   "budget": {
     "profile": "default",
     "files_read": 40,
@@ -157,12 +157,12 @@
     },
     "output": {
       "proposal_path": "sdd/proposals/oauth2-3lo-issues.proposal.md",
-      "commit_sha": null
+      "commit_sha": "4ad114e"
     }
   },
   "resume_hint": {
     "next_phase": "committed",
-    "next_action": "/sdd-proposal --resume FEAT-108"
+    "next_action": "/sdd-spec FEAT-108"
   },
   "feature_slug": "oauth2-3lo-issues"
 }
