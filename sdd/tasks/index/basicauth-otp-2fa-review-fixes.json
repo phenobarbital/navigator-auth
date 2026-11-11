@@ -394,7 +394,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -404,8 +404,9 @@
       "parallelism_notes": "TASK-186: both modify backends/oauth2/backend.py and tests/test_mfa_review_fixes_oauth2_tokens.py, and consumes the mfa/amr claims 186 adds",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-187-abac-bearer-request-context.md"
+      "completed_at": "2026-11-11T18:05:49+00:00",
+      "file": "sdd/tasks/completed/TASK-187-abac-bearer-request-context.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-188",
