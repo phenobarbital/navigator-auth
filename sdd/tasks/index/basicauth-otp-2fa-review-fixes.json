@@ -304,7 +304,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -314,8 +314,9 @@
       "parallelism_notes": "TASK-182: both modify navigator_auth/handlers/mfa.py and tests/test_mfa_enrollment_security.py (182 first)",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-183-factor-management-hardening.md"
+      "completed_at": "2026-11-11T17:57:34+00:00",
+      "file": "sdd/tasks/completed/TASK-183-factor-management-hardening.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-184",
@@ -346,7 +347,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -360,8 +361,9 @@
       "parallelism_notes": "TASK-184: both modify backends/oauth2/backend.py (184 first); TASK-175: current_generation/generation_matches/stamp_generation and both modify navigator_auth/auth.py; TASK-171: advisory_user_lock; TASK-172: user_from_id(conn=); TASK-179: its AC28 end-to-end test calls the real password_reset handler (handlers/users/session.py)",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-185-oauth2-credential-generation.md"
+      "completed_at": "2026-11-11T17:57:34+00:00",
+      "file": "sdd/tasks/completed/TASK-185-oauth2-credential-generation.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-186",
