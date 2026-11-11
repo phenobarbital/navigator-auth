@@ -82,7 +82,7 @@
       "feature_id": "FEAT-112",
       "feature": "abac-pdp-tech-debt",
       "spec": "sdd/specs/abac-pdp-tech-debt.spec.md",
-      "status": "pending",
+      "status": "in-progress",
       "priority": "low",
       "effort": "S",
       "depends_on": [
@@ -90,8 +90,8 @@
       ],
       "parallel": true,
       "parallelism_notes": "TASK-211: both modify navigator_auth/abac/pdp.py and append to tests/test_pdp_registry_hardening.py (fixtures _storage/_allow/_ctx from TASK-210)",
-      "assigned_to": null,
-      "started_at": null,
+      "assigned_to": "claude-code:sdd-fix:953638ae",
+      "started_at": "2026-11-11T18:27:37+00:00",
       "completed_at": null,
       "file": "sdd/tasks/active/TASK-212-pdp-policies-iterable.md"
     }
