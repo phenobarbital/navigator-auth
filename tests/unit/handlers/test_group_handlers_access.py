@@ -88,7 +88,9 @@ class TestQueryStringCannotBypassProtectedGroups:
         view.authorize_protected_group = AsyncMock()
         with (
             patch.object(GuardedModelViewHooks, "_pre_put", new=AsyncMock(return_value=True)),
-            patch("navigator_auth.handlers.groups._stored_group_name", new=AsyncMock(return_value="security_admin")) as stored,
+            patch(
+                "navigator_auth.handlers.groups._stored_group_name", new=AsyncMock(return_value="security_admin")
+            ) as stored,
         ):
             await view._pre_put()
         stored.assert_awaited_once_with(view, "1")
