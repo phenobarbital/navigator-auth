@@ -180,9 +180,13 @@ async def test_rotate_master_key_rotates_mfa_seeds(
     async with await mfa_db.acquire() as conn:
         await provider._install_seed(conn, user["user_id"], seed)
 
-    target = MfaSecretTarget(mfa_db)
+    # navigator_session's PostgresTarget.transaction() calls ``conn.transaction().start()`` (asyncpg API);
+    # asyncdb's driver ``transaction()`` is an awaitable that already started it. Rotate through the raw
+    # asyncpg pool the asyncdb pool wraps, which the library supports.
+    raw_pool = getattr(mfa_db, "_pool", mfa_db)
+    target = MfaSecretTarget(raw_pool)
     stats = await rotate_master_key(
-        [UserVaultTarget(mfa_db), target],
+        [UserVaultTarget(raw_pool), target],
         old_id,
         new_id,
         KeyRing({old_id: old_key, new_id: new_key}, new_id),
@@ -199,5 +203,5 @@ async def test_rotate_master_key_rotates_mfa_seeds(
         store=MfaChallengeStore(mfa_redis_pool, mfa_secret),
         clock=frozen_totp_clock,
     )
-    code = TOTP(seed, 6, SHA1(), 30).generate(frozen_totp_clock())
+    code = TOTP(seed, 6, SHA1(), 30).generate(frozen_totp_clock()).decode("ascii")
     assert await new_provider.verify(None, user, code) is True
