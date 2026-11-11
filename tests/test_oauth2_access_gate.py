@@ -441,6 +441,9 @@ class TestDeviceFlowGate:
     @pytest.mark.asyncio
     async def test_device_denial_renders_not_redirects(self, provider):
         """The device flow has no redirect_uri to send the user to."""
+        owner = MagicMock()
+        owner.user_id = USER_ID
+        provider._idp.user_from_id = AsyncMock(return_value=owner)
         response = await provider._enforce_access_gate(
             _request(), _client(gated=True), USER_ID, redirect_uri=None, state=""
         )

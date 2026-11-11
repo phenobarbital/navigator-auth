@@ -35,6 +35,7 @@ import hashlib
 import hmac
 import importlib
 import json
+import re
 import secrets
 from urllib.parse import urlencode, unquote_plus, urlparse, urlunparse
 from uuid import uuid4
@@ -278,6 +279,9 @@ def issuer_url(request: Optional[web.Request] = None) -> str:
     if scheme != "https" and not _is_localhost(host):
         scheme = "https"
     return f"{scheme}://{host}".rstrip("/")
+
+
+_DEVICE_USER_CODE_RE = re.compile(r"[A-Za-z0-9 -]{1,32}")
 
 
 class Oauth2Provider(BaseAuthBackend):
@@ -1858,6 +1862,13 @@ class Oauth2Provider(BaseAuthBackend):
 
         Extracted verbatim from ``auth_login``; the key list is fixed.
         """
+        device_user_code = data.get("device_user_code")
+        if device_user_code:
+            # FEAT-108: device login resumes the verification form; the code is data, never a URL.
+            if not _DEVICE_USER_CODE_RE.fullmatch(str(device_user_code)):
+                raise web.HTTPBadRequest(reason="Invalid device code.")
+            device_location = request.app.router["nav_oauth2_device"].url_for()
+            return web.HTTPFound(device_location.with_query(user_code=str(device_user_code)))
         location = request.app.router["nav_oauth2_authorize"].url_for()
         payload = {
             "client_id": data.get("client_id"),
@@ -1949,6 +1960,7 @@ class Oauth2Provider(BaseAuthBackend):
         "code_challenge_method",
         "nonce",
         "prompt",
+        "device_user_code",
     )
 
     async def _render_mfa_page(
@@ -2055,7 +2067,7 @@ class Oauth2Provider(BaseAuthBackend):
             data = {key: val for (key, val) in request.query.items()}
             # Provider selected: park the authorize request and detour.
             provider = data.pop("provider", None)
-            if provider:
+            if provider and not data.get("device_user_code"):
                 return await self._start_upstream_login(request, provider, data)
             data["upstream_providers"] = self._upstream_providers()
             return await self._parser.view(filename="oauth/login.html", params=data)
@@ -3211,16 +3223,18 @@ class Oauth2Provider(BaseAuthBackend):
         session_user = await self.check_session(request)
         if not session_user:
             # Redirect to login, with return URL.
-            location = request.app.router["nav_oauth2_login"].url_for()
-            redirect_url = location.with_query(
-                action_url=str(location),
-                device_user_code=raw_user_code,
-            )
-            raise web.HTTPFound(redirect_url)
+            self._redirect_to_login(request, {"device_user_code": raw_user_code})
 
         user_obj = self._decode_session_user(session_user)
         if not user_obj:
             return self._error_response("access_denied", "Cannot resolve session user.", status=401)
+        try:
+            await self._resolve_resource_owner(user_obj.user_id)
+        except (UserNotFound, FailedAuth):
+            # FEAT-108 D5: re-authenticate; the device code stays pending.
+            self._redirect_to_login(request, {"device_user_code": raw_user_code})
+        except IdentityStoreUnavailable:
+            return self._owner_store_unavailable()
 
         try:
             await self._session_auth_context(request)
