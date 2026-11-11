@@ -101,7 +101,14 @@ class FakePDP:
 def _pdp(actions):
     """Build an allowing superuser policy for actions."""
     return FakePDP(
-        Policy("users_admin_access", description="test", effect=PolicyEffect.ALLOW, actions=actions, groups=["superuser"], priority=1)
+        Policy(
+            "users_admin_access",
+            description="test",
+            effect=PolicyEffect.ALLOW,
+            actions=actions,
+            groups=["superuser"],
+            priority=1,
+        )
     )
 
 

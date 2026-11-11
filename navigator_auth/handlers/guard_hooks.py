@@ -53,9 +53,7 @@ class GuardedModelViewHooks:
             self.error(response={"error": "A JSON object is required"}, status=400)
         keys = {key for element in elements for key in element}
         if include_query:
-            keys.update(
-                key for key in self.query_parameters(self.request) if key in self.model.get_columns()
-            )
+            keys.update(key for key in self.query_parameters(self.request) if key in self.model.get_columns())
         self._guard_write_keys = frozenset(keys)
         return self._guard_write_keys
 
