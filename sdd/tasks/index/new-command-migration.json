@@ -194,7 +194,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [
@@ -204,8 +204,9 @@
       "parallelism_notes": "Uses acquire_raw and get_status from TASK-160 (navigator_auth/migrations/runner.py); only task touching navigator_auth/auth.py and navigator_auth/backends/passkey.py.",
       "assigned_to": null,
       "started_at": "2026-11-11T21:35:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-166-startup-migration-check.md"
+      "completed_at": "2026-11-11T22:11:17+00:00",
+      "file": "sdd/tasks/completed/TASK-166-startup-migration-check.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-167",
@@ -235,7 +236,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "L",
       "depends_on": [
@@ -246,8 +247,9 @@
       "parallelism_notes": "Drives upgrade() from TASK-163 and appends to tests/unit/migrations/test_runner.py (TASK-160/163); appends to tests/unit/migrations/test_oauth2_sql.py and applies 001_oauth2_schema.sql, both created by TASK-167.",
       "assigned_to": null,
       "started_at": "2026-11-11T21:35:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-168-migration-live-tests.md"
+      "completed_at": "2026-11-11T22:11:17+00:00",
+      "file": "sdd/tasks/completed/TASK-168-migration-live-tests.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-169",
@@ -256,7 +258,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -267,8 +269,9 @@
       "parallelism_notes": "Documents the navauth flags/exit codes defined by TASK-165 (navigator_auth/migrations/cli.py) and indexes 001_oauth2_schema.sql from TASK-167; prose edits to documentation/oauth.md etc. follow TASK-167's removal of backends/oauth2/ddl.sql.",
       "assigned_to": null,
       "started_at": "2026-11-11T21:35:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-169-migration-docs.md"
+      "completed_at": "2026-11-11T22:11:17+00:00",
+      "file": "sdd/tasks/completed/TASK-169-migration-docs.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-170",
