@@ -11,6 +11,7 @@ anyone out. Exit 1, listing offenders, on either blocking condition:
 Exit 2 on an operational error. It cannot detect an address that is merely
 WRONG: there is no e-mail verification state (spec R4).
 """
+
 import argparse
 import asyncio
 import logging
@@ -65,9 +66,7 @@ class PreflightReport(BaseModel):
         return not self.missing_email and not self.superusers_without_strong_factor
 
 
-async def run_preflight(
-    db_pool: Any, org_id: int, *, state: Optional[MfaStateMachine] = None
-) -> PreflightReport:
+async def run_preflight(db_pool: Any, org_id: int, *, state: Optional[MfaStateMachine] = None) -> PreflightReport:
     """Evaluate B1/B2 for every ACTIVE member of ``org_id``.
 
     Args:
@@ -85,9 +84,7 @@ async def run_preflight(
         raise PreflightError("org_id must be a positive integer")
     try:
         if not await mfa_tables_present(db_pool):
-            raise PreflightError(
-                "MFA tables missing — start the service once with AUTH_BASIC_2FA_ENABLED=true"
-            )
+            raise PreflightError("MFA tables missing — start the service once with AUTH_BASIC_2FA_ENABLED=true")
         async with await db_pool.acquire() as conn:
             if await conn.fetchval("SELECT to_regclass($1)", _MEMBERSHIP) is None:
                 raise PreflightError("organization_users not found")
@@ -146,9 +143,7 @@ def _parse(argv: Optional[Sequence[str]]) -> argparse.Namespace:
         description="Refuse MFA enforcement for a tenant that would lock users out.",
     )
     parser.add_argument("--org-id", type=int, required=True, help="Tenant (organization) id")
-    parser.add_argument(
-        "--dsn", default=None, help="Postgres DSN (default: navigator_auth.conf.default_dsn)"
-    )
+    parser.add_argument("--dsn", default=None, help="Postgres DSN (default: navigator_auth.conf.default_dsn)")
     return parser.parse_args(argv)
 
 

@@ -1,9 +1,16 @@
 """Pre-flight — FEAT-106 spec §3 Module 12 (TASK-146). No live DB: fakes only."""
+
 import pytest
 
 import scripts.preflight_mfa as preflight
 from scripts.preflight_mfa import (
-    EXIT_BLOCKED, EXIT_ERROR, EXIT_OK, Offender, PreflightError, PreflightReport, run_preflight,
+    EXIT_BLOCKED,
+    EXIT_ERROR,
+    EXIT_OK,
+    Offender,
+    PreflightError,
+    PreflightReport,
+    run_preflight,
 )
 
 
@@ -44,14 +51,14 @@ class _State:
 
 
 def _row(uid, email="u@example.com", su=False):
-    return {"user_id": uid, "username": f"user{uid}", "email": email,
-            "is_superuser": su, "is_active": True}
+    return {"user_id": uid, "username": f"user{uid}", "email": email, "is_superuser": su, "is_active": True}
 
 
 @pytest.fixture(autouse=True)
 def _tables_present(monkeypatch):
     async def _present(_pool):
         return True
+
     monkeypatch.setattr(preflight, "mfa_tables_present", _present)
 
 
@@ -91,6 +98,7 @@ async def test_preflight_missing_membership_table_is_error():
 async def test_preflight_missing_mfa_tables_is_error(monkeypatch):
     async def _absent(_pool):
         return False
+
     monkeypatch.setattr(preflight, "mfa_tables_present", _absent)
     with pytest.raises(PreflightError):
         await run_preflight(_Pool(_Conn([])), 5, state=_State())
@@ -109,10 +117,10 @@ class _StubAsyncPool:
 
 def _report(missing=(), weak=()):
     return PreflightReport(
-        org_id=5, members=3,
+        org_id=5,
+        members=3,
         missing_email=tuple(Offender(user_id=i, username=f"user{i}") for i in missing),
-        superusers_without_strong_factor=tuple(
-            Offender(user_id=i, username=f"user{i}") for i in weak),
+        superusers_without_strong_factor=tuple(Offender(user_id=i, username=f"user{i}") for i in weak),
     )
 
 
@@ -121,6 +129,7 @@ def test_main_exit_codes(monkeypatch, capsys):
 
     async def _blocked(*a, **kw):
         return _report(missing=[2], weak=[10])
+
     monkeypatch.setattr(preflight, "run_preflight", _blocked)
     assert preflight.main(["--org-id", "5"]) == EXIT_BLOCKED
     out = capsys.readouterr().out
@@ -130,12 +139,14 @@ def test_main_exit_codes(monkeypatch, capsys):
 
     async def _clean(*a, **kw):
         return _report()
+
     monkeypatch.setattr(preflight, "run_preflight", _clean)
     assert preflight.main(["--org-id", "5"]) == EXIT_OK
     capsys.readouterr()
 
     async def _boom(*a, **kw):
         raise PreflightError("organization_users not found")
+
     monkeypatch.setattr(preflight, "run_preflight", _boom)
     assert preflight.main(["--org-id", "5"]) == EXIT_ERROR
 
