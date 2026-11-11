@@ -526,3 +526,41 @@ class TestDeviceGrantOwnerCheck:
         assert body["error"] == "invalid_grant"
         assert body["error_description"] == _UNRESOLVED
         assert provider.code_storage.calls == ["claim", "mark_used", "delete"]
+
+
+class TestResolverFailsClosedOnNone:
+    @pytest.mark.asyncio
+    async def test_idp_returning_none_is_user_not_found(self, provider):
+        """A custom IdP may return None; user_is_active(None) is True, so it must not pass."""
+        provider._idp.user_from_id = AsyncMock(return_value=None)
+        with pytest.raises(UserNotFound):
+            await provider._resolve_resource_owner(OWNER_ID)
+
+    @pytest.mark.asyncio
+    async def test_outage_log_carries_no_exception_text(self, provider):
+        provider._idp.user_from_id = AsyncMock(side_effect=RuntimeError("dsn=postgres://u:secret@db"))
+        with pytest.raises(IdentityStoreUnavailable):
+            await provider._resolve_resource_owner(OWNER_ID)
+        logged = str(provider.logger.error.call_args)
+        assert "secret" not in logged
+        assert "RuntimeError" in logged
+
+
+class TestTokenSessionClaimsResolvesOwner:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "lookup, expected",
+        [
+            (AsyncMock(side_effect=UserNotFound("x")), UserNotFound),
+            (AsyncMock(return_value=None), UserNotFound),
+            (AsyncMock(return_value=_owner_user(is_active=False)), FailedAuth),
+            (AsyncMock(side_effect=IdentityStoreUnavailable()), IdentityStoreUnavailable),
+        ],
+        ids=["unknown", "none", "disabled", "outage"],
+    )
+    async def test_unresolvable_owner_raises_before_any_session_is_created(self, provider, lookup, expected):
+        provider._idp.user_from_id = lookup
+        provider._create_user_session = AsyncMock()
+        with pytest.raises(expected):
+            await provider._token_session_claims(MagicMock(), OWNER_ID)
+        provider._create_user_session.assert_not_awaited()

@@ -561,8 +561,15 @@ class Oauth2Provider(BaseAuthBackend):
         except IdentityStoreUnavailable:
             raise
         except Exception as exc:  # pylint: disable=W0703
-            self.logger.error(f"Oauth2: resource-owner lookup failed for user_id={user_id}: {exc!s}")
+            # Class name only: a store exception string can carry DSN fragments.
+            self.logger.error(
+                f"Oauth2: resource-owner lookup failed for user_id={user_id}: {type(exc).__name__}"
+            )
             raise IdentityStoreUnavailable() from exc
+        if user is None:
+            # A custom IdP may return None instead of raising; user_is_active(None)
+            # is True, so without this a missing owner would pass (fail-open).
+            raise UserNotFound("Unknown resource owner.")
         if not user_is_active(user):
             raise FailedAuth("Disabled resource owner.")
         return user
