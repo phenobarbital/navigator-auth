@@ -132,8 +132,10 @@ class PDP:
         Raises:
             ValueError: ``PolicyAdapter.from_policy`` rejected the policy (the
                 message carries its reason), a policy with the same name is
-                already registered, or the evaluator failed to load it (the
-                original error is chained). Nothing is changed when it raises.
+                already registered or already loaded in the evaluator (from
+                storage, YAML or a pre-loaded evaluator), or the evaluator
+                failed to load it (the original error is chained). Nothing is
+                changed when it raises.
         """
         name = getattr(policy, "name", repr(policy))
         result = PolicyAdapter.from_policy(policy)
@@ -141,10 +143,13 @@ class PDP:
             raise ValueError(f"Policy '{name}' cannot be registered: {result.reason}")
         adapted = [p for p in [result.policy, *result.additional_policies] if p is not None]
         registered_names = {registered.name for registered in self._registered}
+        loaded_names = {loaded.name for loaded in self._evaluator._index.all()}
         adapted_names: set[str] = set()
         for adapted_policy in adapted:
             if adapted_policy.name in registered_names or adapted_policy.name in adapted_names:
                 raise ValueError(f"Policy name '{adapted_policy.name}' is already registered")
+            if adapted_policy.name in loaded_names:
+                raise ValueError(f"Policy name '{adapted_policy.name}' is already loaded in the evaluator")
             adapted_names.add(adapted_policy.name)
         for warning in result.warnings:
             self.logger.warning("Policy adaptation warning: %s", warning)
@@ -169,6 +174,26 @@ class PDP:
         """
         registered = {id(policy) for policy in self._registered}
         return any(id(policy) not in registered for policy in self._evaluator._index.all())
+
+    def _warn_registered_name_collisions(self, policies: list[ResourcePolicy], source: str) -> None:
+        """Log a WARNING for each policy whose name is also a registered policy's name.
+
+        Both policies stay loaded and enforced (a DENY still wins); only lookups
+        by name, such as ``PolicyIndex.get_by_name`` used by the decorators,
+        return one of them.
+
+        Args:
+            policies: Policies about to be loaded from storage.
+            source: Where they come from, for the log message.
+        """
+        registered_names = {policy.name for policy in self._registered}
+        for name in sorted({policy.name for policy in policies} & registered_names):
+            self.logger.warning(
+                "Policy name '%s' from %s is also a registered policy; both are enforced, "
+                "but lookups by name return only one of them. Rename one.",
+                name,
+                source,
+            )
 
     def sorted_policies(self):
         """Sort locally registered policies by priority in place.
@@ -195,7 +220,7 @@ class PDP:
         # Load policies from DB storage
         try:
             policies = await self.storage.load_policies()
-            self._load_policy_dicts(policies)
+            self._load_policy_dicts(policies, "DB storage")
         except Exception as exc:
             self.logger.error("Error loading policies from DB storage: %s", exc)
 
@@ -203,21 +228,26 @@ class PDP:
         if self.yaml_storage is not None:
             try:
                 yaml_policies = await self.yaml_storage.load_policies()
-                self._load_policy_dicts(yaml_policies)
+                self._load_policy_dicts(yaml_policies, "YAML storage")
             except Exception as exc:
                 self.logger.error(f"Error loading policies from YAML storage: {exc}")
 
         self._policies.sort(key=lambda policy: policy.priority)
 
-    def _load_policy_dicts(self, policies: list):
+    def _load_policy_dicts(self, policies: list, source: str = "storage"):
         """Convert policy dicts and load them into the evaluator.
 
         The evaluator is loaded first, so a load failure also leaves the
         compatibility list ``self._policies`` unchanged.
+
+        Args:
+            policies: Raw policy dicts from a storage backend.
+            source: Label used in name-collision warnings.
         """
         resource_policies, warnings = PolicyAdapter.adapt_batch(policies)
         for w in warnings:
             self.logger.warning("Policy adaptation warning: %s", w)
+        self._warn_registered_name_collisions(resource_policies, source)
 
         # Load into evaluator (all or nothing).
         self._evaluator.load_policies(resource_policies)
@@ -373,6 +403,7 @@ class PDP:
             self.logger.warning("Reload warning: %s", w)
 
         # Registered policies survive a reload (storage alone does not hold them).
+        self._warn_registered_name_collisions(resource_policies, "storage reload")
         resource_policies.extend(self._registered)
 
         # Build new index

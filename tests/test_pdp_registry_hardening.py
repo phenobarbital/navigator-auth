@@ -158,3 +158,73 @@ def test_load_policy_dicts_failure_keeps_compat_list(pdp, monkeypatch):
 
     assert [id(policy) for policy in pdp._policies] == policies_before
     assert [id(policy) for policy in pdp.evaluator._index.all()] == index_before
+
+
+# --- Module 2: name collisions (issue:518d25bdd2ff) ------------------------------------------
+
+
+def _row(name: str, effect: str, path: str, priority: int = 50) -> dict:
+    return {"name": name, "effect": effect, "resources": [f"uri:{path}"], "actions": ["uri:read"], "priority": priority}
+
+
+def _collision_warnings(logger: MagicMock) -> list:
+    return [call for call in logger.warning.call_args_list if "also a registered policy" in call.args[0]]
+
+
+@pytest.mark.asyncio
+async def test_add_policy_rejects_name_loaded_from_storage():
+    pdp = PDP(storage=_storage([_row("x", "allow", "/x/")]))
+    await pdp._load_policies()
+    index_before = [id(policy) for policy in pdp.evaluator._index.all()]
+
+    with pytest.raises(ValueError, match="already loaded in the evaluator"):
+        pdp.add_policy(_allow("x", "/other/"))
+
+    assert pdp._registered == []
+    assert [id(policy) for policy in pdp.evaluator._index.all()] == index_before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "registered, stored",
+    [
+        (_allow("dup", "/dup/", priority=5), _row("dup", "deny", "/dup/")),
+        (
+            Policy(name="dup", effect=PolicyEffect.DENY, resource=["urn:uri:/dup/"], priority=50),
+            _row("dup", "allow", "/dup/", 5),
+        ),
+    ],
+    ids=["storage-deny", "registered-deny"],
+)
+async def test_storage_collision_with_registered_warns_and_keeps_both(registered, stored):
+    pdp = PDP(storage=_storage([stored]), policies=[registered])
+    pdp.logger = MagicMock()
+
+    await pdp._load_policies()
+
+    startup = _collision_warnings(pdp.logger)
+    assert len(startup) == 1
+    assert startup[0].args[1:] == ("dup", "DB storage")
+    assert [policy.name for policy in pdp.evaluator._index.all()] == ["dup", "dup"]
+    assert not pdp.evaluator.check_access(_ctx(), ResourceType.URI, "/dup/", "uri:read").allowed
+
+    pdp.logger.reset_mock()
+    await pdp.reload_policies()
+
+    reload = _collision_warnings(pdp.logger)
+    assert len(reload) == 1
+    assert reload[0].args[1:] == ("dup", "storage reload")
+    assert [policy.name for policy in pdp.evaluator._index.all()] == ["dup", "dup"]
+    assert not pdp.evaluator.check_access(_ctx(), ResourceType.URI, "/dup/", "uri:read").allowed
+
+
+@pytest.mark.asyncio
+async def test_no_collision_no_warning():
+    pdp = PDP(storage=_storage([_row("stored", "deny", "/stored/")]), policies=[_allow("registered")])
+    pdp.logger = MagicMock()
+
+    await pdp._load_policies()
+    await pdp.reload_policies()
+
+    assert _collision_warnings(pdp.logger) == []
+    assert sorted(policy.name for policy in pdp.evaluator._index.all()) == ["registered", "stored"]
