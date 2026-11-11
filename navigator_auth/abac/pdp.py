@@ -104,9 +104,22 @@ class PDP:
 
     @property
     def evaluator(self) -> PolicyEvaluator:
+        """Return the evaluator that decides authorization requests.
+
+        Returns:
+            The shared ``PolicyEvaluator`` used unless tenant SQL filtering
+            selects a per-tenant evaluator.
+        """
+
         return self._evaluator
 
     def policies(self):
+        """Return the locally registered adapted policies.
+
+        Returns:
+            The compatibility list of ``ResourcePolicy`` objects. Authorization
+            decisions are made by the evaluator.
+        """
         return self._policies
 
     def add_policy(self, policy: AbstractPolicy) -> list[ResourcePolicy]:
@@ -158,6 +171,12 @@ class PDP:
         return any(id(policy) not in registered for policy in self._evaluator._index.all())
 
     def sorted_policies(self):
+        """Sort locally registered policies by priority in place.
+
+        Returns:
+            None. The compatibility list returned by :meth:`policies` is
+            reordered; evaluator ordering is unchanged.
+        """
         self._policies.sort(key=lambda policy: policy.priority)
 
     async def _load_policies(self):
@@ -327,7 +346,11 @@ class PDP:
             await self.yaml_storage.close()
 
     async def reload_policies(self) -> int:
-        """Hot-reload policies from DB/YAML without restart."""
+        """Hot-reload storage policies while retaining registered policies.
+
+        Returns:
+            The number of policies loaded into the evaluator after the reload.
+        """
         policy_dicts = []
 
         # Re-load from DB
@@ -459,6 +482,22 @@ class PDP:
             user: Any = None,
             effect: PolicyEffect = PolicyEffect.ALLOW
     ):
+        """Authorize a request against the applicable policy evaluator.
+
+        Args:
+            request: The incoming HTTP request.
+            session: Optional authentication session data.
+            user: Optional resolved user; session user information is used when
+                omitted.
+            effect: The requested policy effect.
+
+        Returns:
+            The matching ``PolicyResponse`` when access is allowed.
+
+        Raises:
+            AccessDenied: If a matching policy denies access.
+            PreconditionFailed: If no policy allows the request.
+        """
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
         except (KeyError, TypeError):

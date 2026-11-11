@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AdapterResult:
+    """Represent the outcome of adapting one policy for evaluation.
+
+    Attributes:
+        policy: The primary adapted policy when adaptation succeeds.
+        warnings: Non-fatal conversion warnings.
+        additional_policies: Derived policies, such as a negated-resource DENY.
+        skipped: Whether the input could not be safely adapted.
+        reason: The reason adaptation was skipped.
+    """
+
     policy: Optional[ResourcePolicy] = None
     warnings: List[str] = field(default_factory=list)
     additional_policies: List[ResourcePolicy] = field(default_factory=list)
@@ -90,7 +100,15 @@ class PolicyAdapter:
 
     @staticmethod
     def adapt(policy_dict: dict) -> AdapterResult:
-        """Convert a single policy dict to ResourcePolicy."""
+        """Convert a storage policy dictionary into evaluator policies.
+
+        Args:
+            policy_dict: A classic, file, object, or resource policy mapping.
+
+        Returns:
+            The adapted policy result. Conversion failures are represented by a
+            skipped result rather than raised to the caller.
+        """
         try:
             policy_type = policy_dict.get("policy_type", "policy")
             if policy_type == "resource":
@@ -436,7 +454,16 @@ class PolicyAdapter:
 
     @staticmethod
     def adapt_batch(policy_dicts: List[dict]) -> Tuple[List[ResourcePolicy], List[str]]:
-        """Convert a batch of policy dicts."""
+        """Convert a batch of storage policy dictionaries.
+
+        Args:
+            policy_dicts: Policy mappings loaded from storage.
+
+        Returns:
+            A pair containing the successfully adapted policies (including any
+            derived policies) and warnings for policies that were skipped or
+            adapted with warnings.
+        """
         all_policies = []
         all_warnings = []
         for d in policy_dicts:
