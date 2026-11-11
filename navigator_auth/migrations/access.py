@@ -28,7 +28,15 @@ RUNTIME_TABLES: dict[str, tuple[tuple[str | None, str], ...]] = {
     ),
     "identity": ((RELEASED_SCHEMA, "user_identities"),),
     "passkey": ((None, "user_credentials"), (None, "user_passkey_handles")),
-    "mfa": (),
+    "mfa": (
+        (None, "tenant_mfa_policy"),
+        (None, "user_mfa"),
+        (None, "user_mfa_backup_codes"),
+        (None, "user_trusted_devices"),
+        (None, "user_mfa_audit"),
+        (None, "user_mfa_security"),
+        (None, "user_mfa_secrets"),
+    ),
     "oauth2": (
         (None, "clients"),
         (None, "policies"),

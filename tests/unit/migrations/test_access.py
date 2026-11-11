@@ -24,7 +24,15 @@ def test_scope_matches_spec_and_excludes_unrelated_tables() -> None:
         (AUTH_DB_SCHEMA, "user_credentials"),
         (AUTH_DB_SCHEMA, "user_passkey_handles"),
     ]
-    assert scope_for("mfa") == []
+    assert scope_for("mfa") == [
+        (AUTH_DB_SCHEMA, "tenant_mfa_policy"),
+        (AUTH_DB_SCHEMA, "user_mfa"),
+        (AUTH_DB_SCHEMA, "user_mfa_backup_codes"),
+        (AUTH_DB_SCHEMA, "user_trusted_devices"),
+        (AUTH_DB_SCHEMA, "user_mfa_audit"),
+        (AUTH_DB_SCHEMA, "user_mfa_security"),
+        (AUTH_DB_SCHEMA, "user_mfa_secrets"),
+    ]
     assert all(
         table not in {"users", "schema_migrations"}
         for tables in [scope_for("vault"), scope_for("identity")]

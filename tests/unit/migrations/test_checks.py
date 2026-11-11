@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from navigator_auth.conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE
+from navigator_auth.mfa.migrations import MFA_TABLES
 from navigator_auth.migrations.catalog import MigrationFile
 from navigator_auth.migrations.checks import (
     OAUTH2_INDEXES,
@@ -28,6 +29,7 @@ def _file(migration_set: str, filename: str) -> MigrationFile:
         ("identity", "006_identity_drop_legacy_uid.sql", "auth.user_identities"),
         ("passkey", "001_passkey_credentials.sql", f"{AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE}"),
         ("oauth2", "001_oauth2_schema.sql", f"{AUTH_DB_SCHEMA}.clients"),
+        ("mfa", "001_mfa_tables.sql", f"{AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE}"),
     ],
 )
 async def test_missing_prerequisite_fails_each_set(fake_conn, migration_set, filename, missing):
@@ -101,6 +103,27 @@ async def test_oauth2_each_unmet_condition_fails(fake_conn, broken, expected):
 
     with pytest.raises(MigrationError, match=expected):
         await check_postconditions(fake_conn, _file("oauth2", "001_oauth2_schema.sql"))
+
+
+@pytest.mark.asyncio
+async def test_mfa_prerequisite_and_postconditions(fake_conn):
+    """MFA needs users and records each file only after its tables exist."""
+    first = _file("mfa", "001_mfa_tables.sql")
+    second = _file("mfa", "002_mfa_secrets.sql")
+
+    with pytest.raises(MigrationError, match=AUTH_USERS_TABLE):
+        await check_prerequisites(fake_conn, first)
+
+    fake_conn.relations = {f"{AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE}"}
+    with pytest.raises(MigrationError, match=MFA_TABLES[0]):
+        await check_postconditions(fake_conn, first)
+    with pytest.raises(MigrationError, match=MFA_TABLES[-1]):
+        await check_postconditions(fake_conn, second)
+
+    fake_conn.relations.update(f"{AUTH_DB_SCHEMA}.{table}" for table in MFA_TABLES)
+    await check_prerequisites(fake_conn, first)
+    await check_postconditions(fake_conn, first)
+    await check_postconditions(fake_conn, second)
 
 
 @pytest.mark.asyncio

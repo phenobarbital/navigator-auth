@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from ..conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE
+from ..mfa.migrations import MFA_TABLES
 from .catalog import MigrationFile
 from .runner import MigrationError, quote_ident
 
@@ -134,6 +135,8 @@ def prerequisite_tables(migration_set: str) -> tuple[tuple[str, str], ...]:
         return ((AUTH_DB_SCHEMA, AUTH_USERS_TABLE),)
     if migration_set == "oauth2":
         return ((AUTH_DB_SCHEMA, AUTH_USERS_TABLE), (AUTH_DB_SCHEMA, "clients"), (AUTH_DB_SCHEMA, "policies"))
+    if migration_set == "mfa":
+        return ((AUTH_DB_SCHEMA, AUTH_USERS_TABLE),)
     return ()
 
 
@@ -222,6 +225,10 @@ async def check_postconditions(conn: Any, file: MigrationFile) -> None:
         unmet = await _identity_006_unmet(conn)
     elif key == OAUTH2_FILE:
         unmet = await _oauth2_unmet(conn)
+    elif key == ("mfa", "001_mfa_tables.sql"):
+        unmet = await _tables_unmet(conn, AUTH_DB_SCHEMA, MFA_TABLES[:-1])
+    elif key == ("mfa", "002_mfa_secrets.sql"):
+        unmet = await _tables_unmet(conn, AUTH_DB_SCHEMA, MFA_TABLES[-1:])
 
     if unmet:
         raise MigrationError(f"{file.migration_set}/{file.filename} incomplete: {'; '.join(unmet)}")

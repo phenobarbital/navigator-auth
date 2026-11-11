@@ -72,6 +72,8 @@ A file whose checksum changed after being applied is skipped and reported; use
 | identity | `005_identity_legacy_uid_default.sql` | FEAT-103 | Legacy `uid` column made self-filling |
 | identity | `006_identity_drop_legacy_uid.sql` | — | Drops the legacy `uid` column (guarded by postconditions) |
 | passkey | `001_passkey_credentials.sql` | FEAT-101 | WebAuthn credential and handle tables |
+| mfa | `001_mfa_tables.sql` | FEAT-106 | MFA policy, enrollment, backup-code, trusted-device, audit, and security tables |
+| mfa | `002_mfa_secrets.sql` | FEAT-106 | Encrypted MFA seed storage and vault-seed relocation |
 | oauth2 | `001_oauth2_schema.sql` | FEAT-110 | OAuth2 clients, policies, tokens, grants, device codes, client access (FEAT-093/094/095), no seed data |
 
 ## Adding a migration
