@@ -18,7 +18,7 @@ docs:
 **Feature ID**: FEAT-106 (reused — see frontmatter `reuse_feature_id`)
 **Date**: 2026-11-11
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: 0.30.0
 
 ---
@@ -53,12 +53,15 @@ Both transcripts are committed under `sdd/state/FEAT-106/pr633-review/`. Both re
 - **G5** — When 2FA is enabled and MFA is unavailable, credential changes fail closed (503). MFA availability self-heals without a restart.
 - **G6** — Session issuance after a password check is serialized with security transitions for the same user.
 - **G7** — Minting a new second factor (backup codes) needs fresh proof of an existing strong factor.
+- **G8** — An OAuth2 access token minted after an MFA'd OAuth2 login carries `mfa`/`amr`. Its bound session exposes them to ABAC, so FEAT-106 fresh-factor rules can grant OAuth2 tokens (§8 Q2).
+- **G9** — An admin `password_reset` ends the target user's existing sessions and tokens, as recovery does (§8 Q3).
 
 ### Non-Goals (explicitly out of scope)
 - Medium- and low-severity review findings: #6 proxy-aware IP limiter, #8 email-issuance flooding, #9 rate-spec parse fail-open, #10 device rotation before cookie delivery, #13 `attempts_remaining`, #14 redundant queries, #15 sync callbacks, A3 limiter on factor-management endpoints, A4 policy-hardening race, and L1–L6. They go to a follow-up spec.
 - **#11 — `UserManager` admin password writes.** This remains FEAT-106 non-goal R1 (Q17 → separate follow-up spec).
-- Propagating `amr`/`acr` into OAuth2 access tokens minted from an MFA'd OAuth2 session, and OAuth2 `acr_values` step-up. FEAT-106 already excluded both (brainstorm Option C).
-- Revoking existing sessions on `password_change` / `password_reset`. That is not current behavior, and only recovery revokes (unchanged).
+- OAuth2 `acr`/`acr_values` step-up (FEAT-106 brainstorm Option C), and an `amr` claim in OIDC ID tokens. `amr` propagation into access tokens, introspection and userinfo **is** in scope (M9).
+- Copying `mfa`/`amr` from token claims into a session that `auth_middleware` **recreates** from a token after the bound session expired (`auth.py:1147`). Such a session carries no `amr`, so fresh-factor rules deny it (fail closed).
+- Revoking other sessions on a self-service `password_change`. Only `password_reset` (G9) and recovery revoke.
 - Moving MFA services ownership out of BasicAuth. The OAuth2 login form uses the slot BasicAuth builds (D4).
 
 ---
@@ -107,7 +110,22 @@ A body that raises `TransitionAborted` rolls back without being logged as an err
 1. Read and validate on a pooled connection, then release it.
 2. Enter the transition, re-read the user on its connection, compare the hash captured in phase 1 (`TransitionAborted` → 409 on drift), and write the credential on the transition connection.
 
-Recovery additionally consumes the confirmation token and revokes sessions **inside** the transition body, before commit, so a revocation failure rolls the password change back.
+Recovery additionally consumes the confirmation token and revokes sessions **inside** the transition body, before commit, so a revocation failure rolls the password change back. `password_reset` (admin) revokes the target user's sessions and jtis the same way (G9). It uses the recovery handler's process-wide `SessionRevoker` through a new `PasswordRecoveryHandler.session_revoker()` accessor, so no new Redis pool is created.
+
+**OAuth2 token `amr` (M9).** `_create_user_session(extra=…)` (M6) stores `mfa`/`amr`/`auth_method` at the top level of the browser session. It also writes a minimal `AUTH_SESSION_OBJECT` (`user_id`, `username`, `mfa`, `amr`, `auth_method="oauth2"`), which is where ABAC reads `userinfo` (`abac/decorators.py:50`, `abac/guardian.py:88`).
+
+The new `_session_auth_context(request)` reads that pair back. The three places that mint authorization-code carriers copy it onto the carrier (`OauthAuthorizationCode.mfa`/`.amr`):
+- `_issue_code` (`backend.py:1494`) — the authorize and consent paths;
+- the device-flow carrier (`backend.py:2775`).
+
+The code exchange then copies the pair:
+- into `token_data` (claims `mfa`, `amr`);
+- into the issued `OauthRefreshToken`;
+- into the session bound by `_token_session_claims(..., extra=…)`.
+
+A refresh rotation copies the pair from the parent refresh token: `amr` describes the original authentication event. Introspection and userinfo echo `amr` (and `mfa`) when the token carries them.
+
+Codes and tokens minted without MFA carry neither claim, so 2FA-off tokens are byte-identical to today's (AC5).
 
 **Availability self-healing (M1).** `MfaServicesSlot.ready()` returns the current services. When they are unavailable for a transient reason, it rebuilds them at most once per `AUTH_MFA_RETRY_INTERVAL`, single-flight under an `asyncio.Lock`. Permanent configuration errors (no `AUTH_OTP_SECRET`, no `authdb`) are flagged `permanent=True` and are not retried.
 
@@ -144,6 +162,9 @@ Recovery additionally consumes the confirmation token and revokes sessions **ins
 | `Oauth2Provider._create_user_session` | modifies | New `extra: Optional[dict]` merged into `session_data` (`mfa`, `amr`, `auth_method`). |
 | `security_transition` | modifies | Always yields a connection; fail closed on unavailable; `TransitionAborted`. |
 | `MfaSecurity.user_lock` | modifies | Timeout and `ContextVar` publication. |
+| `OauthAuthorizationCode` / `OauthRefreshToken` | modifies | New optional `mfa: bool = False`, `amr: Optional[list[str]] = None` (M9). Stored codes and tokens deserialize unchanged (`code_backend.py:82,163` use `Model(**json.loads(...))`). |
+| `Oauth2Provider._token_session_claims` / `token_request` / `userinfo` / `introspect` | modifies | Carry and echo `mfa`/`amr` (M9). |
+| `PasswordRecoveryHandler` | modifies | New public `session_revoker()` classmethod returning the existing `_revoker` (M4, G9). |
 | `navigator_session.vault.targets.postgres.PostgresTarget` | extends | `MfaSecretTarget`. |
 | `navigator_session.vault_targets` entry point | registers | `mfa = "navigator_auth.mfa.targets:factory"`. |
 
@@ -168,6 +189,19 @@ class VerifyRefused(Exception):
                        # rate_limited | account_disabled | mfa_unavailable | <MfaSignal code>
     status: int
     extra: dict        # e.g. {"attempts_remaining": 3}; MfaSignal payload for policy refusals
+```
+
+```python
+# navigator_auth/backends/oauth2/models.py (modified, M9)
+class OauthAuthorizationCode(BaseModel):   # verified: models.py:209
+    ...
+    mfa: bool = Field(default=False)               # session passed a second factor
+    amr: Optional[list[str]] = Field(default=None) # e.g. ["pwd", "totp"]; None when not MFA'd
+
+class OauthRefreshToken(BaseModel):        # verified: models.py:245
+    ...
+    mfa: bool = Field(default=False)
+    amr: Optional[list[str]] = Field(default=None)
 ```
 
 ```sql
@@ -226,14 +260,15 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
 
 | Module | Eligible? | Decided patterns / exact contracts | Why not (if no) |
 |---|---|---|---|
-| M1: Self-healing MFA services | yes | `MfaServicesSlot.ready()`, `get_ready_mfa_services()`, `MfaServices.permanent`, `AUTH_MFA_RETRY_INTERVAL` (int s, fallback 30), single-flight `asyncio.Lock`. | — |
-| M2: Lock-scoped connection discipline | yes | `user_lock(user_id)` timeout `AUTH_MFA_LOCK_TIMEOUT` (float s, fallback 10) via `asyncio.wait_for` on acquire + `SET LOCAL lock_timeout`; `LOCK_CONNECTION` ContextVar; `conn=` kw-only params listed in §3 M2. | — |
+| M1: Self-healing MFA services | yes | `MfaServicesSlot.ready()`, `get_ready_mfa_services()`, `MfaServices.permanent`, `AUTH_MFA_RETRY_INTERVAL` (int s, fallback **15**), single-flight `asyncio.Lock`. | — |
+| M2: Lock-scoped connection discipline | yes | `user_lock(user_id)` timeout `AUTH_MFA_LOCK_TIMEOUT` (float s, fallback **5.0**) via `asyncio.wait_for` on acquire + `SET LOCAL lock_timeout`; `LOCK_CONNECTION` ContextVar; `conn=` kw-only params listed in §3 M2. | — |
 | M3: Transactional security_transition | yes | Always yields a connection; `MfaUnavailable` before yield; `TransitionAborted` rollback; same bump/revoke/audit order as today. | — |
 | M4: Credential-change call sites | yes | Two-phase pattern; 409 `credentials_changed` on hash drift; 503 `mfa_unavailable`; recovery order fixed in §3 M4. | — |
 | M5: SecondFactorGate | yes | Signatures + `GateResult`/`VerifyRefused`; verify step order fixed in §3 M5; D16 backup consume before lock. | — |
 | M6: OAuth2 login second factor | yes | Route `POST {login_uri}/mfa` name `nav_oauth2_login_mfa`, excluded from auth; template `templates/oauth/mfa.html`; `_authorize_redirect` key list identical to today's. | — |
 | M7: MFA secrets table + rotation target | yes | DDL above; `MfaSecretTarget` mirrors `IdentityTarget` (instance `table`/`name` override); entry point `mfa`. | — |
 | M8: Factor-management hardening | yes | `backup_codes` → `_strong_factor_proof` else 403 `strong_factor_proof_required`; disenroll guard under lock; pre-lock `MfaStorageError` → 503. | — |
+| M9: OAuth2 token `amr` propagation | yes | Model fields above; `_session_auth_context()`; claims `mfa`/`amr` only when `mfa` is True; refresh copies from the parent; introspection/userinfo echo. | — |
 
 ### Module 1: Self-healing MFA services
 - **Path**: `navigator_auth/mfa/services.py`, `navigator_auth/conf.py`
@@ -260,7 +295,7 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
   async def get_ready_mfa_services(app: Any) -> Optional[MfaServices]:
       """Async, self-healing counterpart of get_mfa_services (verified: services.py:113)."""
   ```
-  `navigator_auth/conf.py`: `AUTH_MFA_RETRY_INTERVAL = config.getint("AUTH_MFA_RETRY_INTERVAL", fallback=30)` next to the `AUTH_OTP_*` block (verified: `conf.py:659-671`).
+  `navigator_auth/conf.py`: `AUTH_MFA_RETRY_INTERVAL = config.getint("AUTH_MFA_RETRY_INTERVAL", fallback=15)` next to the `AUTH_OTP_*` block (verified: `conf.py:659-671`).
 - Every MFA decision point switches from `get_mfa_services` to `await get_ready_mfa_services`: the gate (M5), `security_transition` (M3), `MfaHandler._session_user`/`challenge`, and the OAuth2 form (M6).
 
 ### Module 2: Lock-scoped connection discipline
@@ -299,7 +334,7 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
   async def delete_credential(self, user_id: int, credential_id: bytes, *,
                               keep_last: bool = False, conn: Any = None) -> bool: ...
   ```
-  `navigator_auth/conf.py`: `AUTH_MFA_LOCK_TIMEOUT = config.getfloat("AUTH_MFA_LOCK_TIMEOUT", fallback=10.0)`.
+  `navigator_auth/conf.py`: `AUTH_MFA_LOCK_TIMEOUT = config.getfloat("AUTH_MFA_LOCK_TIMEOUT", fallback=5.0)`.
 - `BackupCodeStore.consume` keeps **no** `conn` parameter (D16; verified `backup_codes.py:132`).
 
 ### Module 3: Transactional `security_transition`
@@ -341,7 +376,8 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
     1. Phase 1, on a pooled connection that is then released: `User.get`, check the old password (403 on mismatch), capture `user.password`.
     2. Phase 2: `async with security_transition(...) as conn:` set `User.Meta.connection = conn`, re-`get`; hash ≠ captured → `TransitionAborted("credentials_changed")` → 409; set the new password, `await user.update()`.
     3. `MfaUnavailable` → 503 `mfa_unavailable`.
-  - `password_reset` (`session.py:171`): the same two-phase shape. Phase 1 is only the existence check (404).
+  - `password_reset` (`session.py:171`): the same two-phase shape. Phase 1 is only the existence check (404). In phase 2, after `await user.update()` and still inside the transition body, it calls `await PasswordRecoveryHandler.session_revoker().revoke_user(request, user)` (G9). A revocation failure raises → rollback → 503, and the password is unchanged.
+  - `PasswordRecoveryHandler.session_revoker()` (`recovery/handler.py`, new classmethod): calls `cls._ensure_resources()` (verified `handler.py:139`) and returns `cls._revoker` (verified `handler.py:151`). It is the single process-wide `SessionRevoker`.
   - Recovery completion (`recovery/handler.py:299`):
     1. Phase 1 (pooled, released): `peek_confirmation`, `User.get`, policy validation (422).
     2. Phase 2 (transition connection), in this order: re-get user → hash drift → `TransitionAborted` (409) → write password → `consume_confirmation` (`None` → `TransitionAborted("invalid_confirmation")` → 400) → `revoke_user` (Redis-only; a failure raises → rollback → 503) → commit.
@@ -413,7 +449,9 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
   # navigator_auth/backends/oauth2/backend.py
   async def _create_user_session(self, request, user, response=None,
                                  extra: Optional[dict] = None):  # verified: backend.py:632
-      """``extra`` keys (mfa, amr, auth_method) are merged into session_data; None → unchanged."""
+      """``extra`` keys (mfa, amr, auth_method) are merged into session_data at top level AND mirrored
+      into a minimal AUTH_SESSION_OBJECT {user_id, username, mfa, amr, auth_method} (M9); None →
+      session_data byte-identical to today (AC5)."""
 
   def _authorize_redirect(self, request: web.Request, data: dict) -> web.HTTPFound:
       """Extracted verbatim from auth_login (backend.py:1648-1670): client_id, redirect_uri,
@@ -485,6 +523,40 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
     - Inside `user_lock` → conn, before `disenroll(conn=conn)`: `policy` from `_security_context(..., conn)`; `requires_strong_factor(record, policy)` and `passkey_count(uid, conn=conn) == 0` → 409 `strong_factor_required` (rollback).
     - The pre-lock guard (`:395`) is removed.
 
+### Module 9: OAuth2 token `amr` propagation
+- **Path**: `navigator_auth/backends/oauth2/backend.py`, `navigator_auth/backends/oauth2/models.py`
+- **Responsibility**: Carry the second-factor outcome of the OAuth2 login from the browser session, through the code and refresh token, into access-token claims, the token-bound session, introspection and userinfo (G8).
+- **Depends on**: M6 (`_create_user_session(extra=…)` writes the session pair)
+- **Interface Skeleton**:
+  ```python
+  # navigator_auth/backends/oauth2/models.py  (modifies models.py:209, :245) — fields in §2 Data Models
+
+  # navigator_auth/backends/oauth2/backend.py
+  async def _session_auth_context(self, request: web.Request) -> dict:
+      """Return {"mfa": bool, "amr": list[str] | None} from the current browser session's top-level
+      keys (written by _create_user_session(extra=…)). Missing session/keys → {"mfa": False, "amr": None}.
+      Never raises."""
+
+  async def _issue_code(self, request, client, user_obj, redirect_uri, scope, state,
+                        code_challenge=None, code_challenge_method=None, resource=None):  # verified: backend.py:1478
+      """Unchanged signature; the OauthAuthorizationCode it builds (backend.py:1494) gets
+      **await self._session_auth_context(request)."""
+
+  async def _token_session_claims(self, request: web.Request, user_id: int,
+                                  extra: Optional[dict] = None) -> dict:  # verified: backend.py:688
+      """``extra`` is forwarded to _create_user_session(request, user, extra=extra) so the token-bound
+      session exposes mfa/amr in AUTH_SESSION_OBJECT; None → unchanged."""
+  ```
+  - **Device carrier** (`backend.py:2775`): `OauthAuthorizationCode(..., **await self._session_auth_context(request))`.
+  - **Code exchange** (`token_data` at `backend.py:1822`):
+    - When `auth_code.mfa` is True, set `token_data["mfa"] = True` and `token_data["amr"] = auth_code.amr`.
+    - Pass `extra={"mfa": True, "amr": auth_code.amr, "auth_method": "oauth2"}` to `_token_session_claims`.
+    - Copy both fields onto the `OauthRefreshToken` (`backend.py:1873`).
+  - **Refresh grant** (`token_data` at `backend.py:2040`, rotation at `backend.py:2082`): the same, sourced from the presented refresh token `rt`. The rotated token copies `rt.mfa` / `rt.amr`.
+  - **client_credentials** (`token_data` at `backend.py:1929`): no user, so no `mfa`/`amr`. Unchanged.
+  - **Introspection** (`claims` dict at `backend.py:2468`): adds `"amr": token_payload["amr"]` and `"mfa": True` when the token payload carries `amr`. For a refresh token, they come from `rt`.
+  - **userinfo** (`claims = {"sub": …}` at `backend.py:2222`): adds `"amr"` when the access-token payload carries it. This is not scope-gated, because `amr` describes the authentication rather than the profile.
+
 ---
 
 ## 4. Test Specification
@@ -525,6 +597,12 @@ def factory(resources: Mapping[str, Any]) -> Optional[MfaSecretTarget]: ...
 | `test_trusted_device_session_issued_under_lock` | AC18. |
 | `test_backup_regeneration_requires_proof` | AC19. |
 | `test_disenroll_guard_under_lock_race` | AC20. |
+| `test_oauth2_token_carries_amr_after_mfa_login` | AC23. |
+| `test_oauth2_token_without_mfa_has_no_amr` | AC24. |
+| `test_oauth2_refresh_preserves_amr` | AC25. |
+| `test_oauth2_introspect_and_userinfo_echo_amr` | AC26. |
+| `test_abac_fresh_factor_grants_mfa_oauth2_token` | AC27. |
+| `test_password_reset_revokes_sessions` | AC28. |
 
 ### Validation Contract
 
@@ -533,6 +611,7 @@ tests:
 - tests/test_mfa_review_fixes_transitions.py
 - tests/test_mfa_review_fixes_gate.py
 - tests/test_mfa_review_fixes_oauth2.py
+- tests/test_mfa_review_fixes_oauth2_tokens.py
 - tests/test_mfa_review_fixes_vault.py
 - tests/test_mfa_review_fixes_management.py
 - tests/test_mfa_verify.py
@@ -600,6 +679,12 @@ Reuse `tests/fixtures/mfa.py` (`mfa_db`, `mfa_redis_pool`, `frozen_totp_clock`, 
   - A storage error in a pre-lock disenroll check answers 503, not 500.
 - [ ] **AC21** — Every existing `tests/test_mfa_*.py` suite passes. Tests updated for intended behavior changes (backup regeneration proof, MFA secrets table) say so in their docstrings.
 - [ ] **AC22** — No new runtime dependency. The 2FA-off BasicAuth login is unchanged (FEAT-106 AC4 sweep still green).
+- [ ] **AC23** — After an OAuth2 login that passed TOTP (M6), the authorization-code exchange returns an access token whose payload has `mfa: true` and `amr: ["pwd","totp"]`. The token-bound session's `AUTH_SESSION_OBJECT` has the same `mfa`/`amr`. The same holds for the device-flow carrier.
+- [ ] **AC24** — An OAuth2 login with no factor owed, or with 2FA off, yields tokens with **no** `mfa`/`amr` claim. With 2FA off, the token payload keys match `origin/dev`.
+- [ ] **AC25** — A `refresh_token` grant from an MFA'd chain issues an access token with the original `amr`, and the rotated refresh token keeps it. A trusted-device login's chain keeps `["pwd","trusted_device"]`.
+- [ ] **AC26** — `/oauth2/introspect` returns `amr` (and `mfa: true`) for an MFA'd access or refresh token, and omits them otherwise. `/oauth2/userinfo` returns `amr` for an MFA'd access token.
+- [ ] **AC27** — With the FEAT-106 policy pack and `requires_fresh_factor`, a request bearing an OAuth2 access token from a TOTP-verified login is **granted**. Tokens from a trusted-device login and from a no-MFA login are **denied**.
+- [ ] **AC28** — `password_reset` revokes the target user's session and jtis inside the transition: their pre-reset token is rejected 401 afterwards. A fault in `revoke_user` leaves the password unchanged (503).
 
 ---
 
@@ -700,6 +785,34 @@ class Oauth2Provider(BaseAuthBackend):                                # line 258
     async def _create_user_session(self, request, user, response=None)  # line 632
     async def auth_login(self, request)                               # line 1616; POST builds the authorize payload at 1648-1670
 
+    async def _token_session_claims(self, request, user_id: int) -> dict  # line 688
+    async def authorize(self, request)                                # line 1343; check_session at 1423
+    async def _issue_code(self, request, client, user_obj, redirect_uri, scope, state,
+                          code_challenge=None, code_challenge_method=None, resource=None)  # line 1478; OauthAuthorizationCode(...) at 1494
+    async def token_request(self, request)                            # line 1694; token_data at 1822 (code), 1929 (client_credentials), 2040 (refresh)
+    #   OauthRefreshToken(...) at 1873 (code exchange) and 2082 (rotation)
+    async def userinfo(self, request)                                 # line 2194; claims = {"sub": str(user_id)} at 2222
+    async def introspect(self, request)                               # line 2359; claims: dict = {"active": True, ...} at 2468
+    #   device-flow carrier OauthAuthorizationCode(...) at 2775
+
+# navigator_auth/backends/oauth2/models.py
+class OauthAuthorizationCode(BaseModel)                               # line 209 (datamodel BaseModel, Field)
+class OauthRefreshToken(BaseModel)                                    # line 245
+# navigator_auth/backends/oauth2/code_backend.py — Redis JSON round-trip: Model(**json.loads(data)) at 82, 163
+
+# ABAC reads userinfo from the session object:
+# navigator_auth/abac/decorators.py:50   userinfo = session[AUTH_SESSION_OBJECT]
+# navigator_auth/abac/guardian.py:88     userinfo = session.get(AUTH_SESSION_OBJECT, {})
+# navigator_auth/abac/context.py:136-141 EvalContext reads userinfo["mfa"] / ["auth_method"]; amr via ctx.userinfo
+# navigator_auth/backends/abstract.py:205 BasicAuth-style sessions wrap userdata under AUTH_SESSION_OBJECT;
+#   OAuth2 _create_user_session does NOT today (only {session_key_property, "user"}).
+
+# navigator_auth/handlers/recovery/handler.py
+class PasswordRecoveryHandler:
+    @classmethod
+    def _ensure_resources(cls) -> None                                # line 139
+    #   cls._revoker = SessionRevoker(cls._pool)                      # line 151
+
 # navigator_auth/passkey/store.py
 class PasskeyStore:
     async def save_credential(self, credential: StoredCredential) -> None  # line 66
@@ -733,6 +846,9 @@ PostgresTarget SELECT has no row filter (scans every row incl. soft-deleted)    
 - ~~`{schema}.user_mfa_secrets`~~, ~~`navigator_auth/mfa/login.py`~~, ~~`navigator_auth/mfa/targets.py`~~, ~~`templates/oauth/mfa.html`~~ — created by this spec.
 - ~~`get_ready_mfa_services`~~, ~~`MfaUnavailable`~~, ~~`TransitionAborted`~~, ~~`LOCK_CONNECTION`~~, ~~`AUTH_MFA_RETRY_INTERVAL`~~, ~~`AUTH_MFA_LOCK_TIMEOUT`~~ — created by this spec.
 - ~~an MFA second factor anywhere in `navigator_auth/backends/oauth2/`~~ — none today (the #1 bypass).
+- ~~`OauthAuthorizationCode.amr` / `.mfa`~~, ~~`OauthRefreshToken.amr` / `.mfa`~~, ~~`Oauth2Provider._session_auth_context`~~, ~~`PasswordRecoveryHandler.session_revoker`~~ — created by this spec (M9, M4).
+- ~~`AUTH_SESSION_OBJECT` in OAuth2 sessions~~ — absent today; M9 adds it only when `extra` is passed.
+- ~~an OIDC `id_token`~~ — not issued by this provider today; no `amr` in ID tokens (non-goal).
 
 ### Edit Sites (Blueprint Anchors)
 
@@ -775,11 +891,23 @@ Verified against: `3f14b3c`
 | `navigator_auth/mfa/migrations.py` | MODIFY | `_MIGRATION_FILES = ("001_mfa_tables.sql",)` | `migrations.py:13` | 1 |
 | `navigator_auth/mfa/migrations.py` | MODIFY | `MFA_TABLES = (` | `migrations.py:14` | 1 |
 | `pyproject.toml` | MODIFY | `identity = "navigator_auth.identity.targets:factory"` | `pyproject.toml:77` | 1 |
+| `navigator_auth/handlers/recovery/handler.py` | MODIFY (add `session_revoker`) | `def _ensure_resources(cls) -> None:` | `handler.py:139` | 1 |
+| `navigator_auth/backends/oauth2/models.py` | MODIFY | `class OauthAuthorizationCode(BaseModel):` | `models.py:209` | 1 |
+| `navigator_auth/backends/oauth2/models.py` | MODIFY | `class OauthRefreshToken(BaseModel):` | `models.py:245` | 1 |
+| `navigator_auth/backends/oauth2/backend.py` | MODIFY | `async def _token_session_claims(self, request: web.Request, user_id: int) -> dict:` | `backend.py:688` | 1 |
+| `navigator_auth/backends/oauth2/backend.py` | MODIFY | `code_obj = OauthAuthorizationCode(` | `backend.py:1494` | 1 |
+| `navigator_auth/backends/oauth2/backend.py` | MODIFY | `**await self._token_session_claims(request, user_id),`, the code-exchange occurrence: preceded by `"scope": scope,` / `"jti": jti,` inside the `token_data = {` that starts at 1822 | `backend.py:1829` | 2 (anchor) / 1 (with context: first occurrence, after `# TASK-027: mint jti.`) |
+| `navigator_auth/backends/oauth2/backend.py` | MODIFY | `            rt = OauthRefreshToken(` (12-space indent) | `backend.py:1873` | 1 |
+| `navigator_auth/backends/oauth2/backend.py` | MODIFY | `**await self._token_session_claims(request, user_id),`, the refresh-grant occurrence (second, after `# TASK-024: user_id always from the refresh token.`) | `backend.py:2046` | 2 (anchor) / 1 (with context) |
+| `navigator_auth/backends/oauth2/backend.py` | MODIFY | `new_rt = OauthRefreshToken(` | `backend.py:2082` | 1 |
+| `navigator_auth/backends/oauth2/backend.py` | MODIFY | `claims = {"sub": str(user_id)}` | `backend.py:2222` | 1 |
+| `navigator_auth/backends/oauth2/backend.py` | MODIFY | `claims: dict = {` | `backend.py:2468` | 1 |
+| `navigator_auth/backends/oauth2/backend.py` | MODIFY | `carrier = OauthAuthorizationCode(` | `backend.py:2775` | 1 |
 | `navigator_auth/mfa/login.py` | CREATE | — | — | — |
 | `navigator_auth/mfa/targets.py` | CREATE | — | — | — |
 | `navigator_auth/mfa/sql/002_mfa_secrets.sql` | CREATE | — | — | — |
 | `templates/oauth/mfa.html` | CREATE | — | — | — |
-| `tests/test_mfa_review_fixes_*.py` (6 files, §4) | CREATE | — | — | — |
+| `tests/test_mfa_review_fixes_*.py` (7 files, §4) | CREATE | — | — | — |
 
 ---
 
@@ -793,6 +921,8 @@ Verified against: `3f14b3c`
 - **D5 — The backup code is consumed before the lock (D16 preserved).** A backup code consumed by a verify that later fails stays consumed. The FEAT-106 spec requires that ("do not restore consumed backup codes after downstream failures").
 - **D6 — Credential changes fail closed when MFA is configured but down.** This extends FEAT-106 G7/S5 ("fail the logins, not the process") to credential changes. Allowing them would skip device revocation.
 - **D7 — Backup-code regeneration needs factor proof.** This amends FEAT-106 M5/AC14 and the S8 cross-check row "re-auth on regeneration". The password alone is no longer enough.
+- **D8 — `amr` follows the OIDC meaning, across refreshes too.** `amr` records how the user originally authenticated, so refresh rotations copy it unchanged and never re-derive it. The claims appear only when the login actually passed MFA. A missing claim means "not MFA'd" to every consumer, which keeps the deny-by-default posture.
+- **D9 — ABAC sees OAuth2 `amr` through the bound session, not the JWT.** ABAC reads `session[AUTH_SESSION_OBJECT]` everywhere (`abac/decorators.py:50`, `abac/guardian.py:88`). Teaching the PDP to read JWT claims would be a wider change. M9 therefore mirrors the pair into the token-bound session's `AUTH_SESSION_OBJECT`, and only when it exists.
 
 ### Patterns to Follow
 - Keep FEAT-106's fail-closed posture: any dependency error on a security path → 503 `mfa_unavailable`, never a bypass.
@@ -807,6 +937,8 @@ Verified against: `3f14b3c`
 - **Entry-point discovery reads installed metadata.** The new `mfa` target is visible to `discover_targets()` only after reinstalling the package (`uv pip install -e .`). Tests construct `MfaSecretTarget` directly and assert the pyproject declaration separately.
 - **Single-flight rebuild and the old services object.** Swapping `slot.services` while requests hold the old object is safe: the old pools stay valid until closed. Close the old Redis pool only after the swap.
 - **The `LOCK_CONNECTION` guard is a test aid.** Production code must not branch on it except `user_lock` itself. The guard proves G3; it does not enforce it at runtime.
+- **One session per user identity (OAuth2).** `_create_user_session` keys the session by identity (`backend.py:632-680`), so each token mint rewrites the user's single session. The bound session therefore reflects the **latest** mint's `amr`, while each JWT keeps its own claim. Example: a token from a trusted-device login, minted after a TOTP one, downgrades what ABAC sees for both tokens to `trusted_device`. That direction is safe (deny). The reverse can upgrade an older token's session view. This is accepted and documented in `docs/two_factor_auth.rst`. Making ABAC read per-token claims is a follow-up.
+- **A session recreated from a token loses `amr`.** When the bound session expires, `auth_middleware` rebuilds one from the token (`auth.py:1147`) without `mfa`/`amr`, so fresh-factor rules deny it (fail closed; a non-goal).
 - **The OAuth2 MFA page echoes authorize parameters.** Every value must be HTML-escaped by the template engine. The parameters are client-controlled, as they already are in `oauth/login.html`.
 
 ### External Dependencies
@@ -824,12 +956,15 @@ Verified against: `3f14b3c`
   - M4 → M3 (`TransitionAborted`, `MfaUnavailable`, always-a-connection), M4 → M2 (`PasskeyStore` `conn=`);
   - M5 → M1, M5 → M2 (`user_from_id`/`verify`/`consume_and_rotate` `conn=`);
   - M6 → M5 (`SecondFactorGate`);
-  - M8 → M2 (lock connection for the guard).
+  - M8 → M2 (lock connection for the guard);
+  - M9 → M6 (`_create_user_session(extra=…)` writes the session pair that M9 reads and mirrors).
   - M7 is independent.
 - **Shared files** (tasks touching them are serialized):
   - `navigator_auth/handlers/mfa.py` — M5, M8;
   - `navigator_auth/mfa/totp.py` — M2, M7;
-  - `navigator_auth/conf.py` — M1, M2.
+  - `navigator_auth/conf.py` — M1, M2;
+  - `navigator_auth/backends/oauth2/backend.py` — M6, M9;
+  - `navigator_auth/handlers/recovery/handler.py` — M4 only (`session_revoker` + recovery transition), so M4 keeps both edits in one task.
 - **Exclusive resources**: M7 adds a DDL migration that every live-DB test applies, so its task is `parallel: false`.
 - **Cross-feature dependencies**: none beyond FEAT-106 itself (same branch).
 
@@ -841,9 +976,9 @@ Verified against: `3f14b3c`
 - [x] OAuth2 login form handling of a user who owes a factor — *Resolved by the user*: a full second factor in OAuth2 (M5/M6), not a refusal.
 - [x] Backup-code regeneration — *Resolved by the user*: require fresh factor proof (M8, D7; amends FEAT-106 M5).
 - [x] #11 `UserManager` — *Resolved*: stays FEAT-106 non-goal R1 (follow-up spec).
-- [ ] `AUTH_MFA_LOCK_TIMEOUT` default of 10 s, and `AUTH_MFA_RETRY_INTERVAL` default of 30 s: acceptable for production? — *Owner: Jesus Lara*
-- [ ] Should tokens minted from an MFA'd OAuth2 session carry `amr` (needed for ABAC fresh-factor rules on OAuth2 tokens)? Listed as a non-goal here. — *Owner: Jesus Lara*
-- [ ] Should `password_reset` (admin) also revoke the target's sessions, as recovery does? Not current behavior; candidate for the #11 follow-up. — *Owner: Jesus Lara*
+- [x] **Q1** — Defaults for the new settings — *Resolved by the user (2026-11-11)*: `AUTH_MFA_LOCK_TIMEOUT` = **5 s**, `AUTH_MFA_RETRY_INTERVAL` = **15 s**. Applied in §3 M1 and M2.
+- [x] **Q2** — Should tokens minted from an MFA'd OAuth2 session carry `amr`? — *Resolved by the user*: **yes, in this spec.** Applied as G8, Module 9, D8, D9 and AC23–AC27, covering access tokens, refresh chains, introspection and userinfo. ID tokens and `acr` stay non-goals.
+- [x] **Q3** — Should an admin `password_reset` revoke the target's sessions? — *Resolved by the user*: **yes, in this spec.** Applied as G9, §3 M4 and AC28. Self-service `password_change` is unchanged.
 
 ---
 
@@ -866,7 +1001,9 @@ Summary: **0** confirmed · **0** rejected · **0** escalated (step skipped).
     - the OAuth2 login second factor and the `/oauth2/login/mfa` route;
     - `AUTH_MFA_RETRY_INTERVAL` and `AUTH_MFA_LOCK_TIMEOUT`;
     - the `user_mfa_secrets` table and the `mfa` vault-target entry point (with the reinstall note for `navigator-vault`);
-    - backup-code regeneration now needing factor proof.
+    - backup-code regeneration now needing factor proof;
+    - `mfa`/`amr` in OAuth2 access tokens, refresh chains, introspection and userinfo, including the one-session-per-identity caveat (§7);
+    - admin `password_reset` now ending the target's sessions.
   - `CHANGELOG.md` — a 0.30.0 entry for these fixes.
 - **API modules**: `navigator_auth.mfa` (`login`, `targets`, `events`, `services`).
 
@@ -877,3 +1014,4 @@ Summary: **0** confirmed · **0** rejected · **0** escalated (step skipped).
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-11-11 | Jesus Lara | Initial draft from the PR #633 review (Claude subagent + codex verification). |
+| 0.2 | 2026-11-11 | Jesus Lara | Open questions resolved: defaults 5 s / 15 s; Module 9 (OAuth2 token `amr`); `password_reset` revokes sessions. Added G8, G9, D8, D9 and AC23–AC28. |
