@@ -105,7 +105,11 @@ class UserSession(BaseHandler):
             return self.critical(reason=f"Error getting User: {err}", exception=err)
 
     async def password_change(self, request: web.Request):
-        """Reset User Password."""
+        """Change the password while preserving existing sessions and tokens.
+
+        The security transition still invalidates trusted devices and updates
+        MFA bookkeeping. Session revocation is reserved for reset and recovery.
+        """
         session = await self.session(request)
         params = self.match_parameters(request)
         try:
