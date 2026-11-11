@@ -127,7 +127,8 @@ coming through it.
 
 Keep the ranges tight: anything inside them can probe the server without
 being reported. Invalid entries are skipped with a warning that gives their
-position, never their value.
+position, never their value. See `docs/trusted_proxies.md` for both settings
+in detail, with AWS examples.
 
 ## Limits
 
