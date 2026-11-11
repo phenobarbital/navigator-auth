@@ -1,0 +1,82 @@
+version: "1.0"
+defaults:
+  effect: deny
+policies:
+  - name: users_admin_access
+    effect: allow
+    description: >-
+      Superusers may read, create, update and delete users, bounded in code by
+      the handler's write allowlist. Never grants is_superuser / user_role /
+      is_staff / password: those are privileged columns no CRUD path writes.
+    resources: ["uri:/api/v1/users*"]
+    actions: ["user:read", "user:create", "user:update", "user:delete"]
+    subjects:
+      groups: ["superuser"]
+    priority: 90
+    enforcing: true
+
+  - name: groups_admin_access
+    effect: allow
+    description: >-
+      Superusers may manage ordinary groups. A protected group (superuser,
+      security_admin, ...) additionally needs users:grant_role, checked in code.
+    resources: ["uri:/api/v1/groups*"]
+    actions: ["group:read", "group:create", "group:update", "group:delete"]
+    subjects:
+      groups: ["superuser"]
+    priority: 90
+    enforcing: true
+
+  - name: user_groups_admin_access
+    effect: allow
+    description: >-
+      Superusers may read, create and delete ordinary group memberships. A
+      protected group additionally needs users:grant_role, checked in code.
+    resources:
+      - "uri:/api/v1/user_groups*"
+      - "uri:/api/v1/usergroups*"
+    actions: ["user_group:read", "user_group:create", "user_group:delete"]
+    subjects:
+      groups: ["superuser"]
+    priority: 90
+    enforcing: true
+
+  - name: group_permissions_admin_access
+    effect: allow
+    description: >-
+      Superusers may read, create and delete group permissions.
+    resources: ["uri:/api/v1/group_permissions*"]
+    actions: ["group_permission:read", "group_permission:create", "group_permission:delete"]
+    subjects:
+      groups: ["superuser"]
+    priority: 90
+    enforcing: true
+
+  - name: permissions_admin_access
+    effect: allow
+    description: >-
+      Superusers may read, create, update and delete permissions.
+    resources: ["uri:/api/v1/permissions*"]
+    actions: ["permission:read", "permission:create", "permission:update", "permission:delete"]
+    subjects:
+      groups: ["superuser"]
+    priority: 90
+    enforcing: true
+
+  - name: users_grant_role
+    effect: allow
+    description: >-
+      Change a user's privileged flags (is_superuser, user_role, is_staff), and
+      change membership or definition of a protected group. Deliberately NOT
+      granted to `superuser`; held by security_admin, the same group as
+      FEAT-106's mfa:disenroll.
+    resources:
+      - "uri:/api/v1/users*"
+      - "uri:/api/v1/user_groups*"
+      - "uri:/api/v1/usergroups*"
+      - "uri:/api/v1/groups*"
+    actions: ["users:grant_role"]
+    subjects:
+      groups: ["security_admin"]
+    priority: 90
+    enforcing: true
