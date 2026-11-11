@@ -52,7 +52,13 @@ app = web.Application()
 app.router.add_static('/static/', path=BASE_DIR / 'examples' / 'static', name='static')
 
 # Auth System
-auth = AuthHandler()
+# ``backends`` pins the provider this example demonstrates (navigator_auth.conf
+# star-imports settings.settings last, so local dev settings would otherwise decide the
+# list), and ``authz_backends=[]`` stops an inherited allow_hosts from letting requests
+# through without a session.
+auth = AuthHandler(
+    backends=["navigator_auth.backends.oauth2.Oauth2Provider"], authz_backends=[]
+)
 auth.setup(app)
 
 app.add_routes([
@@ -172,13 +178,15 @@ if __name__ == '__main__':
                 print()
                 print("3LO flow (public client + PKCE S256):")
                 print(
-                    "  GET http://localhost:5000/oauth2/authorize"
-                    "?response_type=code"
+                    "  Open http://localhost:5000/login and press Authorize — the page"
+                    " generates the PKCE pair (S256) and a random state."
+                )
+                print(
+                    "  Raw form: GET /oauth2/authorize?response_type=code"
                     "&client_id=nav_public_client"
                     "&redirect_uri=http://localhost:5000/static/callback.html"
-                    "&scope=default+profile+email+offline_access"
-                    "&state=test_state"
-                    "&code_challenge=<S256_hash>&code_challenge_method=S256"
+                    "&scope=default+profile+email+offline_access&state=<random>"
+                    "&code_challenge=BASE64URL(SHA256(code_verifier))&code_challenge_method=S256"
                 )
                 print()
                 print("Device Grant flow (RFC 8628, S256 PKCE required):")
