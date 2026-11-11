@@ -1,4 +1,5 @@
 """Shared fixtures for the FEAT-110 migration tests."""
+
 from pathlib import Path
 
 import pytest

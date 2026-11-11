@@ -4,6 +4,7 @@ Every schema change lives in ``navigator_auth/migrations/sql/<set>/NNN_descripti
 Files are discovered from the filesystem: a correctly named file dropped into a set
 directory is registered by being there.
 """
+
 from __future__ import annotations
 
 import hashlib

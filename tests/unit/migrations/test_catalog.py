@@ -1,4 +1,5 @@
 """Unit tests for the migration catalog."""
+
 from pathlib import Path
 
 import pytest
@@ -18,10 +19,19 @@ RELEASED = {
     ("vault", "002_vault_crypto_hardening.sql"): "7e0482573142e4fc9249079306bdecc29d2eff6f8ae2b61addaeee16a6002b18",
     ("identity", "001_identity_credentials.sql"): "8f94156c97e195fb592c398f773f60764e1d9fd6dff2f645bbf4f383415d8dce",
     ("identity", "002_identity_id_token.sql"): "12a6359ed7e518511c7071e289f73a4e54ac412cb02f3e48157771d76dea847c",
-    ("identity", "003_identity_key_version_integer.sql"): "4207ee7f2d25c61d71525664fb172a947d2d41a010fe6ee84ad21c2395a8bc0c",
+    (
+        "identity",
+        "003_identity_key_version_integer.sql",
+    ): "4207ee7f2d25c61d71525664fb172a947d2d41a010fe6ee84ad21c2395a8bc0c",
     ("identity", "004_identity_base_columns.sql"): "d83d2f0501c61fc48b31d98e87a0b6ccd2ffca0e1eefbfc2166f99c9499ec44b",
-    ("identity", "005_identity_legacy_uid_default.sql"): "e77db04d4756984f092f3438d7ceacc515cc5769744c2f7ad747cd36c9d29d25",
-    ("identity", "006_identity_drop_legacy_uid.sql"): "77d5293158802e84de00a854cc744eca30b503747dfd14b9cf9e46af0eb22a1f",
+    (
+        "identity",
+        "005_identity_legacy_uid_default.sql",
+    ): "e77db04d4756984f092f3438d7ceacc515cc5769744c2f7ad747cd36c9d29d25",
+    (
+        "identity",
+        "006_identity_drop_legacy_uid.sql",
+    ): "77d5293158802e84de00a854cc744eca30b503747dfd14b9cf9e46af0eb22a1f",
     ("passkey", "001_passkey_credentials.sql"): "56ec735aed75c85101da1ef9e60ca3f227ce8a1a135f0c9a0a4e0ae8eef3c710",
 }
 
@@ -45,9 +55,7 @@ def test_discover_orders_tmp_catalog(tmp_catalog: Path) -> None:
 def test_every_sql_dir_is_registered() -> None:
     """Every non-private directory under SQL_ROOT is a registered set."""
     directories = [
-        path.name
-        for path in catalog.SQL_ROOT.iterdir()
-        if path.is_dir() and not path.name.startswith((".", "__"))
+        path.name for path in catalog.SQL_ROOT.iterdir() if path.is_dir() and not path.name.startswith((".", "__"))
     ]
     assert set(directories).issubset(MIGRATION_SETS)
 
