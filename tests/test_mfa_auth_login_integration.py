@@ -3,6 +3,7 @@
 Uses a real AuthHandler (BasicAuth configured, no server started) whose
 ``backends`` mapping is replaced by fakes, and a spy on load_session.
 """
+
 import json
 import warnings
 from unittest.mock import AsyncMock
