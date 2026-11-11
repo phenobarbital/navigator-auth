@@ -382,6 +382,9 @@ async def test_enrollment_authorization_is_server_side(env):
     assert pending.user_id == uid
     assert pending.session_hash == hashlib.sha256(session.session_id.encode()).hexdigest()
     assert pending.security_version == await env.version(uid)
+    evaluation = await env.services.evaluate(user)
+    assert pending.context_digest == evaluation.context_digest
+    assert pending.context_digest != forged["context_digest"]
     assert started["expires_in"] == ENROLLMENT_TTL
 
 
@@ -464,6 +467,9 @@ async def test_totp_confirmation_single_use(env):
     assert statuses == [200, 400]
     confirmed = next(body for response, body in results if response.status == 200)
     assert confirmed["status"] == "confirmed"
+    refused = next(body for response, body in results if response.status == 400)
+    assert refused == {"error": "invalid_enrollment"}
+    assert await env.services.store.peek_enrollment(started["enrollment_token"]) is None
 
     assert len(await env.audit(uid, "totp_confirm")) == 1
     assert await env.version(uid) == version_before + 1
@@ -676,6 +682,32 @@ async def test_confirmation_boolean_wrapper_fails_closed_without_context(env) ->
         assert await provider.confirm_enrollment(*args, conn=conn) is False
         evaluation = await env.services.evaluate(user, conn=conn)
         assert await provider.confirm_enrollment(*args, conn=conn, context_digest=evaluation.context_digest) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed_field", ["password", "is_active"])
+async def test_confirmation_rejects_account_context_drift(env, changed_field: str) -> None:
+    """Fresh account changes invalidate a pending seed independently of security-version bumps."""
+    user = await env.new_user()
+    uid = user["user_id"]
+    session = FakeSession(uid)
+    response, started = await env.enroll(user, session)
+    assert response.status == 201
+    version = await env.version(uid)
+    if changed_field == "password":
+        await env.one(f"UPDATE {USERS} SET password=$1 WHERE user_id=$2 RETURNING 1", "changed-password-hash", uid)
+    else:
+        await env.one(f"UPDATE {USERS} SET is_active=false WHERE user_id=$1 RETURNING 1", uid)
+    assert await env.version(uid) == version
+
+    response, body = await env.confirm(user, session, started["enrollment_token"], env.code(started["secret_b32"])[0])
+    assert (response.status, body) == (400, {"error": "invalid_enrollment"})
+    assert await env.services.store.peek_enrollment(started["enrollment_token"]) is None
+    assert await env.active_seed_row(uid) is None
+    assert not await env.services.state.totp_confirmed(uid)
+    assert await env.services.backup_codes.remaining(uid) == 0
+    assert await env.audit(uid, "totp_confirm") == []
+    assert await env.version(uid) == version
 
 
 @pytest.mark.asyncio
