@@ -463,7 +463,6 @@ class MfaHandler:
         except MfaStorageError:
             return _error("mfa_unavailable", 503)
 
-
     async def _audit_denied(self, services: Any, actor_id: int, target_id: int, reason: str) -> None:
         """Durable record of a refused admin disenrolment. Best effort: never changes the response."""
         try:

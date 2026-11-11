@@ -101,7 +101,9 @@ class Env:
     async def make_org(self, *members: int) -> int:
         """Create an organization with the given member user ids."""
         slug = f"mfa-t142-{secrets.token_hex(4)}"
-        org_id = await self.one(f"INSERT INTO {ORGS} (organization, org_slug) VALUES ($1, $2) RETURNING org_id", slug, slug)
+        org_id = await self.one(
+            f"INSERT INTO {ORGS} (organization, org_slug) VALUES ($1, $2) RETURNING org_id", slug, slug
+        )
         self.orgs.append(org_id)
         for user_id in members:
             await self.join(user_id, org_id)
@@ -136,7 +138,9 @@ class Env:
         return await self.rows(sql + " ORDER BY id", target_id)
 
     async def snapshot(self, user_id: int) -> dict:
-        user = await self.row(f"SELECT password, email, is_superuser, is_active FROM {USERS} WHERE user_id = $1", user_id)
+        user = await self.row(
+            f"SELECT password, email, is_superuser, is_active FROM {USERS} WHERE user_id = $1", user_id
+        )
         passkeys = 0
         if await self.one("SELECT to_regclass($1)", PASSKEYS) is not None:
             passkeys = await self.one(f"SELECT count(*) FROM {PASSKEYS} WHERE user_id = $1", user_id)
