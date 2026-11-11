@@ -11,6 +11,7 @@ from .user_identities import (
     IdentitiesManageView,
 )
 from .partners import PartnerKeyHandler
+from .users.role import UserRoleHandler
 from .recovery.handler import PasswordRecoveryHandler
 from .config import ConfigHandler
 from .allowed_ips import AllowedIPHandler
@@ -35,6 +36,7 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     UserGroupManager.configure(app, '/api/v1/usergroups')
     ### User Methods:
     # User:
+    router.add_view(r"/api/v1/users/{id:\d+}/role", UserRoleHandler, name="api_user_role")
     UserManager.configure(app, '/api/v1/users')
     # User Account:
     router.add_view(
@@ -98,7 +100,7 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     router.add_post("/api/v2/user/set_password", usr.password_change)
     router.add_post("/api/v2/user/password_reset/{userid:.*}", usr.password_reset)
     router.add_get("/api/v2/user/gen_token/{userid:.*}", usr.gen_token, allow_head=True)
-    
+
     ## Password Recovery (FEAT-098): three-step, HMAC-signed flow.
     # The literal /confirm segment must be registered before {token}, or
     # "confirm" would be captured as a token (same ordering problem solved
