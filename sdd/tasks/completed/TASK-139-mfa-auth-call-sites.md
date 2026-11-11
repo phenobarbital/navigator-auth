@@ -559,10 +559,8 @@ Spec §4 rows owned here: `test_api_login_mfa_required_does_not_try_next_backend
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
+**Completed by**: sonnet (native), 1 attempt
+**Date**: 2026-11-11
+**Notes**: auth.py call sites: MfaSignal re-raised in _login_token/_backend_auth, api_login maps the signal to a JSON response, finalize_login split out. 7 new tests pass (merge-tier green). Regression suites (test_basic_auth, test_login, test_passkey_signin, test_basic_open_session) could not run in the sandbox (no DB/Redis reachable) — re-run in CI before /sdd-done.
 
 **Deviations from spec**: none | describe if any
