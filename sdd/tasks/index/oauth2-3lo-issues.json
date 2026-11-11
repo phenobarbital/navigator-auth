@@ -250,7 +250,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -260,8 +260,9 @@
       "parallelism_notes": "TASK-204: same backend.py (serialized) and relies on TASK-204's user_from_id stub in tests/test_oauth2_introspection_device_integration.py; uses TASK-203's _redirect_to_login/_resolve_resource_owner (transitive). Also edits tests/test_oauth2_access_gate.py after TASK-203 did.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-205-device-owner-check-login-resume.md"
+      "completed_at": "2026-11-11T22:18:54+00:00",
+      "file": "sdd/tasks/completed/TASK-205-device-owner-check-login-resume.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-206",
