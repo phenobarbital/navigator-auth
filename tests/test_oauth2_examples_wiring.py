@@ -1,4 +1,5 @@
 """FEAT-108 M2 — oauth2_server.py backend pinning and the PKCE browser pages."""
+
 import ast
 from pathlib import Path
 
@@ -14,7 +15,8 @@ def _read(path: Path) -> str:
 
 def _auth_handler_calls(tree: ast.AST) -> list[ast.Call]:
     return [
-        node for node in ast.walk(tree)
+        node
+        for node in ast.walk(tree)
         if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "AuthHandler"
     ]
 
@@ -30,9 +32,7 @@ def test_oauth2_server_pins_backends():
     calls = _auth_handler_calls(ast.parse(_read(SERVER)))
     assert len(calls) == 1
     kwargs = {kw.arg: kw.value for kw in calls[0].keywords}
-    assert ast.literal_eval(kwargs["backends"]) == [
-        "navigator_auth.backends.oauth2.Oauth2Provider"
-    ]
+    assert ast.literal_eval(kwargs["backends"]) == ["navigator_auth.backends.oauth2.Oauth2Provider"]
     assert ast.literal_eval(kwargs["authz_backends"]) == []
 
 

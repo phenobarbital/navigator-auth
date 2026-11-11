@@ -8,43 +8,49 @@ Covers:
   - Config: OAUTH_ACCESS_TOKEN_TTL, OAUTH_REVOCATION_CACHE_TTL present
 """
 
-
 # ---------------------------------------------------------------------------
 # Config constants
 # ---------------------------------------------------------------------------
+
 
 class TestUserinfoConfig:
     """TASK-028 config constants exist and have correct types."""
 
     def test_access_token_ttl_exists(self):
         from navigator_auth.conf import OAUTH_ACCESS_TOKEN_TTL
+
         assert isinstance(OAUTH_ACCESS_TOKEN_TTL, int)
         assert OAUTH_ACCESS_TOKEN_TTL > 0
 
     def test_access_token_ttl_default_one_hour(self):
         """Default access token TTL should be 3600 seconds (1 hour)."""
         from navigator_auth.conf import OAUTH_ACCESS_TOKEN_TTL
+
         assert OAUTH_ACCESS_TOKEN_TTL == 3600
 
     def test_revocation_cache_ttl_exists(self):
         from navigator_auth.conf import OAUTH_REVOCATION_CACHE_TTL
+
         assert isinstance(OAUTH_REVOCATION_CACHE_TTL, int)
         assert OAUTH_REVOCATION_CACHE_TTL > 0
 
     def test_revocation_cache_ttl_default(self):
         """Revocation cache TTL defaults to 30 seconds."""
         from navigator_auth.conf import OAUTH_REVOCATION_CACHE_TTL
+
         assert OAUTH_REVOCATION_CACHE_TTL == 30
 
     def test_logout_redirect_uri_exists(self):
         """AUTH_LOGOUT_REDIRECT_URI must be present (not a new key per D8)."""
         from navigator_auth.conf import AUTH_LOGOUT_REDIRECT_URI
+
         assert AUTH_LOGOUT_REDIRECT_URI is not None
 
 
 # ---------------------------------------------------------------------------
 # userinfo claims logic (pure, no server)
 # ---------------------------------------------------------------------------
+
 
 class TestUserinfoClaims:
     """Scope-gated claim selection logic for the /userinfo endpoint."""
@@ -144,6 +150,7 @@ class TestUserinfoClaims:
 # userinfo 401 conditions (conceptual)
 # ---------------------------------------------------------------------------
 
+
 class TestUserinfo401:
     """userinfo must return 401 for invalid/expired/revoked tokens."""
 
@@ -181,20 +188,22 @@ class TestUserinfo401:
 # logout redirect logic (conceptual)
 # ---------------------------------------------------------------------------
 
+
 class TestLogoutRedirect:
     """Logout must tear down session and redirect to AUTH_LOGOUT_REDIRECT_URI."""
 
     def test_logout_redirect_uri_is_string(self):
         """AUTH_LOGOUT_REDIRECT_URI must be a string path."""
         from navigator_auth.conf import AUTH_LOGOUT_REDIRECT_URI
+
         assert isinstance(AUTH_LOGOUT_REDIRECT_URI, str)
 
     def test_logout_redirect_starts_with_slash(self):
         """AUTH_LOGOUT_REDIRECT_URI must be an absolute path."""
         from navigator_auth.conf import AUTH_LOGOUT_REDIRECT_URI
+
         # Either a path ('/...') or a full URL ('http...')
-        assert AUTH_LOGOUT_REDIRECT_URI.startswith("/") or \
-               AUTH_LOGOUT_REDIRECT_URI.startswith("http")
+        assert AUTH_LOGOUT_REDIRECT_URI.startswith("/") or AUTH_LOGOUT_REDIRECT_URI.startswith("http")
 
     def test_finish_logout_returns_200(self):
         """finish_logout handler concept: returns HTTP 200, not a redirect."""
@@ -204,6 +213,7 @@ class TestLogoutRedirect:
     def test_backend_has_logout_method(self):
         """Oauth2Provider has the logout method (not a stub)."""
         from navigator_auth.backends.oauth2.backend import Oauth2Provider
+
         assert hasattr(Oauth2Provider, "logout")
         # Must be callable (not just `pass`).
         assert callable(getattr(Oauth2Provider, "logout"))
@@ -211,11 +221,13 @@ class TestLogoutRedirect:
     def test_backend_has_finish_logout_method(self):
         """Oauth2Provider has the finish_logout method (not a stub)."""
         from navigator_auth.backends.oauth2.backend import Oauth2Provider
+
         assert hasattr(Oauth2Provider, "finish_logout")
         assert callable(getattr(Oauth2Provider, "finish_logout"))
 
     def test_backend_has_userinfo_method(self):
         """Oauth2Provider has the userinfo method (not a stub)."""
         from navigator_auth.backends.oauth2.backend import Oauth2Provider
+
         assert hasattr(Oauth2Provider, "userinfo")
         assert callable(getattr(Oauth2Provider, "userinfo"))
