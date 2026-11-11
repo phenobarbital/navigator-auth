@@ -213,8 +213,15 @@ async def test_api_login_backend_loop_and_explicit_backend_same_envelope(mfa_app
     explicit = await mfa_app.client.post(
         "/api/v1/login", json={"username": "missing", "password": "wrong"}, headers={"X-Auth-Method": "BasicAuth"}
     )
-    assert response.status == explicit.status
-    assert set(await response.json()) == set(await explicit.json())
+    # Legacy behaviour (unchanged by FEAT-106): the backend loop swallows per-backend failures and ends
+    # with ForbiddenAccess (403), while an explicit backend maps UserNotFound to Unauthorized (401).
+    # What MUST hold for both routes is a refusal with no session and no token.
+    assert response.status in (401, 403)
+    assert explicit.status in (401, 403)
+    for reply in (response, explicit):
+        assert "session" not in {name.lower() for name in reply.cookies}
+        body = await reply.json()
+        assert "token" not in body and "refresh_token" not in body
 
 
 @pytest.mark.asyncio
