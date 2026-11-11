@@ -23,6 +23,15 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
     policy_name: str = "users_grant_role"
     superuser_actions = frozenset()
 
+    @property
+    def request(self):
+        """Return the request, including for lightweight unit-test instances."""
+        return self._request
+
+    @request.setter
+    def request(self, value):
+        self._request = value
+
     async def _not_allowed(self):
         raise web.HTTPMethodNotAllowed(self.request.method, ["POST"])
 
