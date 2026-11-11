@@ -104,10 +104,7 @@ class TestBase:
         assert not issubclass(PermissionHandler, ModelView)
 
     def test_config_matches_policy_pack(self):
-        path = (
-            Path(__file__).resolve().parents[3]
-            / "navigator_auth/abac/default_policies/auth_crud_admin_access.yaml"
-        )
+        path = Path(__file__).resolve().parents[3] / "navigator_auth/abac/default_policies/auth_crud_admin_access.yaml"
         pack = yaml.safe_load(path.read_text())
         pol = next(p for p in pack["policies"] if p["name"] == PermissionHandler.policy_name)
         assert set(pol["actions"]) == set(PermissionHandler.superuser_actions)

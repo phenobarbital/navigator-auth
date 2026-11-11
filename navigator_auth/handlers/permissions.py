@@ -23,9 +23,7 @@ class PermissionHandler(OwnerOrSuperuserGuard, ModelHandler):
 
     owner_column: Optional[str] = None
     policy_name: str = "permissions_admin_access"
-    superuser_actions = frozenset(
-        {"permission:read", "permission:create", "permission:update", "permission:delete"}
-    )
+    superuser_actions = frozenset({"permission:read", "permission:create", "permission:update", "permission:delete"})
     writable_by_admin = frozenset({"permission", "description"})
     privileged_columns = frozenset({"permission_id", "created_at"})
 
