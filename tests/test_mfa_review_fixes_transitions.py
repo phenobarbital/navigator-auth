@@ -1,15 +1,23 @@
 """FEAT-106 review fixes — lock core (M2): bounded user_lock and LOCK_CONNECTION (AC10, AC11)."""
 
 import asyncio
+import json
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
+from navigator_session import AUTH_SESSION_OBJECT
 
 from navigator_auth.conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE
+from navigator_auth.handlers.recovery.revoke import RevocationError
+from navigator_auth.handlers.users.passwd import check_password, set_basic_password
+from navigator_auth.handlers.users.session import UserSession
 from navigator_auth.mfa.events import TransitionAborted, security_transition
 from navigator_auth.mfa.exceptions import MfaStorageError, MfaUnavailable
 from navigator_auth.mfa.security import LOCK_CONNECTION, MfaSecurity, advisory_user_lock
 from navigator_auth.mfa.services import MFA_APP_KEY, MfaServices, MfaServicesSlot
 from navigator_auth.mfa.trusted_devices import TrustedDeviceStore
+from navigator_auth.security_state import current_generation, ensure_security_state_tables
 from tests.fixtures.mfa import mfa_db, mfa_secret, mfa_user_factory, single_connection_authdb  # noqa: F401
 
 
@@ -222,4 +230,206 @@ async def test_transition_commits_write_with_bookkeeping(
     assert first_name == "committed"
     assert version == 1
     assert audit_count == 1
+    assert single_connection_authdb.acquires_inside_lock == []
+
+
+class _Revoker:
+    """Record strict password-reset revocation requests without external session state."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        """Initialize an optional failure raised by strict revocation."""
+        self.error = error
+        self.calls: list[tuple[object, bool]] = []
+
+    async def revoke_user(self, request, user, *, strict: bool = False) -> int:
+        """Record the request and either succeed or raise the configured error."""
+        self.calls.append((user, strict))
+        if self.error is not None:
+            raise self.error
+        return 1
+
+
+def _response_body(response) -> dict:
+    """Decode an aiohttp response body returned by a direct handler invocation."""
+    return json.loads(response.body)
+
+
+async def _password_change(pool, user: dict, app: dict, password: str = "ChangedPw1!"):
+    """Invoke ``password_change`` with its authenticated session and JSON payload stubbed."""
+    handler = UserSession()
+
+    async def session(_request):
+        return {AUTH_SESSION_OBJECT: {"user_id": user["user_id"], "superuser": user["is_superuser"]}}
+
+    async def get_json(_request):
+        return {"password": password, "old_password": user["password_plain"]}
+
+    handler.session = session
+    handler.get_json = get_json
+    handler.match_parameters = lambda _request: {}
+    return await handler.password_change(SimpleNamespace(app=app))
+
+
+async def _password_reset(pool, actor: dict, user: dict, app: dict, password: str = "ResetPw1!"):
+    """Invoke ``password_reset`` as an authenticated superuser with a JSON payload stubbed."""
+    handler = UserSession()
+
+    async def session(_request):
+        return {AUTH_SESSION_OBJECT: {"user_id": actor["user_id"], "superuser": True}}
+
+    async def json_data(_request):
+        return {"password": password}
+
+    handler.session = session
+    handler.json_data = json_data
+    handler.match_parameters = lambda _request: {"userid": user["user_id"]}
+    return await handler.password_reset(SimpleNamespace(app=app))
+
+
+async def _stored_password(pool, user_id: int) -> str:
+    """Return the persisted password hash for a fixture user."""
+    async with await pool.acquire() as conn:
+        return await conn.fetchval(
+            f"SELECT password FROM {AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE} WHERE user_id = $1", user_id
+        )
+
+
+@pytest.mark.asyncio
+async def test_password_change_two_phase_success(mfa_db, mfa_user_factory, mfa_secret):
+    """password_change updates its hash with the MFA audit and version in one transition."""
+    user = await mfa_user_factory()
+    response = await _password_change(mfa_db, user, _app_with_services(mfa_db, mfa_secret))
+
+    assert response.status == 202
+    assert check_password(await _stored_password(mfa_db, user["user_id"]), "ChangedPw1!")
+    security = MfaSecurity(mfa_db, mfa_secret)
+    async with await mfa_db.acquire() as conn:
+        assert await security.current_version(conn, user["user_id"]) == 1
+        assert (
+            await conn.fetchval(
+                f"SELECT count(*) FROM {AUTH_DB_SCHEMA}.user_mfa_audit WHERE target_user_id = $1", user["user_id"]
+            )
+            == 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_password_change_hash_drift_409(mfa_db, mfa_user_factory, monkeypatch):
+    """A separately committed hash change between phases is rejected without another write."""
+    user = await mfa_user_factory()
+    changed_hash = set_basic_password("InterveningPw1!")
+    original_transition = security_transition
+
+    @asynccontextmanager
+    async def drift_transition(app, user_id, event, **kwargs):
+        async with original_transition(app, user_id, event, **kwargs) as conn:
+            async with await mfa_db.acquire() as drift_conn:
+                await drift_conn.fetchval(
+                    f"UPDATE {AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE} SET password = $2 WHERE user_id = $1 RETURNING user_id",
+                    user_id,
+                    changed_hash,
+                )
+            yield conn
+
+    monkeypatch.setattr("navigator_auth.handlers.users.session.security_transition", drift_transition)
+    response = await _password_change(mfa_db, user, {"authdb": mfa_db})
+
+    assert response.status == 409
+    assert _response_body(response) == {"error": "credentials_changed"}
+    assert await _stored_password(mfa_db, user["user_id"]) == changed_hash
+
+
+@pytest.mark.asyncio
+async def test_transition_atomic_on_audit_failure_password_flows(mfa_db, mfa_user_factory, mfa_secret, monkeypatch):
+    """An audit failure rolls back password writes for both password flows."""
+    change_user = await mfa_user_factory()
+    actor = await mfa_user_factory(superuser=True)
+    reset_user = await mfa_user_factory()
+    app = _app_with_services(mfa_db, mfa_secret)
+    change_before = await _stored_password(mfa_db, change_user["user_id"])
+    reset_before = await _stored_password(mfa_db, reset_user["user_id"])
+
+    async def fail_audit(self, conn, entry):
+        raise MfaStorageError("injected")
+
+    monkeypatch.setattr(MfaSecurity, "write_audit", fail_audit)
+    monkeypatch.setattr(
+        "navigator_auth.handlers.users.session.PasswordRecoveryHandler.session_revoker",
+        classmethod(lambda cls: _Revoker()),
+    )
+    change_response = await _password_change(mfa_db, change_user, app)
+    reset_response = await _password_reset(mfa_db, actor, reset_user, app)
+
+    assert change_response.status == reset_response.status == 503
+    assert await _stored_password(mfa_db, change_user["user_id"]) == change_before
+    assert await _stored_password(mfa_db, reset_user["user_id"]) == reset_before
+
+
+@pytest.mark.asyncio
+async def test_password_flows_mfa_unavailable_503(mfa_db, mfa_user_factory, monkeypatch):
+    """Configured but unavailable MFA fails both password flows before credential writes."""
+    change_user = await mfa_user_factory()
+    actor = await mfa_user_factory(superuser=True)
+    reset_user = await mfa_user_factory()
+    unavailable = {MFA_APP_KEY: MfaServicesSlot(MfaServices(backend=None, available=False)), "authdb": mfa_db}
+    change_before = await _stored_password(mfa_db, change_user["user_id"])
+    reset_before = await _stored_password(mfa_db, reset_user["user_id"])
+    monkeypatch.setattr(
+        "navigator_auth.handlers.users.session.PasswordRecoveryHandler.session_revoker",
+        classmethod(lambda cls: _Revoker()),
+    )
+
+    change_response = await _password_change(mfa_db, change_user, unavailable)
+    reset_response = await _password_reset(mfa_db, actor, reset_user, unavailable)
+
+    assert change_response.status == reset_response.status == 503
+    assert _response_body(change_response) == _response_body(reset_response) == {"error": "mfa_unavailable"}
+    assert await _stored_password(mfa_db, change_user["user_id"]) == change_before
+    assert await _stored_password(mfa_db, reset_user["user_id"]) == reset_before
+
+
+@pytest.mark.asyncio
+async def test_password_reset_revokes_sessions(mfa_db, mfa_user_factory, monkeypatch):
+    """Reset increments generation and rolls both writes back when strict revocation fails."""
+    await ensure_security_state_tables(mfa_db)
+    actor = await mfa_user_factory(superuser=True)
+    user = await mfa_user_factory()
+    revoker = _Revoker()
+    monkeypatch.setattr(
+        "navigator_auth.handlers.users.session.PasswordRecoveryHandler.session_revoker",
+        classmethod(lambda cls: revoker),
+    )
+    response = await _password_reset(mfa_db, actor, user, {"authdb": mfa_db})
+    assert response.status == 202
+    assert len(revoker.calls) == 1
+    assert revoker.calls[0][0].user_id == user["user_id"]
+    assert revoker.calls[0][1] is True
+    async with await mfa_db.acquire() as conn:
+        assert await current_generation(conn, user["user_id"]) == 1
+    before = await _stored_password(mfa_db, user["user_id"])
+    monkeypatch.setattr(
+        "navigator_auth.handlers.users.session.PasswordRecoveryHandler.session_revoker",
+        classmethod(lambda cls: _Revoker(RevocationError("injected"))),
+    )
+    failed = await _password_reset(mfa_db, actor, user, {"authdb": mfa_db}, password="AnotherPw1!")
+    assert failed.status == 503
+    assert _response_body(failed) == {"error": "temporarily_unavailable"}
+    assert await _stored_password(mfa_db, user["user_id"]) == before
+    async with await mfa_db.acquire() as conn:
+        assert await current_generation(conn, user["user_id"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_password_flows_single_connection(single_connection_authdb, mfa_user_factory, monkeypatch):
+    """Both flows finish using a one-connection authdb without acquiring inside a lock."""
+    await ensure_security_state_tables(single_connection_authdb)
+    user = await mfa_user_factory()
+    actor = await mfa_user_factory(superuser=True)
+    monkeypatch.setattr(
+        "navigator_auth.handlers.users.session.PasswordRecoveryHandler.session_revoker",
+        classmethod(lambda cls: _Revoker()),
+    )
+    app = {"authdb": single_connection_authdb}
+    await asyncio.wait_for(_password_change(single_connection_authdb, user, app), timeout=10)
+    await asyncio.wait_for(_password_reset(single_connection_authdb, actor, user, app), timeout=10)
     assert single_connection_authdb.acquires_inside_lock == []
