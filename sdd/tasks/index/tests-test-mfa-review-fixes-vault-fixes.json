@@ -1,0 +1,55 @@
+{
+  "feature": "tests-test-mfa-review-fixes-vault-fixes",
+  "feature_id": "FEAT-115",
+  "spec": "sdd/specs/tests-test-mfa-review-fixes-vault-fixes.spec.md",
+  "type": "feature",
+  "base_branch": "dev",
+  "created_at": "2026-11-11T21:51:46+00:00",
+  "completed_at": null,
+  "parallel_semantics": "exclusive",
+  "validation_contract": "required",
+  "test_contract": {
+    "schema": 2,
+    "runners": [
+      {
+        "kind": "pytest",
+        "targets": [
+          "tests/unit/vault/test_asyncpg_pool.py",
+          "tests/test_mfa_review_fixes_vault.py",
+          "tests/test_mfa_review_followups.py",
+          "tests/unit/identity/test_identity_vault_v2.py",
+          "tests/test_mfa_review_fixes_docs.py"
+        ],
+        "settings": {
+          "markers": ""
+        },
+        "tiers": [
+          "task",
+          "merge",
+          "feature"
+        ]
+      }
+    ],
+    "digest": "sha256:7f2e3fe8cc0afd75fbdcdd268713812f7ab32d34880645a2f9ccfb334ac714b8"
+  },
+  "tasks": [
+    {
+      "id": "TASK-214",
+      "slug": "asyncpg-pool-adapter-for-vault-targets",
+      "title": "asyncpg pool adapter for vault targets on the asyncdb authdb pool",
+      "feature_id": "FEAT-115",
+      "feature": "tests-test-mfa-review-fixes-vault-fixes",
+      "spec": "sdd/specs/tests-test-mfa-review-fixes-vault-fixes.spec.md",
+      "status": "pending",
+      "priority": "high",
+      "effort": "S",
+      "depends_on": [],
+      "parallel": true,
+      "parallelism_notes": "single task: creates navigator_auth/vault/pool.py and is its only consumer (mfa/identity targets)",
+      "assigned_to": null,
+      "started_at": null,
+      "completed_at": null,
+      "file": "sdd/tasks/active/TASK-214-asyncpg-pool-adapter-for-vault-targets.md"
+    }
+  ]
+}
