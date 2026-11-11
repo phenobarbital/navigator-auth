@@ -1,4 +1,5 @@
 """Tests for PolicyAdapter.from_policy and AbstractPolicy.raw_resources (FEAT-109 M1)."""
+
 import copy
 
 import pytest
@@ -60,9 +61,7 @@ def test_from_policy_object_policy_urn():
 
 def test_from_policy_negated_resource():
     """Negated resources generate a higher-priority enforcing deny policy."""
-    result = PolicyAdapter.from_policy(
-        Policy(name="api", resource=["urn:uri:/api/.*", "!urn:uri:/api/admin.*"])
-    )
+    result = PolicyAdapter.from_policy(Policy(name="api", resource=["urn:uri:/api/.*", "!urn:uri:/api/admin.*"]))
 
     assert not result.skipped
     assert result.additional_policies[0].name == "api_negated"

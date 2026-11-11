@@ -334,8 +334,12 @@ class PolicyAdapter:
                 elif isinstance(value, list):
                     valid = bool(value) and all(isinstance(item, int) and not isinstance(item, bool) for item in value)
                 elif isinstance(value, Mapping):
-                    valid = bool(value) and set(value).issubset({"min", "max"}) and all(
-                        isinstance(item, (int, float)) and not isinstance(item, bool) for item in value.values()
+                    valid = (
+                        bool(value)
+                        and set(value).issubset({"min", "max"})
+                        and all(
+                            isinstance(item, (int, float)) and not isinstance(item, bool) for item in value.values()
+                        )
                     )
                 else:
                     valid = False
