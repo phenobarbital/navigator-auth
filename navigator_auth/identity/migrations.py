@@ -10,12 +10,13 @@ startup after the first.
 """
 
 import logging
-from pathlib import Path
 from typing import Any
+
+from ..migrations.catalog import set_dir
 
 logger = logging.getLogger("navigator.identity")
 
-SQL_DIR = Path(__file__).parent / "sql"
+SQL_DIR = set_dir("identity")
 
 
 # Applied in order, at every startup. Idempotent: each file uses
