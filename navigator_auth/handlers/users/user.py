@@ -3,10 +3,7 @@ from typing import Optional
 from asyncdb.models import Model
 from navigator.views.model import NotSet
 from ...models import User
-from ...conf import (
-    AUTH_USER_MODEL,
-    AUTH_USER_VIEW
-)
+from ...conf import AUTH_USER_MODEL, AUTH_USER_VIEW
 from ..guard_hooks import GuardedModelViewHooks
 from ..guards import OwnerOrSuperuserGuard
 from ..handler import ModelHandler
@@ -57,7 +54,7 @@ class UserManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandler):
         return await self.get_userid(session=self._session)
 
     async def _set_display_name(self, value, column, **kwargs):
-        data = kwargs.get('data')
+        data = kwargs.get("data")
         if not value:
             try:
                 return f"{data['first_name']} {data['last_name']}"

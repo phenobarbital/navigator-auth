@@ -17,79 +17,46 @@ from .config import ConfigHandler
 from .allowed_ips import AllowedIPHandler
 from .client_access import ClientAccessHandler
 
+
 ## TODO migration of login/logout handlers:
 def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     ### Model permissions:
-    router.add_view(
-        r"/api/v1/permissions/{id:.*}", PermissionHandler,
-        name="api_permissions_id"
-    )
-    router.add_view(
-        r"/api/v1/permissions{meta:\:?.*}", PermissionHandler,
-        name="api_permissions"
-    )
+    router.add_view(r"/api/v1/permissions/{id:.*}", PermissionHandler, name="api_permissions_id")
+    router.add_view(r"/api/v1/permissions{meta:\:?.*}", PermissionHandler, name="api_permissions")
     ## Groups:
-    GroupManager.configure(app, '/api/v1/groups')
+    GroupManager.configure(app, "/api/v1/groups")
     # User Group:
-    UserGroupManager.configure(app, '/api/v1/user_groups')
-    GroupPermissionManager.configure(app, '/api/v1/group_permissions')
-    UserGroupManager.configure(app, '/api/v1/usergroups')
+    UserGroupManager.configure(app, "/api/v1/user_groups")
+    GroupPermissionManager.configure(app, "/api/v1/group_permissions")
+    UserGroupManager.configure(app, "/api/v1/usergroups")
     ### User Methods:
     # User:
     router.add_view(r"/api/v1/users/{id:\d+}/role", UserRoleHandler, name="api_user_role")
-    UserManager.configure(app, '/api/v1/users')
+    UserManager.configure(app, "/api/v1/users")
     # User Account:
-    router.add_view(
-        r"/api/v1/user_accounts/{id:.*}", UserAccountHandler,
-        name="api_auth_useraccount_id"
-    )
-    router.add_view(
-        r"/api/v1/user_accounts{meta:\:?.*}", UserAccountHandler,
-        name="api_auth_useraccount"
-    )
+    router.add_view(r"/api/v1/user_accounts/{id:.*}", UserAccountHandler, name="api_auth_useraccount_id")
+    router.add_view(r"/api/v1/user_accounts{meta:\:?.*}", UserAccountHandler, name="api_auth_useraccount")
     # Partner Key Authentication Management
-    router.add_view(
-        r"/api/v1/partner/tokens/{id:.*}", PartnerKeyHandler,
-        name="api_auth_partnerkey_id"
-    )
-    router.add_view(
-        r"/api/v1/partner/tokens{meta:\:?.*}", PartnerKeyHandler,
-        name="api_auth_partnerkey"
-    )
+    router.add_view(r"/api/v1/partner/tokens/{id:.*}", PartnerKeyHandler, name="api_auth_partnerkey_id")
+    router.add_view(r"/api/v1/partner/tokens{meta:\:?.*}", PartnerKeyHandler, name="api_auth_partnerkey")
     # User Account:
-    router.add_view(
-        r"/api/v1/user_identity/{id:.*}", UserIdentityHandler,
-        name="api_auth_useridentity_id"
-    )
-    router.add_view(
-        r"/api/v1/user_identity{meta:\:?.*}", UserIdentityHandler,
-        name="api_auth_useridentity"
-    )
+    router.add_view(r"/api/v1/user_identity/{id:.*}", UserIdentityHandler, name="api_auth_useridentity_id")
+    router.add_view(r"/api/v1/user_identity{meta:\:?.*}", UserIdentityHandler, name="api_auth_useridentity")
     ### Identity Vault (linked external credentials):
     # literal segments must be registered before the {identity_id} route.
+    router.add_view("/api/v1/user/identities/manage", IdentitiesManageView, name="api_user_identities_manage")
     router.add_view(
-        "/api/v1/user/identities/manage", IdentitiesManageView,
-        name="api_user_identities_manage"
-    )
-    router.add_view(
-        r"/api/v1/user/identities/link/{provider:[a-z0-9_]+}",
-        IdentityLinkHandler,
-        name="api_user_identities_link"
+        r"/api/v1/user/identities/link/{provider:[a-z0-9_]+}", IdentityLinkHandler, name="api_user_identities_link"
     )
     router.add_view(
         r"/api/v1/user/identities/{provider:[a-z0-9_]+}/credential",
         IdentityCredentialHandler,
-        name="api_user_identity_credential"
+        name="api_user_identity_credential",
     )
     router.add_view(
-        r"/api/v1/user/identities/{identity_id:[0-9a-fA-F-]{36}}",
-        UserIdentitiesHandler,
-        name="api_user_identities_id"
+        r"/api/v1/user/identities/{identity_id:[0-9a-fA-F-]{36}}", UserIdentitiesHandler, name="api_user_identities_id"
     )
-    router.add_view(
-        "/api/v1/user/identities", UserIdentitiesHandler,
-        name="api_user_identities"
-    )
+    router.add_view("/api/v1/user/identities", UserIdentitiesHandler, name="api_user_identities")
     ### User Session Methods:
     usr = UserSession()
     router.add_get("/api/v2/user/logout", usr.logout, allow_head=True)
@@ -105,44 +72,22 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
     # The literal /confirm segment must be registered before {token}, or
     # "confirm" would be captured as a token (same ordering problem solved
     # above for the identity routes).
+    router.add_view("/api/v1/password-recovery/confirm", PasswordRecoveryHandler, name="api_password_recovery_confirm")
     router.add_view(
-        "/api/v1/password-recovery/confirm", PasswordRecoveryHandler,
-        name="api_password_recovery_confirm"
+        r"/api/v1/password-recovery/{token}", PasswordRecoveryHandler, name="api_password_recovery_validate"
     )
-    router.add_view(
-        r"/api/v1/password-recovery/{token}", PasswordRecoveryHandler,
-        name="api_password_recovery_validate"
-    )
-    router.add_view(
-        "/api/v1/password-recovery", PasswordRecoveryHandler,
-        name="api_password_recovery_request"
-    )
+    router.add_view("/api/v1/password-recovery", PasswordRecoveryHandler, name="api_password_recovery_request")
     # Legacy aliases: /forgot-password -> step 1, /reset-password -> step 3.
-    router.add_view(
-        r"/api/v1/forgot-password", PasswordRecoveryHandler,
-        name="api_forgot_password"
-    )
-    router.add_view(
-        r"/api/v1/reset-password", PasswordRecoveryHandler,
-        name="api_reset_password"
-    )
+    router.add_view(r"/api/v1/forgot-password", PasswordRecoveryHandler, name="api_forgot_password")
+    router.add_view(r"/api/v1/reset-password", PasswordRecoveryHandler, name="api_reset_password")
 
     ## Security: Environment/Config debug (superuser only, GET only):
     ## Disabled by default; enable via SECURITY_CONFIG_HANDLER env flag.
     if SECURITY_CONFIG_HANDLER is True:
-        router.add_get(
-            "/api/v1/security/config", ConfigHandler,
-            name="api_security_config", allow_head=False
-        )
+        router.add_get("/api/v1/security/config", ConfigHandler, name="api_security_config", allow_head=False)
 
     ## OAuth2 per-client access gate (FEAT-095 TASK-042, superuser only):
-    router.add_view(
-        r"/api/v1/oauth2/clients/{client_uid}/access", ClientAccessHandler,
-        name="api_oauth2_client_access"
-    )
+    router.add_view(r"/api/v1/oauth2/clients/{client_uid}/access", ClientAccessHandler, name="api_oauth2_client_access")
 
     ## Security: Add public IPs to allowed_ips backend (superuser only, POST only):
-    router.add_post(
-        "/api/v1/security/allowed_ips", AllowedIPHandler,
-        name="api_security_allowed_ips"
-    )
+    router.add_post("/api/v1/security/allowed_ips", AllowedIPHandler, name="api_security_allowed_ips")
