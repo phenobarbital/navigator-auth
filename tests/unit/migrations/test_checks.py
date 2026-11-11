@@ -1,4 +1,5 @@
 """Tests for migration prerequisites and completion checks."""
+
 from pathlib import Path
 
 import pytest
@@ -6,7 +7,6 @@ import pytest
 from navigator_auth.conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE
 from navigator_auth.migrations.catalog import MigrationFile
 from navigator_auth.migrations.checks import (
-    OAUTH2_CLIENT_COLUMNS,
     OAUTH2_INDEXES,
     OAUTH2_TABLES,
     check_postconditions,

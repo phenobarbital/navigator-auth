@@ -4,6 +4,7 @@ Read-only: every function here runs catalog queries only. ``runner.upgrade()`` c
 ``check_prerequisites`` before a file's SQL and ``check_postconditions`` after it, inside
 the file's transaction, so an unmet condition rolls the file back and leaves it pending.
 """
+
 from __future__ import annotations
 
 import logging
