@@ -9,6 +9,7 @@ Provides idempotent DDL for the Session Vault system, applied in order by
   64-char HMAC ``session_id``, ``quarantine``/``integrity_fail`` audit operations
   and INTEGER key versions. Each change is applied only when needed.
 """
+
 import logging
 from typing import Any
 

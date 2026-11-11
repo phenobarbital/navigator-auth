@@ -1,6 +1,5 @@
 """Unit tests for navigator_auth.vault.migrations module."""
 import warnings
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
