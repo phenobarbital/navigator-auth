@@ -3,13 +3,14 @@
 import asyncio
 import secrets
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from navigator_auth.conf import AUTH_DB_SCHEMA
 from navigator_auth.handlers.mfa import MfaHandler
 from navigator_auth.mfa.exceptions import MfaStorageError
+from navigator_auth.mfa.limiter import StrictRateLimiter
 from navigator_auth.mfa.types import MfaState
 from navigator_auth.passkey.migrations import ensure_passkey_tables
 from tests.fixtures.mfa import (  # noqa: F401
@@ -58,6 +59,55 @@ async def test_enforced_ordinary_user_can_enroll(env) -> None:
     )
     assert response.status == 200
     assert confirmed["status"] == "confirmed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["enroll_totp", "disenroll_totp", "backup_codes"])
+@pytest.mark.parametrize("refused_by", ["user", "ip"])
+async def test_management_limits_precede_all_proofs(env, monkeypatch, method: str, refused_by: str) -> None:
+    """Both limits reject each route before password checks or consumable proofs."""
+    user, session, secret, codes = await env.enrolled_user()
+    uid = user["user_id"]
+    active = await env.active_seed_row(uid)
+    user_check = AsyncMock(return_value=refused_by != "user")
+    ip_check = AsyncMock(return_value=refused_by != "ip")
+    password, totp, backup = Mock(), AsyncMock(), AsyncMock()
+    monkeypatch.setattr(env.services.user_limiter, "check", user_check)
+    monkeypatch.setattr(env.services.ip_limiter, "check", ip_check)
+    monkeypatch.setattr(env.services.backend._idp, "check_password", password)
+    monkeypatch.setattr(env.services.providers["totp"], "verify", totp)
+    monkeypatch.setattr(env.services.backup_codes, "consume", backup)
+    response, body = await env.call(
+        method, uid, {"password": user["password_plain"], "code": env.code(secret)[0], "backup_code": codes[0]}, session
+    )
+    assert (response.status, body) == (429, {"error": "rate_limited"})
+    user_check.assert_awaited_once_with(f"mgmt:{uid}")
+    if refused_by == "ip":
+        ip_check.assert_awaited_once_with("127.0.0.1")
+    password.assert_not_called()
+    totp.assert_not_awaited()
+    backup.assert_not_awaited()
+    assert await env.active_seed_row(uid) == active
+
+
+@pytest.mark.asyncio
+async def test_management_wrong_password_and_proof_share_budget(env, monkeypatch) -> None:
+    """Failed password and factor proofs consume the shared budget across management routes."""
+    user, session, secret, _ = await env.enrolled_user()
+    uid = user["user_id"]
+    active = await env.active_seed_row(uid)
+    monkeypatch.setattr(env.services, "user_limiter", StrictRateLimiter(env.redis_pool, "2/hour", "management-test"))
+    response, body = await env.call("enroll_totp", uid, {"password": "wrong"}, session)
+    assert (response.status, body) == (403, {"error": "invalid_credentials"})
+    response, body = await env.call(
+        "backup_codes", uid, {"password": user["password_plain"], "code": "invalid"}, session
+    )
+    assert (response.status, body) == (403, {"error": "strong_factor_proof_required"})
+    response, body = await env.call(
+        "disenroll_totp", uid, {"password": user["password_plain"], "code": env.code(secret)[0]}, session
+    )
+    assert (response.status, body) == (429, {"error": "rate_limited"})
+    assert await env.active_seed_row(uid) == active
 
 
 @pytest.mark.asyncio

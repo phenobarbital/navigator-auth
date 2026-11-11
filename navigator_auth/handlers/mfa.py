@@ -240,6 +240,10 @@ class MfaHandler:
         services, session, record = await self._session_user(request, services)
         body = await _json_body(request)
         uid = int(record["user_id"] if isinstance(record, dict) else getattr(record, "user_id"))
+        if not await services.user_limiter.check(f"mgmt:{uid}") or not await services.ip_limiter.check(
+            _remote(request)
+        ):
+            return _error("rate_limited", 429)
         if not self._fresh_password_ok(services, record, body.get("password")):
             return _error("invalid_credentials", 403)
         try:
@@ -332,6 +336,10 @@ class MfaHandler:
         services, session, record = await self._session_user(request, services)
         body = await _json_body(request)
         uid = int(record["user_id"] if isinstance(record, dict) else getattr(record, "user_id"))
+        if not await services.user_limiter.check(f"mgmt:{uid}") or not await services.ip_limiter.check(
+            _remote(request)
+        ):
+            return _error("rate_limited", 429)
         if not self._fresh_password_ok(services, record, body.get("password")):
             return _error("invalid_credentials", 403)
         try:
@@ -390,6 +398,10 @@ class MfaHandler:
         services, session, record = await self._session_user(request, services)
         body = await _json_body(request)
         uid = int(record["user_id"] if isinstance(record, dict) else getattr(record, "user_id"))
+        if not await services.user_limiter.check(f"mgmt:{uid}") or not await services.ip_limiter.check(
+            _remote(request)
+        ):
+            return _error("rate_limited", 429)
         if not self._fresh_password_ok(services, record, body.get("password")):
             return _error("invalid_credentials", 403)
         try:
