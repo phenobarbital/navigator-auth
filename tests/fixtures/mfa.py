@@ -11,6 +11,7 @@ import redis.asyncio as aioredis
 from navigator_auth.conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE, REDIS_AUTH_URL, default_dsn
 from navigator_auth.handlers.users.passwd import set_basic_password
 from navigator_auth.mfa.migrations import ensure_mfa_tables
+from navigator_auth.mfa.security import LOCK_CONNECTION
 from navigator_auth.mfa.types import MfaMode, OtpNotificationPayload, TenantMfaPolicy
 
 MFA_TEST_SECRET = b"test-mfa-secret-feat106-not-for-production"
@@ -70,6 +71,48 @@ async def mfa_db():
     except Exception as err:  # pylint: disable=W0703
         pytest.skip(f"Postgres unavailable: {type(err).__name__}: {err}")
     yield pool
+    await pool.close()
+
+
+class _LockAwarePool:
+    """asyncdb pool wrapper recording every ``acquire()`` with the lock context value."""
+
+    def __init__(self, pool) -> None:
+        """Wrap a pool and initialize acquire records."""
+        self._pool = pool
+        self.strict = False
+        self.acquires: list[bool] = []
+        self.acquires_inside_lock: list[object] = []
+
+    def acquire(self):
+        """Record the call, optionally refuse it inside a lock scope, then delegate."""
+        held = LOCK_CONNECTION.get()
+        self.acquires.append(held is not None)
+        if held is not None:
+            self.acquires_inside_lock.append(held)
+            if self.strict:
+                raise AssertionError("pool.acquire() called inside a user_lock scope")
+        return self._pool.acquire()
+
+    def __getattr__(self, name):
+        """Delegate unknown attributes to the wrapped pool."""
+        return getattr(self._pool, name)
+
+
+@pytest_asyncio.fixture
+async def single_connection_authdb():
+    """Live authdb pool capped at one connection that records nested acquires, or skip."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            import asyncdb  # pylint: disable=import-outside-toplevel
+
+            pool = asyncdb.AsyncPool("pg", dsn=default_dsn, max_clients=1, min_size=1)
+        await pool.connect()
+        await ensure_mfa_tables(pool)
+    except Exception as err:  # pylint: disable=W0703
+        pytest.skip(f"Postgres unavailable: {type(err).__name__}: {err}")
+    yield _LockAwarePool(pool)
     await pool.close()
 
 
