@@ -88,7 +88,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -98,8 +98,9 @@
       "parallelism_notes": "TASK-171: both modify navigator_auth/conf.py (serialized, 171 first)",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-173-mfa-services-self-healing.md"
+      "completed_at": "2026-11-11T16:53:29+00:00",
+      "file": "sdd/tasks/completed/TASK-173-mfa-services-self-healing.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-174",
@@ -254,7 +255,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -265,8 +266,9 @@
       "parallelism_notes": "TASK-171: user_lock/LOCK_CONNECTION (mfa/security.py); TASK-172: user_from_id/TOTPProvider.verify/consume_and_rotate conn= parameters",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-181-second-factor-gate-core.md"
+      "completed_at": "2026-11-11T16:53:30+00:00",
+      "file": "sdd/tasks/completed/TASK-181-second-factor-gate-core.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-182",
