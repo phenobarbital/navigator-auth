@@ -30,7 +30,12 @@ EXPECTED_RESOURCES = {
     "user_groups_admin_access": ["uri:/api/v1/user_groups*", "uri:/api/v1/usergroups*"],
     "group_permissions_admin_access": ["uri:/api/v1/group_permissions*"],
     "permissions_admin_access": ["uri:/api/v1/permissions*"],
-    "users_grant_role": ["uri:/api/v1/users*", "uri:/api/v1/user_groups*", "uri:/api/v1/usergroups*", "uri:/api/v1/groups*"],
+    "users_grant_role": [
+        "uri:/api/v1/users*",
+        "uri:/api/v1/user_groups*",
+        "uri:/api/v1/usergroups*",
+        "uri:/api/v1/groups*",
+    ],
 }
 
 
