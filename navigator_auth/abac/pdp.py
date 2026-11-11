@@ -110,6 +110,7 @@ class PDP:
             The shared ``PolicyEvaluator`` used unless tenant SQL filtering
             selects a per-tenant evaluator.
         """
+
         return self._evaluator
 
     def policies(self):

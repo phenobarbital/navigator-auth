@@ -22,6 +22,7 @@ class AdapterResult:
         skipped: Whether the input could not be safely adapted.
         reason: The reason adaptation was skipped.
     """
+
     policy: Optional[ResourcePolicy] = None
     warnings: List[str] = field(default_factory=list)
     additional_policies: List[ResourcePolicy] = field(default_factory=list)
