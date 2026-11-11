@@ -14,12 +14,14 @@ from navigator_session.vault.registry import VaultRow
 from navigator_session.vault.targets import UserVaultTarget
 
 from navigator_auth.conf import AUTH_DB_SCHEMA
+from navigator_auth.identity.targets import IdentityTarget
 from navigator_auth.mfa.exceptions import MfaStorageError
 from navigator_auth.mfa.migrations import MFA_TABLES, ensure_mfa_tables
 from navigator_auth.mfa.store import MfaChallengeStore
 from navigator_auth.mfa.targets import MfaSecretTarget, factory
 from navigator_auth.mfa.totp import TOTP_VAULT_KEY, TOTPProvider, mfa_seed_context
 from navigator_auth.mfa.types import PROVIDER_TOTP
+from navigator_auth.vault import asyncpg_pool
 from navigator_auth.vault.integration import VAULT_KEYRING_APP_KEY, setup_vault_tables
 from tests.fixtures.mfa import frozen_totp_clock, mfa_db, mfa_redis_pool, mfa_secret, mfa_user_factory  # noqa: F401
 
@@ -180,13 +182,11 @@ async def test_rotate_master_key_rotates_mfa_seeds(
     async with await mfa_db.acquire() as conn:
         await provider._install_seed(conn, user["user_id"], seed)
 
-    # navigator_session's PostgresTarget.transaction() calls ``conn.transaction().start()`` (asyncpg API);
-    # asyncdb's driver ``transaction()`` is an awaitable that already started it. Rotate through the raw
-    # asyncpg pool the asyncdb pool wraps, which the library supports.
-    raw_pool = getattr(mfa_db, "_pool", mfa_db)
-    target = MfaSecretTarget(raw_pool)
+    # Rotate on the application's asyncdb pool itself (FEAT-115): MfaSecretTarget wraps it, and
+    # navigator-session's UserVaultTarget gets the same native asyncpg connections through asyncpg_pool().
+    target = MfaSecretTarget(mfa_db)
     stats = await rotate_master_key(
-        [UserVaultTarget(raw_pool), target],
+        [UserVaultTarget(asyncpg_pool(mfa_db)), target],
         old_id,
         new_id,
         KeyRing({old_id: old_key, new_id: new_key}, new_id),
@@ -205,6 +205,36 @@ async def test_rotate_master_key_rotates_mfa_seeds(
     )
     code = TOTP(seed, 6, SHA1(), 30).generate(frozen_totp_clock()).decode("ascii")
     assert await new_provider.verify(None, user, code) is True
+
+
+@pytest.mark.asyncio
+async def test_targets_transaction_on_asyncdb_pool(mfa_db):
+    """FEAT-115: navigator-auth targets run transactions on the asyncdb ``authdb`` pool."""
+    await setup_vault_tables(mfa_db)
+    for target in (MfaSecretTarget(mfa_db), IdentityTarget(mfa_db)):
+        async with target.transaction() as conn:
+            assert not hasattr(conn, "fetch_all")  # native asyncpg connection, not the asyncdb driver
+            assert await conn.fetchval("SELECT 1") == 1
+        async for _batch in target.iter_batches(1):
+            break
+
+
+@pytest.mark.asyncio
+async def test_mfa_target_write_fails_closed_on_asyncdb_pool(mfa_db):
+    """FEAT-115: on the asyncdb pool a row-less or rejected write raises instead of reporting success."""
+    target = MfaSecretTarget(mfa_db)
+    identity = {"user_id": 1, "provider": PROVIDER_TOTP, "key": TOTP_VAULT_KEY}
+    missing = VaultRow(ref="missing", pk=uuid.uuid4(), identity=identity, values={})
+    with pytest.raises(LookupError):
+        async with target.transaction():
+            await target.write(missing, {"ciphertext_db": b"x"}, 1)
+    rejected = VaultRow(ref="rejected", pk="not-a-uuid", identity=identity, values={})
+    with pytest.raises(Exception) as err:
+        async with target.transaction():
+            await target.write(rejected, {"ciphertext_db": b"x"}, 1)
+    assert not isinstance(err.value, LookupError)
+    async with mfa_db.acquire() as conn:
+        assert await conn.fetchval("SELECT 1") == 1
 
 
 @pytest.mark.asyncio

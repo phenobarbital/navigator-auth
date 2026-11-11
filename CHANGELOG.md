@@ -1,5 +1,13 @@
 # Unreleased
 
+- **Vault targets on the asyncdb `authdb` pool (FEAT-115).** `MfaSecretTarget`
+  and `IdentityTarget` now run on native asyncpg connections even when they are
+  given the application's asyncdb pool, so in-process master-key rotation no
+  longer crashes (`'coroutine' object has no attribute 'start'`) and no longer
+  counts a failed or row-less write as rotated. The new
+  `navigator_auth.vault.asyncpg_pool()` does the same for navigator-session's
+  `UserVaultTarget`. See `docs/vault.rst`.
+
 - **FEAT-106 review fixes (0.30.0).** Fixes every high-severity finding from the
   PR #633 review. The OAuth2 login form now enforces the second factor
   (`POST /oauth2/login/mfa`; `503` when 2FA is on and the MFA services are
