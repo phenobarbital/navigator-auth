@@ -60,6 +60,7 @@ example's bootstrap must apply them itself through `navigator_auth.migrations.up
 | `examples/README.md` | MODIFY | `ddl.sql` mention; startup-migration sentence |
 | `examples/oauth2_mcp_server.py` | MODIFY | Docstring `ddl.sql` mention |
 | `examples/identity_vault_server.py` | MODIFY | Bootstrap runs `upgrade()`; docstrings |
+| `examples/sql/identity_vault_schema.sql` | MODIFY | Comment-only: drop the moved `identity/sql/` path (acceptance grep covers `examples/`) |
 | `tests/unit/migrations/test_docs_index.py` | CREATE | README index test |
 
 ---
@@ -132,6 +133,7 @@ file's header comment or `git log --follow -- <file>`; never guess one (write "â
     {"path": "examples/README.md", "action": "MODIFY"},
     {"path": "examples/oauth2_mcp_server.py", "action": "MODIFY"},
     {"path": "examples/identity_vault_server.py", "action": "MODIFY"},
+    {"path": "examples/sql/identity_vault_schema.sql", "action": "MODIFY"},
     {"path": "tests/unit/migrations/test_docs_index.py", "action": "CREATE"}
   ],
   "contract_symbols": [
