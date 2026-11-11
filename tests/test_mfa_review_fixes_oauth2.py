@@ -669,3 +669,110 @@ async def test_oauth2_login_single_connection_pool(
         # Non-vacuous: the measured calls really ran on the one-connection pool.
         assert len(single_connection_authdb.acquires) > before
         assert single_connection_authdb.acquires_inside_lock == []
+
+
+def _oauth_claims(token: str) -> dict:
+    """Unverified claims of a minted token: the middleware verifies it; this only reads assurance."""
+    return jwt.decode(token, options={"verify_signature": False})
+
+
+async def _drop_session(live: OAuthLive, user: dict, session_id: str) -> None:
+    """Delete the identity-shared session so the next bearer request recreates it from the token."""
+    pool = live.auth.session.storage._redis
+    async with aioredis.Redis(connection_pool=pool) as redis_client:
+        await redis_client.delete(f"session:{session_id}", f"user:{user['username']}")
+
+
+async def _totp_mint(live: OAuthLive, user: dict, secret: str, *, remember: bool = False):
+    """OAuth2 TOTP login through the browser leg; returns (access token, /oauth2/login/mfa response)."""
+    params, verifier = live.authorize_params()
+    page = await live.oauth_login(user, params)
+    assert page.status == 200, await page.text()
+    response = await live.oauth_mfa(
+        params, await live.challenge_of(page), PROVIDER_TOTP, live.totp(secret), remember=remember
+    )
+    assert response.status == 302, await response.text()
+    return await live.mint(response, verifier), response
+
+
+async def _plain_mint(live: OAuthLive, user: dict, *, cookies: dict | None = None) -> str:
+    """OAuth2 login with no factor owed (or a trusted device): the password POST redirects directly."""
+    params, verifier = live.authorize_params()
+    response = await live.oauth_login(user, params, cookies=cookies)
+    return await live.mint(response, verifier)
+
+
+@live_test
+async def test_oauth2_live_abac_fresh_factor(oauth_live):
+    """FEAT-106 AC27 end to end: tokens minted by /oauth2/token after a TOTP, a trusted-device and a
+    no-MFA login carry the matching claims; through the real bearer middleware only the TOTP token
+    satisfies requires_fresh_factor."""
+    live = oauth_live
+    user = await live.user()
+    # OPTIONAL + no TOTP owes no factor; remember_days enables trusted devices (test_mfa_e2e.py:569).
+    await live.org(user["user_id"], mode=MfaMode.OPTIONAL, remember_days=30)
+    await live.grant(user)
+
+    tokens = {"plain": await _plain_mint(live, user)}
+    secret, _ = await live.enrol_totp(user, await live.plain_login(user))
+    tokens["totp"], response = await _totp_mint(live, user, secret, remember=True)
+    device = response.cookies[TRUSTED_COOKIE].value
+    tokens["trusted"] = await _plain_mint(live, user, cookies={TRUSTED_COOKIE: device})
+
+    claims = {name: _oauth_claims(token) for name, token in tokens.items()}
+    for name, claim in claims.items():
+        assert claim["user_id"] == user["user_id"], name
+        assert claim["client_id"] == OAUTH_CLIENT_ID, name
+    assert "mfa" not in claims["plain"] and "amr" not in claims["plain"]
+    assert claims["totp"]["mfa"] is True and claims["totp"]["amr"] == ["pwd", "totp"]
+    assert claims["trusted"]["mfa"] is True and claims["trusted"]["amr"] == ["pwd", "trusted_device"]
+
+    views = {name: await live.evalctx(token) for name, token in tokens.items()}
+    for name, view in views.items():
+        assert view["mechanism"] == "bearer", (name, view)
+    assert (views["totp"]["mfa"], views["totp"]["amr"], views["totp"]["fresh"]) == (True, ["pwd", "totp"], True)
+    assert views["trusted"]["mfa"] is True and views["trusted"]["fresh"] is False
+    assert views["plain"]["mfa"] is False and views["plain"]["fresh"] is False
+
+
+@live_test
+async def test_oauth2_live_assurance_isolation(oauth_live):
+    """FEAT-106 AC29 end to end: a password-only token minted before a TOTP mint, and a trusted-device
+    token minted after one TOTP mint and before another, stay denied while the identity-shared session
+    holds a later TOTP login's assurance, and after the session is recreated from each token; both TOTP
+    tokens stay granted."""
+    live = oauth_live
+    user = await live.user()
+    await live.org(user["user_id"], mode=MfaMode.OPTIONAL, remember_days=30)
+    await live.grant(user)
+
+    tokens = {"pwd": await _plain_mint(live, user)}
+    secret, _ = await live.enrol_totp(user, await live.plain_login(user))
+    tokens["totp1"], response = await _totp_mint(live, user, secret, remember=True)
+    device = response.cookies[TRUSTED_COOKIE].value
+    tokens["trusted"] = await _plain_mint(live, user, cookies={TRUSTED_COOKIE: device})
+    tokens["totp2"], _ = await _totp_mint(live, user, secret)
+    # Last, so nothing overwrites it: a BasicAuth TOTP login writes mfa/amr into the shared session.
+    response, body = await live.totp_login(user, secret)
+    assert response.status == 200, body
+
+    session_ids = {_oauth_claims(token)[live.provider.session_id_property] for token in tokens.values()}
+    assert len(session_ids) == 1, "every token for one identity shares one session"
+    session_id = session_ids.pop()
+
+    # Precondition, so the test cannot pass vacuously: the shared session says "fresh TOTP".
+    shared = await live.evalctx(tokens["pwd"])
+    assert shared["session_mfa"] is True and "totp" in shared["session_amr"], shared
+
+    expected = {"pwd": False, "trusted": False, "totp1": True, "totp2": True}
+    for name, token in tokens.items():
+        view = await live.evalctx(token)
+        assert view["mechanism"] == "bearer", (name, view)
+        assert view["fresh"] is expected[name], ("shared session", name, view)
+
+    # Session recreation: each token's first request rebuilds the session from the token alone.
+    for name, token in tokens.items():
+        await _drop_session(live, user, session_id)
+        view = await live.evalctx(token)
+        assert view["session_mfa"] is False, ("recreated", name, view)
+        assert view["fresh"] is expected[name], ("recreated", name, view)
