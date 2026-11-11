@@ -36,6 +36,7 @@ from .vault.integration import (
     VAULT_SESSION_KEY,
 )
 from .identity.migrations import setup_identity_columns
+from .security_state import setup_security_state_tables
 from .backends.idp import IdentityProvider
 from .libs.expiry import expiry_fields
 from .identities import AuthUser
@@ -191,6 +192,7 @@ class AuthHandler:
         if "authdb" in app:
             await setup_vault_tables(app["authdb"])
             await setup_identity_columns(app["authdb"])
+            await setup_security_state_tables(app["authdb"])
         # Re-hydrate exclude-provider paths after each startup (FEAT-241 M2):
         for provider in self._exclude_providers:
             try:
