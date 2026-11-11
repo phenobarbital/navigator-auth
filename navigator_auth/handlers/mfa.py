@@ -336,6 +336,7 @@ class MfaHandler:
     @_with_mfa_services
     async def disenroll_totp(self, request: web.Request, services: Optional[MfaServices]) -> web.Response:
         """Disenrol TOTP after fresh password and proof; guard the last factor under the lock (AC20)."""
+
         services, session, record = await self._session_user(request, services)
         body = await _json_body(request)
         uid = int(record["user_id"] if isinstance(record, dict) else getattr(record, "user_id"))

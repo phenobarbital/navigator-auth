@@ -76,9 +76,7 @@ async def test_disenroll_guard_under_lock_race(env):
             return 503
 
     response, body = await asyncio.gather(
-        env.call(
-            "disenroll_totp", uid, {"password": user["password_plain"], "code": env.code(secret)[0]}, session
-        ),
+        env.call("disenroll_totp", uid, {"password": user["password_plain"], "code": env.code(secret)[0]}, session),
         delete_last_passkey(),
     )
     statuses = sorted((response[0].status, body))
