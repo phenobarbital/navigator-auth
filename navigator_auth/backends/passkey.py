@@ -324,7 +324,9 @@ class PasskeyAuth(BasicAuth):
         except web.HTTPException:
             raise
         except (MfaUnavailable, MfaStorageError) as err:
-            self.logger.warning(f"Passkey: registration transition failed for user {user.user_id}: {type(err).__name__}")
+            self.logger.warning(
+                f"Passkey: registration transition failed for user {user.user_id}: {type(err).__name__}"
+            )
             raise web.HTTPServiceUnavailable(
                 text=json.dumps({"error": "mfa_unavailable", "reason": "Passkey: MFA storage unavailable"}),
                 content_type="application/json",
