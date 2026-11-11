@@ -83,10 +83,11 @@ class MfaServices:
         user_id = int(_user_id(user))
         memberships = await self.resolver.memberships(user_id, conn=conn)
         policy = await self.resolver.effective(user, conn=conn, memberships=memberships)
-        state = await self.state.state_of(user, policy, conn=conn)
-        totp = await self.state.totp_confirmed(user_id, conn=conn)
-        strong = await self.state.has_strong_factor(user, conn=conn)
-        providers, preferred = await self.state.available_providers(user, policy, conn=conn)
+        facts = await self.state.factor_facts(user, conn=conn)
+        state = await self.state.state_of(user, policy, conn=conn, facts=facts)
+        totp = facts.totp_confirmed
+        strong = facts.has_strong_factor
+        providers, preferred = await self.state.available_providers(user, policy, conn=conn, facts=facts)
         version = await self.security.current_version(conn, user_id)
         digest = self.security.context_digest(
             user=user,

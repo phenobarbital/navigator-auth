@@ -1,7 +1,10 @@
 """Policy resolver, apply_tenant_policy and MfaStateMachine — FEAT-106 M7 (TASK-135)."""
 
 import inspect
+import secrets
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -18,6 +21,7 @@ from navigator_auth.mfa.policy import (
     is_hardening,
 )
 from navigator_auth.mfa.security import MfaSecurity
+from navigator_auth.mfa.services import MfaServices
 from navigator_auth.mfa.state import MfaStateMachine, usable_email
 from navigator_auth.mfa.trusted_devices import TrustedDeviceStore
 from navigator_auth.mfa.types import MfaMode, MfaState, TenantMfaPolicy
@@ -86,6 +90,55 @@ def _machine(totp=False, passkeys=0, passkey_table=True, fail_count=False):
 
 USER = {"user_id": 7, "is_superuser": False, "email": "u@example.com"}
 SUPER = {"user_id": 8, "is_superuser": True, "email": "s@example.com"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", list(MfaMode))
+@pytest.mark.parametrize("totp,passkeys", [(True, 0), (False, 1), (False, 0)])
+@pytest.mark.parametrize("superuser", [False, True])
+async def test_evaluation_reads_factor_facts_once(mode: MfaMode, totp: bool, passkeys: int, superuser: bool) -> None:
+    """Real state methods share DB reads while preserving the policy matrix."""
+    machine, conn = _machine(totp=totp, passkeys=passkeys)
+    backup = SimpleNamespace(remaining=AsyncMock(return_value=2))
+    machine._backup = backup
+    policy = _p(5, mode)
+    security = SimpleNamespace(current_version=AsyncMock(return_value=1), context_digest=Mock(return_value="digest"))
+    services = MfaServices(
+        backend=object(),
+        available=True,
+        state=machine,
+        security=security,
+        resolver=SimpleNamespace(memberships=AsyncMock(return_value=[5]), effective=AsyncMock(return_value=policy)),
+    )
+    user = SUPER if superuser else USER
+    if superuser and mode == MfaMode.ENFORCED and not (totp or passkeys):
+        with pytest.raises(MFARefused):
+            await services.evaluate(user, conn=conn)
+        backup.remaining.assert_not_awaited()
+    else:
+        result = await services.evaluate(user, conn=conn)
+        expected_state = MfaState.TOTP if totp else MfaState.EMAIL if mode == MfaMode.ENFORCED else MfaState.NONE
+        assert result.state == expected_state
+        assert result.has_strong_factor is bool(totp or passkeys)
+        expected = (["totp"] if totp else ["email"] if mode == MfaMode.ENFORCED and not passkeys else []) + ["backup"]
+        assert result.providers == tuple(expected)
+        backup.remaining.assert_awaited_once_with(user["user_id"], conn=conn)
+        assert security.context_digest.call_args.kwargs["state"] == expected_state
+    assert sum("FROM auth.user_mfa " in sql for sql, _ in conn.calls) == 1
+    assert sum("to_regclass" in sql for sql, _ in conn.calls) == (0 if totp else 1)
+    assert sum("count(*)" in sql for sql, _ in conn.calls) == (0 if totp else 1)
+
+
+@pytest.mark.asyncio
+async def test_factor_facts_are_not_cached_between_evaluations() -> None:
+    """A removed passkey is observed in the very next facts read."""
+    machine, conn = _machine(totp=False, passkeys=1)
+    first = await machine.factor_facts(USER, conn=conn)
+    conn.answers["count(*)"] = 0
+    second = await machine.factor_facts(USER, conn=conn)
+    assert first.has_strong_factor
+    assert not second.has_strong_factor
+    assert len(conn.calls) == 6
 
 
 def test_policy_strictest_org_wins():
@@ -226,20 +279,21 @@ def test_usable_email_rules():
     assert usable_email({"user_id": 1, "email": " a@b.c "}) == "a@b.c"
 
 
-async def _org_member(pool, user_id: int, org_id: int):
-    """Insert a membership row or skip when the deployment lacks the table."""
+async def _org_member(pool, user_id: int) -> int:
+    """Create an owned organization before inserting its foreign-key membership."""
     async with await pool.acquire() as conn:
-        if await conn.fetchval("SELECT to_regclass($1)", f"{AUTH_DB_SCHEMA}.organization_users") is None:
-            pytest.skip("organization_users not present")
-        try:
-            await conn.fetchval(
-                f"WITH i AS (INSERT INTO {AUTH_DB_SCHEMA}.organization_users (user_id, org_id) "
-                "VALUES ($1, $2) RETURNING 1) SELECT count(*) FROM i",
-                user_id,
-                org_id,
-            )
-        except Exception as err:  # pylint: disable=W0703
-            pytest.skip(f"cannot create membership: {type(err).__name__}")
+        slug = f"mfa-facts-{secrets.token_hex(8)}"
+        org_id = await conn.fetchval(
+            f"INSERT INTO {AUTH_DB_SCHEMA}.organizations (organization, org_slug) VALUES ($1, $2) RETURNING org_id",
+            slug,
+            slug,
+        )
+        await conn.fetchval(
+            f"INSERT INTO {AUTH_DB_SCHEMA}.organization_users (user_id, org_id) VALUES ($1, $2) RETURNING user_id",
+            user_id,
+            org_id,
+        )
+        return org_id
 
 
 async def _cleanup(pool, user_id: int, org_id: int):
@@ -251,8 +305,16 @@ async def _cleanup(pool, user_id: int, org_id: int):
             org_id,
         )
         await conn.fetchval(
+            f"WITH d AS (DELETE FROM {AUTH_DB_SCHEMA}.user_mfa_audit WHERE org_id = $1 RETURNING 1) SELECT count(*) FROM d",
+            org_id,
+        )
+        await conn.fetchval(
             f"WITH d AS (DELETE FROM {AUTH_DB_SCHEMA}.tenant_mfa_policy WHERE org_id = $1 RETURNING 1) "
             "SELECT count(*) FROM d",
+            org_id,
+        )
+        await conn.fetchval(
+            f"DELETE FROM {AUTH_DB_SCHEMA}.organizations WHERE org_id = $1 RETURNING org_id",
             org_id,
         )
 
@@ -272,8 +334,7 @@ async def _audit_count(pool, org_id: int) -> int:
 async def test_apply_tenant_policy_hardening_revokes_and_audits(mfa_db, mfa_user_factory):
     """Live PG: OFF->ENFORCED bumps member versions, revokes their devices, writes one audit row."""
     user = await mfa_user_factory()
-    org_id = 987001
-    await _org_member(mfa_db, user["user_id"], org_id)
+    org_id = await _org_member(mfa_db, user["user_id"])
     security = MfaSecurity(mfa_db, MFA_TEST_SECRET)
     devices = TrustedDeviceStore(mfa_db)
     try:
@@ -306,8 +367,7 @@ async def test_apply_tenant_policy_hardening_revokes_and_audits(mfa_db, mfa_user
 async def test_apply_tenant_policy_relaxing_does_not_revoke(mfa_db, mfa_user_factory):
     """ENFORCED->OPTIONAL: device still live, versions unchanged, one audit row (AC18)."""
     user = await mfa_user_factory()
-    org_id = 987002
-    await _org_member(mfa_db, user["user_id"], org_id)
+    org_id = await _org_member(mfa_db, user["user_id"])
     security = MfaSecurity(mfa_db, MFA_TEST_SECRET)
     devices = TrustedDeviceStore(mfa_db)
     try:
