@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
 **Spec**: `sdd/specs/basicauth-otp-2fa.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-135
@@ -453,10 +453,8 @@ Spec §4 rows owned here: `test_preflight_blocks_users_without_email`,
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sonnet (native), 1 attempt
+**Date**: 2026-11-11
+**Notes**: Preflight script and 7 tests delivered; green. Live-DB smoke run (--org-id against a real DB) was not done in the sandbox.
 
 **Deviations from spec**: none | describe if any
