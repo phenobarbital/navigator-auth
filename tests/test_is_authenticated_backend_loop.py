@@ -132,6 +132,7 @@ async def test_method_wrapper_same_semantics():
 
 # --- FEAT-108 AC6a: restored guest sessions (real Redis sessions) -----------------------------
 
+
 @pytest_asyncio.fixture(scope="module")
 async def restored_guest_app():
     """Provide protected and explicitly anonymous routes over real sessions."""
