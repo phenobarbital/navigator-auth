@@ -110,14 +110,17 @@ class TOTPProvider(AbstractOTPProvider):
             return step
         return None
 
-    async def _load_seed(self, user_id: int) -> Optional[bytes]:
+    async def _load_seed(self, user_id: int, *, conn: Any = None) -> Optional[bytes]:
+        sql = (
+            f"SELECT ciphertext_db FROM {VAULT_SECRETS_TABLE} "
+            "WHERE user_id = $1 AND key = $2 AND deleted_at IS NULL"
+        )
         try:
-            async with await self._db.acquire() as conn:
-                row = await conn.fetch_one(
-                    f"SELECT ciphertext_db FROM {VAULT_SECRETS_TABLE} WHERE user_id = $1 AND key = $2 AND deleted_at IS NULL",
-                    user_id,
-                    TOTP_VAULT_KEY,
-                )
+            if conn is not None:
+                row = await conn.fetch_one(sql, user_id, TOTP_VAULT_KEY)
+            else:
+                async with await self._db.acquire() as own:
+                    row = await own.fetch_one(sql, user_id, TOTP_VAULT_KEY)
         except Exception as err:
             raise MfaStorageError(f"totp seed read failed: {type(err).__name__}") from err
         if not row:
@@ -208,23 +211,32 @@ class TOTPProvider(AbstractOTPProvider):
         return True
 
     async def verify(
-        self, request: web.Request, user: Mapping, code: str, challenge: Optional[MfaChallenge] = None
+        self,
+        request: web.Request,
+        user: Mapping,
+        code: str,
+        challenge: Optional[MfaChallenge] = None,
+        *,
+        conn: Any = None,
     ) -> bool:
         """Verify a code against the active seed, failing closed on storage errors."""
         user_id = int(_field(user, "user_id"))
-        seed = await self._load_seed(user_id)
+        seed = await self._load_seed(user_id, conn=conn)
         if seed is None:
             return False
         step = self.match_step(seed, code, self._clock())
         if step is None or not await self._store.mark_totp_step(user_id, step, REPLAY_TTL):
             return False
+        touch = f"UPDATE {USER_MFA_TABLE} SET last_used_at = now() WHERE user_id=$1 AND provider=$2 RETURNING 1"
+        if conn is not None:
+            try:
+                await conn.fetchval(touch, user_id, PROVIDER_TOTP)
+            except Exception as err:
+                raise MfaStorageError(f"totp last-used touch failed: {type(err).__name__}") from err
+            return True
         try:
-            async with await self._db.acquire() as conn:
-                await conn.fetchval(
-                    f"UPDATE {USER_MFA_TABLE} SET last_used_at = now() WHERE user_id=$1 AND provider=$2 RETURNING 1",
-                    user_id,
-                    PROVIDER_TOTP,
-                )
+            async with await self._db.acquire() as own:
+                await own.fetchval(touch, user_id, PROVIDER_TOTP)
         except Exception as err:
             self.logger.warning("MFA last-used touch failed: %s", type(err).__name__)
         return True
