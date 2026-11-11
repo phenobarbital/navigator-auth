@@ -166,6 +166,11 @@ def _confidential_introspect_client(client_id: str = "introspect_rs", secret: st
     )
 
 
+def _owner(user_id: int):
+    """Return the active owner needed by FEAT-108 token owner resolution."""
+    return {"user_id": user_id, "username": "device-owner", "is_active": True}
+
+
 def _make_provider(
     client: OAuthClient,
     device_store: MemoryDeviceCodeStorage = None,
@@ -209,6 +214,8 @@ def _make_provider(
     # IDP: create_token returns (token, user_id, exp_ts, "Bearer")
     # decode_token is set per test.
     provider._idp = MagicMock()
+    provider._idp.user_from_id = AsyncMock(return_value=_owner(42))
+    provider._create_user_session = AsyncMock(return_value=None)
     provider._idp.create_token = MagicMock(return_value=("generated_access_token", 0, time.time() + 3600, "Bearer"))
     provider._parser = MagicMock()
 

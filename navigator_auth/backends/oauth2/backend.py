@@ -837,18 +837,14 @@ class Oauth2Provider(BaseAuthBackend):
 
         Returns the extra JWT claims (``id``, ``session_id``, ``username``)
         that let ``auth_middleware`` resolve the session — and therefore the
-        user — from the bearer token alone. Returns an empty dict when the
-        resource owner cannot be resolved, leaving the token usable for
-        introspection-based resource servers.
+        user — from the bearer token alone. Returns an empty dict when a
+        session cannot be created. An unresolvable owner raises so grants can
+        fail closed without consuming state during an identity-store outage.
         """
-        try:
-            if conn is None:
-                user = await self._idp.user_from_id(user_id)
-            else:
-                user = await self._idp.user_from_id(user_id, conn=conn)
-        except Exception as exc:  # pylint: disable=W0703
-            self.logger.warning(f"Oauth2: cannot bind a session to the token for user_id={user_id}: {exc}")
-            return {}
+        # FEAT-108: an unresolvable or disabled owner must not get a token.
+        # UserNotFound, FailedAuth and IdentityStoreUnavailable propagate to
+        # the grant handler, which maps each outcome without leaking details.
+        user = await self._resolve_resource_owner(user_id)
         session = await self._create_user_session(request, user)
         if not session:
             return {}
@@ -2226,6 +2222,24 @@ class Oauth2Provider(BaseAuthBackend):
                 if auth_code.generation != generation:
                     await self.code_storage.delete_code(code)
                     return self._error_response("invalid_grant", "Authorization code is no longer valid.")
+                # FEAT-108: resolve the owner before consuming the code.  A
+                # transient identity-store outage therefore leaves it retryable.
+                claim = getattr(self.code_storage, "claim_code", None)
+                if claim is not None and not await claim(code):
+                    return self._error_response("invalid_grant", "Authorization code already used.")
+                try:
+                    session_claims = await self._token_session_claims(request, user_id, conn=conn)
+                except (UserNotFound, FailedAuth):
+                    await self.code_storage.mark_used(code)
+                    await self.code_storage.delete_code(code)
+                    return self._error_response(
+                        "invalid_grant", "The resource owner of this grant cannot be resolved."
+                    )
+                except IdentityStoreUnavailable:
+                    release = getattr(self.code_storage, "release_claim", None)
+                    if release is not None:
+                        await release(code)
+                    return self._owner_store_unavailable()
                 # B5: mark code as used + delete from storage.
                 if not await self.code_storage.mark_used(code):
                     # A concurrent exchange already consumed this code (RFC 6749 §4.1.2: single use).
@@ -2243,7 +2257,7 @@ class Oauth2Provider(BaseAuthBackend):
                         "jti": jti,
                         # Bind the token to a session so the auth middleware,
                         # @is_authenticated() and @user_session() can resolve the user.
-                        **await self._token_session_claims(request, user_id, conn=conn),
+                        **session_claims,
                     },
                     auth_code.generation,
                 )
@@ -2488,6 +2502,18 @@ class Oauth2Provider(BaseAuthBackend):
                 if set(scope.split()) - set(rt.scope.split()):
                     return self._error_response("invalid_scope", "Cannot widen scope during refresh.")
 
+                # FEAT-108 (D6): check the owner before rotation. A confirmed
+                # missing or disabled owner revokes its chain; an outage does not.
+                try:
+                    session_claims = await self._token_session_claims(request, user_id, conn=conn)
+                except (UserNotFound, FailedAuth):
+                    await self.refresh_token_storage.revoke_chain(refresh_token)
+                    return self._error_response(
+                        "invalid_grant", "The resource owner of this grant cannot be resolved."
+                    )
+                except IdentityStoreUnavailable:
+                    return self._owner_store_unavailable()
+
                 jti = str(uuid4())
                 token_data = stamp_generation(
                     {
@@ -2496,7 +2522,7 @@ class Oauth2Provider(BaseAuthBackend):
                         "scope": scope,
                         "jti": jti,
                         # Same session binding as the authorization_code grant.
-                        **await self._token_session_claims(request, user_id, conn=conn),
+                        **session_claims,
                     },
                     rt.generation,
                 )

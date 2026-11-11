@@ -13,6 +13,7 @@ Tests:
 """
 
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 import json
@@ -97,6 +98,11 @@ def _make_auth_code_carrier(
     )
 
 
+def _owner(user_id: int):
+    """Return the active owner needed by FEAT-108 token owner resolution."""
+    return {"user_id": user_id, "username": "device-owner", "is_active": True}
+
+
 class _MemCodeStorage:
     def __init__(self):
         self._codes = {}
@@ -163,9 +169,17 @@ def _make_provider(
     provider.access_token_storage = access_store or _MemAccessStorage()
     provider.grant_storage = None
 
+    @asynccontextmanager
+    async def _no_generation(request, user_id):
+        yield None, 0
+
+    provider._user_generation = _no_generation
+
     # Mock IDP: create_token returns (access_token_str, user_id, exp_ts, "Bearer")
     import time
     provider._idp = MagicMock()
+    provider._idp.user_from_id = AsyncMock(return_value=_owner(42))
+    provider._create_user_session = AsyncMock(return_value=None)
     provider._idp.create_token = MagicMock(
         return_value=("mock_access_token", 42, time.time() + 3600, "Bearer")
     )

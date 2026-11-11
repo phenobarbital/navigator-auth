@@ -106,6 +106,14 @@ class AuthorizationCodeStorage:
         key = f"{self.prefix}{code}"
         await self.redis.delete(key)
 
+    async def claim_code(self, code: str, ttl: int = 30) -> bool:
+        """Atomically claim the right to redeem ``code`` (FEAT-108)."""
+        return bool(await self.redis.set(f"{self.prefix}claim:{code}", "1", nx=True, ex=ttl))
+
+    async def release_claim(self, code: str) -> None:
+        """Drop the claim so a client can retry after a transient outage (FEAT-108)."""
+        await self.redis.delete(f"{self.prefix}claim:{code}")
+
 
 # ---------------------------------------------------------------------------
 # Refresh Token Storage (Redis) — TASK-026 extended
