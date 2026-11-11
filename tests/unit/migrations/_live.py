@@ -98,14 +98,12 @@ async def provision_base_tables(
 
     auth_users = f'{_quote_ident("auth")}.{_quote_ident("users")}'
     await conn.execute(
-        f"CREATE TABLE IF NOT EXISTS {auth_users} "
-        "(user_id SERIAL PRIMARY KEY, username VARCHAR(255))"
+        f"CREATE TABLE IF NOT EXISTS {auth_users} " "(user_id SERIAL PRIMARY KEY, username VARCHAR(255))"
     )
     if AUTH_DB_SCHEMA != "auth":
         configured_users = f"{_quote_ident(AUTH_DB_SCHEMA)}.{_quote_ident(AUTH_USERS_TABLE)}"
         await conn.execute(
-            f"CREATE TABLE IF NOT EXISTS {configured_users} "
-            "(user_id SERIAL PRIMARY KEY, username VARCHAR(255))"
+            f"CREATE TABLE IF NOT EXISTS {configured_users} " "(user_id SERIAL PRIMARY KEY, username VARCHAR(255))"
         )
 
     identity_table = '"auth"."user_identities"'

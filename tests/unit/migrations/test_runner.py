@@ -382,8 +382,7 @@ async def test_runtime_access_live() -> None:
                 timestamps_before = {
                     row["filename"]: row["applied_at"]
                     for row in await admin_conn.fetch(
-                        'SELECT filename, applied_at FROM "auth"."schema_migrations" '
-                        "WHERE migration_set = 'vault'"
+                        'SELECT filename, applied_at FROM "auth"."schema_migrations" ' "WHERE migration_set = 'vault'"
                     )
                 }
                 runtime_conn = await asyncpg.connect(dsn, user=role, password=password)
@@ -397,9 +396,10 @@ async def test_runtime_access_live() -> None:
                         "updated-key",
                         audit_id,
                     )
-                    assert await runtime_conn.fetchval(
-                        'SELECT key FROM "auth"."user_vault_audit" WHERE id = $1', audit_id
-                    ) == "updated-key"
+                    assert (
+                        await runtime_conn.fetchval('SELECT key FROM "auth"."user_vault_audit" WHERE id = $1', audit_id)
+                        == "updated-key"
+                    )
                 finally:
                     await runtime_conn.close()
 
@@ -415,8 +415,7 @@ async def test_runtime_access_live() -> None:
                 timestamps_after = {
                     row["filename"]: row["applied_at"]
                     for row in await admin_conn.fetch(
-                        'SELECT filename, applied_at FROM "auth"."schema_migrations" '
-                        "WHERE migration_set = 'vault'"
+                        'SELECT filename, applied_at FROM "auth"."schema_migrations" ' "WHERE migration_set = 'vault'"
                     )
                 }
                 assert timestamps_after == timestamps_before
@@ -442,13 +441,12 @@ async def test_guarded_skip_retry_live() -> None:
             await provision_base_tables(admin_conn, legacy_identity=True, with_oauth_base=False)
             async with runtime_role(admin_conn) as (role, _password):
                 await admin_conn.execute(
-                    'CREATE VIEW "auth"."identity_uid_blocker" AS '
-                    'SELECT uid FROM "auth"."user_identities"'
+                    'CREATE VIEW "auth"."identity_uid_blocker" AS ' 'SELECT uid FROM "auth"."user_identities"'
                 )
                 blocked = await upgrade(admin_conn, sets=["identity"], runtime_role=role)
                 assert [result.file.filename for result in blocked.failed] == ["006_identity_drop_legacy_uid.sql"]
                 assert not await admin_conn.fetchval(
-                    "SELECT EXISTS (SELECT 1 FROM \"auth\".\"schema_migrations\" "
+                    'SELECT EXISTS (SELECT 1 FROM "auth"."schema_migrations" '
                     "WHERE migration_set = 'identity' AND filename = '006_identity_drop_legacy_uid.sql')"
                 )
 

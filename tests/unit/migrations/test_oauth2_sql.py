@@ -84,19 +84,17 @@ async def test_oauth2_completion_live() -> None:
         admin_conn = await asyncpg.connect(dsn)
         try:
             await provision_base_tables(admin_conn)
-            await admin_conn.execute(
-                'INSERT INTO "auth"."clients" (client, client_name) VALUES (NULL, NULL)'
-            )
+            await admin_conn.execute('INSERT INTO "auth"."clients" (client, client_name) VALUES (NULL, NULL)')
             async with runtime_role(admin_conn) as (role, _password):
                 blocked = await upgrade(admin_conn, sets=["oauth2"], runtime_role=role)
                 assert [result.file.filename for result in blocked.failed] == ["001_oauth2_schema.sql"]
                 assert not await admin_conn.fetchval(
-                    "SELECT EXISTS (SELECT 1 FROM \"auth\".\"schema_migrations\" "
+                    'SELECT EXISTS (SELECT 1 FROM "auth"."schema_migrations" '
                     "WHERE migration_set = 'oauth2' AND filename = '001_oauth2_schema.sql')"
                 )
 
                 await admin_conn.execute(
-                    'UPDATE "auth"."clients" SET client = \'live-client\', client_name = \'Live Client\' '
+                    "UPDATE \"auth\".\"clients\" SET client = 'live-client', client_name = 'Live Client' "
                     "WHERE client IS NULL OR client_name IS NULL"
                 )
                 repaired = await upgrade(admin_conn, sets=["oauth2"], runtime_role=role)
