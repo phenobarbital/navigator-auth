@@ -77,6 +77,9 @@ class BaseAuthBackend(ABC):
     _description: str = "Abstract Backend"
     _service_name: str = "abstract"
     _external_auth: bool = False
+    #: True for backends that authenticate *anyone* (a guest). @is_authenticated never
+    #: calls them; anonymous access goes through the exclude list / allow_anonymous.
+    _anonymous_auth: bool = False
     _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
     _callbacks: Optional[list[Callable]] = None
     # Auth query params this backend owns and may strip before reaching the

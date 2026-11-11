@@ -176,6 +176,36 @@ def user_session() -> Callable[[F], F]:
     return lambda handler: _apply_decorator(handler, _func_wrapper, _method_wrapper)
 
 
+async def _authenticate_with_backends(auth: Any, request: web.Request) -> Optional[Any]:
+    """Try each configured backend in order and return authenticated userdata.
+
+    Anonymous backends are skipped before authentication, MFA signals stop the
+    loop, expected authentication failures try the next backend, deliberate HTTP
+    control flow is re-raised, and unexpected backend failures are logged before
+    trying the next backend.
+    """
+    for name, backend in auth.backends.items():
+        if getattr(backend, "_anonymous_auth", False):
+            continue
+        try:
+            result = await backend.authenticate(request)
+        except MfaSignal:
+            # FEAT-106 R2: a second factor is owed — no other backend may authenticate this request.
+            return None
+        except AuthException:
+            continue
+        except web.HTTPException:
+            raise
+        except Exception:  # pylint: disable=W0703
+            logger.exception("is_authenticated: backend %s failed; trying the next one", name)
+            continue
+        if not result or isinstance(result, web.StreamResponse):
+            # A redirect to an external IdP is the start of interactive login, not a credential.
+            continue
+        return result
+    return None
+
+
 def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]:
     """
     Checks if a user is authenticated before allowing access to the handler.
@@ -211,27 +241,7 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
             else:
                 app = request.app
                 auth = get_auth(app)
-                userdata = None
-                for _, backend in auth.backends.items():
-                    try:
-                        result = await backend.authenticate(request)
-                    except MfaSignal:
-                        # FEAT-106 R2: a second factor is owed — never let another backend
-                        # authenticate this request. userdata stays None → 401 below.
-                        break
-                    except AuthException:
-                        continue
-                    if not result:
-                        continue
-                    if isinstance(result, web.StreamResponse):
-                        # External backends answer an unauthenticated request
-                        # with a redirect to their IdP: that is the start of an
-                        # interactive login, not a credential. Never let it pass
-                        # as "authenticated" (the handler would then run with no
-                        # user at all); try the next backend instead.
-                        continue
-                    userdata = result
-                    break
+                userdata = await _authenticate_with_backends(auth, request)
                 if userdata:
                     return await handler(*args, **kwargs)
                 else:
@@ -259,24 +269,7 @@ def is_authenticated(content_type: str = "application/json") -> Callable[[F], F]
                 return await method(self, *args, **kwargs)
             app = request.app
             auth = get_auth(app)
-            userdata = None
-            for _, backend in auth.backends.items():
-                try:
-                    result = await backend.authenticate(request)
-                except MfaSignal:
-                    # FEAT-106 R2: a second factor is owed — never let another backend
-                    # authenticate this request. userdata stays None → 401 below.
-                    break
-                except AuthException:
-                    continue
-                if not result:
-                    continue
-                if isinstance(result, web.StreamResponse):
-                    # a redirect to an external IdP is not a credential:
-                    # see the note in the function-based wrapper above.
-                    continue
-                userdata = result
-                break
+            userdata = await _authenticate_with_backends(auth, request)
             if userdata:
                 return await method(self, *args, **kwargs)
             else:
