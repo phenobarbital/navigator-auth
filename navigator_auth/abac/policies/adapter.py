@@ -1,20 +1,35 @@
 import re
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple, Any
 from navigator_auth.abac.policies.resource_policy import ResourcePolicy
-from navigator_auth.abac.policies.abstract import PolicyEffect
+from navigator_auth.abac.policies.abstract import AbstractPolicy, PolicyEffect
+from navigator_auth.abac.policies.obj import ObjectPolicy
+from navigator_auth.abac.policies.file import FilePolicy
 from navigator_auth.abac.policies.resources import SubjectSpec
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class AdapterResult:
+    """Represent the outcome of adapting one policy for evaluation.
+
+    Attributes:
+        policy: The primary adapted policy when adaptation succeeds.
+        warnings: Non-fatal conversion warnings.
+        additional_policies: Derived policies, such as a negated-resource DENY.
+        skipped: Whether the input could not be safely adapted.
+        reason: The reason adaptation was skipped.
+    """
+
     policy: Optional[ResourcePolicy] = None
     warnings: List[str] = field(default_factory=list)
     additional_policies: List[ResourcePolicy] = field(default_factory=list)
     skipped: bool = False
     reason: str = ""
+
 
 class PolicyAdapter:
     """Converts classic policy dicts to ResourcePolicy at load time."""
@@ -30,16 +45,18 @@ class PolicyAdapter:
     }
 
     # Regex metacharacters for detection
-    RE_METAS = r'[\^\$\(\)\+\{\}\[\]\|\?\\]'
+    RE_METAS = r"[\^\$\(\)\+\{\}\[\]\|\?\\]"
 
     @staticmethod
     def _tenant(policy_dict: dict) -> Tuple[int, int]:
         """Extract and coerce tenant pair from policy dict. Defaults to (1, 1)."""
+
         def _coerce(v: Any) -> int:
             try:
                 return int(v)
             except (TypeError, ValueError):
                 return 1
+
         return (
             _coerce(policy_dict.get("org_id", 1)),
             _coerce(policy_dict.get("client_id", 1)),
@@ -74,7 +91,7 @@ class PolicyAdapter:
     def _validate_resource(resource: str) -> Optional[str]:
         """Validate resource pattern. Returns warning if invalid."""
         try:
-            type_str, pattern = resource.split(':', 1)
+            type_str, pattern = resource.split(":", 1)
             # If it's a regex (detected by metacharacters), try to compile it
             if re.search(PolicyAdapter.RE_METAS, pattern):
                 try:
@@ -87,7 +104,15 @@ class PolicyAdapter:
 
     @staticmethod
     def adapt(policy_dict: dict) -> AdapterResult:
-        """Convert a single policy dict to ResourcePolicy."""
+        """Convert a storage policy dictionary into evaluator policies.
+
+        Args:
+            policy_dict: A classic, file, object, or resource policy mapping.
+
+        Returns:
+            The adapted policy result. Conversion failures are represented by a
+            skipped result rather than raised to the caller.
+        """
         try:
             policy_type = policy_dict.get("policy_type", "policy")
             if policy_type == "resource":
@@ -105,25 +130,25 @@ class PolicyAdapter:
     def _adapt_resource(policy_dict: dict) -> AdapterResult:
         """Pass-through for already correct ResourcePolicy format."""
         # Ensure effect is enum
-        effect = policy_dict.get('effect', PolicyEffect.ALLOW)
+        effect = policy_dict.get("effect", PolicyEffect.ALLOW)
         if isinstance(effect, str):
-            effect = PolicyEffect.ALLOW if effect.upper() == 'ALLOW' else PolicyEffect.DENY
+            effect = PolicyEffect.ALLOW if effect.upper() == "ALLOW" else PolicyEffect.DENY
 
         org_id, client_id = PolicyAdapter._tenant(policy_dict)
 
         try:
             # Re-initialize to ensure it's a valid ResourcePolicy
             p = ResourcePolicy(
-                name=policy_dict['name'],
+                name=policy_dict["name"],
                 effect=effect,
-                description=policy_dict.get('description'),
-                resources=policy_dict.get('resources'),
-                actions=policy_dict.get('actions'),
-                subjects=policy_dict.get('subjects'),
-                conditions=policy_dict.get('conditions'),
-                environment=policy_dict.get('environment'),
-                priority=policy_dict.get('priority', 0),
-                enforcing=policy_dict.get('enforcing', False),
+                description=policy_dict.get("description"),
+                resources=policy_dict.get("resources"),
+                actions=policy_dict.get("actions"),
+                subjects=policy_dict.get("subjects"),
+                conditions=policy_dict.get("conditions"),
+                environment=policy_dict.get("environment"),
+                priority=policy_dict.get("priority", 0),
+                enforcing=policy_dict.get("enforcing", False),
                 org_id=org_id,
                 client_id=client_id,
             )
@@ -135,17 +160,17 @@ class PolicyAdapter:
     def _adapt_classic(policy_dict: dict) -> AdapterResult:
         """Convert classic Policy dict."""
         warnings = []
-        name = policy_dict.get('name', 'unnamed')
+        name = policy_dict.get("name", "unnamed")
 
         # 0. Tenant
         org_id, client_id = PolicyAdapter._tenant(policy_dict)
 
         # 1. Effect
-        effect_str = str(policy_dict.get('effect', 'ALLOW')).upper()
-        effect = PolicyEffect.ALLOW if effect_str == 'ALLOW' else PolicyEffect.DENY
+        effect_str = str(policy_dict.get("effect", "ALLOW")).upper()
+        effect = PolicyEffect.ALLOW if effect_str == "ALLOW" else PolicyEffect.DENY
 
         # 2. Resources & Negated
-        raw_resources = policy_dict.get('resource') or policy_dict.get('resources') or []
+        raw_resources = policy_dict.get("resource") or policy_dict.get("resources") or []
         if isinstance(raw_resources, str):
             raw_resources = [raw_resources]
 
@@ -156,7 +181,7 @@ class PolicyAdapter:
             warning = PolicyAdapter._validate_resource(conv)
             if warning:
                 warnings.append(warning)
-                continue # Skip invalid patterns
+                continue  # Skip invalid patterns
 
             if is_negated:
                 negated_resources.append(conv)
@@ -164,12 +189,12 @@ class PolicyAdapter:
                 final_resources.append(conv)
 
         # 3. Actions
-        raw_actions = policy_dict.get('actions') or []
+        raw_actions = policy_dict.get("actions") or []
         if isinstance(raw_actions, str):
             raw_actions = [raw_actions]
         final_actions = []
         for a in raw_actions:
-            if ':' in a:
+            if ":" in a:
                 final_actions.append(a)
             else:
                 # Map method to uri: action if possible
@@ -180,19 +205,16 @@ class PolicyAdapter:
                     final_actions.append(f"uri:{a.lower()}")
 
         # 4. Subjects
-        raw_subject = policy_dict.get('subject') or []
+        raw_subject = policy_dict.get("subject") or []
         if isinstance(raw_subject, str):
             raw_subject = [raw_subject]
-        subjects_data = {
-            'groups': set(policy_dict.get('groups') or []),
-            'users': set(raw_subject)
-        }
+        subjects_data = {"groups": set(policy_dict.get("groups") or []), "users": set(raw_subject)}
         subjects = SubjectSpec.from_dict(subjects_data)
 
         # 5. Conditions (context attributes)
         conditions = {}
         python_conditions = {}
-        raw_context = policy_dict.get('context') or {}
+        raw_context = policy_dict.get("context") or {}
         for k, v in raw_context.items():
             python_conditions[k] = v
         if python_conditions:
@@ -200,7 +222,8 @@ class PolicyAdapter:
                 "Policy '%s': context conditions %s are not evaluated "
                 "by the Rust engine and will be ignored. "
                 "Python post-filter not yet implemented.",
-                name, list(python_conditions.keys())
+                name,
+                list(python_conditions.keys()),
             )
 
         # 6. Create Policy
@@ -208,14 +231,14 @@ class PolicyAdapter:
             p = ResourcePolicy(
                 name=name,
                 effect=effect,
-                description=policy_dict.get('description'),
+                description=policy_dict.get("description"),
                 resources=final_resources,
                 actions=final_actions,
                 subjects=subjects,
                 conditions=conditions,
-                environment=policy_dict.get('environment'),
-                priority=policy_dict.get('priority', 0),
-                enforcing=policy_dict.get('enforcing', False),
+                environment=policy_dict.get("environment"),
+                priority=policy_dict.get("priority", 0),
+                enforcing=policy_dict.get("enforcing", False),
                 org_id=org_id,
                 client_id=client_id,
             )
@@ -234,9 +257,9 @@ class PolicyAdapter:
                     actions=final_actions,
                     subjects=subjects,
                     conditions=conditions,
-                    environment=policy_dict.get('environment'),
-                    priority=policy_dict.get('priority', 0) + 1, # Higher priority
-                    enforcing=True, # Enforce the deny
+                    environment=policy_dict.get("environment"),
+                    priority=policy_dict.get("priority", 0) + 1,  # Higher priority
+                    enforcing=True,  # Enforce the deny
                     org_id=org_id,
                     client_id=client_id,
                 )
@@ -257,24 +280,317 @@ class PolicyAdapter:
     def _adapt_object(policy_dict: dict) -> AdapterResult:
         """Convert ObjectPolicy dict."""
         policy_dict = policy_dict.copy()
-        obj_type = policy_dict.get('type', 'object')
-        objects = policy_dict.get('objects') or []
+        obj_type = policy_dict.get("type", "object")
+        objects = policy_dict.get("objects") or []
         if isinstance(objects, str):
             objects = [objects]
 
-        # Convert objects to type:pattern
-        new_resources = []
-        for obj in objects:
-            if ':' not in obj and not obj.startswith('urn:'):
-                new_resources.append(f"{obj_type}:{obj}")
-            else:
-                new_resources.append(obj)
-        policy_dict['resources'] = new_resources
+        policy_dict["resources"] = PolicyAdapter._object_resources(objects, obj_type)
         return PolicyAdapter._adapt_classic(policy_dict)
 
     @staticmethod
+    def _object_resources(objects: List[str], obj_type: str) -> List[str]:
+        """Convert ObjectPolicy object names to classic resource strings.
+
+        Shared by ``_adapt_object`` (storage) and ``from_policy`` (programmatic)
+        so both paths build the same resources.
+
+        Args:
+            objects: Object names, ``type:pattern`` strings or URNs.
+            obj_type: Resource type prefixed to bare names.
+
+        Returns:
+            ``f"{obj_type}:{name}"`` for a bare name; any value containing ``:``
+            (``type:pattern`` or ``urn:...``) unchanged.
+        """
+        return [obj if (":" in obj or obj.startswith("urn:")) else f"{obj_type}:{obj}" for obj in objects]
+
+    # Environment keys the Rust engine evaluates (rs_pep/src/lib.rs:241-247). The
+    # engine silently ignores any other key, so from_policy rejects it instead.
+    ENGINE_ENV_KEYS = frozenset({"hour", "dow", "is_business_hours", "is_weekend", "day_segment"})
+    # Native ResourcePolicy environments may also carry is_manager, which
+    # PolicyEvaluator._serialize_policies_from_index lifts into
+    # conditions.is_manager (evaluator.py:271).
+    NATIVE_ENV_KEYS = ENGINE_ENV_KEYS | frozenset({"is_manager"})
+
+    # Resource type accepted for ObjectPolicy(type=...) when resolving objects=.
+    OBJECT_TYPE_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+
+    @staticmethod
+    def _classic_resource_error(raw_resources: List[str]) -> Optional[str]:
+        """Validate every classic resource, negated ones included.
+
+        Args:
+            raw_resources: ``AbstractPolicy.raw_resources`` (URNs, ``type:pattern``
+                strings or bare paths; a leading ``!`` marks a negated resource).
+
+        Returns:
+            None when every resource converts and validates (an empty list is
+            valid: unrestricted, existing semantics); otherwise the first problem.
+        """
+        for raw in raw_resources:
+            converted, _negated = PolicyAdapter._convert_urn(raw)
+            warning = PolicyAdapter._validate_resource(converted)
+            if warning:
+                return f"invalid resource {raw!r}: {warning}"
+        return None
+
+    @staticmethod
+    def _resolve_objects(policy: AbstractPolicy) -> Tuple[Optional[List[str]], Optional[str]]:
+        """Resolve a programmatic policy's ``objects=`` into classic resources.
+
+        Every case where the objects would otherwise be dropped, retyped,
+        de-negated or flattened is rejected instead.
+
+        Args:
+            policy: The policy given to :meth:`from_policy`. Never mutated.
+
+        Returns:
+            ``(None, None)`` when the policy has no objects; ``(resources, None)``
+            with validated ``type:pattern`` strings; ``(None, reason)`` otherwise.
+        """
+        objects = policy.objects
+        if not objects:
+            return None, None
+        if isinstance(policy, FilePolicy) or not isinstance(policy, ObjectPolicy):
+            return None, "objects= is only supported on ObjectPolicy"
+        if policy.raw_resources:
+            return None, "resource= and objects= cannot be combined (objects= would be ignored)"
+        if isinstance(objects, str):
+            objects = [objects]
+        # A dict would lose its values and a set its order; only plain names are converted.
+        if not isinstance(objects, (list, tuple)) or not all(isinstance(obj, str) and obj for obj in objects):
+            return None, f"unsupported objects shape: {objects!r} (expected a list of non-empty strings)"
+        negated = [obj for obj in objects if obj.startswith("!")]
+        if negated:
+            return None, f"negated objects are not supported: {negated!r}; use resource=['!...'] instead"
+        obj_type = policy.attributes.get("type", "object")
+        # A plain identifier only: "!x" would turn every object into a negated
+        # (DENY) resource and "urn" would re-parse "urn:<name>" as a wildcard URN.
+        if (
+            not isinstance(obj_type, str)
+            or not PolicyAdapter.OBJECT_TYPE_RE.fullmatch(obj_type)
+            or obj_type.lower() == "urn"
+        ):
+            return None, f"unsupported object type for objects=: {obj_type!r}"
+        resources = PolicyAdapter._object_resources(list(objects), obj_type)
+        for obj, resource in zip(objects, resources):
+            error = PolicyAdapter._classic_resource_error([resource])
+            if error:
+                return None, f"invalid object {obj!r}: {error}"
+        return resources, None
+
+    @staticmethod
+    def _normalize_environment(environment: Any) -> Tuple[Optional[dict], Optional[str]]:
+        """Copy and validate a classic environment mapping for the Rust engine.
+
+        ``day_of_week`` becomes ``dow``; equal values under both keys are accepted,
+        conflicting values rejected. Only ``ENGINE_ENV_KEYS`` are accepted.
+
+        Args:
+            environment: ``AbstractPolicy.environment`` (None or a mapping). Never mutated.
+
+        Returns:
+            ``(normalized, None)`` on success (``normalized`` is None when there is no
+            environment) or ``(None, reason)`` on rejection.
+        """
+        if not environment:
+            return None, None
+        if not isinstance(environment, Mapping):
+            return None, f"unsupported environment shape: {type(environment).__name__}"
+        env = dict(environment)
+        if "day_of_week" in env:
+            alias = env.pop("day_of_week")
+            if "dow" in env and env["dow"] != alias:
+                return None, "conflicting environment values for 'dow' and 'day_of_week'"
+            env["dow"] = alias
+        unknown = sorted(set(env) - PolicyAdapter.ENGINE_ENV_KEYS)
+        if unknown:
+            return None, f"unsupported environment keys: {', '.join(unknown)}"
+        for key, value in env.items():
+            error = PolicyAdapter._environment_value_error(key, value)
+            if error:
+                return None, error
+        return env, None
+
+    @staticmethod
+    def _environment_value_error(key: str, value: Any) -> Optional[str]:
+        """Check one environment value against what the policy evaluator honours.
+
+        Shared by the classic (``_normalize_environment``) and native
+        (``_resource_policy_error``) checks. Assumes ``key`` is already known.
+
+        Args:
+            key: An ``ENGINE_ENV_KEYS`` or ``NATIVE_ENV_KEYS`` key.
+            value: The policy's expected value for ``key``.
+
+        Returns:
+            None when supported, otherwise the rejection reason.
+        """
+        if key in {"hour", "dow"}:
+            if isinstance(value, bool):
+                valid = False
+            elif isinstance(value, int):
+                valid = True
+            elif isinstance(value, list):
+                valid = bool(value) and all(isinstance(item, int) and not isinstance(item, bool) for item in value)
+            elif isinstance(value, Mapping):
+                valid = (
+                    bool(value)
+                    and set(value).issubset({"min", "max"})
+                    and all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in value.values())
+                )
+            else:
+                valid = False
+        elif key in {"is_business_hours", "is_weekend"}:
+            valid = isinstance(value, bool) or (
+                isinstance(value, list) and bool(value) and all(isinstance(item, bool) for item in value)
+            )
+        elif key == "is_manager":
+            valid = isinstance(value, bool)
+        else:
+            valid = isinstance(value, str) or (
+                isinstance(value, list) and bool(value) and all(isinstance(item, str) for item in value)
+            )
+        if not valid:
+            return f"unsupported value for environment key {key!r}: {value!r}"
+        return None
+
+    @staticmethod
+    def _resource_policy_error(policy: ResourcePolicy) -> Optional[str]:
+        """Validate a native ResourcePolicy's environment without reinterpreting it.
+
+        Unlike classic policies, no alias is normalised: the policy is passed
+        through unchanged, so ``day_of_week`` is rejected rather than rewritten.
+
+        Args:
+            policy: The ResourcePolicy given to :meth:`from_policy`. Never mutated.
+
+        Returns:
+            None when every environment key is honoured by the evaluator,
+            otherwise the rejection reason.
+        """
+        env = policy._env_conditions  # pylint: disable=W0212
+        if not env:
+            return None
+        if not isinstance(env, Mapping):
+            return f"unsupported environment shape: {type(env).__name__}"
+        unknown = sorted(str(key) for key in set(env) - PolicyAdapter.NATIVE_ENV_KEYS)
+        if unknown:
+            hint = " (use 'dow' instead of 'day_of_week')" if "day_of_week" in unknown else ""
+            return f"unsupported environment keys: {', '.join(unknown)}{hint}"
+        for key, value in env.items():
+            error = PolicyAdapter._environment_value_error(key, value)
+            if error:
+                return error
+        return None
+
+    @staticmethod
+    def from_policy(policy: AbstractPolicy) -> AdapterResult:
+        """Adapt a programmatic policy object for the PolicyEvaluator.
+
+        ``ResourcePolicy`` passes through unchanged when its native environment
+        uses only ``NATIVE_ENV_KEYS`` with supported values. ``FilePolicy`` -> "file",
+        ``ObjectPolicy`` -> "object", any other ``AbstractPolicy`` -> "policy": they
+        are converted to the classic policy dict (``resource`` = ``raw_resources``,
+        or the resolved ``objects=`` of an ``ObjectPolicy``) and passed to
+        :meth:`adapt` only after validation.
+
+        Args:
+            policy: The policy object to adapt. It is never mutated.
+
+        Returns:
+            AdapterResult: the policy (plus a ``<name>_negated`` DENY for ``!``
+            resources) on success; ``skipped=True`` with ``reason`` and no policies
+            when a context/conditions/scopes restriction, an invalid resource, an
+            unsupported or invalid ``objects=`` value (combined with ``resource=``,
+            negated, non-string, or on a non-``ObjectPolicy``) or an unsupported
+            environment condition would be lost. Never raises.
+        """
+        if isinstance(policy, ResourcePolicy):
+            try:
+                error = PolicyAdapter._resource_policy_error(policy)
+            except Exception as exc:  # pylint: disable=W0703
+                error = f"cannot validate environment: {exc}"
+            if error:
+                return AdapterResult(skipped=True, reason=f"Policy '{policy.name}': {error}")
+            return AdapterResult(policy=policy)
+        if not isinstance(policy, AbstractPolicy):
+            return AdapterResult(skipped=True, reason=f"not a policy object: {type(policy).__name__}")
+        name = policy.name
+        try:
+            restricted = [
+                label
+                for label, value in (
+                    ("context", policy.context),
+                    ("conditions", policy.conditions),
+                    ("scopes", policy.scopes),
+                )
+                if value
+            ]
+            if restricted:
+                return AdapterResult(
+                    skipped=True,
+                    reason=(
+                        f"Policy '{name}': classic {', '.join(restricted)} restrictions are not "
+                        "enforced by the policy evaluator; use subject/groups instead"
+                    ),
+                )
+            object_resources, error = PolicyAdapter._resolve_objects(policy)
+            if error:
+                return AdapterResult(skipped=True, reason=f"Policy '{name}': {error}")
+            error = PolicyAdapter._classic_resource_error(policy.raw_resources)
+            if error:
+                return AdapterResult(skipped=True, reason=f"Policy '{name}': {error}")
+            environment, error = PolicyAdapter._normalize_environment(policy.environment)
+            if error:
+                return AdapterResult(skipped=True, reason=f"Policy '{name}': {error}")
+            if isinstance(policy, FilePolicy):
+                policy_type = "file"
+            elif isinstance(policy, ObjectPolicy):
+                policy_type = "object"
+            else:
+                policy_type = "policy"
+            policy_dict = {
+                "policy_type": policy_type,
+                "name": name,
+                "description": policy.description,
+                "effect": "ALLOW" if policy.effect == PolicyEffect.ALLOW else "DENY",
+                # _resolve_objects guarantees raw_resources is empty when objects= is set.
+                "resource": object_resources if object_resources is not None else list(policy.raw_resources),
+                "actions": [f"{action.object}:{action.action}" for action in policy.actions],
+                "subject": list(policy.subject or []),
+                "groups": list(policy.groups or []),
+                "context": {},
+                "environment": environment,
+                "priority": policy.priority,
+                "enforcing": policy.enforcing,
+                # Already resolved into "resource"; _adapt_object must not rebuild them.
+                "objects": None,
+                "org_id": policy.attributes.get("org_id", 1),
+                "client_id": policy.attributes.get("client_id", 1),
+            }
+        except Exception as exc:  # pylint: disable=W0703
+            return AdapterResult(skipped=True, reason=f"Policy '{name}': cannot convert: {exc}")
+        result = PolicyAdapter.adapt(policy_dict)
+        if result.skipped:
+            return result
+        if result.warnings:
+            return AdapterResult(skipped=True, reason=f"Policy '{name}': " + "; ".join(result.warnings))
+        return result
+
+    @staticmethod
     def adapt_batch(policy_dicts: List[dict]) -> Tuple[List[ResourcePolicy], List[str]]:
-        """Convert a batch of policy dicts."""
+        """Convert a batch of storage policy dictionaries.
+
+        Args:
+            policy_dicts: Policy mappings loaded from storage.
+
+        Returns:
+            A pair containing the successfully adapted policies (including any
+            derived policies) and warnings for policies that were skipped or
+            adapted with warnings.
+        """
         all_policies = []
         all_warnings = []
         for d in policy_dicts:

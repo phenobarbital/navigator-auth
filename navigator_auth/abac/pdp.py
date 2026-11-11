@@ -1,6 +1,8 @@
 from typing import List, Optional, Union, Any, Tuple
 from collections import OrderedDict
+from collections.abc import Iterable, Mapping
 import asyncio
+import contextlib
 from aiohttp import web
 from navconfig.logging import logger
 from navigator_session import SessionData
@@ -16,7 +18,9 @@ from .policies import (
     PolicyResponse,
 )
 from .policies.adapter import PolicyAdapter
+from .policies.abstract import AbstractPolicy
 from .policies.evaluator import PolicyEvaluator, PolicyIndex
+from .policies.resource_policy import ResourcePolicy
 from .policies.resources import ResourceType
 from .errors import PreconditionFailed, AccessDenied
 from .context import EvalContext
@@ -26,6 +30,7 @@ from .storages.abstract import AbstractStorage
 from .storages.yaml_storage import YAMLStorage
 from .audit import AuditLog
 from .middleware import abac_middleware
+from ..middlewares.protected_paths import install_protected_paths
 
 # Maximum number of per-tenant evaluator instances kept in the LRU.
 _TENANT_EVALUATOR_LRU_SIZE = 128
@@ -66,45 +71,154 @@ async def find_deny_policy(ctx, policies):
 
 
 class PDP:
-    """ABAC Policy Decision Point implementation.
-    """
+    """ABAC Policy Decision Point implementation."""
+
     def __init__(
         self,
         storage: AbstractStorage,
-        policies: Optional[List[Policy]] = None,
+        policies: Optional[Iterable[AbstractPolicy]] = None,
         yaml_storage: Optional[YAMLStorage] = None,
         evaluator: Optional[PolicyEvaluator] = None,
     ):
+        """Create the PDP.
+
+        Args:
+            storage: Storage the policies are loaded from on startup and reload.
+            policies: Policies to register with ``add_policy``: any iterable
+                (list, tuple, generator, set). ``None`` registers nothing.
+            yaml_storage: Optional YAML policy storage.
+            evaluator: Shared evaluator to use instead of a new one.
+
+        Raises:
+            TypeError: ``policies`` is a string, bytes, a mapping or not iterable.
+            ValueError: ``add_policy`` rejected one of ``policies``.
+        """
         self._policies: list = []
-        if isinstance(policies, list):
-            self._policies = policies
+        # Policies registered through add_policy / policies=: enforced by the
+        # evaluator and kept across reload_policies() and tenant evaluators.
+        self._registered: list[ResourcePolicy] = []
         ### Loading an Storage and registering for Load Policies.
         self.storage = storage
         self.yaml_storage = yaml_storage
         self.logger = logger
         self._auditlog = AuditLog()
-        self._evaluator: PolicyEvaluator = (
-            evaluator if evaluator is not None else PolicyEvaluator()
-        )
+        self._evaluator: PolicyEvaluator = evaluator if evaluator is not None else PolicyEvaluator()
         self._reload_task: Optional[asyncio.Task] = None
         # Per-tenant evaluator LRU (ABAC_TENANT_SQL_FILTERING mode).
         # Keyed by (org_id, client_id) tuple; evicts LRU entries when full.
-        self._tenant_evaluators: OrderedDict[
-            Tuple[int, int], PolicyEvaluator
-        ] = OrderedDict()
+        self._tenant_evaluators: OrderedDict[Tuple[int, int], PolicyEvaluator] = OrderedDict()
+        # Register constructor policies last: add_policy needs the evaluator and
+        # the tenant LRU created above. The caller's list is not aliased.
+        if policies is not None:
+            if isinstance(policies, (str, bytes, Mapping)) or not isinstance(policies, Iterable):
+                raise TypeError(f"PDP policies= must be an iterable of policies, got {type(policies).__name__}")
+            for policy in policies:
+                self.add_policy(policy)
 
     @property
     def evaluator(self) -> PolicyEvaluator:
+        """Return the evaluator that decides authorization requests.
+
+        Returns:
+            The shared ``PolicyEvaluator`` used unless tenant SQL filtering
+            selects a per-tenant evaluator.
+        """
+
         return self._evaluator
 
     def policies(self):
+        """Return the locally registered adapted policies.
+
+        Returns:
+            The compatibility list of ``ResourcePolicy`` objects. Authorization
+            decisions are made by the evaluator.
+        """
         return self._policies
 
-    def add_policy(self, policy: Policy):
-        self._policies.append(policy)
+    def add_policy(self, policy: AbstractPolicy) -> list[ResourcePolicy]:
+        """Register a policy so ``PDP.authorize`` enforces it.
+
+        Args:
+            policy: A classic ``Policy``/``ObjectPolicy``/``FilePolicy`` or a
+                ``ResourcePolicy``.
+
+        Returns:
+            The ``ResourcePolicy`` objects loaded into the evaluator: the adapted
+            policy plus its ``<name>_negated`` DENY when it has ``!`` resources.
+
+        Raises:
+            ValueError: ``PolicyAdapter.from_policy`` rejected the policy (the
+                message carries its reason), a policy with the same name is
+                already registered or already loaded in the evaluator (from
+                storage, YAML or a pre-loaded evaluator), or the evaluator
+                failed to load it (the original error is chained). Nothing is
+                changed when it raises.
+        """
+        name = getattr(policy, "name", repr(policy))
+        result = PolicyAdapter.from_policy(policy)
+        if result.skipped:
+            raise ValueError(f"Policy '{name}' cannot be registered: {result.reason}")
+        adapted = [p for p in [result.policy, *result.additional_policies] if p is not None]
+        registered_names = {registered.name for registered in self._registered}
+        loaded_names = {loaded.name for loaded in self._evaluator._index.all()}
+        adapted_names: set[str] = set()
+        for adapted_policy in adapted:
+            if adapted_policy.name in registered_names or adapted_policy.name in adapted_names:
+                raise ValueError(f"Policy name '{adapted_policy.name}' is already registered")
+            if adapted_policy.name in loaded_names:
+                raise ValueError(f"Policy name '{adapted_policy.name}' is already loaded in the evaluator")
+            adapted_names.add(adapted_policy.name)
+        for warning in result.warnings:
+            self.logger.warning("Policy adaptation warning: %s", warning)
+        try:
+            self._evaluator.load_policies(adapted)
+        except Exception as exc:
+            raise ValueError(f"Policy '{name}' cannot be loaded into the evaluator: {exc}") from exc
+        self._registered.extend(adapted)
+        self._policies.extend(adapted)
+        self._evaluator.invalidate_cache()
+        if self._tenant_evaluators:
+            self._invalidate_tenant_evaluators()
         self.sorted_policies()
+        return adapted
+
+    def _has_external_policies(self) -> bool:
+        """Tell whether the evaluator holds policies not registered via ``add_policy``.
+
+        Returns:
+            True when any policy in the evaluator index is not (by identity) in
+            ``self._registered`` — i.e. the evaluator was pre-loaded externally.
+        """
+        registered = {id(policy) for policy in self._registered}
+        return any(id(policy) not in registered for policy in self._evaluator._index.all())
+
+    def _warn_registered_name_collisions(self, policies: list[ResourcePolicy], source: str) -> None:
+        """Log a WARNING for each policy whose name is also a registered policy's name.
+
+        Both policies stay loaded and enforced (a DENY still wins); only lookups
+        by name, such as ``PolicyIndex.get_by_name`` used by the decorators,
+        return one of them.
+
+        Args:
+            policies: Policies about to be loaded from storage.
+            source: Where they come from, for the log message.
+        """
+        registered_names = {policy.name for policy in self._registered}
+        for name in sorted({policy.name for policy in policies} & registered_names):
+            self.logger.warning(
+                "Policy name '%s' from %s is also a registered policy; both are enforced, "
+                "but lookups by name return only one of them. Rename one.",
+                name,
+                source,
+            )
 
     def sorted_policies(self):
+        """Sort locally registered policies by priority in place.
+
+        Returns:
+            None. The compatibility list returned by :meth:`policies` is
+            reordered; evaluator ordering is unchanged.
+        """
         self._policies.sort(key=lambda policy: policy.priority)
 
     async def _load_policies(self):
@@ -112,7 +226,7 @@ class PDP:
         # setup_pbac / enable_pbac loading via PolicyLoader), skip the
         # on-startup storage load to avoid duplicating or corrupting
         # policies with a second parse that may use a different schema.
-        if self._evaluator._index.all():
+        if self._has_external_policies():
             self.logger.info(
                 "Evaluator already has %d policies loaded externally; "
                 "skipping on-startup storage load to prevent duplicates.",
@@ -123,39 +237,43 @@ class PDP:
         # Load policies from DB storage
         try:
             policies = await self.storage.load_policies()
-            self._load_policy_dicts(policies)
+            self._load_policy_dicts(policies, "DB storage")
         except Exception as exc:
-            self.logger.error('Error loading policies from DB storage: %s', exc)
+            self.logger.error("Error loading policies from DB storage: %s", exc)
 
         # Load policies from YAML storage (if configured)
         if self.yaml_storage is not None:
             try:
                 yaml_policies = await self.yaml_storage.load_policies()
-                self._load_policy_dicts(yaml_policies)
+                self._load_policy_dicts(yaml_policies, "YAML storage")
             except Exception as exc:
-                self.logger.error(
-                    f'Error loading policies from YAML storage: {exc}'
-                )
+                self.logger.error(f"Error loading policies from YAML storage: {exc}")
 
         self._policies.sort(key=lambda policy: policy.priority)
 
-    def _load_policy_dicts(self, policies: list):
-        """Convert all policy dicts and load into evaluator."""
+    def _load_policy_dicts(self, policies: list, source: str = "storage"):
+        """Convert policy dicts and load them into the evaluator.
+
+        The evaluator is loaded first, so a load failure also leaves the
+        compatibility list ``self._policies`` unchanged.
+
+        Args:
+            policies: Raw policy dicts from a storage backend.
+            source: Label used in name-collision warnings.
+        """
         resource_policies, warnings = PolicyAdapter.adapt_batch(policies)
         for w in warnings:
             self.logger.warning("Policy adaptation warning: %s", w)
+        self._warn_registered_name_collisions(resource_policies, source)
+
+        # Load into evaluator (all or nothing).
+        self._evaluator.load_policies(resource_policies)
 
         # Also keep them in self._policies for backward compatibility
         # (mostly for filter_files which still uses them)
         self._policies.extend(resource_policies)
 
-        # Load into evaluator
-        self._evaluator.load_policies(resource_policies)
-
-
-    async def _get_tenant_evaluator(
-        self, org_id: int, client_id: int
-    ) -> PolicyEvaluator:
+    async def _get_tenant_evaluator(self, org_id: int, client_id: int) -> PolicyEvaluator:
         """Return a per-tenant PolicyEvaluator, building and caching it if needed.
 
         Only active when ``ABAC_TENANT_SQL_FILTERING`` is ``True``.  The LRU is
@@ -180,9 +298,10 @@ class PDP:
             tenant_ev = await self._build_tenant_evaluator(org_id, client_id)
         except Exception as exc:
             self.logger.warning(
-                "Failed to build tenant evaluator for (%s, %s): %s — "
-                "falling back to shared evaluator",
-                org_id, client_id, exc,
+                "Failed to build tenant evaluator for (%s, %s): %s — " "falling back to shared evaluator",
+                org_id,
+                client_id,
+                exc,
             )
             return self._evaluator
 
@@ -193,15 +312,14 @@ class PDP:
         self._tenant_evaluators[key] = tenant_ev
         return tenant_ev
 
-    async def _build_tenant_evaluator(
-        self, org_id: int, client_id: int
-    ) -> PolicyEvaluator:
+    async def _build_tenant_evaluator(self, org_id: int, client_id: int) -> PolicyEvaluator:
         """Fetch global + tenant rows from DB and build a fresh PolicyEvaluator."""
         policy_dicts = []
 
         # DB: only global + this tenant (parameterized query in pgStorage)
         db_policies = await self.storage.load_policies(
-            org_id=org_id, client_id=client_id,
+            org_id=org_id,
+            client_id=client_id,
         )
         if db_policies:
             policy_dicts.extend(db_policies)
@@ -213,19 +331,23 @@ class PDP:
                 if yaml_policies:
                     policy_dicts.extend(yaml_policies)
             except Exception as exc:
-                self.logger.warning(
-                    "Tenant evaluator: YAML load failed: %s", exc
-                )
+                self.logger.warning("Tenant evaluator: YAML load failed: %s", exc)
 
         resource_policies, warnings = PolicyAdapter.adapt_batch(policy_dicts)
         for w in warnings:
             self.logger.warning("Tenant evaluator adapt warning: %s", w)
 
+        # Registered policies reach every tenant evaluator; tenant scoping stays
+        # with the engine (org_id/client_id on each ResourcePolicy).
+        resource_policies.extend(self._registered)
+
         ev = PolicyEvaluator()
         ev.load_policies(resource_policies)
         self.logger.debug(
             "Built per-tenant evaluator for (%s, %s): %d policies",
-            org_id, client_id, len(resource_policies),
+            org_id,
+            client_id,
+            len(resource_policies),
         )
         return ev
 
@@ -236,9 +358,7 @@ class PDP:
         self.logger.debug("Invalidated %d per-tenant evaluator(s)", count)
         return count
 
-    def get_evaluator_for(
-        self, org_id: int = 1, client_id: int = 1
-    ) -> PolicyEvaluator:
+    def get_evaluator_for(self, org_id: int = 1, client_id: int = 1) -> PolicyEvaluator:
         """Synchronous helper for tests — returns the shared evaluator.
 
         In async contexts use ``_get_tenant_evaluator`` instead.
@@ -251,12 +371,11 @@ class PDP:
         return self._evaluator
 
     async def on_startup(self, app: web.Application):
-        """Signal Handler for loading Policies from Storage.
-        """
+        """Signal Handler for loading Policies from Storage."""
         # Call the _load_policies function
         await self._load_policies()
         # Register evaluator for handler-level access
-        app['policy_evaluator'] = self._evaluator
+        app["policy_evaluator"] = self._evaluator
         # Start periodic reload if configured (must be in async context)
         if ABAC_RELOAD_INTERVAL > 0:
             self._reload_task = asyncio.ensure_future(self._periodic_reload())
@@ -264,14 +383,18 @@ class PDP:
     async def on_shutdown(self, app: web.Application):
         if self._reload_task:
             self._reload_task.cancel()
-            with asyncio.suppress(asyncio.CancelledError):
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._reload_task
         await self.storage.close()
         if self.yaml_storage is not None:
             await self.yaml_storage.close()
 
     async def reload_policies(self) -> int:
-        """Hot-reload policies from DB/YAML without restart."""
+        """Hot-reload storage policies while retaining registered policies.
+
+        Returns:
+            The number of policies loaded into the evaluator after the reload.
+        """
         policy_dicts = []
 
         # Re-load from DB
@@ -280,7 +403,7 @@ class PDP:
             if db_policies:
                 policy_dicts.extend(db_policies)
         except Exception as exc:
-            self.logger.error('Reload: Error loading from DB: %s', exc)
+            self.logger.error("Reload: Error loading from DB: %s", exc)
 
         # Re-load from YAML
         if self.yaml_storage is not None:
@@ -289,12 +412,16 @@ class PDP:
                 if yaml_policies:
                     policy_dicts.extend(yaml_policies)
             except Exception as exc:
-                self.logger.error('Reload: Error loading from YAML: %s', exc)
+                self.logger.error("Reload: Error loading from YAML: %s", exc)
 
         # Convert and swap
         resource_policies, warnings = PolicyAdapter.adapt_batch(policy_dicts)
         for w in warnings:
             self.logger.warning("Reload warning: %s", w)
+
+        # Registered policies survive a reload (storage alone does not hold them).
+        self._warn_registered_name_collisions(resource_policies, "storage reload")
+        resource_policies.extend(self._registered)
 
         # Build new index
         new_index = PolicyIndex()
@@ -308,9 +435,7 @@ class PDP:
         # Invalidate per-tenant LRU so stale evaluators are rebuilt on next access
         if self._tenant_evaluators:
             n_evicted = self._invalidate_tenant_evaluators()
-            self.logger.debug(
-                "Reload: invalidated %d per-tenant evaluator(s)", n_evicted
-            )
+            self.logger.debug("Reload: invalidated %d per-tenant evaluator(s)", n_evicted)
 
         # Update local list for compatibility
         self._policies = resource_policies
@@ -339,21 +464,15 @@ class PDP:
         elif hasattr(app, "get_app"):
             self.app = app.get_app()
         else:
-            raise TypeError(
-                f"Invalid type for Application Setup: {app}:{type(app)}"
-            )
+            raise TypeError(f"Invalid type for Application Setup: {app}:{type(app)}")
         ### Also creates a PEP (Policy Enforcing Point) on backend
-        self.app['security'] = Guardian(pdp=self)
+        self.app["security"] = Guardian(pdp=self)
         ## and the PDP itself:
-        self.app['abac'] = self
+        self.app["abac"] = self
         # startup operations over storage backend
-        self.app.on_startup.append(
-            self.on_startup
-        )
+        self.app.on_startup.append(self.on_startup)
         # cleanup operations over storage backend
-        self.app.on_shutdown.append(
-            self.on_shutdown
-        )
+        self.app.on_shutdown.append(self.on_shutdown)
 
         # the backend add a middleware to the app
         mdl = self.app.middlewares
@@ -361,42 +480,45 @@ class PDP:
         # middlewares: appended here it already does when AuthHandler.setup()
         # ran first; otherwise AuthHandler.setup() moves it behind them.
         mdl.append(abac_middleware)
+        # System paths stay closed whatever the policies say (and even when
+        # the PDP is used without AuthHandler).
+        install_protected_paths(self.app)
         ### create the API endpoint for this ABAC
         pep = PEP()
-        self.app.router.add_post(
-            "/api/v1/abac/reload", PolicyHandler.reload
-        )
-        self.app.router.add_post(
-            "/api/v1/abac/authorize", pep.authorize
-        )
-        self.app.router.add_get(
-            "/api/v1/abac/authorize", pep.authorize
-        )
-        self.app.router.add_post(
-            "/api/v1/abac/is_allowed", pep.is_allowed
-        )
-        self.app.router.add_post(
-            "/api/v1/abac/check", pep.check
-        )
+        self.app.router.add_post("/api/v1/abac/reload", PolicyHandler.reload)
+        self.app.router.add_post("/api/v1/abac/authorize", pep.authorize)
+        self.app.router.add_get("/api/v1/abac/authorize", pep.authorize)
+        self.app.router.add_post("/api/v1/abac/is_allowed", pep.is_allowed)
+        self.app.router.add_post("/api/v1/abac/check", pep.check)
         ## Policy Handler:
-        self.app.router.add_view(
-            r"/api/v1/abac/policies/{id:.*}", PolicyHandler,
-            name="api_abac_policies_id"
-        )
-        self.app.router.add_view(
-            r"/api/v1/abac/policies/{meta:\:?.*}", PolicyHandler,
-            name="api_abac_policies"
-        )
+        self.app.router.add_view(r"/api/v1/abac/policies/{id:.*}", PolicyHandler, name="api_abac_policies_id")
+        self.app.router.add_view(r"/api/v1/abac/policies/{meta:\:?.*}", PolicyHandler, name="api_abac_policies")
         ## end
-        self.logger.debug(' == ABAC is Started == ')
+        self.logger.debug(" == ABAC is Started == ")
 
     async def authorize(
-            self,
-            request: web.Request,
-            session: SessionData = None,
-            user: Any = None,
-            effect: PolicyEffect = PolicyEffect.ALLOW
+        self,
+        request: web.Request,
+        session: SessionData = None,
+        user: Any = None,
+        effect: PolicyEffect = PolicyEffect.ALLOW,
     ):
+        """Authorize a request against the applicable policy evaluator.
+
+        Args:
+            request: The incoming HTTP request.
+            session: Optional authentication session data.
+            user: Optional resolved user; session user information is used when
+                omitted.
+            effect: The requested policy effect.
+
+        Returns:
+            The matching ``PolicyResponse`` when access is allowed.
+
+        Raises:
+            AccessDenied: If a matching policy denies access.
+            PreconditionFailed: If no policy allows the request.
+        """
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
         except (KeyError, TypeError):
@@ -417,17 +539,18 @@ class PDP:
 
         # Delegate to evaluator (pass resolved tenant from context)
         result = evaluator.check_access(
-            ctx, ResourceType.URI, request.path, action,
-            org_id=ctx.org_id, client_id=ctx.client_id,
+            ctx,
+            ResourceType.URI,
+            request.path,
+            action,
+            org_id=ctx.org_id,
+            client_id=ctx.client_id,
         )
 
         # auditlog expects an object with effect, response, rule
         # EvaluationResult has allowed, effect, matched_policy, reason
         response = PolicyResponse(
-            effect=result.effect,
-            response=result.reason,
-            rule=result.matched_policy or "default",
-            actions=[action]
+            effect=result.effect, response=result.reason, rule=result.matched_policy or "default", actions=[action]
         )
 
         self._debug_authorization(request, user, action, request.path, result)
@@ -437,9 +560,7 @@ class PDP:
             if result.matched_policy:
                 raise AccessDenied(f"Access Denied: {result.reason}")
             else:
-                raise PreconditionFailed(
-                    "No Matching Policies were found, Deny access."
-                )
+                raise PreconditionFailed("No Matching Policies were found, Deny access.")
 
         return response
 
@@ -481,29 +602,27 @@ class PDP:
     ## Audit Log
     async def auditlog(self, answer, user):
         try:
-            self.logger.notice(f'Policy: {answer}')
+            self.logger.notice(f"Policy: {answer}")
             await self._auditlog.log(answer, PolicyEffect(answer.effect).name, user)
         except Exception as exc:
-            self.logger.warning('Error saving policy Log: %s', exc)
+            self.logger.warning("Error saving policy Log: %s", exc)
 
     async def allowed_groups(
-            self,
-            request: web.Request,
-            session: SessionData = None,
-            user: Any = None,
-            groups: list = None,
-            effect: PolicyEffect = PolicyEffect.ALLOW
+        self,
+        request: web.Request,
+        session: SessionData = None,
+        user: Any = None,
+        groups: list = None,
+        effect: PolicyEffect = PolicyEffect.ALLOW,
     ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
         except (KeyError, TypeError):
-            raise AccessDenied(
-                "Access Denied: no session information available"
-            )
+            raise AccessDenied("Access Denied: no session information available")
         member = False
         if "groups" in userinfo:
             member = bool(not set(userinfo["groups"]).isdisjoint(groups))
-        elif user and hasattr(user, 'groups'):
+        elif user and hasattr(user, "groups"):
             for group in user.groups:
                 if group.group in groups:
                     member = True
@@ -511,17 +630,9 @@ class PDP:
         if member is True:
             return effect
         else:
-            raise AccessDenied(
-                "Access Denied"
-            )
+            raise AccessDenied("Access Denied")
 
-    async def filter_files(
-            self,
-            request: web.Request,
-            files: list[str],
-            session: SessionData = None,
-            user: Any = None
-    ):
+    async def filter_files(self, request: web.Request, files: list[str], session: SessionData = None, user: Any = None):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
         except (KeyError, TypeError):
@@ -537,23 +648,25 @@ class PDP:
         # Delegate to the PolicyEvaluator (Rust-backed) for URI filtering.
         # Each file is treated as a URI resource for policy evaluation.
         result = evaluator.filter_resources(
-            ctx, ResourceType.URI, files, "uri:read",
-            org_id=ctx.org_id, client_id=ctx.client_id,
+            ctx,
+            ResourceType.URI,
+            files,
+            "uri:read",
+            org_id=ctx.org_id,
+            client_id=ctx.client_id,
         )
         if not result.allowed and not result.denied:
-            raise PreconditionFailed(
-                "No Matching Policies were found, Deny access."
-            )
+            raise PreconditionFailed("No Matching Policies were found, Deny access.")
         return result.allowed
 
     async def is_allowed(
-            self,
-            request: web.Request,
-            session: SessionData = None,
-            user: Any = None,
-            org_id: Any = None,
-            client_id: Any = None,
-            **kwargs
+        self,
+        request: web.Request,
+        session: SessionData = None,
+        user: Any = None,
+        org_id: Any = None,
+        client_id: Any = None,
+        **kwargs,
     ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
@@ -563,9 +676,9 @@ class PDP:
             user = userinfo
         ctx = EvalContext(request, user, userinfo, session, org_id=org_id, client_id=client_id)
 
-        obj = kwargs.get('resource', None)
-        action = kwargs.get('action', 'uri:read')
-        owner_reports_to = kwargs.get('owner_reports_to')
+        obj = kwargs.get("resource", None)
+        action = kwargs.get("action", "uri:read")
+        owner_reports_to = kwargs.get("owner_reports_to")
 
         if not obj:
             # If no resource specified, we use URI authorization from request
@@ -573,9 +686,9 @@ class PDP:
 
         # Extract resource type and name from "type:name" or assume URI
         if isinstance(obj, str):
-            if ':' in obj:
+            if ":" in obj:
                 try:
-                    rtype_str, rname = obj.split(':', 1)
+                    rtype_str, rname = obj.split(":", 1)
                     try:
                         rtype = ResourceType(rtype_str)
                     except ValueError:
@@ -598,15 +711,17 @@ class PDP:
 
         # Delegate to evaluator (pass resolved tenant from context)
         result = evaluator.check_access(
-            ctx, rtype, rname, action, owner_reports_to=owner_reports_to,
-            org_id=ctx.org_id, client_id=ctx.client_id,
+            ctx,
+            rtype,
+            rname,
+            action,
+            owner_reports_to=owner_reports_to,
+            org_id=ctx.org_id,
+            client_id=ctx.client_id,
         )
 
         response = PolicyResponse(
-            effect=result.effect,
-            response=result.reason,
-            rule=result.matched_policy or "default",
-            actions=[action]
+            effect=result.effect, response=result.reason, rule=result.matched_policy or "default", actions=[action]
         )
 
         self._debug_authorization(request, user, action, f"{rtype}:{rname}", result)
@@ -614,13 +729,13 @@ class PDP:
         return response
 
     async def filter_obj(
-            self,
-            request: web.Request,
-            objects: Union[str, list],
-            _type: str,
-            session: SessionData = None,
-            user: Any = None,
-            effect: PolicyEffect = PolicyEffect.ALLOW
+        self,
+        request: web.Request,
+        objects: Union[str, list],
+        _type: str,
+        session: SessionData = None,
+        user: Any = None,
+        effect: PolicyEffect = PolicyEffect.ALLOW,
     ):
         try:
             userinfo = session[AUTH_SESSION_OBJECT]
@@ -646,25 +761,25 @@ class PDP:
 
         # Delegate to the PolicyEvaluator for batch filtering (pass resolved tenant)
         result = evaluator.filter_resources(
-            ctx, resource_type, objects, f"{_type}:read",
-            org_id=ctx.org_id, client_id=ctx.client_id,
+            ctx,
+            resource_type,
+            objects,
+            f"{_type}:read",
+            org_id=ctx.org_id,
+            client_id=ctx.client_id,
         )
         if not result.allowed and not result.denied:
-            raise PreconditionFailed(
-                "No Matching Policies were found, Deny access."
-            )
+            raise PreconditionFailed("No Matching Policies were found, Deny access.")
 
         # Build response compatible with legacy callers
         response = PolicyResponse(
             effect=effect if result.allowed else PolicyEffect.DENY,
             response="Filtered by PolicyEvaluator",
             rule="evaluator",
-            actions=[f"{_type}:read"]
+            actions=[f"{_type}:read"],
         )
         await self.auditlog(response, user)
 
         if not result.allowed:
-            raise AccessDenied(
-                f"Access Denied: no allowed objects of type '{_type}'"
-            )
+            raise AccessDenied(f"Access Denied: no allowed objects of type '{_type}'")
         return response

@@ -74,6 +74,49 @@ real implementation.
 
 ---
 
+## `policy_server.py` — PBAC example
+
+This example combines an `AuthHandler` login form with PDP and Guardian authorization. It loads the
+default packs from `navigator_auth/abac/default_policies` through `YAMLStorage`, registers ten example
+policies with `pdp.add_policy` (five `ResourcePolicy` policies and five classic `Policy`/`ObjectPolicy`
+policies), and exposes the REST decision endpoint at `/api/v1/abac/check`.
+
+### Run
+
+PostgreSQL (used by `pgStorage` and `default_dsn`) and Redis must be available through your environment
+or `env/dev/.env` configuration. From the repository root, run:
+
+```bash
+python examples/policy_server.py
+```
+
+Open <http://localhost:5000/>, log in, and visit `/dashboard/`. To query the decision endpoint directly:
+
+```bash
+curl -X POST http://localhost:5000/api/v1/abac/check \
+    -H "Content-Type: application/json" \
+    -d '{"user":"alice@acme.com","resource":"tool:jira_create","action":"tool:execute","groups":["engineering"]}'
+```
+
+### Troubleshooting
+
+* **`428 "No Matching Policies were found, Deny access."`** — no policy covers the path. Register
+  one with `pdp.add_policy(...)`; policies pushed straight into the evaluator are dropped by
+  `reload_policies()`.
+* **`ValueError` from `pdp.add_policy(...)`** — the policy cannot be enforced as written: an invalid
+  resource pattern, a duplicate name, or a classic `context` / `conditions` / `scopes` restriction
+  (rejected, never silently ignored). Express a username restriction with `subject=[...]`.
+  Supported environment keys: `hour`, `dow` (`day_of_week` is accepted as an alias),
+  `is_business_hours`, `is_weekend`, `day_segment`.
+* **`InsecureKeyLengthWarning: The HMAC key is N bytes long`** or the startup WARNING
+  `AUTH_SECRET_KEY is N bytes; HMAC keys should be at least 32 bytes` — set `AUTH_SECRET_KEY` and
+  `AUTH_TOKEN_SECRET` / `PARTNER_KEY` to at least 32 bytes (see "Signing keys" in `docs/settings.rst`).
+* **`Vault secret failed integrity check ... UnsupportedFormatError`** — a pre-v2 (v1) vault
+  secret. Apply `navigator_auth/vault/sql/002_vault_crypto_hardening.sql`, then run
+  `navigator-vault migrate --dry-run`, then `navigator-vault migrate --run --backup-dir <dir>`.
+
+---
+
 ## `identity_vault_server.py` — Identity Vault: login + linked credentials
 
 The example for the Identity Vault (PR #582): one aiohttp app with an

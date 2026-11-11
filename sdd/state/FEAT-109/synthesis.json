@@ -1,0 +1,552 @@
+{
+  "schema_version": "1.0",
+  "feat_id": "FEAT-109",
+  "mode": "investigation",
+  "summary_oneline": "PBAC example: add_policy() URI grants never reach the evaluator (428 on /dashboard/), plus log noise, a 6-byte JWT key and an unmigrated v1 vault secret.",
+  "localization": [
+    {
+      "path": "navigator_auth/abac/pdp.py",
+      "symbol": "PDP.authorize",
+      "lines": "393-448",
+      "role": "decides URI access through the PolicyEvaluator only; raises PreconditionFailed (428) when no policy matched",
+      "evidence": [
+        "F004"
+      ]
+    },
+    {
+      "path": "navigator_auth/abac/pdp.py",
+      "symbol": "PDP.add_policy",
+      "lines": "103-108",
+      "role": "public API that appends a classic Policy to self._policies only; never adapts it into the evaluator",
+      "evidence": [
+        "F004"
+      ]
+    },
+    {
+      "path": "navigator_auth/abac/pdp.py",
+      "symbol": "PDP._load_policies",
+      "lines": "110-141",
+      "role": "startup storage load; returns early at line 115 when the evaluator already holds policies",
+      "evidence": [
+        "F004",
+        "F007"
+      ]
+    },
+    {
+      "path": "navigator_auth/abac/pdp.py",
+      "symbol": "PDP._load_policy_dicts",
+      "lines": "142-153",
+      "role": "the only path that adapts policies (PolicyAdapter.adapt_batch) and loads them into the evaluator",
+      "evidence": [
+        "F004"
+      ]
+    },
+    {
+      "path": "navigator_auth/abac/policies/adapter.py",
+      "symbol": "PolicyAdapter._adapt_classic",
+      "lines": "186-221",
+      "role": "converts a classic Policy dict into a ResourcePolicy (subjects, tenant (1,1) default)",
+      "evidence": [
+        "F011"
+      ]
+    },
+    {
+      "path": "navigator_auth/abac/errors.py",
+      "symbol": "PreconditionFailed",
+      "lines": "77-80",
+      "role": "builds the HTTP 428 error returned to the browser",
+      "evidence": [
+        "F004"
+      ]
+    },
+    {
+      "path": "examples/policy_server.py",
+      "symbol": "create_app",
+      "lines": "528-603",
+      "role": "pre-loads the evaluator (load_from_directory at 560, load_policies at 563) then registers URI policies via pdp.add_policy (586)",
+      "evidence": [
+        "F005"
+      ]
+    },
+    {
+      "path": "examples/policy_server.py",
+      "symbol": "public_dashboard",
+      "lines": "125-132",
+      "role": "the only ALLOW policy for urn:uri:/dashboard/ (no subject constraint)",
+      "evidence": [
+        "F005"
+      ]
+    },
+    {
+      "path": "navigator_auth/abac/middleware.py",
+      "symbol": "abac_middleware",
+      "lines": "16-58",
+      "role": "logs 'Access to X is not Authenticated.' at WARNING (line 43) for every unauthenticated, non-excluded request, then passes it through; duplicate except at 47-56",
+      "evidence": [
+        "F002"
+      ]
+    },
+    {
+      "path": "navigator_auth/conf.py",
+      "symbol": "EXCLUDE_DEFAULTS",
+      "lines": "63-72",
+      "role": "default auth exclude list (no /favicon.ico, /.well-known/*)",
+      "evidence": [
+        "F002"
+      ]
+    },
+    {
+      "path": "navigator_auth/auth.py",
+      "symbol": "AuthHandler.add_exclude_list",
+      "lines": "844-853",
+      "role": "per-app fnmatch exclude list API used by the example",
+      "evidence": [
+        "F002"
+      ]
+    },
+    {
+      "path": "navigator_auth/conf.py",
+      "symbol": "SECRET_KEY",
+      "lines": "305-308",
+      "role": "AUTH_SECRET_KEY taken verbatim, no minimum length; random 32-byte fallback only when unset",
+      "evidence": [
+        "F003"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/idp/__init__.py",
+      "symbol": "SECRET_KEY JWT use",
+      "lines": "250-432",
+      "role": "HS256 jwt.encode/decode with SECRET_KEY \u2014 triggers PyJWT InsecureKeyLengthWarning",
+      "evidence": [
+        "F003"
+      ]
+    },
+    {
+      "path": ".venv/lib/python3.11/site-packages/navigator_session/vault/session_vault.py",
+      "symbol": "SessionVault.load_for_session",
+      "lines": "420-460",
+      "role": "per-row open; logs 'failed integrity check', audits integrity_fail, skips the row (dependency code)",
+      "evidence": [
+        "F001"
+      ]
+    },
+    {
+      "path": ".venv/lib/python3.11/site-packages/navigator_session/vault/envelope.py",
+      "symbol": "UnsupportedFormatError",
+      "lines": "69-134",
+      "role": "raised for any blob that is not a v2 (0xA2) envelope (dependency code)",
+      "evidence": [
+        "F001"
+      ]
+    },
+    {
+      "path": "sdd/specs/migrate-classic-policies-abac-rust.spec.md",
+      "symbol": "PDP module change",
+      "lines": "37-92",
+      "role": "the April 2026 migration that made authorize() evaluator-only while promising an unchanged PDP public interface; add_policy not covered",
+      "evidence": [
+        "F014"
+      ]
+    }
+  ],
+  "constraints": [
+    {
+      "statement": "The 'skip storage load when the evaluator is pre-populated' guard is intentional and pinned by tests/test_yaml_storage_double_load.py::TestPDPDoubleLoadPrevention",
+      "evidence": [
+        "F004",
+        "F007"
+      ],
+      "implication": "the fix must not reintroduce double-loading of YAML/DB policies; route add_policy() into the evaluator instead of removing the guard"
+    },
+    {
+      "statement": "PDP.authorize consults only the evaluator; self._policies is kept only 'for backward compatibility'",
+      "evidence": [
+        "F004"
+      ],
+      "implication": "any policy that must affect authorization has to be adapted and loaded into the evaluator"
+    },
+    {
+      "statement": "Default effect is deny (ABAC_DEFAULT_EFFECT fallback 'deny'; every default YAML pack declares defaults.effect: deny); the Rust engine fails closed on errors",
+      "evidence": [
+        "F006",
+        "F013"
+      ],
+      "implication": "the fix must keep fail-closed semantics \u2014 no allow-by-default shortcut"
+    },
+    {
+      "statement": "No test covers the 428 no-match path or PDP.add_policy",
+      "evidence": [
+        "F007"
+      ],
+      "implication": "the fix needs regression tests for add_policy -> evaluator and for the 428 response"
+    },
+    {
+      "statement": "abac_middleware's warning branch is a pass-through (request still served); tests/test_probes.py references a separate probe tracker for repeated unauthenticated probes",
+      "evidence": [
+        "F002"
+      ],
+      "implication": "demoting/filtering the log must not change authorization behaviour or the probe tracker"
+    },
+    {
+      "statement": "SECRET_KEY also signs IdP authorization codes/JWTs and CSRF tokens; PARTNER_KEY (16 bytes) is the fallback for AUTH_TOKEN_SECRET",
+      "evidence": [
+        "F003"
+      ],
+      "implication": "rotating the key invalidates in-flight tokens; a startup check must cover both keys and choose warn vs fail deliberately"
+    },
+    {
+      "statement": "Vault envelope/SessionVault code lives in the navigator-session dependency; loading is fail-closed per row by design (FEAT-099)",
+      "evidence": [
+        "F001",
+        "F009",
+        "F012"
+      ],
+      "implication": "the vault error is an operational migration step (navigator-vault migrate), not a navigator-auth code change"
+    },
+    {
+      "statement": "The classic->Rust migration spec promised an unchanged PDP public interface",
+      "evidence": [
+        "F014"
+      ],
+      "implication": "restoring add_policy's effect is a bug fix to honour that contract, not a new API"
+    }
+  ],
+  "investigation": {
+    "hypotheses": [
+      {
+        "rank": 1,
+        "statement": "The example's URI grants (public_dashboard etc.) are registered with PDP.add_policy, which never loads them into the PolicyEvaluator; because the example pre-populates the evaluator, PDP._load_policies also skips storage, and PDP.authorize \u2014 which asks only the evaluator \u2014 finds no policy for /dashboard/ and raises the 428.",
+        "supporting": [
+          "F004",
+          "F005",
+          "F006",
+          "F007",
+          "F013",
+          "F014"
+        ],
+        "contradicting": [
+          "F008"
+        ],
+        "confidence": "medium",
+        "reasoning": "Every link is read directly and probe-verified at HEAD c25272a. F014 dates the gap to the April 2026 classic->Rust migration, which explains why no recent commit shows it; still not reproduced at runtime.",
+        "next_probe": "After pdp.setup(app) at examples/policy_server.py:589, print [p.name for p in pdp._evaluator._index.all()] and confirm public_dashboard is absent; then GET /dashboard/ logged in and expect 428."
+      },
+      {
+        "rank": 2,
+        "statement": "Before the pre-load guard landed in PDP._load_policies, startup also loaded DB/YAML storage policies into the evaluator, so a /dashboard/ grant stored in the example database used to match.",
+        "supporting": [
+          "F004",
+          "F008"
+        ],
+        "contradicting": [],
+        "confidence": "low",
+        "reasoning": "Would explain 'was working before', but the guard's landing date and the example DB contents were not researched (git budget exhausted).",
+        "next_probe": "git log -S '_index.all()' -- navigator_auth/abac/pdp.py ; grep -n 'dashboard' examples/sql/*"
+      },
+      {
+        "rank": 3,
+        "statement": "The 2026-10-13 session-user rehydration change (normalize_memberships on every request, decode errors return no user) altered the subject so subject-scoped policies stop matching.",
+        "supporting": [
+          "F010"
+        ],
+        "contradicting": [
+          "F004",
+          "F005"
+        ],
+        "confidence": "low",
+        "reasoning": "A 428 means no policy matched the resource at all, and public_dashboard has no subject constraint, so H1 explains the symptom without this change.",
+        "next_probe": "Search the server log for 'NAV: Unable to decode User session' (auth.py:755)."
+      }
+    ]
+  },
+  "enrichment": null,
+  "confidence_map": [
+    {
+      "id": "C1",
+      "statement": "PDP.authorize checks access only through the PolicyEvaluator and raises PreconditionFailed (HTTP 428) when no policy matched",
+      "evidence": [
+        "F004"
+      ],
+      "confidence": "high",
+      "reasoning": "Direct read of pdp.py:393-448 and errors.py:77-80; probe-verified."
+    },
+    {
+      "id": "C2",
+      "statement": "PDP.add_policy only appends to self._policies and never loads the policy into the evaluator",
+      "evidence": [
+        "F004"
+      ],
+      "confidence": "high",
+      "reasoning": "Direct read of pdp.py:103-108; probe-verified signature."
+    },
+    {
+      "id": "C3",
+      "statement": "PDP._load_policies returns early (pdp.py:115) when the evaluator already holds policies",
+      "evidence": [
+        "F004"
+      ],
+      "confidence": "high",
+      "reasoning": "Anchor probe-verified at line 115."
+    },
+    {
+      "id": "C4",
+      "statement": "policy_server.py pre-loads the evaluator and registers the /dashboard/ grant only via pdp.add_policy",
+      "evidence": [
+        "F005"
+      ],
+      "confidence": "high",
+      "reasoning": "Anchors verified at lines 560, 586 and 130."
+    },
+    {
+      "id": "C5",
+      "statement": "C1-C4 together produce the 428 on /dashboard/ and other add_policy-covered URIs",
+      "evidence": [
+        "F004",
+        "F005"
+      ],
+      "confidence": "medium",
+      "reasoning": "Logical chain of verified facts; not reproduced at runtime."
+    },
+    {
+      "id": "C6",
+      "statement": "The pre-load guard is intentional and covered by TestPDPDoubleLoadPrevention",
+      "evidence": [
+        "F004",
+        "F007"
+      ],
+      "confidence": "high",
+      "reasoning": "Test class verified at tests/test_yaml_storage_double_load.py:219."
+    },
+    {
+      "id": "C7",
+      "statement": "No test references PreconditionFailed or add_policy",
+      "evidence": [
+        "F007"
+      ],
+      "confidence": "high",
+      "reasoning": "absent-probe on tests/ returned no matches for both."
+    },
+    {
+      "id": "C8",
+      "statement": "The default effect is deny and no default YAML pack grants /dashboard/",
+      "evidence": [
+        "F006",
+        "F013"
+      ],
+      "confidence": "high",
+      "reasoning": "conf.py:710 anchor verified; pack contents read."
+    },
+    {
+      "id": "C9",
+      "statement": "No commit in the last 45 days explains when /dashboard/ stopped working",
+      "evidence": [
+        "F008",
+        "F002",
+        "F014"
+      ],
+      "confidence": "medium",
+      "reasoning": "git log covers abac/, vault/, middlewares/ and the example; the pre-load guard was not dated. F014 suggests the gap predates the window (April 2026 migration)."
+    },
+    {
+      "id": "C10",
+      "statement": "The session-user normalization change contributes to the 428",
+      "evidence": [
+        "F010"
+      ],
+      "confidence": "low",
+      "reasoning": "Plausible by timing only; contradicted by the no-subject public_dashboard policy."
+    },
+    {
+      "id": "C11",
+      "statement": "abac_middleware.py:43 logs a root-logger WARNING for every unauthenticated, non-excluded request and still serves it",
+      "evidence": [
+        "F002"
+      ],
+      "confidence": "high",
+      "reasoning": "Anchor verified at line 43; read of lines 16-58."
+    },
+    {
+      "id": "C12",
+      "statement": "Neither EXCLUDE_DEFAULTS nor the example's exclude list covers /favicon.ico, /.well-known/* or /client-config",
+      "evidence": [
+        "F002",
+        "F005"
+      ],
+      "confidence": "high",
+      "reasoning": "Direct read of conf.py:63-72 and policy_server.py:535-538."
+    },
+    {
+      "id": "C13",
+      "statement": "It is unexplained why the SystemRoute (404) skip at middleware.py:28 does not silence these unrouted paths",
+      "evidence": [
+        "F002"
+      ],
+      "confidence": "low",
+      "reasoning": "REPL showed 404s are SystemRoute, yet the user's log shows the warning; needs a live repro."
+    },
+    {
+      "id": "C14",
+      "statement": "middleware.py:47-56 has a duplicate, unreachable except (TypeError, KeyError) clause",
+      "evidence": [
+        "F002"
+      ],
+      "confidence": "high",
+      "reasoning": "Direct read."
+    },
+    {
+      "id": "C15",
+      "statement": "The 6-byte HMAC key is AUTH_SECRET_KEY from env/.env (same length in env/prod/.env) and nothing validates key length at startup",
+      "evidence": [
+        "F003"
+      ],
+      "confidence": "high",
+      "reasoning": "Lengths measured; conf.py:305-308 anchor verified."
+    },
+    {
+      "id": "C16",
+      "statement": "SECRET_KEY signs IdP JWTs/authorization codes and CSRF tokens; PARTNER_KEY (16 bytes) backs AUTH_TOKEN_SECRET",
+      "evidence": [
+        "F003"
+      ],
+      "confidence": "high",
+      "reasoning": "Direct read of idp/__init__.py, token.py:105 and conf.py:344-349."
+    },
+    {
+      "id": "C17",
+      "statement": "User 35's 'account' vault secret is most likely a pre-FEAT-099 v1 blob that was never migrated",
+      "evidence": [
+        "F001",
+        "F009",
+        "F012"
+      ],
+      "confidence": "medium",
+      "reasoning": "UnsupportedFormatError is the documented v1/non-v2 error; the row itself was not inspected."
+    },
+    {
+      "id": "C18",
+      "statement": "The vault failure is non-fatal by design and its code lives in navigator-session; the remedy is navigator-vault migrate",
+      "evidence": [
+        "F001",
+        "F009",
+        "F012"
+      ],
+      "confidence": "high",
+      "reasoning": "Direct read of session_vault.py:420-460 and the migrate CLI; FEAT-099 spec G5."
+    },
+    {
+      "id": "C19",
+      "statement": "Tenant scoping is not the cause: classic policies default to the global (1,1) tenant",
+      "evidence": [
+        "F011"
+      ],
+      "confidence": "medium",
+      "reasoning": "Adapter read directly; global-match behaviour taken from a test name."
+    },
+    {
+      "id": "C20",
+      "statement": "How an adapted classic policy with empty groups/users (public_dashboard) matches subjects is unverified",
+      "evidence": [
+        "F011"
+      ],
+      "confidence": "low",
+      "reasoning": "SubjectSpec.from_dict empty-set semantics not read; if empty means 'match nobody' the library fix also needs a subject rule."
+    },
+    {
+      "id": "C21",
+      "statement": "add_policy lost its effect in the April 2026 classic->Rust migration, which rewired authorize() and _load_policy_dicts() but never mentions add_policy",
+      "evidence": [
+        "F014"
+      ],
+      "confidence": "medium",
+      "reasoning": "Spec lines 37/92 read directly; the omission is inferred from an absent grep match."
+    }
+  ],
+  "unknowns": [
+    {
+      "id": "U1",
+      "question": "Where should the 428 fix go: make PDP.add_policy load classic policies into the evaluator (library), rewrite the example's URI policies as evaluator-native policies (example only), or both?",
+      "blocks_claims": [
+        "C5",
+        "C20"
+      ],
+      "plausible_answers": [
+        "library \u2014 fixes every add_policy caller",
+        "example only \u2014 library API unchanged",
+        "both"
+      ],
+      "ask_user": true,
+      "user_answer": "Library + example: make PDP.add_policy() load classic policies into the evaluator (keep the startup-load guard), add regression tests, and clean up the example."
+    },
+    {
+      "id": "U2",
+      "question": "How should the 'Access to X is not Authenticated' noise be handled: demote it to DEBUG, add default exclusions for browser probe paths (/favicon.ico, /.well-known/*), or both?",
+      "blocks_claims": [
+        "C11",
+        "C12"
+      ],
+      "plausible_answers": [
+        "demote to DEBUG",
+        "default probe-path exclusions",
+        "both"
+      ],
+      "ask_user": true,
+      "user_answer": "Both: demote the message to DEBUG, add default exclusions for /favicon.ico and /.well-known/*, and remove the duplicate dead except clause."
+    },
+    {
+      "id": "U3",
+      "question": "For HMAC keys shorter than 32 bytes (AUTH_SECRET_KEY, AUTH_TOKEN_SECRET/PARTNER_KEY): warn at startup, refuse to start, or only rotate the env values?",
+      "blocks_claims": [
+        "C15",
+        "C16"
+      ],
+      "plausible_answers": [
+        "warn at startup + rotate env",
+        "refuse to start",
+        "rotate env only"
+      ],
+      "ask_user": true,
+      "user_answer": "Warn + rotate env: log a startup warning when AUTH_SECRET_KEY or AUTH_TOKEN_SECRET/PARTNER_KEY is under 32 bytes, and set new 32+ byte env values."
+    },
+    {
+      "id": "U4",
+      "question": "When did /dashboard/ last work in the example (roughly)?",
+      "blocks_claims": [
+        "C9",
+        "C10"
+      ],
+      "plausible_answers": [
+        "within the last few days",
+        "weeks or months ago",
+        "not sure"
+      ],
+      "ask_user": true,
+      "user_answer": "Not sure."
+    }
+  ],
+  "recommended_next_command": {
+    "command": "sdd-spec",
+    "rationale": "The only scope fork (library vs example, U1) is resolved and every fix site is localized and probe-verified; the remaining medium confidence is runtime reproduction, which the spec should make its first acceptance test."
+  },
+  "overall_confidence": "medium",
+  "meta": {
+    "findings_used": [
+      "F001",
+      "F002",
+      "F003",
+      "F004",
+      "F005",
+      "F006",
+      "F007",
+      "F008",
+      "F009",
+      "F010",
+      "F011",
+      "F012",
+      "F013",
+      "F014"
+    ],
+    "findings_unused": [],
+    "notes": "Follow-up research (not user questions): (1) date the pre-load guard: git log -S '_index.all()' -- navigator_auth/abac/pdp.py; (2) read SubjectSpec.from_dict for empty-subject semantics; (3) live repro of the /favicon.ico warning to explain C13; (4) check whether env/prod/.env is tracked by git. Vault unknown dropped as non-blocking: the codebase answers it (operational migrate). Post-Q&A: F014 added (follow-up read, depth 1); recommendation moved from sdd-brainstorm to sdd-spec because U1 removed the fork."
+  }
+}

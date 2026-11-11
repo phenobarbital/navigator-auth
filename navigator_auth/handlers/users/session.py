@@ -153,6 +153,10 @@ class UserSession(BaseHandler):
             headers = {"x-status": "OK", "x-message": "Session OK"}
             response = {"action": "Password Changed", "status": "OK"}
             return self.json_response(response=response, headers=headers, status=202)
+        except web.HTTPException:
+            # self.error() raises: let the 403 above reach the client instead
+            # of being re-reported as a 500 by the generic handler below.
+            raise
         except TransitionAborted as aborted:
             return self.json_response(response={"error": aborted.reason}, status=409)
         except MfaStorageError:
@@ -196,8 +200,11 @@ class UserSession(BaseHandler):
             async with security_transition(
                 request.app, user.user_id, "password_reset", actor_user_id=userinfo.get("user_id")
             ) as conn:
+                # coalesce: a never-set (NULL) password is a valid captured state — users
+                # created by PUT /api/v1/users have none until this reset — while a missing
+                # row still reads as None and aborts.
                 current = await conn.fetchval(
-                    f"SELECT password FROM {_USERS} WHERE user_id = $1 FOR UPDATE", user.user_id
+                    f"SELECT coalesce(password, '') FROM {_USERS} WHERE user_id = $1 FOR UPDATE", user.user_id
                 )
                 if current is None or not secrets.compare_digest(str(current), str(captured or "")):
                     raise TransitionAborted("credentials_changed")

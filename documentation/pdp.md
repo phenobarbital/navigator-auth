@@ -63,3 +63,13 @@ policy file cannot widen a handler.
 require_all=False) -> (allowed, reason, response)` is public and usable by any
 handler whose decision depends on request-time data (such as a row's owner).
 
+
+## Unauthenticated requests and system paths
+
+`abac_middleware` does **not** block unauthenticated requests: it logs
+`Access to <path> is not Authenticated.` and hands the request to the handler,
+which decides (a protected view raises 401, a static route answers 404 for a
+missing file). System paths (`/.env`, `/etc/`, `/logs/`, key and config
+files...) never get that far: `protected_paths_middleware` refuses them first,
+whatever the policies say, and logs one warning per host that keeps probing.
+See [protected-paths.md](protected-paths.md).

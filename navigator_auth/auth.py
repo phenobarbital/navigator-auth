@@ -41,6 +41,7 @@ from .backends.idp import IdentityProvider
 from .backends.oauth2.models import is_oauth_user_token
 from .security_state.store import SecurityStateError, generation_matches, generation_of
 from .libs.expiry import expiry_fields
+from .libs.hmac_keys import warn_short_hmac_keys
 from .identities import AuthUser
 from .conf import (
     AUTH_MECHANISM_KEY,
@@ -84,6 +85,7 @@ from .templates import TemplateParser
 from .middlewares.security import security_middleware
 from .middlewares.csrf import csrf_middleware
 from .middlewares.version import version_middleware
+from .middlewares.protected_paths import install_protected_paths
 from .abac.middleware import abac_middleware
 from .abac.context import bearer_context_from_claims
 
@@ -715,6 +717,8 @@ class AuthHandler:
         logging.debug(":::: Auth Handler Loaded ::::")
         # Seed the per-app exclude list from defaults (avoids global mutation)
         self.app[AUTH_EXCLUDE_LIST_KEY] = list(exclude_list)
+        # FEAT-109: one security WARNING per configured HMAC key under 32 bytes.
+        warn_short_hmac_keys()
         # register the Auth extension into the app
         self.app[self.name] = self
         ## Configure Routes
@@ -787,6 +791,9 @@ class AuthHandler:
         if abac_middleware in mdl:
             mdl.remove(abac_middleware)
             mdl.append(abac_middleware)
+        # Hard deny for system paths (/.env, /etc/, /logs/...): outermost, so
+        # no exclude list, authz backend or ABAC policy can open them.
+        install_protected_paths(self.app)
         return self.app
 
     async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:

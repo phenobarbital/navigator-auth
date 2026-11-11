@@ -10,17 +10,21 @@ identities. Access to other users' credentials (service accounts,
 admin tooling) is out of scope here — compose it via the ABAC layer.
 """
 from datetime import datetime, timezone
+from typing import Optional
 
 from aiohttp import web
 from aiohttp_cors import CorsViewMixin
+from asyncdb.exceptions import NoDataFound
 from navconfig.logging import logging
 from navigator_session import get_session
 
 from ..decorators import user_session
-from ..exceptions import AuthException, ConfigError
+from ..exceptions import AuthException, ConfigError, UserNotFound
 from ..identity.crypto import IdentityCipher
+from ..identity.refresh import refresh_linked_identity
 from ..identity.store import (
     IdentityCredentialError,
+    IdentityRefreshBusy,
     IdentityStore,
     cache_credential,
     cached_credential,
@@ -95,6 +99,26 @@ class BaseIdentityView(web.View, CorsViewMixin):
         except Exception:  # pylint: disable=W0703
             return None
 
+    async def _refresh(
+        self, store: IdentityStore, backend, identity, leeway: Optional[int] = None
+    ) -> tuple:
+        """Refresh under the per-account guard; map failures to HTTP errors.
+
+        Returns:
+            ``(row, credential)`` from ``refresh_linked_identity``.
+        """
+        provider = identity.auth_provider
+        try:
+            return await refresh_linked_identity(store, backend, identity, leeway=leeway)
+        except (UserNotFound, NoDataFound):
+            _json_error(404, f"{provider}: identity {identity.identity_id} is no longer linked.")
+        except (ConfigError, IdentityCredentialError):
+            _json_error(409, f"{provider}: stored credential cannot be refreshed; re-link the identity.")
+        except IdentityRefreshBusy as err:
+            _json_error(503, str(err))
+        except AuthException as err:
+            _json_error(502, f"Provider refresh failed: {err}")
+
 
 @user_session()
 class UserIdentitiesHandler(BaseIdentityView):
@@ -134,13 +158,7 @@ class UserIdentitiesHandler(BaseIdentityView):
                 "re-link the identity instead.",
             )
         backend = self._backend(identity.auth_provider)
-        try:
-            token = await backend.refresh_identity_tokens(
-                current.refresh_token
-            )
-        except AuthException as err:
-            _json_error(502, f"Provider refresh failed: {err}")
-        identity = await store.update_tokens(identity, token)
+        identity, token = await self._refresh(store, backend, identity)
         session = await self._session()
         if session:
             await cache_credential(
@@ -202,13 +220,9 @@ class IdentityCredentialHandler(BaseIdentityView):
                     "stored; re-link the identity.",
                 )
             backend = self._backend(provider)
-            try:
-                token = await backend.refresh_identity_tokens(
-                    token.refresh_token
-                )
-            except AuthException as err:
-                _json_error(502, f"Provider refresh failed: {err}")
-            identity = await store.update_tokens(identity, token)
+            identity, token = await self._refresh(
+                store, backend, identity, leeway=IDENTITY_REFRESH_LEEWAY
+            )
         credential = token.credential()
         if session:
             await cache_credential(session, provider, credential)

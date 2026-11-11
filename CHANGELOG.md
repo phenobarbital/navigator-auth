@@ -31,6 +31,75 @@
   `mfa_admin_access.yaml` pack and `mfa:disenroll` action, and
   `scripts/preflight_mfa.py`. The `mfa:` vault namespace is reserved and the
   generic vault API rejects it. See `docs/two_factor_auth.rst`.
+- **Behavior change — `PDP.add_policy()` and `PDP(policies=[...])` are enforced
+  (FEAT-109).** They used to append to a list `PDP.authorize` never read, so
+  programmatic policies were silently ignored (the PBAC example answered 428 for
+  `/dashboard/`). Registered policies are now adapted with the new
+  `PolicyAdapter.from_policy`, loaded into the `PolicyEvaluator`, and kept across
+  `reload_policies()` and per-tenant evaluators; `add_policy` returns the loaded
+  `ResourcePolicy` list. It now **raises `ValueError`** instead of accepting a
+  policy it cannot enforce: duplicate registered names, invalid resource
+  patterns (including `!`-negated ones), and classic `context` / `conditions` /
+  `scopes` restrictions (use `subject=[...]` for a username restriction). Classic
+  `environment` accepts `day_of_week` as an alias of `dow`; unsupported keys are
+  rejected. `Policy(resource="...")` with a single string no longer raises
+  `TypeError`.
+- **PDP policy registry hardening (FEAT-112).** `PolicyEvaluator.load_policies`
+  is now all-or-nothing: a failure (e.g. a policy that cannot be serialized)
+  leaves the evaluator unchanged, and `PDP.add_policy` raises `ValueError`
+  instead of leaving a half-loaded policy that made `on_startup` skip the
+  storage load. `add_policy` also rejects a name already loaded from
+  storage/YAML, and a storage/YAML policy named like a registered one logs a
+  WARNING on startup and reload (both stay enforced). `PDP(policies=...)`
+  accepts any iterable and raises `TypeError` for strings, mappings and
+  non-iterables instead of silently ignoring a tuple.
+- **`PDP.on_shutdown` no longer crashes with periodic reload on (FEAT-113).**
+  It called the nonexistent `asyncio.suppress`, so with
+  `ABAC_RELOAD_INTERVAL > 0` shutdown raised `AttributeError` and the policy
+  storages were never closed. It now uses `contextlib.suppress`.
+- **`PolicyAdapter.from_policy` validates `ObjectPolicy(objects=...)` (FEAT-111).**
+  Objects are converted with the policy's `type=` (default `object`) and
+  validated like `resource=`. A policy is rejected (`add_policy` raises
+  `ValueError`) instead of losing objects silently: `resource=` combined with
+  `objects=`, `!`-negated objects, dict-shaped or non-string objects, and
+  `objects=` on `Policy` / `FilePolicy`. A `ResourcePolicy` passed to
+  `add_policy` now has its `environment` checked too: keys other than `hour`,
+  `dow`, `is_business_hours`, `is_weekend`, `day_segment` and `is_manager`, or
+  unsupported value shapes, raise `ValueError` instead of being silently
+  ignored by the engine (use `dow`, not `day_of_week`, on native policies).
+- **`abac_middleware` no longer mishandles unrouted requests (FEAT-109).** The
+  404 skip swallowed `HTTPNotFound`, ran the 404 handler twice and logged
+  `Access to <path> is not Authenticated.` at WARNING for browser probes
+  (`/favicon.ico`, `/.well-known/...`). Unrouted requests now pass through once
+  and silently; the unauthenticated pass-through logs at DEBUG.
+  `EXCLUDE_DEFAULTS` is unchanged.
+- **Startup warning for short HMAC keys (FEAT-109).** `AuthHandler.setup` logs
+  one WARNING on `navigator_auth.security` per configured HMAC key shorter than
+  32 bytes (`AUTH_SECRET_KEY`, `AUTH_TOKEN_SECRET` / `PARTNER_KEY`, an explicit
+  `AUTH_RECOVERY_SECRET`), naming the setting and its length, never the value.
+  See "Signing keys" in `docs/settings.rst`.
+- **`AUTH_PROBE_IGNORE_IPS`: exclude hosts from the repeated-probe warning.**
+  Comma-separated IPs or CIDR ranges whose rejected requests are never
+  counted by `protected_paths_middleware`, so a load balancer's health checks
+  (e.g. AWS ELB/ALB pinging the server) no longer show up as a scan. Matched
+  against the resolved client IP. See `documentation/protected-paths.md`.
+
+- **BREAKING — write envelope on the auth CRUD handlers (FEAT-107, no
+  deprecation window).** `/api/v1/users*`, `/api/v1/groups*`,
+  `/api/v1/user_groups*`, `/api/v1/usergroups*`, `/api/v1/group_permissions*` and
+  `/api/v1/permissions*` were authorized by authentication alone; any session
+  could set `is_superuser` / `user_role` / `is_staff`, join any group (including
+  `superuser`) or grant any permission. Privileged columns are no longer
+  writable through PATCH/PUT/POST; use `POST /api/v1/users/{id}/role` with
+  `users:grant_role`, held by `security_admin`. Passwords are no longer settable
+  through the user CRUD, including on create; use `password_change` or
+  `password_reset`. `username` is no longer updatable; users are created with
+  PUT; owners edit with PATCH; reads are gated; and `?_filter=` answers 400 on
+  the ModelView routes. Membership or definition of protected groups requires
+  `users:grant_role` (`AUTH_PROTECTED_GROUPS`). A user can no longer delete
+  their own account through `DELETE /api/v1/users/{id}`. Deploy the new
+  `abac/default_policies/auth_crud_admin_access.yaml` pack. Find affected
+  callers through the guard's audited 403s. See `docs/auth_crud_authorization.rst`.
 
 - **Owner-or-superuser access control on the auth model CRUD surfaces
   (FEAT-105, client-visible behaviour change).** `/api/v1/user_identity*`,

@@ -469,8 +469,15 @@ class AzureAuth(ExternalAuth):
 
     async def refresh_identity_tokens(self, refresh_token: str) -> TokenResponse:
         cache = msal.SerializableTokenCache()
-        app = self.get_msal_app(token_cache=cache)
-        result = app.acquire_token_by_refresh_token(refresh_token, scopes=self.identity_scopes())
+        scopes = self.identity_scopes()
+
+        def _refresh() -> dict:
+            # Building the app fetches tenant metadata and the grant is an
+            # HTTP call: both are blocking, so neither runs on the event loop.
+            app = self.get_msal_app(token_cache=cache)
+            return app.acquire_token_by_refresh_token(refresh_token, scopes=scopes)
+
+        result = await asyncio.to_thread(_refresh)
         token = self._token_from_msal_result(result, cache)
         if not token.refresh_token:
             token.refresh_token = refresh_token

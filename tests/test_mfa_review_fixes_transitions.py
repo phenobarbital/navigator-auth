@@ -420,6 +420,32 @@ async def test_password_reset_revokes_sessions(mfa_db, mfa_user_factory, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_password_reset_sets_first_password(mfa_db, mfa_user_factory, monkeypatch):
+    """A user created without a password (FEAT-107 PUT /api/v1/users) gets one via reset.
+
+    The ``FOR UPDATE`` re-read must tell a NULL password apart from a missing row:
+    NULL is the captured state of a never-set password, not a concurrent change.
+    """
+    await ensure_security_state_tables(mfa_db)
+    actor = await mfa_user_factory(superuser=True)
+    user = await mfa_user_factory()
+    async with await mfa_db.acquire() as conn:
+        await conn.fetchval(
+            f"UPDATE {AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE} SET password = NULL WHERE user_id = $1 RETURNING user_id",
+            user["user_id"],
+        )
+    revoker = _Revoker()
+    monkeypatch.setattr(
+        "navigator_auth.handlers.users.session.PasswordRecoveryHandler.session_revoker",
+        classmethod(lambda cls: revoker),
+    )
+    response = await _password_reset(mfa_db, actor, user, {"authdb": mfa_db}, password="FirstPw1!")
+    assert response.status == 202, _response_body(response)
+    assert check_password(await _stored_password(mfa_db, user["user_id"]), "FirstPw1!")
+    assert len(revoker.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_password_flows_single_connection(single_connection_authdb, mfa_user_factory, monkeypatch):
     """Both flows finish using a one-connection authdb without acquiring inside a lock."""
     await ensure_security_state_tables(single_connection_authdb)

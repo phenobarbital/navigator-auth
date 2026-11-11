@@ -1,0 +1,541 @@
+{
+  "schema_version": "1.0",
+  "feat_id": "FEAT-108",
+  "mode": "investigation",
+  "summary_oneline": "Both OAuth2 examples are miswired (3LO example inherits local backends/authz and an unresolvable user 35; oauth2_server.py pages never do PKCE), exposing four latent library defects.",
+  "localization": [
+    {
+      "path": "examples/oauth2_3lo_server.py",
+      "symbol": "make_app",
+      "lines": "218",
+      "role": "builds AuthHandler(enable_authdb=False) without backends=/authz_backends=, so the local settings decide the backend list",
+      "evidence": [
+        "F003"
+      ]
+    },
+    {
+      "path": "navigator_auth/conf.py",
+      "symbol": "settings override",
+      "lines": "912-915",
+      "role": "star-imports settings.settings last, overriding AUTHENTICATION_BACKENDS set by the example via os.environ.setdefault",
+      "evidence": [
+        "F003"
+      ]
+    },
+    {
+      "path": "examples/identity_vault_server.py",
+      "symbol": "AuthHandler(...)",
+      "lines": "722",
+      "role": "existing pattern that pins backends and disables authz backends for an example",
+      "evidence": [
+        "F003"
+      ]
+    },
+    {
+      "path": "navigator_auth/auth.py",
+      "symbol": "AuthHandler._auth_middleware",
+      "lines": "1056-1073",
+      "role": "allow_hosts exempt branch: bearer resolution needs an existing session and never publishes request[\"userdata\"]",
+      "evidence": [
+        "F004"
+      ]
+    },
+    {
+      "path": "navigator_auth/decorators.py",
+      "symbol": "is_authenticated._func_wrapper._wrap",
+      "lines": "207-237",
+      "role": "loops every backend's authenticate(), catches only AuthException, accepts the first truthy result (also the method wrapper at 261)",
+      "evidence": [
+        "F005"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/api.py",
+      "symbol": "APIKeyAuth.authenticate",
+      "lines": "143-157",
+      "role": "indexes the False returned by check_token_info for a JWT without device_id -> TypeError at 154 (the 500)",
+      "evidence": [
+        "F006"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/noauth.py",
+      "symbol": "NoAuth.authenticate",
+      "lines": "54-82",
+      "role": "always returns a truthy anonymous user + new session -> the 200 'Hello Anonymous'",
+      "evidence": [
+        "F007"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/oauth2/backend.py",
+      "symbol": "Oauth2Provider._token_session_claims",
+      "lines": "688-710",
+      "role": "binds the token to a session via self._idp.user_from_id; on failure logs the reported warning and returns {} (token issued without session claims)",
+      "evidence": [
+        "F002"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/oauth2/backend.py",
+      "symbol": "Oauth2Provider.authorize",
+      "lines": "1422-1456",
+      "role": "takes the resource owner from the browser session cookie (check_session) and skips login/consent when a grant exists",
+      "evidence": [
+        "F001"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/oauth2/backend.py",
+      "symbol": "Oauth2Provider.userinfo",
+      "lines": "2194-2254",
+      "role": "fills profile claims from user_from_id and defaults them to \"\" when the lookup fails",
+      "evidence": [
+        "F008"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/oauth2/backend.py",
+      "symbol": "Oauth2Provider.list_grants",
+      "lines": "2311-2315",
+      "role": "401 'Not authenticated.' when _get_request_user_id finds neither userdata nor request.user",
+      "evidence": [
+        "F008"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/oauth2/backend.py",
+      "symbol": "Oauth2Provider._get_request_user_id",
+      "lines": "2801-2830",
+      "role": "reads request[\"userdata\"] then request.user",
+      "evidence": [
+        "F008"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/oauth2/backend.py",
+      "symbol": "Oauth2Provider.authenticate",
+      "lines": "2833",
+      "role": "correct resource-server check (401 when the token has no bound session) that the decorator loop never reaches first",
+      "evidence": [
+        "F014",
+        "F015"
+      ]
+    },
+    {
+      "path": "tests/test_oauth2_3lo_session_binding.py",
+      "symbol": "TestTokenSessionBinding",
+      "lines": "102-136",
+      "role": "mock-only tests; test_unknown_user_degrades_without_raising locks the silent {} degrade",
+      "evidence": [
+        "F009"
+      ]
+    },
+    {
+      "path": "examples/static/callback.html",
+      "symbol": "exchangeToken",
+      "lines": "30-41",
+      "role": "posts the code without code_verifier (no verifier is ever generated), so the token endpoint answers invalid_grant",
+      "evidence": [
+        "F017"
+      ]
+    },
+    {
+      "path": "examples/static/oauth2_index.html",
+      "symbol": "Authorize link",
+      "lines": "54",
+      "role": "authorize link without code_challenge for a PKCE-required public client",
+      "evidence": [
+        "F017"
+      ]
+    },
+    {
+      "path": "examples/oauth2_server.py",
+      "symbol": "startup hint (3LO flow)",
+      "lines": "172-182",
+      "role": "prints a 3LO URL with a literal <S256_hash> placeholder and no verifier",
+      "evidence": [
+        "F017"
+      ]
+    },
+    {
+      "path": "navigator_auth/backends/oauth2/backend.py",
+      "symbol": "Oauth2Provider._handle_authorization_code",
+      "lines": "1799-1808",
+      "role": "PKCE check: requires code_verifier when the code carries a challenge (correct per RFC 7636)",
+      "evidence": [
+        "F017"
+      ]
+    }
+  ],
+  "constraints": [
+    {
+      "statement": "AuthHandler already accepts backends= and authz_backends= so an application's backend list does not depend on settings.settings; its docstring names the bundled examples as the use case",
+      "evidence": [
+        "F003",
+        "F007"
+      ],
+      "implication": "the example fix is wiring, not new library API"
+    },
+    {
+      "statement": "Issuing a session-less token when the owner cannot be resolved is deliberate (d3f85ba: 'usable for introspection-based resource servers') and asserted by test_unknown_user_degrades_without_raising",
+      "evidence": [
+        "F002",
+        "F009",
+        "F014"
+      ],
+      "implication": "failing closed at the token endpoint is a behaviour change that must update that test and be decided explicitly"
+    },
+    {
+      "statement": "is_authenticated already has explicit anonymous opt-ins (exclude list, request.allow_anonymous) covered by tests/unit/test_is_authenticated_exclude.py",
+      "evidence": [
+        "F005",
+        "F009"
+      ],
+      "implication": "rejecting anonymous results in the backend loop keeps an opt-in path for apps that want anonymous access"
+    },
+    {
+      "statement": "NoAuth, allow_hosts and the backend-loop semantics are used by real deployments (local settings enable 8 backends), and AuthHandler.api_login iterates backends the same way",
+      "evidence": [
+        "F003",
+        "F007",
+        "F002"
+      ],
+      "implication": "decorator/middleware changes affect every app, not only the example; they need their own tests"
+    },
+    {
+      "statement": "The short HMAC key and issuer come from the developer's env/.env; the IdP binds conf.SECRET_KEY at import time",
+      "evidence": [
+        "F003",
+        "F011"
+      ],
+      "implication": "the example cannot fix the key with os.environ.setdefault; at most it can warn or document"
+    },
+    {
+      "statement": "APIKeyAuth also handles OAuth2 bearer JWTs (TASK-029 / af51e88 bearer branch)",
+      "evidence": [
+        "F006",
+        "F016"
+      ],
+      "implication": "the fix must make APIKeyAuth decline non-API-key bearers cleanly, not stop it from reading bearers"
+    }
+  ],
+  "investigation": {
+    "hypotheses": [
+      {
+        "rank": 1,
+        "statement": "Both OAuth2 examples are miswired. (a) oauth2_3lo_server.py does not pin its auth configuration: the developer's settings/settings.py (8 backends incl. APIKeyAuth and NoAuth) and env/.env (allow_hosts authz, 6-byte key) override its os.environ defaults, so localhost requests take the middleware's exempt branch and fall into the decorator's backend loop, where APIKeyAuth crashes on the bearer (500) and NoAuth admits credential-less calls (200). (b) oauth2_server.py's pages never do PKCE: the token endpoint correctly demands a code_verifier, but oauth2_index.html/callback.html never generate or send one and the startup hint prints a <S256_hash> placeholder.",
+        "supporting": [
+          "F003",
+          "F004",
+          "F005",
+          "F006",
+          "F007",
+          "F010",
+          "F011",
+          "F017"
+        ],
+        "contradicting": [],
+        "confidence": "high",
+        "reasoning": "Every link is cited: the resolved runtime config was probed, the traceback frames match decorators.py:217 and api.py:154, and the SPA sends the anonymous call with credentials:'omit', so the anonymous 200 is produced server-side. (b): the error string matches backend.py:1803 and no example page builds a PKCE pair.",
+        "next_probe": "Pass backends=['navigator_auth.backends.oauth2.Oauth2Provider'] and authz_backends=[] to AuthHandler in the example and repeat the six clicks. For (b): run the flow from oauth2_3lo_server.py, whose page does PKCE in JS."
+      },
+      {
+        "rank": 2,
+        "statement": "user_id 35 came from a pre-existing browser session for localhost:5000 in the shared Redis store; /oauth2/authorize took that session as the resource owner without a demo login, and the demo IdP (users 1, 2) cannot resolve it, so every issued/refreshed token is session-less — producing the bind warnings, the empty userinfo and the grants 401.",
+        "supporting": [
+          "F001",
+          "F002",
+          "F008"
+        ],
+        "contradicting": [],
+        "confidence": "medium",
+        "reasoning": "The session cookie is the only code path by which a non-demo user_id can reach the code; which app created that session is not provable from the code.",
+        "next_probe": "Clear cookies for localhost:5000 (or use a private window), log in as demo/demo123 and check the token's user_id is 1."
+      },
+      {
+        "rank": 3,
+        "statement": "Independently of the example, four library defects turn a misconfiguration into wrong answers instead of a clean 401: APIKeyAuth.authenticate lacks the `if not data` guard, is_authenticated lets non-AuthException errors escape and accepts anonymous results, the allow_hosts exempt branch never publishes request[\"userdata\"], and /oauth2/authorize + the token endpoint accept a resource owner the IdP cannot resolve.",
+        "supporting": [
+          "F001",
+          "F002",
+          "F004",
+          "F005",
+          "F006",
+          "F007",
+          "F008",
+          "F009",
+          "F013"
+        ],
+        "contradicting": [],
+        "confidence": "high",
+        "reasoning": "Each defect is read directly in the code; none is covered by tests and none is a recent regression (F013), so fixing the example alone would hide them again.",
+        "next_probe": "Unit tests: APIKeyAuth.authenticate with a 3LO JWT returns None; is_authenticated with [APIKeyAuth, NoAuth] answers 401 for a bad bearer and for no credentials."
+      }
+    ]
+  },
+  "enrichment": null,
+  "confidence_map": [
+    {
+      "id": "C1",
+      "statement": "The 3LO example builds AuthHandler without backends=/authz_backends=, unlike identity_vault_server.py",
+      "evidence": [
+        "F003"
+      ],
+      "confidence": "high",
+      "reasoning": "Both lines read and probed (c32, c33)."
+    },
+    {
+      "id": "C2",
+      "statement": "conf.py star-imports settings.settings last; the local settings/settings.py enables 8 backends including APIKeyAuth, TrocToken, Azure, ADFS and NoAuth",
+      "evidence": [
+        "F003"
+      ],
+      "confidence": "high",
+      "reasoning": "Read and probed (c22, c37); runtime probe resolved the same list."
+    },
+    {
+      "id": "C3",
+      "statement": "At runtime AUTHORIZATION_BACKENDS is allow_hosts,allowed_ips with ALLOWED_HOSTS=localhost*, and AUTH_SECRET_KEY is 6 bytes from env/.env",
+      "evidence": [
+        "F003",
+        "F011"
+      ],
+      "confidence": "high",
+      "reasoning": "Direct runtime probe in the venv (names and lengths only)."
+    },
+    {
+      "id": "C4",
+      "statement": "allow_hosts exempts localhost requests; the exempt branch needs an existing session and never sets request[\"userdata\"]",
+      "evidence": [
+        "F004"
+      ],
+      "confidence": "high",
+      "reasoning": "Code read at auth.py:1056-1073 vs 1136/1168."
+    },
+    {
+      "id": "C5",
+      "statement": "is_authenticated loops every backend, catches only AuthException and accepts the first truthy result",
+      "evidence": [
+        "F005"
+      ],
+      "confidence": "high",
+      "reasoning": "Code read; traceback frame decorators.py:217 matches."
+    },
+    {
+      "id": "C6",
+      "statement": "The 500 is APIKeyAuth.authenticate indexing the False returned by check_token_info for a JWT without device_id",
+      "evidence": [
+        "F006"
+      ],
+      "confidence": "high",
+      "reasoning": "Code read; traceback frame api.py:154 matches; check_credentials already guards the same case."
+    },
+    {
+      "id": "C7",
+      "statement": "The anonymous 200 comes from NoAuth.authenticate accepted by the decorator loop, not from a leaked cookie",
+      "evidence": [
+        "F007",
+        "F010"
+      ],
+      "confidence": "high",
+      "reasoning": "NoAuth always returns truthy; the SPA call uses credentials:'omit'; log shows 'Auth.NoAuth ... User Created'."
+    },
+    {
+      "id": "C8",
+      "statement": "_token_session_claims swallows the user_from_id failure and the code and refresh grants still issue a token without session claims",
+      "evidence": [
+        "F002"
+      ],
+      "confidence": "high",
+      "reasoning": "Code read; the decoded tokens in the report carry no session claims."
+    },
+    {
+      "id": "C9",
+      "statement": "The bind warning text is raised by DemoIdentityProvider.user_from_id, which only knows user ids 1 and 2",
+      "evidence": [
+        "F001",
+        "F002"
+      ],
+      "confidence": "high",
+      "reasoning": "Message format 'Invalid Credentials for user_id=35' matches the example source."
+    },
+    {
+      "id": "C10",
+      "statement": "user_id 35 entered through a pre-existing localhost:5000 session cookie that /oauth2/authorize used as resource owner",
+      "evidence": [
+        "F001"
+      ],
+      "confidence": "medium",
+      "reasoning": "Only code path that can yield a non-demo user; origin of that session not provable from code."
+    },
+    {
+      "id": "C11",
+      "statement": "List my grants returns 401 because neither request[\"userdata\"] nor request.user is set for the request",
+      "evidence": [
+        "F008",
+        "F004"
+      ],
+      "confidence": "high",
+      "reasoning": "Handler and helper read; exempt branch read."
+    },
+    {
+      "id": "C12",
+      "statement": "/oauth2/userinfo returns \"\" for profile claims because user_from_id fails and _claim defaults to \"\"",
+      "evidence": [
+        "F008"
+      ],
+      "confidence": "high",
+      "reasoning": "Code read; body matches exactly."
+    },
+    {
+      "id": "C13",
+      "statement": "Fixing only the example would turn the /api/v1/me 500 into a 401 while user 35 stays unresolvable, because Oauth2Provider.authenticate rejects tokens without a bound session",
+      "evidence": [
+        "F005",
+        "F014"
+      ],
+      "confidence": "medium",
+      "reasoning": "Inferred by combining the decorator loop order with Oauth2Provider.authenticate's documented behaviour."
+    },
+    {
+      "id": "C14",
+      "statement": "None of the failing code paths changed after d3f85ba; the crash and loop are latent, not recent regressions",
+      "evidence": [
+        "F012",
+        "F013",
+        "F014"
+      ],
+      "confidence": "high",
+      "reasoning": "git log -L over the functions."
+    },
+    {
+      "id": "C15",
+      "statement": "Existing 3LO tests are mock-only and do not cover the decorator loop, APIKeyAuth with an OAuth2 bearer, NoAuth or allow_hosts",
+      "evidence": [
+        "F009"
+      ],
+      "confidence": "high",
+      "reasoning": "Test file read; greps over tests/ returned no matches."
+    },
+    {
+      "id": "C16",
+      "statement": "The TrocToken and TokenAuth middlewares pass the 3LO bearer through and do not cause any symptom",
+      "evidence": [
+        "F011"
+      ],
+      "confidence": "medium",
+      "reasoning": "Middleware entry read; their deeper paths were not traced."
+    },
+    {
+      "id": "C17",
+      "statement": "'code_verifier required.' is the provider correctly enforcing RFC 7636 for a code issued with a code_challenge",
+      "evidence": [
+        "F017"
+      ],
+      "confidence": "high",
+      "reasoning": "Error string and branch read at backend.py:1800-1803."
+    },
+    {
+      "id": "C18",
+      "statement": "No page in the oauth2_server.py walk-through generates or sends a code_verifier; oauth2_3lo_app.html already has a working in-browser PKCE implementation to reuse",
+      "evidence": [
+        "F017"
+      ],
+      "confidence": "high",
+      "reasoning": "callback.html, oauth2_index.html and the 3LO app read/grepped directly."
+    }
+  ],
+  "unknowns": [
+    {
+      "id": "U1",
+      "question": "Before starting the 3LO flow, was that browser already logged in to another Navigator app on localhost:5000 (same Redis) as user 35, and did the demo login form appear?",
+      "blocks_claims": [
+        "C10"
+      ],
+      "plausible_answers": [
+        "yes — another app on :5000, logged in as user 35; no demo login form shown",
+        "no — I logged in with demo/demo123",
+        "not sure"
+      ],
+      "ask_user": true,
+      "user_answer": "not sure",
+      "resolved": false,
+      "resolution_note": "Unresolved but no longer blocking: the U3 decision (validate the session user at /oauth2/authorize, fail the token grant) covers both a foreign session cookie and any other source of an unresolvable user. Probe stays: retry in a private window with demo/demo123."
+    },
+    {
+      "id": "U2",
+      "question": "Should @is_authenticated() reject anonymous results (NoAuth guest) from its backend loop, leaving the exclude list / allow_anonymous as the only ways to admit anonymous callers?",
+      "blocks_claims": [
+        "C7"
+      ],
+      "plausible_answers": [
+        "yes — reject anonymous in the loop",
+        "no — keep accepting NoAuth; fix only the example",
+        "configurable per decorator"
+      ],
+      "ask_user": true,
+      "user_answer": "yes — reject anonymous in the loop",
+      "resolved": true,
+      "resolution_note": "@is_authenticated() backend loop treats a guest/unauthenticated result as failure; exclude list and allow_anonymous remain the opt-ins."
+    },
+    {
+      "id": "U3",
+      "question": "When the resource owner cannot be resolved by the IdP, what should the provider do: keep issuing session-less tokens, fail the token request, or also re-validate the session user at /oauth2/authorize and force a fresh login?",
+      "blocks_claims": [
+        "C8",
+        "C10"
+      ],
+      "plausible_answers": [
+        "validate at /authorize (force login) and fail the token request",
+        "fail only the token request (invalid_grant)",
+        "keep current behaviour, document it"
+      ],
+      "ask_user": true,
+      "user_answer": "validate at /authorize (force login) and fail the token request",
+      "resolved": true,
+      "resolution_note": "Replaces the deliberate silent degrade from d3f85ba; test_unknown_user_degrades_without_raising must change."
+    },
+    {
+      "id": "U4",
+      "question": "When one backend in the is_authenticated loop raises an unexpected (non-AuthException) error, should the loop log and continue, or fail with 401 instead of 500?",
+      "blocks_claims": [],
+      "plausible_answers": [
+        "log at warning and continue",
+        "log and answer 401",
+        "only fix APIKeyAuth, leave the loop strict"
+      ],
+      "ask_user": false,
+      "resolved": false,
+      "resolution_note": "Deferred to /sdd-spec (fix item 4); surfaced after Q&A, not asked."
+    }
+  ],
+  "recommended_next_command": {
+    "command": "sdd-spec",
+    "rationale": "Localization is high-confidence and the fix set is bounded (example wiring + four library defects); the remaining choices are behaviour decisions answered in Q&A, not architectural forks."
+  },
+  "overall_confidence": "medium",
+  "meta": {
+    "findings_used": [
+      "F001",
+      "F002",
+      "F003",
+      "F004",
+      "F005",
+      "F006",
+      "F007",
+      "F008",
+      "F009",
+      "F010",
+      "F011",
+      "F012",
+      "F013",
+      "F014",
+      "F015",
+      "F016",
+      "F017"
+    ],
+    "findings_unused": [],
+    "notes": "Overall confidence held at medium until U1 confirms how user 35 entered the flow (C10). Budget overruns: git lane 15/10 git calls, codebase lane 315/255 s; all planned queries ran, so research is not truncated. Five citation anchors were non-unique but consistent with the cited ranges. Q&A: U2 and U3 resolved by the user; U1 answered 'not sure' and left open (non-blocking). F017 added after the review gate from a mid-run user report (oauth2_server.py PKCE); research done in the parent session."
+  }
+}

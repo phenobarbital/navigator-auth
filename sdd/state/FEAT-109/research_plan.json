@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "mode_hint": "investigation",
+  "rationale": "Four symptoms from running examples/policy_server.py: log noise (middleware.py:43), a 6-byte HMAC key warning from PyJWT, a vault UnsupportedFormatError, and a regression ('was working before') where every URL returns 428 'No Matching Policies were found'. Bug-shaped -> investigation.",
+  "queries": [
+    {"id": "Q001", "intent": "Orient: PBAC policy decision point and 'No Matching Policies' deny path", "type": "wiki_query", "priority": 0, "params": {"question": "PDP policy evaluation no matching policies deny"}},
+    {"id": "Q002", "intent": "Orient: session vault integrity check and secret format", "type": "wiki_query", "priority": 0, "params": {"question": "session vault integrity check load secrets"}},
+    {"id": "Q003", "intent": "Orient: auth middleware unauthenticated access warning", "type": "wiki_query", "priority": 0, "params": {"question": "auth middleware not Authenticated warning"}},
+    {"id": "Q004", "intent": "Locate the 'is not Authenticated' warning (middleware.py:43)", "type": "grep", "priority": 1, "params": {"pattern": "is not Authenticated", "path": "navigator_auth"}},
+    {"id": "Q005", "intent": "Locate the 'No Matching Policies' deny and the 428 status", "type": "grep", "priority": 1, "params": {"pattern": "No Matching Policies|PreconditionFailed|428", "path": "navigator_auth"}},
+    {"id": "Q006", "intent": "Locate UnsupportedFormatError and the vault integrity check", "type": "grep", "priority": 1, "params": {"pattern": "UnsupportedFormatError|failed integrity check", "path": "navigator_auth"}},
+    {"id": "Q007", "intent": "Find the JWT HMAC secret source (6-byte key)", "type": "grep", "priority": 1, "params": {"pattern": "SECRET_KEY|AUTH_TOKEN_SECRET|jwt.encode|jwt.decode", "path": "navigator_auth"}},
+    {"id": "Q008", "intent": "Read the example server: routes, policies loaded, PDP setup, exclude lists", "type": "read", "priority": 1, "params": {"path": "examples/policy_server.py"}},
+    {"id": "Q009", "intent": "Read the PDP/abac evaluation code around the no-match deny", "type": "read", "priority": 1, "params": {"path": "<file from Q005>"}},
+    {"id": "Q010", "intent": "Read session_vault.py integrity check (~lines 430-495)", "type": "read", "priority": 1, "params": {"path": "navigator_auth/vault/session_vault.py"}},
+    {"id": "Q011", "intent": "Read the middleware emitting the warning (~line 43)", "type": "read", "priority": 1, "params": {"path": "<file from Q004>"}},
+    {"id": "Q012", "intent": "Recent commits on abac/PDP (regression for 428)", "type": "git_log", "priority": 1, "params": {"path": "navigator_auth/abac/", "since": "45.days.ago"}},
+    {"id": "Q013", "intent": "Recent commits on vault (format change -> UnsupportedFormatError)", "type": "git_log", "priority": 1, "params": {"path": "navigator_auth/vault/", "since": "45.days.ago"}},
+    {"id": "Q014", "intent": "Recent commits on the example and middlewares", "type": "git_log", "priority": 2, "params": {"path": "examples/policy_server.py navigator_auth/middlewares/", "since": "45.days.ago"}},
+    {"id": "Q015", "intent": "Policy definition files used by the example (yaml/json) and their match rules", "type": "glob", "priority": 2, "params": {"pattern": "examples/**/*polic*"}},
+    {"id": "Q016", "intent": "Existing tests covering no-match / default-deny behaviour", "type": "grep", "priority": 2, "params": {"pattern": "No Matching Policies|default_effect|DENY", "path": "tests"}}
+  ]
+}
