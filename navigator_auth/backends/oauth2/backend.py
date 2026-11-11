@@ -48,6 +48,7 @@ import redis.asyncio as aioredis
 from ...identities import AuthUser
 from ...conf import (
     AUTH_MECHANISM_BEARER,
+    AUTH_BEARER_CONTEXT_KEY,
     AUTH_LOGIN_FAILED_URI,
     AUTH_LOGOUT_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
@@ -3339,6 +3340,9 @@ class Oauth2Provider(BaseAuthBackend):
         if not user:
             raise InvalidAuth("Oauth2: cannot resolve the user of this access token.", status=401)
         request["userdata"] = payload
+        from ...abac.context import bearer_context_from_claims  # noqa: PLC0415 — lazy: oauth2 must not import abac at load
+
+        request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
         request["authenticated"] = True
         self._set_user_request(request, user, mechanism=AUTH_MECHANISM_BEARER)
         return payload

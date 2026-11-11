@@ -7,7 +7,7 @@ from navconfig.logging import logger
 from navigator_auth.conf import AUTH_SESSION_OBJECT
 from .errors import PreconditionFailed, AccessDenied
 from .policies import PolicyEffect, Environment
-from .context import EvalContext
+from .context import EvalContext, effective_userinfo
 from .decorators import groups_protected
 from .policies.resources import ResourceType
 if TYPE_CHECKING:
@@ -52,6 +52,7 @@ class Guardian:
         if user is None:
             try:
                 userinfo = session[AUTH_SESSION_OBJECT]
+                userinfo = effective_userinfo(request, userinfo)
                 if isinstance(userinfo, dict) and userinfo:
                     user = userinfo
                     logger.debug(
@@ -248,6 +249,7 @@ class Guardian:
             userinfo = session[AUTH_SESSION_OBJECT]
         except (KeyError, TypeError):
             userinfo = {}
+        userinfo = effective_userinfo(request, userinfo)
 
         env = Environment()
 
