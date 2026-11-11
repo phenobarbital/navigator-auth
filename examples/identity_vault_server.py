@@ -79,6 +79,7 @@ Requirements
   its client id is configured (see ``PROVIDERS`` below), so you can try
   the example with just GitHub, or just Azure, or none at all.
 """
+
 import os
 
 # ---------------------------------------------------------------------------
@@ -155,7 +156,6 @@ from navigator_auth.exceptions import ConfigError, UserNotFound  # noqa: E402
 from navigator_auth.identity.crypto import IdentityCipher  # noqa: E402
 from navigator_auth.migrations import upgrade  # noqa: E402
 
-
 HERE = Path(__file__).parent
 STATIC_DIR = HERE / "static"
 SCHEMA_FILE = HERE / "sql" / "identity_vault_schema.sql"
@@ -229,9 +229,7 @@ async def bootstrap_database() -> None:
         report = await upgrade(conn.get_connection(), ["vault", "identity"], runtime_role=DBUSER)
         if report.failed or report.access_errors:
             failed = ", ".join(f"{r.file.migration_set}/{r.file.filename}" for r in report.failed)
-            raise RuntimeError(
-                f"Library migrations failed: files=[{failed}] access_errors={report.access_errors}"
-            )
+            raise RuntimeError(f"Library migrations failed: files=[{failed}] access_errors={report.access_errors}")
         await conn.execute(
             """
             INSERT INTO auth.users

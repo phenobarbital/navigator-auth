@@ -1,4 +1,5 @@
 """The migrations README indexes every catalog file (FEAT-110, spec M7)."""
+
 from pathlib import Path
 
 from navigator_auth.migrations.catalog import discover
