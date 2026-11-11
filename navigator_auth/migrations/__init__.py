@@ -14,6 +14,7 @@ from .runner import (
     MigrationStatus,
     UpgradeReport,
     get_status,
+    upgrade,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "discover",
     "get_status",
     "render_sql",
+    "upgrade",
 ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -13,7 +14,8 @@ from asyncdb.interfaces.abstract import AbstractDriver
 from pydantic import BaseModel, Field
 
 from ..conf import AUTH_DB_SCHEMA
-from .catalog import MigrationFile, discover
+from ..version import __version__
+from .catalog import MigrationFile, discover, render_sql
 
 logger = logging.getLogger("navigator.migrations")
 
@@ -185,3 +187,123 @@ async def get_status(conn: Any, sets: Iterable[str] | None = None) -> list[Migra
                 )
             )
     return statuses
+
+
+_UPSERT_SQL = """
+INSERT INTO {ledger} (migration_set, filename, checksum, package_version, execution_ms)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (migration_set, filename) DO UPDATE SET
+    checksum = EXCLUDED.checksum,
+    applied_at = now(),
+    applied_by = current_user,
+    package_version = EXCLUDED.package_version,
+    execution_ms = EXCLUDED.execution_ms
+"""
+
+
+async def _upsert_ledger(conn: Any, file: MigrationFile, duration_ms: int) -> None:
+    """Record ``file`` as applied with its current checksum."""
+    await execute_checked(
+        conn,
+        _UPSERT_SQL.format(ledger=ledger_name()),
+        file.migration_set,
+        file.filename,
+        file.checksum,
+        __version__,
+        duration_ms,
+    )
+
+
+async def _apply_file(conn: Any, file: MigrationFile, runtime_role: str) -> MigrationResult:
+    """Apply one file in one transaction; never raises — failures become ``ok=False``."""
+    from .access import grant_runtime_access, verify_runtime_access  # noqa: PLC0415 — cycle
+    from .checks import check_postconditions, check_prerequisites  # noqa: PLC0415 — cycle
+
+    started = time.monotonic()
+    try:
+        async with conn.transaction():
+            await check_prerequisites(conn, file)
+            await execute_checked(conn, render_sql(file.path.read_text(encoding="utf-8")))
+            await check_postconditions(conn, file)
+            await grant_runtime_access(conn, file.migration_set, runtime_role)
+            await verify_runtime_access(conn, file.migration_set, runtime_role)
+            duration_ms = int((time.monotonic() - started) * 1000)
+            await _upsert_ledger(conn, file, duration_ms)
+    except Exception as err:  # pylint: disable=W0703
+        duration_ms = int((time.monotonic() - started) * 1000)
+        logger.error("Migration %s/%s failed: %s", file.migration_set, file.filename, err)
+        return MigrationResult(file=file, ok=False, error=str(err), duration_ms=duration_ms)
+    return MigrationResult(file=file, ok=True, duration_ms=duration_ms)
+
+
+async def _reconcile_access(conn: Any, migration_set: str, runtime_role: str) -> list[str]:
+    """Grant + verify one set's runtime access in its own transaction; return error strings."""
+    from .access import grant_runtime_access, verify_runtime_access  # noqa: PLC0415 — cycle
+
+    try:
+        async with conn.transaction():
+            await grant_runtime_access(conn, migration_set, runtime_role)
+            await verify_runtime_access(conn, migration_set, runtime_role)
+    except Exception as err:  # pylint: disable=W0703
+        logger.error("Runtime access for set %s could not be reconciled: %s", migration_set, err)
+        return [f"{migration_set}: {err}"]
+    return []
+
+
+async def upgrade(
+    conn: Any,
+    sets: Iterable[str] | None = None,
+    *,
+    runtime_role: str,
+    reapply_changed: bool = False,
+    fail_fast: bool = False,
+) -> UpgradeReport:
+    """Apply pending files (and changed ones when ``reapply_changed``).
+
+    Holds ``pg_advisory_lock(ADVISORY_LOCK_KEY)`` for the run. Each file: prerequisite
+    checks + SQL + postcondition checks + runtime grants + ledger upsert in one
+    transaction. A failure rolls back the entire file, is recorded in ``report.failed``
+    and the run continues, unless ``fail_fast``. Access for already-applied selected
+    files is reconciled as well; failures appear in ``report.access_errors``.
+
+    Raises:
+        MigrationError: invalid runtime role, missing schema, or the lock cannot be taken.
+    """
+    from .access import validate_runtime_role  # noqa: PLC0415 — cycle
+
+    await validate_runtime_role(conn, runtime_role)
+    report = UpgradeReport()
+    await execute_checked(conn, "SELECT pg_advisory_lock($1)", ADVISORY_LOCK_KEY)
+    try:
+        await ensure_ledger(conn)
+        statuses = await get_status(conn, sets)
+        applied_sets: list[str] = []
+        stopped = False
+        for status in statuses:
+            if status.state is MigrationState.APPLIED:
+                if status.file.migration_set not in applied_sets:
+                    applied_sets.append(status.file.migration_set)
+                continue
+            if status.state is MigrationState.CHANGED and not reapply_changed:
+                report.skipped_changed.append(status)
+                continue
+            result = await _apply_file(conn, status.file, runtime_role)
+            if result.ok:
+                report.applied.append(result)
+            else:
+                report.failed.append(result)
+                if fail_fast:
+                    stopped = True
+                    break
+        if not stopped:
+            for migration_set in applied_sets:
+                errors = await _reconcile_access(conn, migration_set, runtime_role)
+                report.access_errors.extend(errors)
+                if errors and fail_fast:
+                    break
+    finally:
+        try:
+            await execute_checked(conn, "SELECT pg_advisory_unlock($1)", ADVISORY_LOCK_KEY)
+        except Exception as err:  # pylint: disable=W0703
+            logger.warning("Could not release migration advisory lock: %s", err)
+    return report
