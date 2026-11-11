@@ -15,8 +15,10 @@ import logging
 from typing import Any, Optional
 
 from navigator_session.vault import KeyRing
-from navigator_session.vault.session_vault import SessionVault
+from .reserved import ReservedPrefixSessionVault
 from .migrations import ensure_vault_tables
+
+SessionVault = ReservedPrefixSessionVault
 
 logger = logging.getLogger("navigator.vault")
 
