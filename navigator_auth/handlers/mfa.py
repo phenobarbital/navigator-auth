@@ -35,7 +35,6 @@ from navigator_auth.mfa.types import (
     MfaMode,
     MfaSecurityNotice,
     MfaState,
-    PROVIDER_BACKUP,
     PROVIDER_TOTP,
 )
 from navigator_auth.responses import JSONResponse
@@ -118,7 +117,9 @@ class MfaHandler:
         except (InvalidAuth, ValueError, TypeError):
             return False
 
-    async def _strong_factor_proof(self, request: web.Request, services: Any, session: Any, record: Any, body: dict) -> bool:
+    async def _strong_factor_proof(
+        self, request: web.Request, services: Any, session: Any, record: Any, body: dict
+    ) -> bool:
         """Accept current TOTP, an unused backup code, or a fresh passkey session."""
         if body.get("code") and await services.providers[PROVIDER_TOTP].verify(request, record, body["code"]):
             return True
@@ -136,7 +137,9 @@ class MfaHandler:
         totp = await services.state.totp_confirmed(uid, conn=conn)
         strong = await services.state.has_strong_factor(record, conn=conn)
         state = MfaState.TOTP if totp else (MfaState.EMAIL if policy.mode == MfaMode.ENFORCED else MfaState.NONE)
-        digest = services.security.context_digest(user=record, memberships=memberships, policy=policy, state=state, has_strong_factor=strong)
+        digest = services.security.context_digest(
+            user=record, memberships=memberships, policy=policy, state=state, has_strong_factor=strong
+        )
         return policy, state, strong, digest
 
     async def enroll_totp(self, request: web.Request) -> web.Response:
@@ -145,20 +148,35 @@ class MfaHandler:
         body = await _json_body(request)
         if not self._fresh_password_ok(services, record, body.get("password")):
             return self._err("invalid_credentials", 403)
-        if await services.state.has_strong_factor(record) and not await self._strong_factor_proof(request, services, session, record, body):
+        if await services.state.has_strong_factor(record) and not await self._strong_factor_proof(
+            request, services, session, record, body
+        ):
             return self._err("strong_factor_proof_required", 403)
         uid = int(record["user_id"] if isinstance(record, Mapping) else record.user_id)
         try:
             async with services.security.user_lock(uid) as conn:
                 policy, state, strong, digest = await self._security_context(services, record, conn)
                 authorization = EnrollmentAuthorization(
-                    user_id=uid, session_id=session.session_id,
+                    user_id=uid,
+                    session_id=session.session_id,
                     security_version=await services.security.current_version(conn, uid),
                     context_digest=digest,
                     expires_at=datetime.now(timezone.utc) + timedelta(seconds=ENROLLMENT_TTL),
                 )
                 payload = await services.providers[PROVIDER_TOTP].start_enrollment(record, authorization)
-                await services.security.write_audit(conn, MfaAuditEntry(actor_user_id=uid, target_user_id=uid, org_id=policy.org_id or None, action="totp_enroll_start", old_state=state.value, new_state=state.value, method="totp", outcome="pending"))
+                await services.security.write_audit(
+                    conn,
+                    MfaAuditEntry(
+                        actor_user_id=uid,
+                        target_user_id=uid,
+                        org_id=policy.org_id or None,
+                        action="totp_enroll_start",
+                        old_state=state.value,
+                        new_state=state.value,
+                        method="totp",
+                        outcome="pending",
+                    ),
+                )
             return JSONResponse(payload, status=201, headers=NO_STORE)
         except MfaStorageError:
             return self._err("mfa_unavailable", 503)
@@ -171,21 +189,41 @@ class MfaHandler:
         if not isinstance(token, str) or not isinstance(code, str) or not token or not code:
             return self._err("invalid_request", 400)
         uid = int(record["user_id"] if isinstance(record, Mapping) else record.user_id)
-        if not await services.user_limiter.check(f"enroll:{uid}") or not await services.ip_limiter.check(_remote(request)):
+        if not await services.user_limiter.check(f"enroll:{uid}") or not await services.ip_limiter.check(
+            _remote(request)
+        ):
             return self._err("rate_limited", 429)
         try:
             async with services.security.user_lock(uid) as conn:
                 policy, old_state, strong, digest = await self._security_context(services, record, conn)
-                if not await services.providers[PROVIDER_TOTP].confirm_enrollment(record, code, token, session.session_id, conn=conn):
+                if not await services.providers[PROVIDER_TOTP].confirm_enrollment(
+                    record, code, token, session.session_id, conn=conn
+                ):
                     pending = await services.store.peek_enrollment(token)
                     remaining = 0 if pending is not None else -1
-                    return self._err("invalid_enrollment" if remaining < 0 else "invalid_code", 400, attempts_remaining=max(remaining, 0))
+                    return self._err(
+                        "invalid_enrollment" if remaining < 0 else "invalid_code",
+                        400,
+                        attempts_remaining=max(remaining, 0),
+                    )
                 await services.security.bump_version(conn, uid)
                 await services.trusted_devices.revoke_all(uid, "totp_enrolled", conn=conn)
                 codes = None
                 if await services.backup_codes.remaining(uid, conn=conn) == 0:
                     codes = await services.backup_codes.generate(uid, conn=conn)
-                await services.security.write_audit(conn, MfaAuditEntry(actor_user_id=uid, target_user_id=uid, org_id=policy.org_id or None, action="totp_confirm", old_state=old_state.value, new_state="totp", method="totp", outcome="success"))
+                await services.security.write_audit(
+                    conn,
+                    MfaAuditEntry(
+                        actor_user_id=uid,
+                        target_user_id=uid,
+                        org_id=policy.org_id or None,
+                        action="totp_confirm",
+                        old_state=old_state.value,
+                        new_state="totp",
+                        method="totp",
+                        outcome="success",
+                    ),
+                )
             result = {"status": "confirmed"}
             if codes:
                 result["backup_codes"] = codes
@@ -217,8 +255,28 @@ class MfaHandler:
             await services.security.bump_version(conn, uid)
             await services.trusted_devices.revoke_all(uid, "totp_disenrolled", conn=conn)
             _, _, _, _ = await self._security_context(services, record, conn)
-            await services.security.write_audit(conn, MfaAuditEntry(actor_user_id=uid, target_user_id=uid, org_id=policy.org_id or None, action="totp_disenroll", old_state="totp", new_state="none", method="totp", outcome="success"))
-        await notify_security_event(MfaSecurityNotice(email=usable_email(record), display_name=str(getattr(record, "display_name", "")), username=str(getattr(record, "username", uid)), event="totp_disenrolled", occurred_at=datetime.now(timezone.utc)))
+            await services.security.write_audit(
+                conn,
+                MfaAuditEntry(
+                    actor_user_id=uid,
+                    target_user_id=uid,
+                    org_id=policy.org_id or None,
+                    action="totp_disenroll",
+                    old_state="totp",
+                    new_state="none",
+                    method="totp",
+                    outcome="success",
+                ),
+            )
+        await notify_security_event(
+            MfaSecurityNotice(
+                email=usable_email(record),
+                display_name=str(getattr(record, "display_name", "")),
+                username=str(getattr(record, "username", uid)),
+                event="totp_disenrolled",
+                occurred_at=datetime.now(timezone.utc),
+            )
+        )
         return JSONResponse({"status": "disenrolled"}, status=200, headers=NO_STORE)
 
     async def backup_codes(self, request: web.Request) -> web.Response:
@@ -232,7 +290,17 @@ class MfaHandler:
         uid = int(record["user_id"] if isinstance(record, Mapping) else record.user_id)
         async with services.security.user_lock(uid) as conn:
             codes = await services.backup_codes.generate(uid, conn=conn)
-            await services.security.write_audit(conn, MfaAuditEntry(actor_user_id=uid, target_user_id=uid, org_id=None, action="backup_codes_regenerate", method="backup", outcome="success"))
+            await services.security.write_audit(
+                conn,
+                MfaAuditEntry(
+                    actor_user_id=uid,
+                    target_user_id=uid,
+                    org_id=None,
+                    action="backup_codes_regenerate",
+                    method="backup",
+                    outcome="success",
+                ),
+            )
         return JSONResponse({"backup_codes": codes, "count": len(codes)}, status=201, headers=NO_STORE)
 
     async def verify(self, request: web.Request) -> web.Response:
