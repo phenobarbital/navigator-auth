@@ -307,6 +307,7 @@ class TestConsentEndpointIsGated:
 
         user = MagicMock()
         user.user_id = USER_ID
+        provider._idp.user_from_id = AsyncMock(return_value=user)
         provider.check_session = AsyncMock(return_value={"user_id": USER_ID})
         provider._decode_session_user = MagicMock(return_value=user)
         provider.get_payload = AsyncMock(

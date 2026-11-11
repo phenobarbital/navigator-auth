@@ -26,7 +26,7 @@ FEAT-094 changes (in task order):
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Any
+from typing import Any, NoReturn, Optional
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
 from html import escape
@@ -106,6 +106,7 @@ from ...exceptions import (
     FailedAuth,
     UserNotFound,
     InvalidAuth,
+    IdentityStoreUnavailable,
 )
 from ...responses import JSONResponse
 from ..abstract import BaseAuthBackend, user_is_active
@@ -525,6 +526,42 @@ class Oauth2Provider(BaseAuthBackend):
             {"error": error, "error_description": description},
             status=status,
         )
+
+    def _owner_store_unavailable(self) -> web.StreamResponse:
+        """Generic 503 for an identity-store outage (FEAT-108 D6) — no database detail."""
+        return self._error_response("server_error", "The identity service is temporarily unavailable.", status=503)
+
+    def _redirect_to_login(self, request: web.Request, data: dict) -> NoReturn:
+        """Raise HTTPFound to nav_oauth2_login carrying the authorization request (FEAT-108).
+
+        Extracted from ``authorize``'s no-session branch so the no-session and the
+        unknown-owner paths share it. The session is never invalidated here (D3).
+        """
+        location = request.app.router["nav_oauth2_login"].url_for()
+        payload = {"action_url": str(location), **data}
+        url = location.with_query(**payload)
+        self.redirect(url, location=True)
+
+    async def _resolve_resource_owner(self, user_id: Any) -> Any:
+        """Return the IdP user for ``user_id`` (FEAT-108).
+
+        Raises:
+            UserNotFound: the IdP raised UserNotFound or a datamodel ValidationError.
+            FailedAuth: ``user_is_active(user)`` is False (D4).
+            IdentityStoreUnavailable: the store failed, or the IdP raised anything else.
+        """
+        try:
+            user = await self._idp.user_from_id(user_id)
+        except (UserNotFound, ValidationError) as exc:
+            raise UserNotFound("Unknown resource owner.") from exc
+        except IdentityStoreUnavailable:
+            raise
+        except Exception as exc:  # pylint: disable=W0703
+            self.logger.error(f"Oauth2: resource-owner lookup failed for user_id={user_id}: {exc!s}")
+            raise IdentityStoreUnavailable() from exc
+        if not user_is_active(user):
+            raise FailedAuth("Disabled resource owner.")
+        return user
 
     async def get_payload(self, request):
         ctype = request.content_type
@@ -1596,10 +1633,7 @@ class Oauth2Provider(BaseAuthBackend):
         # Check user session.
         session = await self.check_session(request)
         if not session:
-            location = request.app.router["nav_oauth2_login"].url_for()
-            payload = {"action_url": str(location), **data}
-            url = location.with_query(**payload)
-            self.redirect(url, location=True)
+            self._redirect_to_login(request, data)
 
         # FEAT-106 review fixes (M9): a stale or foreign browser event never lends assurance.
         try:
@@ -1613,6 +1647,15 @@ class Oauth2Provider(BaseAuthBackend):
         # A non-activated user must never see the consent screen and never
         # receive a code.
         gate_user = self._decode_session_user(session)
+        if gate_user is None:
+            self._redirect_to_login(request, data)
+        try:
+            await self._resolve_resource_owner(gate_user.user_id)
+        except (UserNotFound, FailedAuth):
+            # FEAT-108 D3: re-authenticate THIS authorization; the shared session is kept.
+            self._redirect_to_login(request, data)
+        except IdentityStoreUnavailable:
+            return self._owner_store_unavailable()
         if gate_user is not None:
             denied = await self._enforce_access_gate(
                 request,
@@ -1733,6 +1776,12 @@ class Oauth2Provider(BaseAuthBackend):
                 user_obj = self._decode_session_user(session_user)
                 if not user_obj:
                     return self._error_response("access_denied", "Cannot resolve user from session.", status=401)
+                try:
+                    await self._resolve_resource_owner(user_obj.user_id)
+                except (UserNotFound, FailedAuth):
+                    return self._error_response("access_denied", "Unknown or disabled resource owner.", status=401)
+                except IdentityStoreUnavailable:
+                    return self._owner_store_unavailable()
                 try:
                     await self._session_auth_context(request)
                 except InvalidAuth:
