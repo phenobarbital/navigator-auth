@@ -41,14 +41,13 @@ from aiohttp import web
 from navigator.views import BaseView
 from navigator_auth import AuthHandler
 from navigator_auth.abac.pdp import PDP
-from navigator_auth.abac.guardian import Guardian
-from navigator_auth.abac.decorators import groups_protected, requires_permission
+from navigator_auth.abac.decorators import groups_protected
 from navigator_auth.abac.storages.pg import pgStorage
 from navigator_auth.abac.storages.yaml_storage import YAMLStorage
 from navigator_auth.abac.policies import Policy, PolicyEffect, ObjectPolicy
 from navigator_auth.abac.policies.resource_policy import ResourcePolicy
 from navigator_auth.abac.policies.resources import ResourceType, ActionType
-from navigator_auth.abac.policies.evaluator import PolicyEvaluator, PolicyLoader
+from navigator_auth.abac.policies.evaluator import PolicyEvaluator
 from navigator_auth.abac.policies.environment import Environment
 from navigator_auth.conf import default_dsn
 
@@ -174,8 +173,22 @@ prod_config_manager = ObjectPolicy(
     description="Platform lead manages production configurations",
     actions=["config:edit", "config:deploy"],
     resource=["urn:navigator:config::production"],
-    context={"username": "platform-lead@acme.com"},
+    subject=["platform-lead@acme.com"],
     priority=55,
+)
+
+# Every example policy, registered with pdp.add_policy in create_app().
+EXAMPLE_POLICIES = (
+    data_science_vectors,
+    qa_testing_tools,
+    deny_vector_delete,
+    agent_chat_all,
+    agent_configure_platform,
+    public_dashboard,
+    admin_panel,
+    analytics_business_hours,
+    deployment_approval,
+    prod_config_manager,
 )
 
 
@@ -555,19 +568,6 @@ def create_app() -> web.Application:
         cache_ttl_seconds=300,
     )
 
-    # Load default policy packs into the evaluator
-    if default_policies_dir.is_dir():
-        evaluator.load_from_directory(default_policies_dir)
-
-    # Load custom ResourcePolicies
-    evaluator.load_policies([
-        data_science_vectors,
-        qa_testing_tools,
-        deny_vector_delete,
-        agent_chat_all,
-        agent_configure_platform,
-    ])
-
     # --- PDP (Policy Decision Point) ---
     pdp = PDP(
         storage=storage,
@@ -575,14 +575,9 @@ def create_app() -> web.Application:
         evaluator=evaluator,
     )
 
-    # Add classic ABAC policies
-    for policy in [
-        public_dashboard,
-        admin_panel,
-        analytics_business_hours,
-        deployment_approval,
-        prod_config_manager,
-    ]:
+    # Register every example policy: add_policy loads it into the evaluator.
+    # The default packs load from yaml_storage when the app starts.
+    for policy in EXAMPLE_POLICIES:
         pdp.add_policy(policy)
 
     # Wire up PDP (registers Guardian, middleware, REST endpoints)
