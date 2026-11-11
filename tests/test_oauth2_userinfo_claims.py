@@ -9,7 +9,6 @@ import pytest
 from navigator_auth.backends.oauth2.backend import Oauth2Provider
 from navigator_auth.exceptions import UserNotFound
 
-
 PAYLOAD = {"user_id": 35, "scope": "default profile email", "jti": "j-1"}
 
 
