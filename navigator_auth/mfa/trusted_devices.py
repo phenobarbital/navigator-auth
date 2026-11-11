@@ -99,8 +99,7 @@ class TrustedDeviceStore:
                         return None
                     new_raw = secrets.token_urlsafe(32)
                     await conn.fetchval(
-                        f"UPDATE {_TABLE} SET rotated_at = now(), last_used_at = now() "
-                        "WHERE id = $1 RETURNING id",
+                        f"UPDATE {_TABLE} SET rotated_at = now(), last_used_at = now() " "WHERE id = $1 RETURNING id",
                         row["id"],
                     )
                     new_id = await conn.fetchval(
