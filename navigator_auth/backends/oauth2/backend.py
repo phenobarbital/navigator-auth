@@ -821,6 +821,49 @@ class Oauth2Provider(BaseAuthBackend):
             self.username_attribute: identity,
         }
 
+    async def _session_auth_context(self, request: web.Request) -> dict:
+        """Return the second-factor assurance of the validated browser event.
+
+        The event must belong to the current browser session and its user. The
+        identity-shared session is never consulted for assurance, so a later
+        login elsewhere cannot upgrade an older event.
+
+        Returns:
+            ``{"mfa": True, "amr": [...]}`` for an MFA event, or an empty
+            dictionary when 2FA is disabled or no event is present.
+
+        Raises:
+            InvalidAuth: If a present event is malformed or bound to another
+                session or user.
+        """
+        if not auth_conf.AUTH_BASIC_2FA_ENABLED:
+            return {}
+
+        record = await self._load_auth_event(request)
+        if record is None:
+            # Passkey and upstream-IdP sessions do not issue OAuth2 events.
+            return {}
+
+        try:
+            session = await get_session(request, None, new=False, ignore_cookie=False)
+            user = self._decode_session_user(session.get("user") if session else None)
+            if session is None or user is None:
+                raise ValueError("session user unavailable")
+            if not hmac.compare_digest(str(record.get("session_id")), str(session.session_id)):
+                raise ValueError("session binding mismatch")
+            if not hmac.compare_digest(str(record.get("user_id")), str(user.user_id)):
+                raise ValueError("user binding mismatch")
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"Oauth2: invalid login event binding: {type(err).__name__}")
+            raise InvalidAuth("Oauth2: login required.", status=401) from err
+
+        if not record.get("mfa"):
+            return {}
+        amr = record.get("amr")
+        if not isinstance(amr, list) or not amr or not all(isinstance(value, str) for value in amr):
+            raise InvalidAuth("Oauth2: invalid login event.", status=401)
+        return {"mfa": True, "amr": list(amr)}
+
     def _auth_pool(self, request: web.Request) -> Any:
         """Return the configured auth database pool, failing closed when absent."""
         app = getattr(request, "app", None)
@@ -1557,6 +1600,14 @@ class Oauth2Provider(BaseAuthBackend):
             url = location.with_query(**payload)
             self.redirect(url, location=True)
 
+        # FEAT-106 review fixes (M9): a stale or foreign browser event never lends assurance.
+        try:
+            await self._session_auth_context(request)
+        except InvalidAuth:
+            location = request.app.router["nav_oauth2_login"].url_for()
+            payload = {"action_url": str(location), **data}
+            self.redirect(location.with_query(**payload), location=True)
+
         # FEAT-095 TASK-042: ACCESS GATE — after login, BEFORE consent.
         # A non-activated user must never see the consent screen and never
         # receive a code.
@@ -1635,6 +1686,8 @@ class Oauth2Provider(BaseAuthBackend):
                     code_challenge_method=code_challenge_method,
                     # RFC 8707: carried through the code to the token exchange.
                     resource=resource,
+                    # FEAT-106 review fixes (M9): assurance of the validated browser event.
+                    **await self._session_auth_context(request),
                     generation=generation,
                 )
                 await self.code_storage.save_code(code_obj)
@@ -1679,6 +1732,10 @@ class Oauth2Provider(BaseAuthBackend):
                 user_obj = self._decode_session_user(session_user)
                 if not user_obj:
                     return self._error_response("access_denied", "Cannot resolve user from session.", status=401)
+                try:
+                    await self._session_auth_context(request)
+                except InvalidAuth:
+                    return self._error_response("access_denied", "User not authenticated.", status=401)
 
                 client = await self.client_storage.get_client(client_id, request=request)
                 if not client:
@@ -2138,6 +2195,9 @@ class Oauth2Provider(BaseAuthBackend):
                     },
                     auth_code.generation,
                 )
+                if auth_code.mfa and auth_code.amr:
+                    token_data["mfa"] = True
+                    token_data["amr"] = list(auth_code.amr)
 
                 # FEAT-095 TASK-044 (RFC 8707): a `resource` on the token request must
                 # match the one the code was issued for; otherwise fall back to the
@@ -2196,6 +2256,8 @@ class Oauth2Provider(BaseAuthBackend):
                         issued_at=now,
                         expires_at=now + sliding_ttl,
                         absolute_expires_at=now + absolute_ttl,
+                        mfa=bool(auth_code.mfa and auth_code.amr),
+                        amr=list(auth_code.amr) if auth_code.mfa and auth_code.amr else None,
                         generation=auth_code.generation,
                     )
                     await self.refresh_token_storage.save_token(rt)
@@ -2377,6 +2439,9 @@ class Oauth2Provider(BaseAuthBackend):
                     },
                     rt.generation,
                 )
+                if rt.mfa and rt.amr:
+                    token_data["mfa"] = True
+                    token_data["amr"] = list(rt.amr)
 
                 # TASK-029: audience = 'user'.
                 access_token, _, exp_abs, scheme = self._idp.create_token(
@@ -2428,6 +2493,8 @@ class Oauth2Provider(BaseAuthBackend):
                         issued_at=now,
                         expires_at=now + sliding_ttl,
                         absolute_expires_at=rt.absolute_expires_at,  # copy from chain root
+                        mfa=rt.mfa,
+                        amr=list(rt.amr) if rt.amr else None,
                         generation=rt.generation,
                     )
                     await self.refresh_token_storage.save_token(new_rt)
@@ -2591,6 +2658,10 @@ class Oauth2Provider(BaseAuthBackend):
                 if val not in (None, ""):
                     return val
             return default
+
+        # FEAT-106 review fixes (M9): authentication methods are not scope-gated.
+        if payload.get("amr"):
+            claims["amr"] = list(payload["amr"])
 
         # Scope-gated claims.
         if "profile" in scopes:
@@ -2812,7 +2883,7 @@ class Oauth2Provider(BaseAuthBackend):
         if token_payload:
             token_client_id = token_payload.get("client_id", "")
         elif rt:
-            token_client_id = str(rt.client_id) if hasattr(rt, "client_id") else ""
+            token_client_id = str(rt.client.client_id) if getattr(rt, "client", None) else ""
         else:
             token_client_id = ""
         if not hmac.compare_digest(str(caller.client_id), str(token_client_id)):
@@ -2842,6 +2913,10 @@ class Oauth2Provider(BaseAuthBackend):
             claims["aud"] = aud
         if jti_claim:
             claims["jti"] = jti_claim
+        presented_amr = token_payload.get("amr") if token_payload else (rt.amr if rt is not None and rt.mfa else None)
+        if presented_amr:
+            claims["amr"] = list(presented_amr)
+            claims["mfa"] = True
 
         # Resolve username for 3LO tokens.
         if user_id:
@@ -3058,6 +3133,12 @@ class Oauth2Provider(BaseAuthBackend):
         if not user_obj:
             return self._error_response("access_denied", "Cannot resolve session user.", status=401)
 
+        try:
+            await self._session_auth_context(request)
+        except InvalidAuth:
+            location = request.app.router["nav_oauth2_login"].url_for()
+            raise web.HTTPFound(location.with_query(action_url=str(location), device_user_code=raw_user_code))
+
         if action == "deny":
             dc.status = DeviceCodeStatus.DENIED
             await self.device_code_storage.update(dc)
@@ -3147,6 +3228,8 @@ class Oauth2Provider(BaseAuthBackend):
                     code_challenge=dc.code_challenge,
                     code_challenge_method=dc.code_challenge_method,
                     expires_at=now + timedelta(seconds=OAUTH_DEVICE_CODE_TTL),
+                    # FEAT-106 review fixes (M9): the approving event's assurance.
+                    **await self._session_auth_context(request),
                     generation=generation,
                 )
                 await self.code_storage.save_code(carrier)
