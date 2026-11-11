@@ -368,7 +368,7 @@ async def test_device_bookkeeping_failure_precedes_session_issuer() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["success", "cancel", "commit_failure", "unlock_failure", "unlock_cancel"])
 async def test_promoted_lock_serializes_and_releases(
-    mfa_db, mfa_secret, mfa_user_factory, monkeypatch, outcome: str
+    mfa_db, mfa_secret, mfa_user_factory, monkeypatch, outcome: str  # noqa: F811
 ) -> None:
     """A different PostgreSQL connection stays excluded until issuance ends, including cancellation."""
     user = await mfa_user_factory()

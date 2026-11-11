@@ -117,6 +117,22 @@ def _release_when_settled(acquire_task: "asyncio.Task[Any]") -> None:
 
 
 @asynccontextmanager
+async def _finalize_locked_transaction(state: _LockState) -> AsyncIterator[None]:
+    """Commit or roll back an ordinary lock scope unless issuance already committed it."""
+    try:
+        yield
+    except BaseException:
+        if not state.committed:
+            await state.conn.rollback()
+        raise
+    try:
+        if not state.committed:
+            await state.conn.commit()
+    except Exception as err:
+        raise MfaStorageError(f"MFA user lock commit failed: {type(err).__name__}") from err
+
+
+@asynccontextmanager
 async def advisory_user_lock(db_pool: Any, user_id: int, *, timeout: Optional[float] = None) -> AsyncIterator[Any]:
     """Yield one pooled connection in one transaction holding the user's advisory lock.
 
@@ -172,17 +188,8 @@ async def advisory_user_lock(db_pool: Any, user_id: int, *, timeout: Optional[fl
         state = _LockState(conn=conn, key=key, timeout=limit)
         state_token = _LOCK_STATE.set(state)
         try:
-            try:
+            async with _finalize_locked_transaction(state):
                 yield conn
-            except BaseException:
-                if not state.committed:
-                    await conn.rollback()
-                raise
-            try:
-                if not state.committed:
-                    await conn.commit()
-            except Exception as err:
-                raise MfaStorageError(f"MFA user lock commit failed: {type(err).__name__}") from err
         finally:
             try:
                 if state.session_lock:

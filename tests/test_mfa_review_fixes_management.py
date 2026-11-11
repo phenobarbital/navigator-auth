@@ -37,7 +37,7 @@ async def test_management_context_uses_shared_evaluation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_enforced_superuser_without_factor_cannot_start_enrollment(env) -> None:
+async def test_enforced_superuser_without_factor_cannot_start_enrollment(env) -> None:  # noqa: F811
     """The shared evaluator's strong-factor refusal survives the HTTP management boundary."""
     user = await env.new_user(superuser=True)
     await env.enforced_org(user["user_id"])
@@ -49,7 +49,7 @@ async def test_enforced_superuser_without_factor_cannot_start_enrollment(env) ->
 
 
 @pytest.mark.asyncio
-async def test_enforced_ordinary_user_can_enroll(env) -> None:
+async def test_enforced_ordinary_user_can_enroll(env) -> None:  # noqa: F811
     """Session-authenticated ordinary users retain enrollment access under enforced policy."""
     user = await env.new_user()
     await env.enforced_org(user["user_id"])
@@ -66,7 +66,9 @@ async def test_enforced_ordinary_user_can_enroll(env) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", ["enroll_totp", "disenroll_totp", "backup_codes"])
 @pytest.mark.parametrize("refused_by", ["user", "ip"])
-async def test_management_limits_precede_all_proofs(env, monkeypatch, method: str, refused_by: str) -> None:
+async def test_management_limits_precede_all_proofs(
+    env, monkeypatch, method: str, refused_by: str  # noqa: F811
+) -> None:  # noqa: F811
     """Both limits reject each route before password checks or consumable proofs."""
     user, session, secret, codes = await env.enrolled_user()
     uid = user["user_id"]
@@ -93,7 +95,7 @@ async def test_management_limits_precede_all_proofs(env, monkeypatch, method: st
 
 
 @pytest.mark.asyncio
-async def test_management_wrong_password_and_proof_share_budget(env, monkeypatch) -> None:
+async def test_management_wrong_password_and_proof_share_budget(env, monkeypatch) -> None:  # noqa: F811
     """Failed password and factor proofs consume the shared budget across management routes."""
     user, session, secret, _ = await env.enrolled_user()
     uid = user["user_id"]
@@ -115,7 +117,9 @@ async def test_management_wrong_password_and_proof_share_budget(env, monkeypatch
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", ["disenroll_totp", "backup_codes"])
 @pytest.mark.parametrize("failure", ["account", "limit", "factor", "proof", "mutation", "commit"])
-async def test_management_storage_failures_preserve_credentials(env, monkeypatch, method: str, failure: str) -> None:
+async def test_management_storage_failures_preserve_credentials(
+    env, monkeypatch, method: str, failure: str  # noqa: F811
+) -> None:  # noqa: F811
     """Storage failures at each management phase return 503 without committing credentials."""
     user, session, secret, _ = await env.enrolled_user()
     uid = user["user_id"]
@@ -264,7 +268,7 @@ async def test_management_single_connection_pool(single_connection_authdb):
 
 
 @pytest.mark.asyncio
-async def test_self_disenrollment_invalidates_all_backup_codes(env) -> None:
+async def test_self_disenrollment_invalidates_all_backup_codes(env) -> None:  # noqa: F811
     """Removing TOTP revokes unused backup credentials in the same security transition."""
     user, session, secret, codes = await env.enrolled_user()
     uid = user["user_id"]
