@@ -5,12 +5,7 @@ from aiohttp.web_urldispatcher import SystemRoute
 from navconfig.logging import logging
 from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY
 
-
-exceptions = (
-    "/api/v1/abac/authorize",
-    "/api/v1/abac/is_allowed",
-    "/api/v1/abac/reload"
-)
+exceptions = ("/api/v1/abac/authorize", "/api/v1/abac/is_allowed", "/api/v1/abac/reload")
 
 
 def _is_system_route(request: web.Request) -> bool:
@@ -52,17 +47,15 @@ async def abac_middleware(
     # avoid authorization on exceptions
     if request.path in exceptions:
         return await handler(request)
-    logging.debug(' == ABAC MIDDLEWARE == ')
+    logging.debug(" == ABAC MIDDLEWARE == ")
     ### verify if request is authenticated
-    if request.get('authenticated', False) is False:
+    if request.get("authenticated", False) is False:
         logging.debug(f"Access to {request.path} is not Authenticated.")
         return await handler(request)
     ### get Guardian:
     try:
-        response = await request.app['security'].authorize(request=request)
+        response = await request.app["security"].authorize(request=request)
     except (TypeError, KeyError) as ex:
         ### there is no ABAC access backend enabled:
-        logging.warning(
-            f'ABAC Warning: there is no backend installed on this system: {ex}'
-        )
+        logging.warning(f"ABAC Warning: there is no backend installed on this system: {ex}")
     return await handler(request)

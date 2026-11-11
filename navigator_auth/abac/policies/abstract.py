@@ -9,8 +9,8 @@ from .environment import Environment
 
 
 class PolicyEffect(Enum):
-    ALLOW = 1, 'allow'
-    DENY = 0, 'deny'
+    ALLOW = 1, "allow"
+    DENY = 0, "deny"
 
     def __bool__(self):
         return bool(self.value[0])
@@ -25,7 +25,7 @@ class PolicyResponse(ClassDict):
 
 class ActionKey:
     def __init__(self, action: str):
-        self.object, self.action = action.split(':', 1)
+        self.object, self.action = action.split(":", 1)
 
     def __eq__(self, other):
         if isinstance(other, ActionKey):
@@ -64,23 +64,24 @@ class AbstractPolicy(ABC):
     priority: int: Every Policy will be evaluated in order of priority.
     enforcing: bool: If True, the policy will be enforced (no other policies will be evaluated).
     """
+
     def __init__(
-            self,
-            name: str = None,
-            description: str = None,
-            actions: list = None,
-            resource: Union[list,str] = None,
-            objects: Optional[dict] = None,
-            conditions: Optional[dict] = None,
-            effect: PolicyEffect = PolicyEffect.ALLOW,
-            subject: Optional[list[str]] = None,
-            groups: Optional[list] = None,
-            context: Optional[dict] = None,
-            environment: Optional[Environment] = None,
-            priority: int = None,
-            enforcing: bool = False,
-            scopes: Optional[list] = None,
-            **kwargs
+        self,
+        name: str = None,
+        description: str = None,
+        actions: list = None,
+        resource: Union[list, str] = None,
+        objects: Optional[dict] = None,
+        conditions: Optional[dict] = None,
+        effect: PolicyEffect = PolicyEffect.ALLOW,
+        subject: Optional[list[str]] = None,
+        groups: Optional[list] = None,
+        context: Optional[dict] = None,
+        environment: Optional[Environment] = None,
+        priority: int = None,
+        enforcing: bool = False,
+        scopes: Optional[list] = None,
+        **kwargs,
     ):
         self.name = name if name else uuid.uuid1().hex
         self.description = description
@@ -112,7 +113,7 @@ class AbstractPolicy(ABC):
         self.environment: Environment = environment
         #### Subject:
         if isinstance(subject, str):
-            self.subject = subject.split(',')
+            self.subject = subject.split(",")
         elif isinstance(subject, list):
             self.subject = subject
         else:
@@ -142,8 +143,8 @@ class AbstractPolicy(ABC):
 
     def fits(self, ctx: EvalContext) -> bool:
         """This method evaluates if the policy matches the current EvalContext and request.
-         It checks if the resources and conditions match the given context.
-         If the policy fits the context, it returns True, otherwise, it returns False
+        It checks if the resources and conditions match the given context.
+        If the policy fits the context, it returns True, otherwise, it returns False
         """
         ## firstly evaluates the resources:
         fit_result = False
@@ -163,10 +164,7 @@ class AbstractPolicy(ABC):
                         ctx_value = getattr(ctx, key)
                         if isinstance(value, dict) and isinstance(ctx_value, dict):
                             # Check if value is a subset of ctx_value
-                            if any(
-                                item not in ctx_value.items()
-                                for item in value.items()
-                            ):
+                            if any(item not in ctx_value.items() for item in value.items()):
                                 fit_result = False
                                 break
                         elif isinstance(value, list):
@@ -184,7 +182,8 @@ class AbstractPolicy(ABC):
             ## third: check if user of session has contexts attributes required:
             fit_context = False
             fit_context = any(
-                a in ctx.user_keys or a in ctx.userinfo_keys or getattr(ctx, a, None) is not None for a in self.context_attrs
+                a in ctx.user_keys or a in ctx.userinfo_keys or getattr(ctx, a, None) is not None
+                for a in self.context_attrs
             )
             if not fit_context and not fit_result:
                 # this policy is enforcing over Context Attributes.
@@ -215,11 +214,7 @@ class AbstractPolicy(ABC):
         pass
 
     @abstractmethod
-    def is_allowed(
-            self,
-            ctx: EvalContext,
-            env: Environment
-    ) -> PolicyResponse:
+    def is_allowed(self, ctx: EvalContext, env: Environment) -> PolicyResponse:
         """
         Evaluates the policy against the provided context and environment.
         :param ctx: The evaluation context, containing user, userinfo, and session
