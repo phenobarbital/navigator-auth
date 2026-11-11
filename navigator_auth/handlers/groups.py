@@ -24,6 +24,20 @@ async def _stored_group_name(view: Any, group_id: Any) -> Optional[str]:
     return getattr(row, "group_name", None)
 
 
+async def _client_elements(view: Any) -> list[dict]:
+    """Return the write elements as ModelView merges them (query columns + body).
+
+    navigator's PUT builds ``{**query_params, **body}``, so a model column
+    supplied only in the query string reaches the database. Authorization must
+    inspect the same merged view; the body wins, as it does upstream.
+    """
+    data = await view.json_data()
+    elements = data if isinstance(data, list) else [data]
+    columns = view.model.get_columns()
+    query = {key: value for key, value in dict(view.query_parameters(view.request)).items() if key in columns}
+    return [{**query, **element} for element in elements if isinstance(element, dict)]
+
+
 class GroupManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandler):
     """Group definitions with protected-name checks on every write."""
 
@@ -40,9 +54,8 @@ class GroupManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandler):
 
     async def _payload_names(self) -> set:
         """Return ``group_name`` values supplied by the client."""
-        data = await self.json_data()
-        elements = data if isinstance(data, list) else [data]
-        return {element.get("group_name") for element in elements if isinstance(element, dict)} - {None}
+        elements = await _client_elements(self)
+        return {element.get("group_name") for element in elements} - {None}
 
     async def _pre_put(self, *args, **kwargs) -> bool:
         await super()._pre_put(*args, **kwargs)
@@ -83,12 +96,9 @@ class UserGroupManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandle
 
     async def _pre_put(self, *args, **kwargs) -> bool:
         await super()._pre_put(*args, **kwargs)
-        data = await self.json_data()
-        elements = data if isinstance(data, list) else [data]
-        for element in elements:
-            if isinstance(element, dict):
-                name = await _stored_group_name(self, element.get("group_id"))
-                await self.authorize_protected_group({name} - {None}, member_id=element.get("user_id"))
+        for element in await _client_elements(self):
+            name = await _stored_group_name(self, element.get("group_id"))
+            await self.authorize_protected_group({name} - {None}, member_id=element.get("user_id"))
         return True
 
     async def _del_primary_data(self, args: dict):

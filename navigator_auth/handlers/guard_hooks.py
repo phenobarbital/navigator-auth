@@ -155,7 +155,11 @@ class GuardedModelViewHooks:
                 await self.acting_user()
             return True
         await self.acting_user()
-        await self._client_keys()
+        keys = await self._client_keys()
+        if self.owner_column is None:
+            # No owner to resolve: decide before the row is fetched, so a
+            # missing row (204) cannot be told apart from a refusal (403).
+            await self.authorize_row(self._action("update"), None, payload=keys)
         return True
 
     async def _pre_delete(self, *args, **kwargs) -> bool:
