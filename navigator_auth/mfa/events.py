@@ -48,18 +48,14 @@ async def security_transition(
     try:
         conn = await lock_cm.__aenter__()
     except BaseException as exc:
+        # Fail closed: never run the credential change without the lock, version bump and audit.
         logger.error(
             "MFA security transition lock failed: event=%s user_id=%s error=%s", event, user_id, type(exc).__name__
         )
-        yield None
-        return
+        raise
 
     try:
-        try:
-            yield conn
-        except BaseException as exc:
-            await lock_cm.__aexit__(type(exc), exc, exc.__traceback__)
-            raise
+        yield conn
         await services.security.bump_version(conn, int(user_id))
         if revoke_devices:
             await services.trusted_devices.revoke_all(int(user_id), event, conn=conn)
@@ -82,10 +78,12 @@ async def security_transition(
         except BaseException:
             pass
         logger.error("MFA security transition failed: event=%s user_id=%s error=%s", event, user_id, type(exc).__name__)
-        return
+        # Propagate: a failing body (or failing bump/revoke/audit) must never look like success.
+        raise
     try:
         await lock_cm.__aexit__(None, None, None)
     except BaseException as exc:
         logger.error(
             "MFA security transition commit failed: event=%s user_id=%s error=%s", event, user_id, type(exc).__name__
         )
+        raise
