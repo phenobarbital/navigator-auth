@@ -66,7 +66,7 @@ in a real deployment.**
   creation and token decoding are the real `IdentityProvider`.
 
 OAuth2 clients likewise live in memory (`OAUTH2_CLIENT_STORAGE=memory`); the
-production default is `postgres` (see `navigator_auth/backends/oauth2/ddl.sql`).
+production default is `postgres` (apply the schema with `navauth self upgrade --set oauth2`).
 
 Everything else — code issuance and single use, PKCE verification, consent and
 consent-skip, refresh-token rotation with reuse detection, revocation — is the
@@ -112,7 +112,7 @@ curl -X POST http://localhost:5000/api/v1/abac/check \
   `AUTH_SECRET_KEY is N bytes; HMAC keys should be at least 32 bytes` — set `AUTH_SECRET_KEY` and
   `AUTH_TOKEN_SECRET` / `PARTNER_KEY` to at least 32 bytes (see "Signing keys" in `docs/settings.rst`).
 * **`Vault secret failed integrity check ... UnsupportedFormatError`** — a pre-v2 (v1) vault
-  secret. Apply `navigator_auth/vault/sql/002_vault_crypto_hardening.sql`, then run
+  secret. Run `navauth self upgrade --set vault --set identity`, then run
   `navigator-vault migrate --dry-run`, then `navigator-vault migrate --run --backup-dir <dir>`.
 
 ---
@@ -161,7 +161,8 @@ account the example seeds (`demo` / `demo123`).
   (minimal `auth.users` + `auth.user_identities`, plus the `demo` user) —
   set `EXAMPLE_BOOTSTRAP_DB=false` once your database already has the
   Navigator `auth` schema. The credential columns and the Session Vault
-  tables are added by the library's own idempotent startup migrations.
+  tables are added by the example itself through `navigator_auth.migrations.upgrade`
+  (startup no longer migrates).
 * **Redis** — sessions and per-flow OAuth2 state.
 * **`VAULT_MASTER_KEY_v1` + `VAULT_ACTIVE_KEY_ID`** — credentials are ciphered
   with the Session Vault master keys. Without them login and SSO keep working

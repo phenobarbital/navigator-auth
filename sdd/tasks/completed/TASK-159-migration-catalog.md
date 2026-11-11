@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-110 — navauth self upgrade database migration command
 **Spec**: `sdd/specs/new-command-migration.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -519,10 +519,8 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (seat gpt-5.6-terra · codex · attempt 1 · 277s · tokens n/a)
+**Date**: 2026-11-11
+**Notes**: Catalog package, nine byte-identical SQL files relocated via git mv, three SQL_DIR repoints, unit tests. Merge-tier validation: 88 passed. Orchestrator diff review: no defects, 0 fix commits (review recorded coder-review:b10cbfbed6d173e08a33f046). Closed via `parrot sdd task close` because the durable evidence root is read-only in the sandbox, so `task finalize` could not be used.
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

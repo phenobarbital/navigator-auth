@@ -580,7 +580,7 @@ returns `{"error": "registration_not_supported"}`. Exceeding the rate limit
 returns `429` with `Retry-After`.
 
 New `auth.clients` columns: `token_endpoint_auth_method`, `registration_source`
-(`static` | `dcr`), `enforce_access_gate`. Run `backends/oauth2/ddl.sql`.
+(`static` | `dcr`), `enforce_access_gate`. Run `navauth self upgrade --set oauth2`.
 
 ## Upstream IdP proxy login
 
@@ -639,7 +639,7 @@ token `jti`s for that (user, client) are all revoked. Effect is immediate for
 refresh and introspection, and within one access-token TTL for tokens already
 minted.
 
-New table `auth.client_access` — see `backends/oauth2/ddl.sql`.
+New table `auth.client_access` — see the `oauth2` migration set (`navauth self upgrade --set oauth2`).
 
 ## Asymmetric signing and JWKS
 

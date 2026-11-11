@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-110 — navauth self upgrade database migration command
 **Spec**: `sdd/specs/new-command-migration.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-160
@@ -431,10 +431,8 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (see index/execution seats; native sonnet for TASK-164, codex for 161/162)
+**Date**: 2026-11-11
+**Notes**: Delivered and merged; wave merge-tier validation 64 passed; orchestrator review found no defects, 0 fix commits (review recorded). Closed via `parrot sdd task close` (durable evidence root read-only in sandbox).
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

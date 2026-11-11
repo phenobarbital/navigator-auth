@@ -65,10 +65,11 @@ for navigator-session's targets:
 Schema migrations
 -----------------
 
-* ``navigator_auth/vault/sql/002_vault_crypto_hardening.sql``
-* ``navigator_auth/identity/sql/003_identity_key_version_integer.sql``
+* ``navigator_auth/migrations/sql/vault/002_vault_crypto_hardening.sql``
+* ``navigator_auth/migrations/sql/identity/003_identity_key_version_integer.sql``
 
-Both are applied automatically at startup and are safe to re-run.
+Both are applied by ``navauth self upgrade`` (startup no longer migrates) and
+are safe to re-run. See :doc:`migrations`.
 
 HTTP contract
 -------------
