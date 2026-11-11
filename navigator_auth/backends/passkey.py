@@ -580,7 +580,10 @@ class PasskeyAuth(BasicAuth):
                 if not totp and count <= 1:
                     raise web.HTTPConflict(
                         text=json.dumps(
-                            {"error": "strong_factor_required", "reason": "Passkey: cannot delete the last strong factor"}
+                            {
+                                "error": "strong_factor_required",
+                                "reason": "Passkey: cannot delete the last strong factor",
+                            }
                         ),
                         content_type="application/json",
                     )

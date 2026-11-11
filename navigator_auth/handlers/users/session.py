@@ -15,7 +15,6 @@ from ...conf import (
 from .passwd import check_password, set_basic_password
 from ...mfa.events import security_transition
 
-
 class UserSession(BaseHandler):
     async def session(self, request):
         session = None

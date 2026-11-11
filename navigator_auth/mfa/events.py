@@ -48,7 +48,9 @@ async def security_transition(
     try:
         conn = await lock_cm.__aenter__()
     except BaseException as exc:
-        logger.error("MFA security transition lock failed: event=%s user_id=%s error=%s", event, user_id, type(exc).__name__)
+        logger.error(
+            "MFA security transition lock failed: event=%s user_id=%s error=%s", event, user_id, type(exc).__name__
+        )
         yield None
         return
 
@@ -84,4 +86,6 @@ async def security_transition(
     try:
         await lock_cm.__aexit__(None, None, None)
     except BaseException as exc:
-        logger.error("MFA security transition commit failed: event=%s user_id=%s error=%s", event, user_id, type(exc).__name__)
+        logger.error(
+            "MFA security transition commit failed: event=%s user_id=%s error=%s", event, user_id, type(exc).__name__
+        )
