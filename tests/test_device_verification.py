@@ -6,7 +6,6 @@ Tests:
   test_device_consent_skip_with_grant    — existing unrevoked OauthGrant skips consent
 """
 
-import asyncio
 import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -368,6 +367,7 @@ async def test_device_verification_no_session_redirects():
 # FEAT-108 TASK-205 — owner check + device login resume (AC13, AC16a)
 # ---------------------------------------------------------------------------
 
+
 def _routed_app():
     """aiohttp app registering the named OAuth2 routes so ``url_for`` works."""
     from aiohttp import web
@@ -438,6 +438,7 @@ async def test_device_verification_owner_outage_503():
 
 def _login_provider(client, store, user):
     from aiohttp import web
+
     provider = _make_provider(client, device_store=store, session_user=user)
     provider.grant_storage = None
     provider._idp.authenticate_credentials = AsyncMock(
@@ -461,9 +462,7 @@ async def test_device_login_resumes_verification():
 
     # 1. no session -> redirected to login carrying the code
     with pytest.raises(web.HTTPFound) as exc:
-        await provider.device_verification(
-            _routed_request({"action": "approve", "user_code": dc.user_code})
-        )
+        await provider.device_verification(_routed_request({"action": "approve", "user_code": dc.user_code}))
     assert f"device_user_code={dc.user_code}" in str(exc.value.location)
 
     # 2. POST the login form with the device code -> device route, not authorize
@@ -494,12 +493,11 @@ async def test_device_login_resumes_verification():
     approver = _make_provider(client, device_store=store, session_user=user, code_store=code_store)
     approver.grant_storage = _MemGrantStorage()
     await approver.grant_storage.save_grant(
-        OauthGrant(user_id=user.user_id, client_id=client.client_id,
-                   scopes=["default", "offline_access"], revoked=False)
+        OauthGrant(
+            user_id=user.user_id, client_id=client.client_id, scopes=["default", "offline_access"], revoked=False
+        )
     )
-    resp = await approver.device_verification(
-        _routed_request({"action": "approve", "user_code": dc.user_code})
-    )
+    resp = await approver.device_verification(_routed_request({"action": "approve", "user_code": dc.user_code}))
     assert resp.status == 200
     current = await store.get_by_device_code(dc.device_code)
     assert current.status == DeviceCodeStatus.APPROVED
@@ -529,9 +527,7 @@ async def test_device_login_rejects_url_like_code():
 
     client, user, dc, store = await _pending_setup()
     provider = _login_provider(client, store, user)
-    provider.get_login_form = AsyncMock(
-        return_value=("erin", "pw", {"device_user_code": "https://evil"})
-    )
+    provider.get_login_form = AsyncMock(return_value=("erin", "pw", {"device_user_code": "https://evil"}))
     with patch.object(backend_mod.auth_conf, "AUTH_BASIC_2FA_ENABLED", False):
         with pytest.raises(web.HTTPBadRequest):
             await provider.auth_login(_routed_request({}, method="POST"))
