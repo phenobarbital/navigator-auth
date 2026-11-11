@@ -12,7 +12,7 @@ a deny reaches the client with its own status. Returning a falsy value from a
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from navigator_session import get_session
 
@@ -32,7 +32,7 @@ class OwnerOrSuperuserGuard:
     """Owner-or-superuser authorization for generic model handlers.
 
     Per-surface behaviour is configuration, not forked logic: subclasses set
-    the five class attributes below and call the coroutines from their own
+    the nine class attributes below and call the coroutines from their own
     verb hooks.
 
     Attributes:
@@ -47,6 +47,11 @@ class OwnerOrSuperuserGuard:
             falsy value disables cross-user access entirely.
         superuser_actions: Actions the admin path may take. An action outside
             this set is refused even when the policy would allow it.
+        writable_by_owner: Columns the owner may update.
+        writable_by_admin: Columns the authorized admin path may update.
+        creatable_by_admin: Columns the authorized admin path may set when
+            creating. ``None`` uses ``writable_by_admin``.
+        privileged_columns: Columns no CRUD path may write.
     """
 
     owner_column: Optional[str] = "user_id"
@@ -54,6 +59,17 @@ class OwnerOrSuperuserGuard:
     public_columns: frozenset[str] = frozenset()
     policy_name: Optional[str] = None
     superuser_actions: frozenset[str] = frozenset({"read", "revoke", "delete"})
+    #: Write side (FEAT-107). Allowlists, never denylists (spec G3): a key
+    #: absent from the applicable set is refused, so a column added to the
+    #: model later is closed by default. All empty by default, and only
+    #: consulted when ``authorize_row`` receives a ``payload`` — the FEAT-105
+    #: handlers pass none and are unaffected (spec G7).
+    writable_by_owner: frozenset[str] = frozenset()
+    writable_by_admin: frozenset[str] = frozenset()
+    #: ``None`` means "same as ``writable_by_admin``".
+    creatable_by_admin: Optional[frozenset[str]] = None
+    #: Writable by NO CRUD path, owner included, create included.
+    privileged_columns: frozenset[str] = frozenset()
 
     # ------------------------------------------------------------------
     # Identity
@@ -117,6 +133,8 @@ class OwnerOrSuperuserGuard:
         owner_id: Optional[int],
         *,
         not_found_on_deny: bool = False,
+        payload: Optional[Iterable[str]] = None,
+        creating: bool = False,
     ) -> bool:
         """Authorize one row operation. Owner, else policy-gated superuser.
 
@@ -127,6 +145,13 @@ class OwnerOrSuperuserGuard:
                 has no owner (``owner_column is None``) or does not exist.
             not_found_on_deny: Answer 404 instead of 403, so a primary-key
                 probe cannot be used to confirm that a foreign row exists.
+            payload: The client-supplied keys of a write (dict or iterable of
+                column names). ``None`` — reads, deletes and every FEAT-105
+                caller — skips the column check entirely. A write caller that
+                omits it gets the pre-FEAT-107 blanket owner allow back, so
+                every write hook MUST pass it (TASK-151 / TASK-155).
+            creating: The payload is for a new row; checked against
+                ``creatable_by_admin``. There is no owner create path.
 
         Returns:
             ``True``. This method **never returns False** — see the module
@@ -139,6 +164,10 @@ class OwnerOrSuperuserGuard:
         """
         user_id, is_superuser = await self.acting_user()
         if self.owner_column is not None and owner_id is not None and str(owner_id) == str(user_id):
+            if payload is not None:
+                await self.authorize_columns(
+                    payload, is_owner=True, creating=creating, action=action, owner_id=owner_id
+                )
             return True
         if not is_superuser:
             await self.audit_decision(action, False, owner_id, f"user {user_id} is not the owner and not a superuser")
@@ -158,7 +187,66 @@ class OwnerOrSuperuserGuard:
         await self.audit_decision(action, bool(allowed), owner_id, reason)
         if not allowed:
             self._refuse(not_found_on_deny)
+        if payload is not None:
+            await self.authorize_columns(payload, is_owner=False, creating=creating, action=action, owner_id=owner_id)
         return True
+
+    async def authorize_columns(
+        self,
+        payload: Iterable[str],
+        *,
+        is_owner: bool,
+        creating: bool = False,
+        action: Optional[str] = None,
+        owner_id: Optional[int] = None,
+    ) -> None:
+        """Refuse a write whose payload touches a column this path may not write.
+
+        Allowlist semantics (spec G3). The applicable set is:
+
+            creating             -> creatable_by_admin (or writable_by_admin)
+            updating, owner      -> writable_by_owner
+            updating, admin path -> writable_by_admin
+
+        A key in ``privileged_columns`` is refused on every path, owner
+        included, create included. There is no owner create path: a create
+        always goes through the superuser path of :meth:`authorize_row`.
+
+        Args:
+            payload: The client-supplied keys (a dict iterates its keys).
+            is_owner: The owner path authorized this write.
+            creating: The payload is for a new row.
+            action: For the audit record only.
+            owner_id: For the audit record only.
+
+        Raises:
+            web.HTTPForbidden: A key falls outside the envelope. The body names
+                only refused columns that are in ``public_columns``.
+            TypeError: ``payload`` is a ``str``/``bytes`` (iterating it would
+                yield characters, silently passing the check).
+        """
+        if isinstance(payload, (str, bytes)):
+            raise TypeError("authorize_columns expects column names, not a string")
+        keys = {str(key) for key in payload}
+        label = action or ("columns:create" if creating else "columns:update")
+        if creating and is_owner:
+            await self.audit_decision(label, False, owner_id, "no owner create path")
+            self._refuse()
+        if creating:
+            allowed = self.creatable_by_admin if self.creatable_by_admin is not None else self.writable_by_admin
+        elif is_owner:
+            allowed = self.writable_by_owner
+        else:
+            allowed = self.writable_by_admin
+        refused = (keys & self.privileged_columns) | (keys - allowed)
+        if not refused:
+            return
+        await self.audit_decision(label, False, owner_id, f"columns outside the write envelope: {sorted(refused)}")
+        body: dict = {"error": "Forbidden"}
+        named = safe_fields(sorted(refused), self.public_columns)
+        if named:
+            body["columns"] = named
+        self.error(response=body, status=403)
 
     async def sanitize_query(
         self,
