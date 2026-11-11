@@ -57,9 +57,7 @@ async def test_unauthenticated_routed_logs_debug(caplog):
         assert response.status == 200
     assert calls == ["/routed"]
     levels = [
-        record.levelno
-        for record in caplog.records
-        if "Access to /routed is not Authenticated." in record.getMessage()
+        record.levelno for record in caplog.records if "Access to /routed is not Authenticated." in record.getMessage()
     ]
     assert levels == [logging.DEBUG]
 

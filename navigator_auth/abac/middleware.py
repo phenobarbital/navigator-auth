@@ -55,7 +55,7 @@ async def abac_middleware(
     logging.debug(' == ABAC MIDDLEWARE == ')
     ### verify if request is authenticated
     if request.get('authenticated', False) is False:
-        logging.debug(f'Access to {request.path} is not Authenticated.')
+        logging.debug(f"Access to {request.path} is not Authenticated.")
         return await handler(request)
     ### get Guardian:
     try:
