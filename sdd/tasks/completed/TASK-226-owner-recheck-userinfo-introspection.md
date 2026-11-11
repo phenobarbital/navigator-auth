@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-108 — OAuth2 3LO issues
 **Spec**: `sdd/specs/oauth2-3lo-issues.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-225
@@ -184,4 +184,13 @@ blueprint, run the Validation Commands, commit only the listed files, then
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: /sdd-fix session `agent:sdd-fix:d964ca37` (Claude Opus 5.5)
+**Date**: 2026-11-12
+**Notes**: userinfo resolves the owner of OAuth user tokens (missing/disabled → 401 `invalid_token`,
+outage → 503 `temporarily_unavailable`) and reuses it for claims; non-OAuth tokens keep the tolerant
+lookup. introspect checks the owner of own-client access and refresh tokens after the same-client
+check (missing/disabled/outage → `{"active": false}`) and reuses it for `username`. The
+introspection test harness now defaults to an active owner. Commit: `aad7321`. 13 of 17 new tests
+fail against the pre-task backend.
+
+**Deviations from spec**: none

@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-108 — OAuth2 3LO issues
 **Spec**: `sdd/specs/oauth2-3lo-issues.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -223,4 +223,19 @@ from the blueprint, run the Validation Commands, commit only the listed files, t
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: /sdd-fix session `agent:sdd-fix:d964ca37` (Claude Opus 5.5)
+**Date**: 2026-11-12
+**Notes**: `OAUTH_CODE_CLAIM_TTL` (default 30) added to `conf.py`; `claim_code(code, ttl=None)`
+defaults to it. `mark_used` now gates on a `SET NX` marker. A held claim re-reads the code:
+consumed/missing → `invalid_grant "Authorization code already used."`, still pending → 503.
+Commits: `4616c32`, review fixes `0cb58e5`. Validation: `tests/test_oauth2_code_redemption.py`,
+`tests/test_oauth2_unknown_resource_owner.py`, `tests/test_oauth2_p0_correctness.py` green
+(1 pre-existing fakeredis skip). An interleaving Redis double shows the old `mark_used` let 5/5
+concurrent callers win; the new one lets exactly 1.
+
+**Deviations from spec**: (1) The in-flight 503 uses its own description ("The authorization code
+is being redeemed; retry shortly.") instead of `_owner_store_unavailable()`, whose identity-store
+message would be wrong when the first attempt crashed. (2) Codex review (CONFIRMED, fixed in
+`0cb58e5`): `mark_used` now also refuses a record already flagged used, sizes its marker
+`max(OAUTH_CODE_TTL, code remaining lifetime)`, and re-saves with `SET XX`, so a consumer paused past
+every TTL cannot resurrect the code for a second one (`TestPausedConsumer`).

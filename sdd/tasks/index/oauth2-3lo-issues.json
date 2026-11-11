@@ -134,7 +134,7 @@
       "effort": "S",
       "depends_on": [],
       "parallel": true,
-      "parallelism_notes": "No dependency: one line in navigator_auth/auth.py's exempt branch (anchor 'pass  # Best-effort\u2026') plus a new mock-based test file; auth.py is touched by no other task.",
+      "parallelism_notes": "No dependency: one line in navigator_auth/auth.py's exempt branch (anchor 'pass  # Best-effort…') plus a new mock-based test file; auth.py is touched by no other task.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
       "completed_at": "2026-11-11T21:49:06+00:00",
@@ -144,7 +144,7 @@
     {
       "id": "TASK-200",
       "slug": "identity-store-unavailable",
-      "title": "IdentityStoreUnavailable \u2014 user_from_id separates a missing user from a store outage",
+      "title": "IdentityStoreUnavailable — user_from_id separates a missing user from a store outage",
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
@@ -291,7 +291,7 @@
     {
       "id": "TASK-207",
       "slug": "docs-changelog-examples-readme",
-      "title": "Documentation \u2014 CHANGELOG behaviour changes and examples/README.md",
+      "title": "Documentation — CHANGELOG behaviour changes and examples/README.md",
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
@@ -319,7 +319,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -329,8 +329,9 @@
       "parallelism_notes": "TASK-205: last FEAT-108 task modifying navigator_auth/backends/oauth2/backend.py (TASK-203/204 transitively; TASK-204 created claim_code in code_backend.py and the tests in tests/test_oauth2_unknown_resource_owner.py).",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-224-atomic-code-consume-claim-ttl.md"
+      "completed_at": "2026-11-11T23:54:48+00:00",
+      "file": "sdd/tasks/completed/TASK-224-atomic-code-consume-claim-ttl.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-225",
@@ -339,7 +340,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "low",
       "effort": "S",
       "depends_on": [
@@ -349,8 +350,9 @@
       "parallelism_notes": "TASK-224: both modify _handle_authorization_code in navigator_auth/backends/oauth2/backend.py and tests/test_oauth2_code_redemption.py (created by TASK-224).",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-225-bind-session-after-code-consume.md"
+      "completed_at": "2026-11-11T23:54:54+00:00",
+      "file": "sdd/tasks/completed/TASK-225-bind-session-after-code-consume.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-226",
@@ -359,7 +361,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -369,8 +371,9 @@
       "parallelism_notes": "TASK-225: both modify navigator_auth/backends/oauth2/backend.py (serialized, lower id first).",
       "assigned_to": null,
       "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-226-owner-recheck-userinfo-introspection.md"
+      "completed_at": "2026-11-11T23:54:54+00:00",
+      "file": "sdd/tasks/completed/TASK-226-owner-recheck-userinfo-introspection.md",
+      "verification": "verified"
     }
   ]
 }
