@@ -313,6 +313,9 @@ class PolicyAdapter:
     # conditions.is_manager (evaluator.py:271).
     NATIVE_ENV_KEYS = ENGINE_ENV_KEYS | frozenset({"is_manager"})
 
+    # Resource type accepted for ObjectPolicy(type=...) when resolving objects=.
+    OBJECT_TYPE_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+
     @staticmethod
     def _classic_resource_error(raw_resources: List[str]) -> Optional[str]:
         """Validate every classic resource, negated ones included.
@@ -362,7 +365,13 @@ class PolicyAdapter:
         if negated:
             return None, f"negated objects are not supported: {negated!r}; use resource=['!...'] instead"
         obj_type = policy.attributes.get("type", "object")
-        if not isinstance(obj_type, str) or not obj_type or ":" in obj_type:
+        # A plain identifier only: "!x" would turn every object into a negated
+        # (DENY) resource and "urn" would re-parse "urn:<name>" as a wildcard URN.
+        if (
+            not isinstance(obj_type, str)
+            or not PolicyAdapter.OBJECT_TYPE_RE.fullmatch(obj_type)
+            or obj_type.lower() == "urn"
+        ):
             return None, f"unsupported object type for objects=: {obj_type!r}"
         resources = PolicyAdapter._object_resources(list(objects), obj_type)
         for obj, resource in zip(objects, resources):
