@@ -16,7 +16,9 @@ from .policies import (
     PolicyResponse,
 )
 from .policies.adapter import PolicyAdapter
+from .policies.abstract import AbstractPolicy
 from .policies.evaluator import PolicyEvaluator, PolicyIndex
+from .policies.resource_policy import ResourcePolicy
 from .policies.resources import ResourceType
 from .errors import PreconditionFailed, AccessDenied
 from .context import EvalContext
@@ -77,8 +79,9 @@ class PDP:
         evaluator: Optional[PolicyEvaluator] = None,
     ):
         self._policies: list = []
-        if isinstance(policies, list):
-            self._policies = policies
+        # Policies registered through add_policy / policies=: enforced by the
+        # evaluator and kept across reload_policies() and tenant evaluators.
+        self._registered: list[ResourcePolicy] = []
         ### Loading an Storage and registering for Load Policies.
         self.storage = storage
         self.yaml_storage = yaml_storage
@@ -93,6 +96,11 @@ class PDP:
         self._tenant_evaluators: OrderedDict[
             Tuple[int, int], PolicyEvaluator
         ] = OrderedDict()
+        # Register constructor policies last: add_policy needs the evaluator and
+        # the tenant LRU created above. The caller's list is not aliased.
+        if isinstance(policies, list):
+            for policy in policies:
+                self.add_policy(policy)
 
     @property
     def evaluator(self) -> PolicyEvaluator:
@@ -101,9 +109,53 @@ class PDP:
     def policies(self):
         return self._policies
 
-    def add_policy(self, policy: Policy):
-        self._policies.append(policy)
+    def add_policy(self, policy: AbstractPolicy) -> list[ResourcePolicy]:
+        """Register a policy so ``PDP.authorize`` enforces it.
+
+        Args:
+            policy: A classic ``Policy``/``ObjectPolicy``/``FilePolicy`` or a
+                ``ResourcePolicy``.
+
+        Returns:
+            The ``ResourcePolicy`` objects loaded into the evaluator: the adapted
+            policy plus its ``<name>_negated`` DENY when it has ``!`` resources.
+
+        Raises:
+            ValueError: ``PolicyAdapter.from_policy`` rejected the policy (the
+                message carries its reason), or a policy with the same name is
+                already registered. Nothing is changed when it raises.
+        """
+        name = getattr(policy, "name", repr(policy))
+        result = PolicyAdapter.from_policy(policy)
+        if result.skipped:
+            raise ValueError(f"Policy '{name}' cannot be registered: {result.reason}")
+        adapted = [p for p in [result.policy, *result.additional_policies] if p is not None]
+        registered_names = {registered.name for registered in self._registered}
+        adapted_names: set[str] = set()
+        for adapted_policy in adapted:
+            if adapted_policy.name in registered_names or adapted_policy.name in adapted_names:
+                raise ValueError(f"Policy name '{adapted_policy.name}' is already registered")
+            adapted_names.add(adapted_policy.name)
+        for warning in result.warnings:
+            self.logger.warning("Policy adaptation warning: %s", warning)
+        self._evaluator.load_policies(adapted)
+        self._registered.extend(adapted)
+        self._policies.extend(adapted)
+        self._evaluator.invalidate_cache()
+        if self._tenant_evaluators:
+            self._invalidate_tenant_evaluators()
         self.sorted_policies()
+        return adapted
+
+    def _has_external_policies(self) -> bool:
+        """Tell whether the evaluator holds policies not registered via ``add_policy``.
+
+        Returns:
+            True when any policy in the evaluator index is not (by identity) in
+            ``self._registered`` — i.e. the evaluator was pre-loaded externally.
+        """
+        registered = {id(policy) for policy in self._registered}
+        return any(id(policy) not in registered for policy in self._evaluator._index.all())
 
     def sorted_policies(self):
         self._policies.sort(key=lambda policy: policy.priority)
@@ -113,7 +165,7 @@ class PDP:
         # setup_pbac / enable_pbac loading via PolicyLoader), skip the
         # on-startup storage load to avoid duplicating or corrupting
         # policies with a second parse that may use a different schema.
-        if self._evaluator._index.all():
+        if self._has_external_policies():
             self.logger.info(
                 "Evaluator already has %d policies loaded externally; "
                 "skipping on-startup storage load to prevent duplicates.",
@@ -222,6 +274,10 @@ class PDP:
         for w in warnings:
             self.logger.warning("Tenant evaluator adapt warning: %s", w)
 
+        # Registered policies reach every tenant evaluator; tenant scoping stays
+        # with the engine (org_id/client_id on each ResourcePolicy).
+        resource_policies.extend(self._registered)
+
         ev = PolicyEvaluator()
         ev.load_policies(resource_policies)
         self.logger.debug(
@@ -296,6 +352,9 @@ class PDP:
         resource_policies, warnings = PolicyAdapter.adapt_batch(policy_dicts)
         for w in warnings:
             self.logger.warning("Reload warning: %s", w)
+
+        # Registered policies survive a reload (storage alone does not hold them).
+        resource_policies.extend(self._registered)
 
         # Build new index
         new_index = PolicyIndex()
