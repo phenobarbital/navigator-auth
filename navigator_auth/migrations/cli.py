@@ -14,7 +14,7 @@ from urllib.parse import quote, urlsplit
 from .. import conf
 from .access import missing_runtime_access, validate_runtime_role
 from .catalog import MIGRATION_SETS, MigrationCatalogError
-from .runner import MigrationError, MigrationState, UpgradeReport, get_status, upgrade
+from .runner import MigrationError, MigrationLockError, MigrationState, UpgradeReport, get_status, upgrade
 
 logger = logging.getLogger("navigator.migrations")
 
@@ -62,15 +62,27 @@ def resolve_dsn(args: argparse.Namespace, *, getpass_fn: Callable[[str], str] = 
         if not password:
             raise MigrationError("admin password is empty")
         label = "--user" if args.user else "AUTH_ADMIN_USER"
-        return (
-            f"postgres://{quote(user, safe='')}:{quote(password, safe='')}@{conf.DBHOST}:{conf.DBPORT}/{conf.DBNAME}",
-            label,
-        )
+        return _build_dsn(user, password), label
 
     if not conf.DBUSER:
         raise MigrationError("no admin credentials are configured and DBUSER is empty")
     print("navauth: using runtime credentials from default_dsn", file=sys.stderr)
     return conf.default_dsn, "default_dsn"
+
+
+def _build_dsn(user: str, password: str) -> str:
+    """Build a ``postgres://`` DSN with every component percent-encoded.
+
+    IPv6 host literals are wrapped in brackets; the database name is encoded so that
+    ``/``, ``?`` or ``#`` in it cannot corrupt the URL.
+    """
+    host = str(conf.DBHOST)
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return (
+        f"postgres://{quote(user, safe='')}:{quote(password, safe='')}"
+        f"@{host}:{conf.DBPORT}/{quote(str(conf.DBNAME), safe='')}"
+    )
 
 
 def _describe(dsn: str) -> str:
@@ -172,6 +184,9 @@ async def run(args: argparse.Namespace, *, connect: Callable[[str], Awaitable[An
         )
         _print_report(report)
         return EXIT_FAILED if report.failed or report.access_errors else EXIT_OK
+    except MigrationLockError as error:
+        print(f"navauth: {error}", file=sys.stderr)
+        return EXIT_FAILED
     except (MigrationError, MigrationCatalogError) as error:
         print(f"navauth: configuration error: {error}", file=sys.stderr)
         return EXIT_CONFIG

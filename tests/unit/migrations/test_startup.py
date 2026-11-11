@@ -90,12 +90,13 @@ async def test_auth_startup_runs_no_ddl(monkeypatch) -> None:
         logger=MagicMock(),
         register_exclusions=MagicMock(),
         _load_subnet_service_tags=AsyncMock(),
+        _backend_list=("navigator_auth.backends.BasicAuth",),
     )
 
     await auth_module.AuthHandler.auth_startup(stub, {"authdb": pool})
 
     keyring.assert_called_once_with({"authdb": pool})
-    warn_pending.assert_awaited_once_with(pool)
+    warn_pending.assert_awaited_once_with(pool, stub._backend_list)
     assert not hasattr(auth_module, "setup_vault_tables")
     assert not hasattr(auth_module, "setup_identity_columns")
 
@@ -132,3 +133,42 @@ async def test_tables_present(fake_conn) -> None:
     fake_conn.relations.remove("auth.user_passkey_handles")
     assert not await tables_present(pool, "auth.user_credentials", "auth.user_passkey_handles")
     assert not fake_conn.writes()
+
+
+def test_enabled_migration_sets_follow_backends_and_mfa(monkeypatch) -> None:
+    """Optional sets are enabled only by a backend that uses them (or 2FA for mfa)."""
+    from navigator_auth import conf
+    from navigator_auth.migrations.startup import enabled_migration_sets
+
+    monkeypatch.setattr(conf, "AUTHENTICATION_BACKENDS", ())
+    monkeypatch.setattr(conf, "AUTH_BASIC_2FA_ENABLED", False)
+    assert enabled_migration_sets() == ["vault", "identity"]
+    assert enabled_migration_sets(("navigator_auth.backends.PasskeyAuth",)) == ["vault", "identity", "passkey"]
+    assert enabled_migration_sets(("navigator_auth.backends.oauth2.Oauth2Provider",)) == [
+        "vault",
+        "identity",
+        "oauth2",
+    ]
+
+    class PasskeyAuth:
+        __module__ = "navigator_auth.backends.passkey"
+
+    assert "passkey" in enabled_migration_sets((PasskeyAuth,))
+
+    monkeypatch.setattr(conf, "AUTH_BASIC_2FA_ENABLED", True)
+    assert enabled_migration_sets() == ["vault", "identity", "mfa"]
+
+
+@pytest.mark.asyncio
+async def test_warn_pending_ignores_disabled_sets(caplog, fake_conn, tmp_catalog) -> None:
+    """Pending files of a set no backend uses are not named in the startup warning."""
+    (tmp_catalog / "passkey").mkdir(exist_ok=True)
+    (tmp_catalog / "passkey" / "001_pk.sql").write_text("SELECT 3;")
+    pool = ConnectionPool(fake_conn)
+    with caplog.at_level(logging.WARNING, logger="navigator.migrations"):
+        await warn_pending_migrations(pool, ("navigator_auth.backends.BasicAuth",))
+    assert "passkey/" not in caplog.text and "vault/001_first.sql" in caplog.text
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="navigator.migrations"):
+        await warn_pending_migrations(pool, ("navigator_auth.backends.PasskeyAuth",))
+    assert "passkey/001_pk.sql (pending)" in caplog.text

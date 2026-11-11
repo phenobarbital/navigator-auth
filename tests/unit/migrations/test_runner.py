@@ -15,6 +15,7 @@ from navigator_auth.migrations.access import missing_runtime_access
 from navigator_auth.migrations.runner import (
     get_status,
     MigrationError,
+    MigrationLockError,
     MigrationState,
     acquire_pooled,
     acquire_raw,
@@ -181,6 +182,10 @@ def _ready(fake_conn, *relations: str) -> None:
     fake_conn.respond("pg_depend", [])
 
 
+def _lock_calls(fake_conn) -> int:
+    return sum(1 for method, sql, _ in fake_conn.statements if method == "fetchval" and "pg_try_advisory_lock" in sql)
+
+
 def _sqls(fake_conn) -> list[str]:
     return [sql for method, sql, _ in fake_conn.statements if method == "execute"]
 
@@ -256,18 +261,39 @@ async def test_upgrade_takes_and_releases_advisory_lock(tmp_catalog, fake_conn) 
     """The lock is taken once and released on success and on run-level errors."""
     _ready(fake_conn)
     await upgrade(fake_conn, runtime_role=ROLE)
-    sqls = _sqls(fake_conn)
-    assert sum("pg_advisory_lock" in q for q in sqls) == 1
-    assert sum("pg_advisory_unlock" in q for q in sqls) == 1
+    assert _lock_calls(fake_conn) == 1
+    assert sum("pg_advisory_unlock" in q for q in _sqls(fake_conn)) == 1
 
     broken = type(fake_conn)()
     _ready(broken)
     broken.schema_missing = True
     with pytest.raises(MigrationError):
         await upgrade(broken, runtime_role=ROLE)
-    sqls = _sqls(broken)
-    assert sum("pg_advisory_lock" in q for q in sqls) == 1
-    assert sum("pg_advisory_unlock" in q for q in sqls) == 1
+    assert _lock_calls(broken) == 1
+    assert sum("pg_advisory_unlock" in q for q in _sqls(broken)) == 1
+
+
+@pytest.mark.asyncio
+async def test_upgrade_lock_wait_is_bounded(tmp_catalog, fake_conn) -> None:
+    """A lock held elsewhere raises MigrationLockError after the timeout, with no DDL or unlock."""
+    _ready(fake_conn)
+    fake_conn.respond("pg_try_advisory_lock", False)
+    with pytest.raises(MigrationLockError, match="advisory lock"):
+        await upgrade(fake_conn, runtime_role=ROLE, lock_timeout=0.05, lock_poll=0.01)
+    assert _lock_calls(fake_conn) >= 2
+    assert not fake_conn.writes()
+    assert not any("pg_advisory_unlock" in q for q in _sqls(fake_conn))
+
+
+@pytest.mark.asyncio
+async def test_upgrade_waits_then_acquires_lock(tmp_catalog, fake_conn) -> None:
+    """The lock is retried until the holder lets go, then the run proceeds."""
+    _ready(fake_conn)
+    answers = iter([False, False, True])
+    fake_conn.respond("pg_try_advisory_lock", lambda sql, args: next(answers))
+    report = await upgrade(fake_conn, runtime_role=ROLE, lock_timeout=5, lock_poll=0.01)
+    assert _lock_calls(fake_conn) == 3
+    assert not report.failed and len(report.applied) == 3
 
 
 @pytest.mark.asyncio

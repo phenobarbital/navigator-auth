@@ -9,6 +9,7 @@ from .catalog import (
 )
 from .runner import (
     MigrationError,
+    MigrationLockError,
     MigrationResult,
     MigrationState,
     MigrationStatus,
@@ -22,6 +23,7 @@ __all__ = [
     "MigrationCatalogError",
     "MigrationError",
     "MigrationFile",
+    "MigrationLockError",
     "MigrationResult",
     "MigrationState",
     "MigrationStatus",

@@ -98,7 +98,15 @@ A file whose checksum changed after being applied is skipped and reported; use
 
 - Application startup no longer migrates. Until you run `navauth self upgrade`
   you get one warning at boot (and `PasskeyAuth` refuses to start without its
-  tables).
+  tables). The warning covers only the sets your configuration uses: `vault` and
+  `identity` always, `passkey` / `oauth2` when a configured backend names them, and
+  `mfa` when `AUTH_BASIC_2FA_ENABLED` is on.
+- Only one upgrade runs at a time. A second `navauth self upgrade` waits up to 30 s
+  for the first to finish, then exits with code 2 ("another migration run holds the
+  advisory lock").
+- A failed file does not stop the run: later files are still attempted (they are
+  idempotent and guarded) and the failed one is retried by the next run. Use
+  `--fail-fast` to stop at the first failure.
 - The first run on an existing database re-runs the idempotent files and
   records them in the ledger.
 - The OAuth2 patch is now a managed migration with no seed data; rows with NULL

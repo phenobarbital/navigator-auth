@@ -73,6 +73,8 @@ class FakeConnection:
         return self._missing_response
 
     def _default_query(self, sql: str, args: tuple[Any, ...]) -> object | None:
+        if "pg_try_advisory_lock" in sql:
+            return True
         if "to_regclass" in sql:
             relation = str(args[0]).replace('"', "")
             if relation.endswith("schema_migrations"):

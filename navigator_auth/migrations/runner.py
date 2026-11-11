@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator, Iterable
@@ -21,6 +22,8 @@ logger = logging.getLogger("navigator.migrations")
 
 LEDGER_TABLE = "schema_migrations"
 ADVISORY_LOCK_KEY: int = 1102026
+LOCK_TIMEOUT_SECONDS: float = 30.0
+LOCK_POLL_SECONDS: float = 0.5
 
 _LEDGER_DDL = """
 CREATE TABLE IF NOT EXISTS {ledger} (
@@ -38,6 +41,10 @@ CREATE TABLE IF NOT EXISTS {ledger} (
 
 class MigrationError(Exception):
     """A statement failed, or the database is not usable for migrations."""
+
+
+class MigrationLockError(MigrationError):
+    """Another migration run holds the advisory lock."""
 
 
 class MigrationState(str, Enum):
@@ -250,6 +257,24 @@ async def _reconcile_access(conn: Any, migration_set: str, runtime_role: str) ->
     return []
 
 
+async def _acquire_lock(conn: Any, timeout: float, poll: float) -> None:
+    """Take the session advisory lock, retrying until ``timeout`` seconds have elapsed.
+
+    Raises:
+        MigrationError: When another session still holds the lock after ``timeout``.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if await conn.fetchval("SELECT pg_try_advisory_lock($1)", ADVISORY_LOCK_KEY):
+            return
+        if time.monotonic() >= deadline:
+            raise MigrationLockError(
+                f"Another migration run holds the advisory lock; gave up after {timeout:g}s. "
+                "Wait for it to finish (or terminate the stuck session) and retry."
+            )
+        await asyncio.sleep(poll)
+
+
 async def upgrade(
     conn: Any,
     sets: Iterable[str] | None = None,
@@ -257,23 +282,30 @@ async def upgrade(
     runtime_role: str,
     reapply_changed: bool = False,
     fail_fast: bool = False,
+    lock_timeout: float = LOCK_TIMEOUT_SECONDS,
+    lock_poll: float = LOCK_POLL_SECONDS,
 ) -> UpgradeReport:
     """Apply pending files (and changed ones when ``reapply_changed``).
 
-    Holds ``pg_advisory_lock(ADVISORY_LOCK_KEY)`` for the run. Each file: prerequisite
-    checks + SQL + postcondition checks + runtime grants + ledger upsert in one
-    transaction. A failure rolls back the entire file, is recorded in ``report.failed``
-    and the run continues, unless ``fail_fast``. Access for already-applied selected
-    files is reconciled as well; failures appear in ``report.access_errors``.
+    Holds the session advisory lock (``ADVISORY_LOCK_KEY``) for the run, retrying for up
+    to ``lock_timeout`` seconds (polling every ``lock_poll``) before giving up. Each file:
+    prerequisite checks + SQL + postcondition checks + runtime grants + ledger upsert in
+    one transaction. A failure rolls back the entire file, is recorded in ``report.failed``
+    and the run continues with the next file, unless ``fail_fast``. That continuation is
+    deliberate (spec FEAT-110 §3): files are idempotent and guarded, so a later file of
+    the same set may still apply or fail on its own prerequisites, and a failed file is
+    simply retried by the next run. Use ``fail_fast`` to stop at the first failure.
+    Access for already-applied selected files is reconciled as well; failures appear in
+    ``report.access_errors``.
 
     Raises:
-        MigrationError: invalid runtime role, missing schema, or the lock cannot be taken.
+        MigrationLockError: the lock is still held by another session after ``lock_timeout`` seconds.
     """
     from .access import validate_runtime_role  # noqa: PLC0415 — cycle
 
     await validate_runtime_role(conn, runtime_role)
     report = UpgradeReport()
-    await execute_checked(conn, "SELECT pg_advisory_lock($1)", ADVISORY_LOCK_KEY)
+    await _acquire_lock(conn, lock_timeout, lock_poll)
     try:
         await ensure_ledger(conn)
         statuses = await get_status(conn, sets)

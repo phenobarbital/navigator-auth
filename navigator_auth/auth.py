@@ -196,7 +196,7 @@ class AuthHandler:
         setup_vault_keyring(app)
         # Schema changes are applied by `navauth self upgrade` (FEAT-110); startup only checks.
         if "authdb" in app:
-            await warn_pending_migrations(app["authdb"])
+            await warn_pending_migrations(app["authdb"], self._backend_list)
             # security_state (FEAT-106 review fixes) is not in the migration
             # catalog yet, so its DDL still runs here until it joins it.
             await setup_security_state_tables(app["authdb"])

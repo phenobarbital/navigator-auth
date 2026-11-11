@@ -245,3 +245,43 @@ def test_cli_unexpected_error_is_failed_not_pending(
     assert code == cli.EXIT_FAILED
     assert "unexpected error (RuntimeError)" in capsys.readouterr().err
     assert closed == [True]
+
+
+def test_dsn_from_user_quotes_host_and_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DBNAME with URL-special characters and an IPv6 host still yield a parseable DSN."""
+    from urllib.parse import unquote, urlsplit
+
+    monkeypatch.setattr(conf, "AUTH_ADMIN_DSN", None)
+    monkeypatch.setattr(conf, "AUTH_ADMIN_PWD", "p@ss/w?rd#")
+    monkeypatch.setattr(conf, "DBHOST", "::1")
+    monkeypatch.setattr(conf, "DBPORT", 5432)
+    monkeypatch.setattr(conf, "DBNAME", "nav/db?x#y")
+    dsn, label = cli.resolve_dsn(_args(dsn=None, user="adm"))
+    parts = urlsplit(dsn)
+    assert label == "--user"
+    assert parts.hostname == "::1" and parts.port == 5432
+    assert unquote(parts.path.lstrip("/")) == "nav/db?x#y"
+    assert unquote(parts.password) == "p@ss/w?rd#" and parts.query == "" and parts.fragment == ""
+
+
+def test_cli_lock_timeout_exits_failed(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """A held advisory lock is a failed run, not a configuration error."""
+    from navigator_auth.migrations.runner import MigrationLockError
+
+    class Conn:
+        async def close(self) -> None:
+            return None
+
+    async def connect(_: str) -> Conn:
+        return Conn()
+
+    async def role(conn: object, name: str | None) -> str:
+        return "runtime"
+
+    async def locked(*_: object, **__: object) -> None:
+        raise MigrationLockError("Another migration run holds the advisory lock; gave up after 30s.")
+
+    monkeypatch.setattr(cli, "validate_runtime_role", role)
+    monkeypatch.setattr(cli, "upgrade", locked)
+    assert cli.main(["self", "upgrade", "--dsn", "postgres://a:b@db/n"], connect=connect) == cli.EXIT_FAILED
+    assert "advisory lock" in capsys.readouterr().err
