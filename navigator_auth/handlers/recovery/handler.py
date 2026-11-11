@@ -16,6 +16,7 @@ line.
 import asyncio
 import importlib
 import logging
+import secrets
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -41,12 +42,27 @@ from navigator_auth.models import User
 from navigator_auth.handlers.users.passwd import set_basic_password
 from navigator_auth.handlers.recovery.limiter import RateLimiter
 from navigator_auth.handlers.recovery.policy import PasswordPolicy
-from navigator_auth.handlers.recovery.revoke import SessionRevoker
+from navigator_auth.handlers.recovery.revoke import RevocationError, SessionRevoker
 from navigator_auth.handlers.recovery.store import RecoveryTokenStore, _hash_token
 from navigator_auth.handlers.recovery.types import NotificationPayload
-from navigator_auth.mfa.events import security_transition
+from navigator_auth.conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE
+from navigator_auth.mfa.events import TransitionAborted, security_transition
+from navigator_auth.mfa.exceptions import MfaStorageError, MfaUnavailable
+from navigator_auth.mfa.security import advisory_user_lock
+from navigator_auth.security_state.store import SecurityStateError, increment_generation, record_confirmation
 
 logger = logging.getLogger("navigator.recovery")
+
+_USERS = f"{AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE}"
+# Consumption markers outlive the signed confirmation by this clock-skew margin (spec M4 durable contract).
+_MARKER_SKEW_SECONDS = 300
+
+
+def _field(record, name: str):
+    """Read ``name`` from a user record that may be a mapping or a datamodel object."""
+    if isinstance(record, dict):
+        return record.get(name)
+    return getattr(record, name, None)
 
 # Registered route names (handlers/__init__.py) that mean "step 3, confirm"
 # rather than "step 1, request" when a POST lands on post(). Route names,
@@ -244,9 +260,15 @@ class PasswordRecoveryHandler(BaseView):
             # distinguish them for the caller.
             return self.error(reason="Invalid or expired recovery link", status=400)
         try:
-            confirm_token, _confirmation = await self._store.issue_confirmation(token)
+            # Rotation serializes with step-3 completion for the same user: take the per-user advisory
+            # lock BEFORE changing Redis, so a rotation cannot land between step 3's recheck and commit.
+            async with advisory_user_lock(self.request.app["authdb"], int(recovery_payload.user_id)):
+                confirm_token, _confirmation = await self._store.issue_confirmation(token)
         except LookupError:
             return self.error(reason="Invalid or expired recovery link", status=400)
+        except MfaStorageError:
+            logger.warning("PasswordRecovery: rotation lock unavailable for user_id=%s", recovery_payload.user_id)
+            return self.json_response(response={"error": "temporarily_unavailable"}, status=503)
         return self.json_response(
             response={
                 "token": confirm_token,
@@ -278,12 +300,8 @@ class PasswordRecoveryHandler(BaseView):
         if confirmation is None:
             return self.error(reason="Invalid or expired confirmation token", status=400)
 
-        # Lookup, policy check and password write all share ONE acquired
-        # connection (matching handlers/users/session.py's
-        # password_change/password_reset) — releasing the connection
-        # between the lookup and the later .update() left a stale
-        # Model.Meta.connection reference and, under load, starved the
-        # pool badly enough to hang the whole process.
+        # Phase 1 (pooled, released): user lookup + policy check. Nothing is
+        # consumed here, so a policy failure leaves BOTH tokens usable.
         db = self.request.app["authdb"]
         async with await db.acquire() as conn:
             User.Meta.connection = conn
@@ -291,34 +309,64 @@ class PasswordRecoveryHandler(BaseView):
                 user = await User.get(user_id=confirmation.user_id)
             except NoDataFound:
                 return self.error(reason="Invalid or expired confirmation token", status=400)
+            captured_hash = _field(user, "password")
+        user_id = _field(user, "user_id")
+        violations = self._policy.validate(password, current_hash=captured_hash)
+        if violations:
+            return self.json_response(
+                response={"violations": [{"rule": v.rule, "message": v.message} for v in violations]},
+                status=422,
+            )
+        new_hash = set_basic_password(password)
+        digest = _hash_token(token)
+        revoker = self.session_revoker()
 
-            current_hash = getattr(user, "password", None)
-            violations = self._policy.validate(password, current_hash=current_hash)
-            if violations:
-                return self.json_response(
-                    response={"violations": [{"rule": v.rule, "message": v.message} for v in violations]},
-                    status=422,
-                )
-
-            # Policy passed: now consume (single-use GETDEL). If this races
-            # with a concurrent step-3 call, the second one lands here.
-            consumed = await self._store.consume_confirmation(token)
-            if consumed is None:
-                return self.error(reason="Invalid or expired confirmation token", status=400)
-
+        # Phase 2: ONE connection, ONE transaction, per-user advisory lock (MFA on or off).
+        try:
             async with security_transition(
-                self.request.app, user.user_id, "recovery_completion", actor_user_id=user.user_id
-            ):
-                user.password = set_basic_password(password)
-                # D17 — self-service reset is NOT the same as a superuser-driven
-                # password_reset (which sets is_new=True). Do not "harmonise"
-                # them.
-                user.is_new = False
-                await user.update()
+                self.request.app, user_id, "recovery_completion", actor_user_id=user_id
+            ) as conn:
+                # COALESCE: a federated user may have a NULL hash; None must mean "row vanished" only.
+                current = await conn.fetchval(
+                    f"SELECT COALESCE(password, '') FROM {_USERS} WHERE user_id = $1 FOR UPDATE", user_id
+                )
+                if current is None or not secrets.compare_digest(str(current), str(captured_hash or "")):
+                    raise TransitionAborted("credentials_changed")
+                live = await self._store.current_confirmation(token)
+                if live is None or int(live.user_id) != int(user_id):
+                    raise TransitionAborted("invalid_confirmation")
+                expires_at = datetime.fromtimestamp(
+                    float(live.issued_at) + AUTH_RECOVERY_CONFIRM_TTL + _MARKER_SKEW_SECONDS, tz=timezone.utc
+                )
+                if not await record_confirmation(conn, digest, int(user_id), expires_at):
+                    raise TransitionAborted("invalid_confirmation")  # committed marker: replay -> 400
+                # D17 — self-service reset is NOT a superuser password_reset (is_new=True). Do not "harmonise".
+                updated = await conn.fetchval(
+                    f"UPDATE {_USERS} SET password = $2, is_new = false WHERE user_id = $1 RETURNING user_id",
+                    user_id,
+                    new_hash,
+                )
+                if updated is None:
+                    raise TransitionAborted("credentials_changed")
+                await increment_generation(conn, int(user_id))
+                revoked = await revoker.revoke_user(self.request, user, strict=True)
+        except TransitionAborted as aborted:
+            if aborted.reason == "credentials_changed":
+                return self.json_response(response={"error": "credentials_changed"}, status=409)
+            return self.error(reason="Invalid or expired confirmation token", status=400)
+        except MfaUnavailable:
+            return self.json_response(response={"error": "mfa_unavailable"}, status=503)
+        except (MfaStorageError, RevocationError, SecurityStateError) as err:
+            logger.error("PasswordRecovery: completion rolled back for user_id=%s: %s", user_id, type(err).__name__)
+            return self.json_response(response={"error": "temporarily_unavailable"}, status=503)
 
-        await self._store.drop_pair(consumed.recovery_key, _hash_token(token))
-
-        revoked = await self._revoker.revoke_user(self.request, user)
+        # After commit: Redis cleanup is best effort — the committed digest is authoritative (AC32).
+        try:
+            await self._store.drop_pair(live.recovery_key, digest)
+        except Exception as err:  # pylint: disable=W0703
+            logger.warning(
+                "PasswordRecovery: post-commit cleanup failed for user_id=%s: %s", user_id, type(err).__name__
+            )
         logger.info(
             "PasswordRecovery: revoked %d session/jti record(s) for user_id=%s",
             revoked,
