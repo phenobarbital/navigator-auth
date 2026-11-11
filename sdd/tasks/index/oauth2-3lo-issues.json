@@ -53,7 +53,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -61,8 +61,9 @@
       "parallelism_notes": "No dependency: edits only examples/oauth2_3lo_server.py and creates tests/test_oauth2_3lo_example.py; uses existing AuthHandler(backends=, authz_backends=) (auth.py:95-103).",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-195-example-3lo-pinned-backends.md"
+      "completed_at": "2026-11-11T21:49:05+00:00",
+      "file": "sdd/tasks/completed/TASK-195-example-3lo-pinned-backends.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-196",
@@ -71,7 +72,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [],
@@ -79,8 +80,9 @@
       "parallelism_notes": "No dependency: owns examples/oauth2_server.py, examples/static/oauth2_index.html, examples/static/callback.html and the new tests/test_oauth2_examples_wiring.py; no other task touches them.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-196-oauth2-server-pkce-walkthrough.md"
+      "completed_at": "2026-11-11T21:49:05+00:00",
+      "file": "sdd/tasks/completed/TASK-196-oauth2-server-pkce-walkthrough.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-197",
@@ -89,7 +91,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -97,8 +99,9 @@
       "parallelism_notes": "No dependency: two guards in navigator_auth/backends/api.py (authenticate :152, check_token_info :185) plus a new test file; api.py is touched by no other task.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-197-apikey-declines-non-apikey-bearer.md"
+      "completed_at": "2026-11-11T21:49:05+00:00",
+      "file": "sdd/tasks/completed/TASK-197-apikey-declines-non-apikey-bearer.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-198",
@@ -107,7 +110,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
@@ -115,8 +118,9 @@
       "parallelism_notes": "No intra-feature dependency: builds on FEAT-106's MfaSignal (cross-feature, merged before the worktree exists); first of the two tasks editing navigator_auth/decorators.py (TASK-202 follows).",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-198-is-authenticated-backend-loop.md"
+      "completed_at": "2026-11-11T21:49:05+00:00",
+      "file": "sdd/tasks/completed/TASK-198-is-authenticated-backend-loop.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-199",
@@ -125,7 +129,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -133,8 +137,9 @@
       "parallelism_notes": "No dependency: one line in navigator_auth/auth.py's exempt branch (anchor 'pass  # Best-effort…') plus a new mock-based test file; auth.py is touched by no other task.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-199-exempt-branch-publishes-userdata.md"
+      "completed_at": "2026-11-11T21:49:06+00:00",
+      "file": "sdd/tasks/completed/TASK-199-exempt-branch-publishes-userdata.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-200",
@@ -143,7 +148,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
@@ -151,8 +156,9 @@
       "parallelism_notes": "No dependency: owns navigator_auth/exceptions.py and navigator_auth/backends/idp/__init__.py, and creates tests/test_oauth2_unknown_resource_owner.py that TASK-203/204 extend.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-200-identity-store-unavailable.md"
+      "completed_at": "2026-11-11T21:49:06+00:00",
+      "file": "sdd/tasks/completed/TASK-200-identity-store-unavailable.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-201",
@@ -161,7 +167,7 @@
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [],
@@ -169,8 +175,9 @@
       "parallelism_notes": "No dependency: edits only Oauth2Provider.userinfo (backend.py:2244-2250); first link of the backend.py chain TASK-201 -> 203 -> 204 -> 205, ordered first so it runs in wave 1.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-201-userinfo-omits-empty-claims.md"
+      "completed_at": "2026-11-11T21:49:06+00:00",
+      "file": "sdd/tasks/completed/TASK-201-userinfo-omits-empty-claims.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-202",
