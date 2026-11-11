@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
 **Spec**: `sdd/specs/basicauth-otp-2fa.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-129, TASK-130
@@ -539,11 +539,9 @@ digest/version groundwork for `test_stale_challenge_rejected`, `test_concurrent_
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: gpt-5.6-terra (codex), 1 attempt
+**Date**: 2026-11-11
+**Notes**: MFA security core delivered; merge-tier green (31 passed across wave). Engine lint residuals (style) left for /sdd-done.
 
 **Deviations from spec**: none expected (module placement `mfa/security.py` is a FEAT-106 task-contract decision);
 list anything else here.

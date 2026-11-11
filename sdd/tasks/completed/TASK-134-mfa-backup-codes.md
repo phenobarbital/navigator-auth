@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
 **Spec**: `sdd/specs/basicauth-otp-2fa.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-129, TASK-130
@@ -476,10 +476,8 @@ Spec §4 rows owned here: `test_backup_codes_generate_count_and_shape`,
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: sonnet (native), 1 attempt
+**Date**: 2026-11-11
+**Notes**: Backup codes (HMAC-SHA256 hashed, atomic regenerate, single-use consume) delivered. 3 passed, 7 DB-backed tests SKIPPED (no Postgres in sandbox) — single-use/concurrency behaviour unverified against a DB; run in CI. Residual F811 lint from fixture imports left for /sdd-done.
 
 **Deviations from spec**: none | describe if any

@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
 **Spec**: `sdd/specs/basicauth-otp-2fa.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-129, TASK-130
@@ -552,10 +552,8 @@ Spec §4 rows owned here: `test_trusted_device_rotates_on_use`,
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: gpt-5.6-luna (codex), 1 attempt
+**Date**: 2026-11-11
+**Notes**: MFA trusted devices delivered; merge-tier green.
 
 **Deviations from spec**: none | describe if any
