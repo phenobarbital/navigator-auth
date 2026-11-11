@@ -38,6 +38,11 @@ RELEASED = {
 # Sets whose files shipped before FEAT-110; newer sets (oauth2, mfa) are covered by their own tests.
 RELEASED_SETS = ["vault", "identity", "passkey"]
 
+MFA = {
+    ("mfa", "001_mfa_tables.sql"): "0f1211a10d13c7a3a6dc6118d12a9e423fe75bfe08cc4e867bfc0f0b3dda776d",
+    ("mfa", "002_mfa_secrets.sql"): "6a2f97527369ea862e09b83f07eb3b27d90dc74aeb4b71a7f455f7a4990e78a9",
+}
+
 
 def test_discover_orders_sets_then_files() -> None:
     """Real catalog: vault → identity → passkey, with ascending names."""
@@ -86,6 +91,12 @@ def test_released_files_are_byte_identical() -> None:
     assert found == RELEASED
 
 
+def test_mfa_files_are_byte_identical() -> None:
+    """MFA migrations retain their raw-byte checksums after catalog relocation."""
+    found = {(file.migration_set, file.filename): file.checksum for file in discover(["mfa"])}
+    assert found == MFA
+
+
 def test_render_sql_leaves_hardcoded_schema_untouched() -> None:
     """Identity and vault released SQL does not contain catalog placeholders."""
     for file in discover(["vault", "identity"]):
@@ -115,5 +126,5 @@ def test_set_dir_rejects_unknown_set_and_missing_dir_is_empty(tmp_catalog: Path)
 def test_old_sql_dirs_are_gone() -> None:
     """Released SQL no longer remains in legacy subsystem directories."""
     package_root = Path(__file__).parents[3] / "navigator_auth"
-    for migration_set in ("identity", "vault", "passkey"):
+    for migration_set in ("identity", "vault", "passkey", "mfa"):
         assert not (package_root / migration_set / "sql").exists()
