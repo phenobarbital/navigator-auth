@@ -47,7 +47,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
@@ -55,8 +55,9 @@
       "parallelism_notes": "Exclusive: graph root — git-mv's the nine released SQL files every other task reads, and creates tests/unit/migrations/conftest.py (tmp_catalog) that every migration test loads.",
       "assigned_to": null,
       "started_at": "2026-11-11T21:35:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-159-migration-catalog.md"
+      "completed_at": "2026-11-11T21:40:53+00:00",
+      "file": "sdd/tasks/completed/TASK-159-migration-catalog.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-160",
@@ -286,4 +287,3 @@
     }
   ]
 }
-
