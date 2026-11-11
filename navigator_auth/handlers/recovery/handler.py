@@ -43,6 +43,7 @@ from navigator_auth.handlers.recovery.policy import PasswordPolicy
 from navigator_auth.handlers.recovery.revoke import SessionRevoker
 from navigator_auth.handlers.recovery.store import RecoveryTokenStore, _hash_token
 from navigator_auth.handlers.recovery.types import NotificationPayload
+from navigator_auth.mfa.events import security_transition
 
 logger = logging.getLogger("navigator.recovery")
 
@@ -307,12 +308,15 @@ class PasswordRecoveryHandler(BaseView):
                     reason="Invalid or expired confirmation token", status=400
                 )
 
-            user.password = set_basic_password(password)
-            # D17 — self-service reset is NOT the same as a superuser-driven
-            # password_reset (which sets is_new=True). Do not "harmonise"
-            # them.
-            user.is_new = False
-            await user.update()
+            async with security_transition(
+                self.request.app, user.user_id, "recovery_completion", actor_user_id=user.user_id
+            ):
+                user.password = set_basic_password(password)
+                # D17 — self-service reset is NOT the same as a superuser-driven
+                # password_reset (which sets is_new=True). Do not "harmonise"
+                # them.
+                user.is_new = False
+                await user.update()
 
         await self._store.drop_pair(consumed.recovery_key, _hash_token(token))
 
