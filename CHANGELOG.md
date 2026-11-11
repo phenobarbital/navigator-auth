@@ -1,5 +1,11 @@
 # Unreleased
 
+- **`AUTH_PROBE_IGNORE_IPS`: exclude hosts from the repeated-probe warning.**
+  Comma-separated IPs or CIDR ranges whose rejected requests are never
+  counted by `protected_paths_middleware`, so a load balancer's health checks
+  (e.g. AWS ELB/ALB pinging the server) no longer show up as a scan. Matched
+  against the resolved client IP. See `documentation/protected-paths.md`.
+
 - **BREAKING — write envelope on the auth CRUD handlers (FEAT-107, no
   deprecation window).** `/api/v1/users*`, `/api/v1/groups*`,
   `/api/v1/user_groups*`, `/api/v1/usergroups*`, `/api/v1/group_permissions*` and

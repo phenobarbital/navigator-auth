@@ -248,6 +248,12 @@ AUTH_PROBE_THRESHOLD = config.getint("AUTH_PROBE_THRESHOLD", fallback=20)
 AUTH_PROBE_WINDOW = config.getint("AUTH_PROBE_WINDOW", fallback=60)
 AUTH_PROBE_COOLDOWN = config.getint("AUTH_PROBE_COOLDOWN", fallback=300)
 AUTH_PROBE_MAX_HOSTS = config.getint("AUTH_PROBE_MAX_HOSTS", fallback=10000)
+# Client IPs or CIDR ranges (comma-separated) that are never counted, e.g. the
+# subnets of an AWS load balancer whose health checks hit the server all the
+# time. Matched against the resolved client IP, not the direct peer.
+AUTH_PROBE_IGNORE_IPS = [
+    e.strip() for e in config.get("AUTH_PROBE_IGNORE_IPS", fallback="").split(",") if e.strip()
+]
 
 ### Protected system paths (protected_paths_middleware):
 # Hidden files (/.env, /.git/...), the env/, etc/ and logs/ top-level

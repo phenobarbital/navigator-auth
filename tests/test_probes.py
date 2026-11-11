@@ -12,12 +12,15 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
+from navigator_auth.authorizations._client_ip import parse_networks
 from navigator_auth.middlewares.protected_paths import protected_paths_middleware
 from navigator_auth.middlewares import probes as probes_mod
 from navigator_auth.middlewares.probes import SECURITY_LOGGER, ProbeTracker
 
 ATTACKER = "203.0.113.7"
 PROXY = "10.0.0.1"
+# Subnet of the load balancer nodes that send the health checks.
+LB_SUBNET = "10.0.8.0/24"
 
 
 class FakeClock:
@@ -36,9 +39,15 @@ def _tracker(
     window: float = 60,
     cooldown: float = 300,
     max_hosts: int = 100,
+    ignored: tuple[str, ...] = (),
 ) -> ProbeTracker:
     return ProbeTracker(
-        threshold=threshold, window=window, cooldown=cooldown, max_hosts=max_hosts, clock=clock
+        threshold=threshold,
+        window=window,
+        cooldown=cooldown,
+        max_hosts=max_hosts,
+        ignored=parse_networks(list(ignored), "AUTH_PROBE_IGNORE_IPS"),
+        clock=clock,
     )
 
 
@@ -129,6 +138,60 @@ def test_logged_paths_are_escaped_and_truncated(caplog):
     message = _security_records(caplog)[0].getMessage()
     assert "\n" not in message
     assert "a" * 201 not in message
+
+
+# --- AUTH_PROBE_IGNORE_IPS ----------------------------------------------------
+
+
+def test_ignored_ip_is_never_counted(caplog):
+    tracker = _tracker(FakeClock(), ignored=("10.0.8.15",))
+    for _ in range(50):
+        assert tracker.record("10.0.8.15", "/", 403) is False
+    assert _security_records(caplog) == []
+
+
+def test_ignored_cidr_covers_every_address_in_range(caplog):
+    # The load balancer's health checks come from changing node IPs.
+    tracker = _tracker(FakeClock(), ignored=(LB_SUBNET,))
+    for i in range(1, 50):
+        assert tracker.record(f"10.0.8.{i}", "/", 403) is False
+        assert tracker.record(f"10.0.8.{i}", "/", 403) is False
+        assert tracker.record(f"10.0.8.{i}", "/", 403) is False
+    assert _security_records(caplog) == []
+
+
+def test_hosts_outside_ignored_ranges_are_still_counted(caplog):
+    tracker = _tracker(FakeClock(), ignored=(LB_SUBNET, "2001:db8::/32"))
+    assert [tracker.record(ATTACKER, "/.env", 404) for _ in range(3)] == [False, False, True]
+    assert len(_security_records(caplog)) == 1
+
+
+def test_ipv4_mapped_ipv6_peer_matches_ipv4_range():
+    tracker = _tracker(FakeClock(), ignored=(LB_SUBNET,))
+    assert tracker.is_ignored("::ffff:10.0.8.20") is True
+    assert tracker.is_ignored("::ffff:10.0.9.20") is False
+
+
+def test_ipv6_range_is_ignored():
+    tracker = _tracker(FakeClock(), ignored=("2001:db8::/32",))
+    assert tracker.is_ignored("2001:db8::1") is True
+    assert tracker.is_ignored("2001:db9::1") is False
+
+
+def test_non_ip_host_is_not_ignored():
+    tracker = _tracker(FakeClock(), ignored=(LB_SUBNET,))
+    assert tracker.is_ignored("not-an-ip") is False
+
+
+def test_invalid_ignore_entries_are_skipped_without_logging_value(caplog):
+    networks = parse_networks(["10.0.8.0/24", "s3cr3t-value", "192.0.2.1"], "AUTH_PROBE_IGNORE_IPS")
+    assert networks == (
+        ipaddress.ip_network("10.0.8.0/24"),
+        ipaddress.ip_network("192.0.2.1/32"),
+    )
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("position 2 of AUTH_PROBE_IGNORE_IPS" in m for m in messages)
+    assert not any("s3cr3t" in m for m in messages)
 
 
 # --- integration through protected_paths_middleware --------------------------
@@ -247,6 +310,34 @@ async def test_client_ip_behind_trusted_proxy(probes, monkeypatch, caplog):
     message = _security_records(caplog)[0].getMessage()
     assert ATTACKER in message
     assert PROXY not in message
+
+
+@pytest.mark.asyncio
+async def test_load_balancer_health_checks_are_ignored(monkeypatch, caplog):
+    # The load balancer is a trusted proxy and its subnet is ignored: its own
+    # health checks (no X-Forwarded-For) are not counted, but clients it
+    # forwards are still counted under their own IP.
+    lb_node = "10.0.8.15"
+    tracker = ProbeTracker(
+        threshold=3,
+        window=60,
+        cooldown=300,
+        max_hosts=100,
+        ignored=parse_networks([LB_SUBNET], "AUTH_PROBE_IGNORE_IPS"),
+    )
+    monkeypatch.setattr(probes_mod, "probe_tracker", tracker)
+    monkeypatch.setattr(probes_mod, "trusted_proxies", {ipaddress.ip_address(lb_node)})
+    for _ in range(20):
+        response = await _call(_request("/", remote=lb_node), _unauthorized_response)
+        assert response.status == 401
+    assert _security_records(caplog) == []
+    for _ in range(3):
+        headers = {"X-Forwarded-For": ATTACKER}
+        with pytest.raises(web.HTTPNotFound):
+            await _call(_request("/missing", remote=lb_node, headers=headers), _not_found)
+    records = _security_records(caplog)
+    assert len(records) == 1
+    assert ATTACKER in records[0].getMessage()
 
 
 @pytest.mark.asyncio
