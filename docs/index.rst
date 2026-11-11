@@ -42,6 +42,7 @@ This project is licensed under the terms of the BSD v3. and Apache 2 Dual licens
    password_recovery
    vault
    security
+   auth_crud_authorization
    changes
    changelog
    code-of-conduct
