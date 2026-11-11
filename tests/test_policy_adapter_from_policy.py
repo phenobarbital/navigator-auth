@@ -165,3 +165,47 @@ def test_from_policy_objects_rejected(policy_class, kwargs, effect):
     assert "object" in result.reason.lower()
     assert result.policy is None and result.additional_policies == []
     assert policy.objects == before
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"is_business_hours": True},
+        {"is_manager": True},
+        {"dow": [0, 1, 2, 3, 4], "hour": {"min": 8, "max": 18}},
+        {"day_segment": "morning"},
+    ],
+)
+def test_from_policy_resource_policy_environment_valid(environment):
+    """Valid native environments pass through as the same, unmodified object."""
+    resource_policy = ResourcePolicy(name="rp", resources=["tool:*"], environment=environment)
+    before = copy.deepcopy(resource_policy._env_conditions)
+
+    result = PolicyAdapter.from_policy(resource_policy)
+
+    assert not result.skipped, result.reason
+    assert result.policy is resource_policy
+    assert resource_policy._env_conditions == before
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"weekday": 1},
+        {"day_of_week": 1},
+        {"hour": "nine"},
+        {"hour": True},
+        {"is_manager": "yes"},
+        {"is_weekend": "no"},
+        ["dow"],
+    ],
+)
+def test_from_policy_resource_policy_environment_rejected(environment):
+    """Unknown keys and unsupported shapes reject a native ResourcePolicy."""
+    result = PolicyAdapter.from_policy(ResourcePolicy(name="rp", resources=["tool:*"], environment=environment))
+
+    assert result.skipped
+    assert result.reason
+    assert result.policy is None and result.additional_policies == []
+    if environment == {"day_of_week": 1}:
+        assert "'dow'" in result.reason

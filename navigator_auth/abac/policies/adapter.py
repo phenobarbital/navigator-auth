@@ -308,6 +308,10 @@ class PolicyAdapter:
     # Environment keys the Rust engine evaluates (rs_pep/src/lib.rs:241-247). The
     # engine silently ignores any other key, so from_policy rejects it instead.
     ENGINE_ENV_KEYS = frozenset({"hour", "dow", "is_business_hours", "is_weekend", "day_segment"})
+    # Native ResourcePolicy environments may also carry is_manager, which
+    # PolicyEvaluator._serialize_policies_from_index lifts into
+    # conditions.is_manager (evaluator.py:271).
+    NATIVE_ENV_KEYS = ENGINE_ENV_KEYS | frozenset({"is_manager"})
 
     @staticmethod
     def _classic_resource_error(raw_resources: List[str]) -> Optional[str]:
@@ -395,40 +399,89 @@ class PolicyAdapter:
         if unknown:
             return None, f"unsupported environment keys: {', '.join(unknown)}"
         for key, value in env.items():
-            if key in {"hour", "dow"}:
-                if isinstance(value, bool):
-                    valid = False
-                elif isinstance(value, int):
-                    valid = True
-                elif isinstance(value, list):
-                    valid = bool(value) and all(isinstance(item, int) and not isinstance(item, bool) for item in value)
-                elif isinstance(value, Mapping):
-                    valid = (
-                        bool(value)
-                        and set(value).issubset({"min", "max"})
-                        and all(
-                            isinstance(item, (int, float)) and not isinstance(item, bool) for item in value.values()
-                        )
-                    )
-                else:
-                    valid = False
-            elif key in {"is_business_hours", "is_weekend"}:
-                valid = isinstance(value, bool) or (
-                    isinstance(value, list) and bool(value) and all(isinstance(item, bool) for item in value)
+            error = PolicyAdapter._environment_value_error(key, value)
+            if error:
+                return None, error
+        return env, None
+
+    @staticmethod
+    def _environment_value_error(key: str, value: Any) -> Optional[str]:
+        """Check one environment value against what the policy evaluator honours.
+
+        Shared by the classic (``_normalize_environment``) and native
+        (``_resource_policy_error``) checks. Assumes ``key`` is already known.
+
+        Args:
+            key: An ``ENGINE_ENV_KEYS`` or ``NATIVE_ENV_KEYS`` key.
+            value: The policy's expected value for ``key``.
+
+        Returns:
+            None when supported, otherwise the rejection reason.
+        """
+        if key in {"hour", "dow"}:
+            if isinstance(value, bool):
+                valid = False
+            elif isinstance(value, int):
+                valid = True
+            elif isinstance(value, list):
+                valid = bool(value) and all(isinstance(item, int) and not isinstance(item, bool) for item in value)
+            elif isinstance(value, Mapping):
+                valid = (
+                    bool(value)
+                    and set(value).issubset({"min", "max"})
+                    and all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in value.values())
                 )
             else:
-                valid = isinstance(value, str) or (
-                    isinstance(value, list) and bool(value) and all(isinstance(item, str) for item in value)
-                )
-            if not valid:
-                return None, f"unsupported value for environment key {key!r}: {value!r}"
-        return env, None
+                valid = False
+        elif key in {"is_business_hours", "is_weekend"}:
+            valid = isinstance(value, bool) or (
+                isinstance(value, list) and bool(value) and all(isinstance(item, bool) for item in value)
+            )
+        elif key == "is_manager":
+            valid = isinstance(value, bool)
+        else:
+            valid = isinstance(value, str) or (
+                isinstance(value, list) and bool(value) and all(isinstance(item, str) for item in value)
+            )
+        if not valid:
+            return f"unsupported value for environment key {key!r}: {value!r}"
+        return None
+
+    @staticmethod
+    def _resource_policy_error(policy: ResourcePolicy) -> Optional[str]:
+        """Validate a native ResourcePolicy's environment without reinterpreting it.
+
+        Unlike classic policies, no alias is normalised: the policy is passed
+        through unchanged, so ``day_of_week`` is rejected rather than rewritten.
+
+        Args:
+            policy: The ResourcePolicy given to :meth:`from_policy`. Never mutated.
+
+        Returns:
+            None when every environment key is honoured by the evaluator,
+            otherwise the rejection reason.
+        """
+        env = policy._env_conditions  # pylint: disable=W0212
+        if not env:
+            return None
+        if not isinstance(env, Mapping):
+            return f"unsupported environment shape: {type(env).__name__}"
+        unknown = sorted(str(key) for key in set(env) - PolicyAdapter.NATIVE_ENV_KEYS)
+        if unknown:
+            hint = " (use 'dow' instead of 'day_of_week')" if "day_of_week" in unknown else ""
+            return f"unsupported environment keys: {', '.join(unknown)}{hint}"
+        for key, value in env.items():
+            error = PolicyAdapter._environment_value_error(key, value)
+            if error:
+                return error
+        return None
 
     @staticmethod
     def from_policy(policy: AbstractPolicy) -> AdapterResult:
         """Adapt a programmatic policy object for the PolicyEvaluator.
 
-        ``ResourcePolicy`` passes through unchanged. ``FilePolicy`` -> "file",
+        ``ResourcePolicy`` passes through unchanged when its native environment
+        uses only ``NATIVE_ENV_KEYS`` with supported values. ``FilePolicy`` -> "file",
         ``ObjectPolicy`` -> "object", any other ``AbstractPolicy`` -> "policy": they
         are converted to the classic policy dict (``resource`` = ``raw_resources``,
         or the resolved ``objects=`` of an ``ObjectPolicy``) and passed to
@@ -446,6 +499,12 @@ class PolicyAdapter:
             environment condition would be lost. Never raises.
         """
         if isinstance(policy, ResourcePolicy):
+            try:
+                error = PolicyAdapter._resource_policy_error(policy)
+            except Exception as exc:  # pylint: disable=W0703
+                error = f"cannot validate environment: {exc}"
+            if error:
+                return AdapterResult(skipped=True, reason=f"Policy '{policy.name}': {error}")
             return AdapterResult(policy=policy)
         if not isinstance(policy, AbstractPolicy):
             return AdapterResult(skipped=True, reason=f"not a policy object: {type(policy).__name__}")
