@@ -5,7 +5,7 @@
   "type": "feature",
   "base_branch": "feat-FEAT-106-basicauth-otp-2fa",
   "created_at": "2026-11-11T15:32:26+00:00",
-  "completed_at": null,
+  "completed_at": "2026-11-11T18:08:18+00:00",
   "parallel_semantics": "exclusive",
   "validation_contract": "required",
   "test_contract": {
@@ -50,16 +50,17 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
       "parallel": true,
       "parallelism_notes": "root: no dependencies; creates LOCK_CONNECTION/advisory_user_lock (mfa/security.py), AUTH_MFA_LOCK_TIMEOUT (conf.py) and single_connection_authdb (tests/fixtures/mfa.py) used by later tasks",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-171-mfa-lock-core.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T16:23:38+00:00",
+      "file": "sdd/tasks/completed/TASK-171-mfa-lock-core.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-172",
@@ -68,16 +69,17 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
       "parallel": true,
       "parallelism_notes": "root: no dependencies; adds conn= kwargs in backends/idp/__init__.py, mfa/totp.py, mfa/trusted_devices.py and passkey/store.py",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-172-mfa-store-conn-params.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T16:23:39+00:00",
+      "file": "sdd/tasks/completed/TASK-172-mfa-store-conn-params.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-173",
@@ -86,7 +88,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -95,9 +97,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-171: both modify navigator_auth/conf.py (serialized, 171 first)",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-173-mfa-services-self-healing.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T16:53:29+00:00",
+      "file": "sdd/tasks/completed/TASK-173-mfa-services-self-healing.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-174",
@@ -106,7 +109,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -115,9 +118,10 @@
       "parallel": false,
       "parallelism_notes": "TASK-172: both modify navigator_auth/mfa/totp.py; exclusive: applies DDL migration 002_mfa_secrets.sql against the shared live test database and edits pyproject.toml",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-174-mfa-secrets-table-rotation-target.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T16:45:37+00:00",
+      "file": "sdd/tasks/completed/TASK-174-mfa-secrets-table-rotation-target.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-175",
@@ -126,16 +130,17 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
       "parallel": false,
       "parallelism_notes": "exclusive: applies DDL (security_state/sql/001_security_state.sql) against the shared live test database; no dependencies",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-175-security-state-tables.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T16:16:52+00:00",
+      "file": "sdd/tasks/completed/TASK-175-security-state-tables.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-176",
@@ -144,16 +149,17 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [],
       "parallel": true,
       "parallelism_notes": "root: no dependencies; handlers/recovery/revoke.py and handler.py are untouched by earlier tasks",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-176-strict-session-revocation.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T16:23:39+00:00",
+      "file": "sdd/tasks/completed/TASK-176-strict-session-revocation.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-177",
@@ -162,7 +168,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -172,9 +178,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-171: uses advisory_user_lock/user_lock timeout and extends tests/test_mfa_review_fixes_transitions.py (created by 171); TASK-173: uses mfa_services_lease (mfa/services.py)",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-177-transactional-security-transition.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T17:06:03+00:00",
+      "file": "sdd/tasks/completed/TASK-177-transactional-security-transition.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-178",
@@ -183,7 +190,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [
@@ -193,9 +200,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-172: calls PasskeyStore.save_credential/delete_credential(conn=); TASK-177: security_transition yields the connection and raises MfaUnavailable, and both modify tests/test_mfa_security_transitions.py",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-178-passkey-transition-call-sites.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T17:36:14+00:00",
+      "file": "sdd/tasks/completed/TASK-178-passkey-transition-call-sites.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-179",
@@ -204,7 +212,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -215,9 +223,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-175: increment_generation (security_state/store.py); TASK-176: PasswordRecoveryHandler.session_revoker() and strict revoke_user; TASK-177: TransitionAborted/MfaUnavailable/yielded connection and extends tests/test_mfa_review_fixes_transitions.py",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-179-password-change-reset-transitions.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T17:36:14+00:00",
+      "file": "sdd/tasks/completed/TASK-179-password-change-reset-transitions.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-180",
@@ -226,7 +235,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -238,9 +247,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-171: advisory_user_lock for confirmation rotation; TASK-175: record_confirmation/increment_generation; TASK-176: both modify handlers/recovery/handler.py and tests/test_password_recovery.py, uses strict revoke_user; TASK-177: TransitionAborted/MfaUnavailable",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-180-recovery-transactional-completion.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T17:36:14+00:00",
+      "file": "sdd/tasks/completed/TASK-180-recovery-transactional-completion.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-181",
@@ -249,7 +259,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -259,9 +269,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-171: user_lock/LOCK_CONNECTION (mfa/security.py); TASK-172: user_from_id/TOTPProvider.verify/consume_and_rotate conn= parameters",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-181-second-factor-gate-core.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T16:53:30+00:00",
+      "file": "sdd/tasks/completed/TASK-181-second-factor-gate-core.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-182",
@@ -270,7 +281,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -281,9 +292,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-181: imports SecondFactorGate/VerifyRefused (mfa/login.py) and extends tests/test_mfa_review_fixes_gate.py; TASK-173: mfa_services_lease and both modify backends/basic.py; TASK-174: both modify tests/test_mfa_enrollment_security.py",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-182-second-factor-gate-adapters.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T17:06:04+00:00",
+      "file": "sdd/tasks/completed/TASK-182-second-factor-gate-adapters.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-183",
@@ -292,7 +304,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -301,9 +313,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-182: both modify navigator_auth/handlers/mfa.py and tests/test_mfa_enrollment_security.py (182 first)",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-183-factor-management-hardening.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T17:57:34+00:00",
+      "file": "sdd/tasks/completed/TASK-183-factor-management-hardening.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-184",
@@ -312,7 +325,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -322,9 +335,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-181: imports SecondFactorGate/VerifyRefused (mfa/login.py); TASK-173: mfa_services_lease (mfa/services.py)",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-184-oauth2-login-second-factor.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T17:06:04+00:00",
+      "file": "sdd/tasks/completed/TASK-184-oauth2-login-second-factor.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-185",
@@ -333,7 +347,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -346,9 +360,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-184: both modify backends/oauth2/backend.py (184 first); TASK-175: current_generation/generation_matches/stamp_generation and both modify navigator_auth/auth.py; TASK-171: advisory_user_lock; TASK-172: user_from_id(conn=); TASK-179: its AC28 end-to-end test calls the real password_reset handler (handlers/users/session.py)",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-185-oauth2-credential-generation.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T17:57:34+00:00",
+      "file": "sdd/tasks/completed/TASK-185-oauth2-credential-generation.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-186",
@@ -357,7 +372,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -367,9 +382,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-184: _load_auth_event/_create_user_session(extra) in backend.py; TASK-185: both modify backend.py, models.py and tests/test_mfa_review_fixes_oauth2_tokens.py (185 first)",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-186-oauth2-amr-propagation.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T18:02:10+00:00",
+      "file": "sdd/tasks/completed/TASK-186-oauth2-amr-propagation.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-187",
@@ -378,7 +394,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -387,9 +403,10 @@
       "parallel": true,
       "parallelism_notes": "TASK-186: both modify backends/oauth2/backend.py and tests/test_mfa_review_fixes_oauth2_tokens.py, and consumes the mfa/amr claims 186 adds",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-187-abac-bearer-request-context.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T18:05:49+00:00",
+      "file": "sdd/tasks/completed/TASK-187-abac-bearer-request-context.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-188",
@@ -398,7 +415,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [
@@ -410,9 +427,10 @@
       "parallel": true,
       "parallelism_notes": "documents symbols from every implementation task; depends on the leaves TASK-178, TASK-180, TASK-183 and TASK-187 (the rest are transitive)",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-188-review-fixes-documentation.md"
+      "started_at": "2026-11-11T16:10:29+00:00",
+      "completed_at": "2026-11-11T18:08:18+00:00",
+      "file": "sdd/tasks/completed/TASK-188-review-fixes-documentation.md",
+      "verification": "verified"
     }
   ]
 }

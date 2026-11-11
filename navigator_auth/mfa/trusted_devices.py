@@ -68,60 +68,71 @@ class TrustedDeviceStore:
             raise MfaStorageError("trusted device issue returned no row")
         return raw
 
-    async def consume_and_rotate(self, raw_token: str, user_id: int) -> Optional[tuple[int, str]]:
-        """Validate and atomically rotate a live token, or revoke on replay."""
+    async def consume_and_rotate(self, raw_token: str, user_id: int, *, conn: Any = None) -> Optional[tuple[int, str]]:
+        """Validate and rotate a live token, or revoke its family on replay.
+
+        When ``conn`` is given, all statements run inside the caller's transaction and this method
+        does not begin, commit, or roll back a transaction.
+        """
         if not raw_token:
             return None
         try:
-            async with await self._pool.acquire() as conn:
-                await conn.transaction()
+            if conn is not None:
+                result, _should_commit = await self._rotate_on(conn, raw_token, user_id)
+                return result
+            async with await self._pool.acquire() as own:
+                await own.transaction()
                 try:
-                    row = await conn.fetch_one(
-                        f"SELECT id, user_id, family_id, label, expires_at, rotated_at, revoked_at "
-                        f"FROM {_TABLE} WHERE token_hash = $1 FOR UPDATE",
-                        _hash_token(raw_token),
-                    )
-                    if row is None or int(row["user_id"]) != int(user_id) or row["revoked_at"] is not None:
-                        await conn.rollback()
-                        return None
-                    if row["rotated_at"] is not None:
-                        await conn.fetchval(
-                            f"WITH r AS (UPDATE {_TABLE} SET revoked_at = now(), revoke_reason = 'replay' "
-                            "WHERE family_id = $1 AND revoked_at IS NULL RETURNING 1) SELECT count(*) FROM r",
-                            row["family_id"],
-                        )
-                        await conn.commit()
-                        logger.warning("trusted device replay: family revoked user_id=%s", user_id)
-                        return None
-                    now = datetime.now(timezone.utc)
-                    if row["expires_at"] <= now:
-                        await conn.rollback()
-                        return None
-                    new_raw = secrets.token_urlsafe(32)
-                    await conn.fetchval(
-                        f"UPDATE {_TABLE} SET rotated_at = now(), last_used_at = now() " "WHERE id = $1 RETURNING id",
-                        row["id"],
-                    )
-                    new_id = await conn.fetchval(
-                        f"INSERT INTO {_TABLE} (user_id, token_hash, family_id, label, expires_at) "
-                        "VALUES ($1, $2, $3, $4, $5) RETURNING id",
-                        int(row["user_id"]),
-                        _hash_token(new_raw),
-                        row["family_id"],
-                        row["label"],
-                        row["expires_at"],
-                    )
-                    if not new_id:
-                        raise MfaStorageError("trusted device rotation returned no row")
-                    await conn.commit()
-                    return int(row["user_id"]), new_raw
+                    result, should_commit = await self._rotate_on(own, raw_token, user_id)
+                    if should_commit:
+                        await own.commit()
+                    else:
+                        await own.rollback()
+                    return result
                 except BaseException:
-                    await conn.rollback()
+                    await own.rollback()
                     raise
         except MfaStorageError:
             raise
         except Exception as err:
             raise MfaStorageError(f"trusted device rotation failed: {type(err).__name__}") from err
+
+    async def _rotate_on(self, conn: Any, raw_token: str, user_id: int) -> tuple[Optional[tuple[int, str]], bool]:
+        """Run rotation statements on ``conn`` without transaction control."""
+        row = await conn.fetch_one(
+            f"SELECT id, user_id, family_id, label, expires_at, rotated_at, revoked_at "
+            f"FROM {_TABLE} WHERE token_hash = $1 FOR UPDATE",
+            _hash_token(raw_token),
+        )
+        if row is None or int(row["user_id"]) != int(user_id) or row["revoked_at"] is not None:
+            return None, False
+        if row["rotated_at"] is not None:
+            await conn.fetchval(
+                f"WITH r AS (UPDATE {_TABLE} SET revoked_at = now(), revoke_reason = 'replay' "
+                "WHERE family_id = $1 AND revoked_at IS NULL RETURNING 1) SELECT count(*) FROM r",
+                row["family_id"],
+            )
+            logger.warning("trusted device replay: family revoked user_id=%s", user_id)
+            return None, True
+        if row["expires_at"] <= datetime.now(timezone.utc):
+            return None, False
+        new_raw = secrets.token_urlsafe(32)
+        await conn.fetchval(
+            f"UPDATE {_TABLE} SET rotated_at = now(), last_used_at = now() " "WHERE id = $1 RETURNING id",
+            row["id"],
+        )
+        new_id = await conn.fetchval(
+            f"INSERT INTO {_TABLE} (user_id, token_hash, family_id, label, expires_at) "
+            "VALUES ($1, $2, $3, $4, $5) RETURNING id",
+            int(row["user_id"]),
+            _hash_token(new_raw),
+            row["family_id"],
+            row["label"],
+            row["expires_at"],
+        )
+        if not new_id:
+            raise MfaStorageError("trusted device rotation returned no row")
+        return (int(row["user_id"]), new_raw), True
 
     async def revoke_all(self, user_id: int, reason: str, *, conn: Any = None) -> int:
         """Revoke every live device of a user and return the count."""

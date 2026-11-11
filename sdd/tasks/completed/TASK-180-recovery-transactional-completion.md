@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — Review fixes: OAuth2 second factor, MFA key rotation, atomic and deadlock-free security transitions
 **Spec**: `sdd/specs/basicauth-otp-2fa-review-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-171, TASK-175, TASK-176, TASK-177
@@ -559,3 +559,9 @@ When you pick up this task:
 **Notes**: What was implemented, any deviations from scope, issues encountered.
 
 **Deviations from spec**: none | describe if any (expected: phase-2 re-read/write via explicit SQL instead of `User.get`/`User.update`; the absent-stage-1-record rotation decision)
+
+---
+
+## Completion Note
+
+Implemented by native sonnet, committed own delivery. tests/test_password_recovery.py 70 passed; test_mfa_e2e 21 passed. File fidelity checked. Closed via `parrot sdd task close`.

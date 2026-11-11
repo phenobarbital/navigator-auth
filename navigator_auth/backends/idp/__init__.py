@@ -1,5 +1,5 @@
 import time
-from typing import Union
+from typing import Any, Union
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 import hashlib
@@ -81,9 +81,7 @@ class IdentityProvider:
         except ImportError as ex:
             raise ConfigError(f"Auth: Error loading Auth User Model {model}: {ex}") from ex
 
-    async def get_user_identity_credential(
-        self, user_id, provider: str, *, auto_refresh: bool = True
-    ) -> dict:
+    async def get_user_identity_credential(self, user_id, provider: str, *, auto_refresh: bool = True) -> dict:
         """Serve a user's linked-identity credential to in-process consumers.
 
         Decrypts the stored credential for (user, provider) from
@@ -102,36 +100,42 @@ class IdentityProvider:
         store = IdentityStore(db, cipher=IdentityCipher())
         identity = await store.get_by_provider(user_id, provider)
         if not identity:
-            raise UserNotFound(
-                f"No linked identity for user {user_id} on {provider}"
-            )
+            raise UserNotFound(f"No linked identity for user {user_id} on {provider}")
         token = store.decrypt_credential(identity)
         if auto_refresh and token.is_expiring(leeway=IDENTITY_REFRESH_LEEWAY):
             if not token.refresh_token:
                 raise ConfigError(
-                    f"{provider}: credential expired and no refresh token "
-                    "stored; the identity must be re-linked."
+                    f"{provider}: credential expired and no refresh token " "stored; the identity must be re-linked."
                 )
             auth = self.app.get("auth")
             backend = auth.get_external_backend(provider) if auth else None
             if backend is None:
-                raise ConfigError(
-                    f"{provider}: backend not enabled; cannot refresh."
-                )
-            _, token = await refresh_linked_identity(
-                store, backend, identity, leeway=IDENTITY_REFRESH_LEEWAY
-            )
+                raise ConfigError(f"{provider}: backend not enabled; cannot refresh.")
+            _, token = await refresh_linked_identity(store, backend, identity, leeway=IDENTITY_REFRESH_LEEWAY)
         return token.credential()
 
-    async def user_from_id(self, uid: int) -> Identity:
-        """Getting User Object."""
+    async def user_from_id(self, uid: int, *, conn: Any = None) -> Identity:
+        """Return the user with ``uid``.
+
+        Args:
+            uid: The user id.
+            conn: When given, run the lookup on this connection without acquiring from the pool.
+
+        Raises:
+            UserNotFound: No such user, or the lookup failed.
+            ValidationError: The stored row does not fit the user model.
+        """
         user = None
+        search = {self.userid_attribute: uid}
         try:
-            db = self.app["authdb"]
-            async with await db.acquire() as conn:
-                search = {self.userid_attribute: uid}
+            if conn is not None:
                 self.user_search.Meta.connection = conn
                 user = await self.user_search.get(**search)
+            else:
+                db = self.app["authdb"]
+                async with await db.acquire() as own:
+                    self.user_search.Meta.connection = own
+                    user = await self.user_search.get(**search)
         except NoDataFound as ex:
             raise UserNotFound(f"Invalid credentials for User {search!s}") from ex
         except ValidationError as ex:
@@ -208,8 +212,7 @@ class IdentityProvider:
         except ValueError as ex:
             if str(ex).startswith("not enough values to unpack"):
                 raise InvalidAuth(
-                    f"Invalid Password{who}: stored password doesn't match "
-                    "algorithm requirements"
+                    f"Invalid Password{who}: stored password doesn't match " "algorithm requirements"
                 ) from ex
             raise InvalidAuth(f"Basic Auth: Invalid Credentials{who}: {ex}") from ex
         assert algorithm == AUTH_PWD_ALGORITHM
@@ -333,10 +336,7 @@ class IdentityProvider:
             registry = load_registry(OAUTH_JWT_KEYS)
             self.__class__._key_registry = registry
             if registry:
-                self.logger.notice(
-                    f"Loaded {len(registry)} JWT signing key(s); "
-                    f"algorithm: {OAUTH_JWT_SIGNING_ALG}"
-                )
+                self.logger.notice(f"Loaded {len(registry)} JWT signing key(s); " f"algorithm: {OAUTH_JWT_SIGNING_ALG}")
         return registry
 
     def signing_key(self):
@@ -371,10 +371,7 @@ class IdentityProvider:
             return SECRET_KEY, [AUTH_JWT_ALGORITHM]
         key = registry.get(kid)
         if key is None or not key.public_key:
-            self.logger.warning(
-                f"Token references unknown signing key '{kid}'; "
-                "falling back to the symmetric key."
-            )
+            self.logger.warning(f"Token references unknown signing key '{kid}'; " "falling back to the symmetric key.")
             return SECRET_KEY, [AUTH_JWT_ALGORITHM]
         return key.public_key, [key.algorithm]
 

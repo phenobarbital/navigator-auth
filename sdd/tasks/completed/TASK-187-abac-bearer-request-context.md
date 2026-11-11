@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — Review fixes: OAuth2 second factor, MFA key rotation, atomic and deadlock-free security transitions
 **Spec**: `sdd/specs/basicauth-otp-2fa-review-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-186
@@ -514,3 +514,9 @@ When you pick up this task:
 **Notes**: What was implemented, any deviations from scope, issues encountered.
 
 **Deviations from spec**: none | describe if any
+
+---
+
+## Completion Note
+
+Implemented by native sonnet; orchestrator ran the 5 validation modules (12/7/5/21/40 passed), committed and merged. Merge-tier: 143 passed, 1 baseline red (google e2e), gate pass. Coder deviation: no real end-to-end OAuth token-minting test (unit-level with fake request); `_fresh_factor` re-implemented locally in tests. Bearer JWT without `auth_method` loses session auth_method in ABAC (deliberate, fail-closed). Closed via `parrot sdd task close`.
