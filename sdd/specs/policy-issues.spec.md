@@ -14,7 +14,7 @@ docs:
 **Feature ID**: FEAT-109
 **Date**: 2026-11-11
 **Author**: Jesus Lara (spec scaffolded by Claude Code)
-**Status**: draft
+**Status**: approved
 **Target version**: 0.29.1
 
 > Source proposal: [`sdd/proposals/policy-issues.proposal.md`](../proposals/policy-issues.proposal.md)
