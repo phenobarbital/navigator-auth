@@ -20,7 +20,7 @@ are never checked." Spec §1 lists the verified failures. The ones that matter a
 loses its negation, and dict values are dropped. Each of these makes a DENY cover less than written,
 which fails open. This task implements spec §3 Module 1.
 
-Base branch: `feat-FEAT-109-policy-issues` (PR #634). `from_policy` does not exist on `dev` yet.
+Base branch: `dev` (FEAT-109 / PR #634 merged at `142a9e1`, so `from_policy` is present). If `grep -c "def from_policy" navigator_auth/abac/policies/adapter.py` prints 0 in your worktree, STOP: it was branched from an old base.
 
 ---
 
@@ -51,7 +51,7 @@ Base branch: `feat-FEAT-109-policy-issues` (PR #634). `from_policy` does not exi
 
 ## Codebase Contract (Anti-Hallucination)
 
-Verified against `feat-FEAT-109-policy-issues` @ `3999ef9`.
+Verified against `dev` @ `98f560d` (adapter.py identical to FEAT-109 head `3999ef9`).
 
 ### Verified Imports
 ```python

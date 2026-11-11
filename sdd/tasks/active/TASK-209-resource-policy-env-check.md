@@ -21,7 +21,7 @@ engine ignores are not rejected." The Rust engine skips unknown environment keys
 `PDP.add_policy` with no time restriction at all. Classic policies already reject this. This task
 implements spec §3 Module 2.
 
-Base branch: `feat-FEAT-109-policy-issues` (PR #634).
+Base branch: `dev` (FEAT-109 / PR #634 merged at `142a9e1`, so `from_policy` is present). If `grep -c "def from_policy" navigator_auth/abac/policies/adapter.py` prints 0 in your worktree, STOP: it was branched from an old base.
 
 ---
 
@@ -52,7 +52,7 @@ alias normalisation for native policies (`day_of_week` is rejected with a hint, 
 
 ## Codebase Contract (Anti-Hallucination)
 
-Verified against `feat-FEAT-109-policy-issues` @ `3999ef9`. Line numbers move once TASK-208 lands, so
+Verified against `dev` @ `98f560d` (adapter.py identical to FEAT-109 head `3999ef9`). Line numbers move once TASK-208 lands, so
 locate edits by the quoted anchors, not by line.
 
 ### Verified Imports

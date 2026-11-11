@@ -1,7 +1,7 @@
 ---
 # SDD flow type and base branch (FEAT-145).
 type: feature
-base_branch: feat-FEAT-109-policy-issues   # stacked: from_policy exists only on FEAT-109 (PR #634) until it merges
+base_branch: dev
 projects: [abac]
 tags: [pbac, policy-adapter, fail-closed, ledger-fix]
 docs:
@@ -18,6 +18,7 @@ docs:
 **Status**: approved
 **Target version**: unreleased
 **Parent**: FEAT-109 — PBAC example policy issues (`sdd/specs/policy-issues.spec.md`)
+**Prerequisite**: met — PR #634 (FEAT-109) merged into `dev` at `142a9e1`; `from_policy` and its tests are on `dev`.
 **Ledger group**: `fixgroup:7dca9c41b57f` — `issue:43c1d14ac3ac` (bug, major), `issue:6a034393d065` (tech_debt, minor)
 
 ---
@@ -32,7 +33,7 @@ dropped. Two ledger issues, filed while FEAT-109 was reviewed, show places where
 
 1. **`issue:43c1d14ac3ac` — `objects=` on an `ObjectPolicy` is not validated.** `from_policy` validates
    only `policy.raw_resources`. The object names go through `_adapt_object`, which rebuilds resources
-   from `objects=` without any check. Verified on `feat-FEAT-109-policy-issues` @ `3999ef9`:
+   from `objects=` without any check. Verified on `dev` @ `98f560d` (adapter.py identical to FEAT-109 head `3999ef9`):
 
    | Input | Today | Effect |
    |---|---|---|
@@ -213,7 +214,7 @@ Reuse `_resources()` in `tests/test_policy_adapter_from_policy.py:12`. No new fi
 
 ## 6. Codebase Contract
 
-Verified against `feat-FEAT-109-policy-issues` @ `3999ef9`.
+Verified against `dev` @ `98f560d` (adapter.py identical to FEAT-109 head `3999ef9`).
 
 ### Verified Imports
 ```python
@@ -267,7 +268,7 @@ class ResourcePolicy(AbstractPolicy):   # line 7
 
 ### Edit Sites (Blueprint Anchors)
 
-Verified against: `3999ef9`
+Verified against: `98f560d` (dev, after PR #634)
 
 | File | Action | Verbatim anchor line | Verified at | Occurrences |
 |---|---|---|---|---|
