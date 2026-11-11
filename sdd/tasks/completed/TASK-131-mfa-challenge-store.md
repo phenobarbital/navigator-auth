@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
 **Spec**: `sdd/specs/basicauth-otp-2fa.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-129
@@ -680,11 +680,9 @@ store halves of `test_challenge_retry_budget`, `test_resend_preserves_budget_and
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: gpt-5.6-luna (codex), 1 attempt
+**Date**: 2026-11-11
+**Notes**: MFA challenge store delivered; merge-tier validation green.
 
 **Deviations from spec**: `issue()` takes keyword-only `security_version`/`context_digest`/`email_code_hash`
 (spec skeleton lists only `user, providers, preferred`, but `MfaChallenge` requires them); enrolment storage,

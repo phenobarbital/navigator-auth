@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
 **Spec**: `sdd/specs/basicauth-otp-2fa.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-129
@@ -646,10 +646,8 @@ and `test_factor_transitions_write_durable_audit` (M8 — the writer is TASK-132
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: gpt-5.6-terra (codex), 1 attempt
+**Date**: 2026-11-11
+**Notes**: MFA migrations delivered; merge-tier validation green (15 passed across wave tests).
 
 **Deviations from spec**: D15 columns, D18 nullable FK-free audit, `bigint` ids — pre-recorded; list anything else here.

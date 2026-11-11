@@ -33,7 +33,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -43,8 +43,9 @@
       "parallelism_notes": "Spec M8. New files only (mfa/migrations.py, mfa/sql/, tests/fixtures/mfa.py, tests/test_mfa_migrations.py). Disjoint from 131 and 143; parallel once 129 is done.",
       "assigned_to": null,
       "started_at": "2026-11-10T23:59:12+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-130-mfa-migrations.md"
+      "completed_at": "2026-11-11T02:03:19+00:00",
+      "file": "sdd/tasks/completed/TASK-130-mfa-migrations.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-131",
@@ -53,7 +54,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -63,8 +64,9 @@
       "parallelism_notes": "Spec M2. New files only (mfa/store.py, mfa/limiter.py, tests/test_mfa_challenge_store.py). Redis-only, no DB; parallel with 130/143 once 129 is done.",
       "assigned_to": null,
       "started_at": "2026-11-10T23:59:12+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-131-mfa-challenge-store.md"
+      "completed_at": "2026-11-11T02:03:19+00:00",
+      "file": "sdd/tasks/completed/TASK-131-mfa-challenge-store.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-132",
@@ -221,7 +223,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa",
       "spec": "sdd/specs/basicauth-otp-2fa.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -231,8 +233,9 @@
       "parallelism_notes": "Spec M10 (part) — NOT delegation-eligible (R2: except-clause ordering). Only needs the MfaSignal exceptions (129); edits auth.py, which no other task edits. Kept sequential for review focus.",
       "assigned_to": null,
       "started_at": "2026-11-10T23:59:12+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-139-mfa-auth-call-sites.md"
+      "completed_at": "2026-11-11T02:03:20+00:00",
+      "file": "sdd/tasks/completed/TASK-139-mfa-auth-call-sites.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-140",
