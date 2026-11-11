@@ -39,6 +39,16 @@
         "/home/jesuslara/proyectos/navigator-auth/.parrot/mcp-toolkits.yaml"
       ],
       "cwd": "/home/jesuslara/proyectos/navigator-auth"
+    },
+    "parrot-memory": {
+      "command": "/home/jesuslara/proyectos/navigator-auth/.venv/bin/parrot",
+      "args": [
+        "mcp-local",
+        "memory",
+        "--config",
+        "/home/jesuslara/proyectos/navigator-auth/.parrot/mcp-toolkits.yaml"
+      ],
+      "cwd": "/home/jesuslara/proyectos/navigator-auth"
     }
   }
 }
