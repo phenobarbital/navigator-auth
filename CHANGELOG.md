@@ -1,5 +1,18 @@
 # Unreleased
 
+- **Two-factor authentication for BasicAuth (FEAT-106, opt-in).** TOTP
+  (Google-Authenticator-compatible) and e-mail one-time codes are a second
+  factor for username/password logins, enforced per tenant through the new
+  `auth.tenant_mfa_policy` table. It is off by default
+  (`AUTH_BASIC_2FA_ENABLED`), so the login path is unchanged until enabled.
+  An MFA-required login returns the new `401` `mfa_required` challenge envelope;
+  `/auth/mfa/*` adds challenge, verification, TOTP enrollment, backup-code, and
+  administrative disenrollment routes. This adds six MFA tables, the
+  `AUTH_OTP_*`, `AUTH_TOTP_ISSUER`, and `AUTH_MFA_*` settings, the
+  `mfa_admin_access.yaml` pack and `mfa:disenroll` action, and
+  `scripts/preflight_mfa.py`. The `mfa:` vault namespace is reserved and the
+  generic vault API rejects it. See `docs/two_factor_auth.rst`.
+
 - **Owner-or-superuser access control on the auth model CRUD surfaces
   (FEAT-105, client-visible behaviour change).** `/api/v1/user_identity*`,
   `/api/v1/user_accounts*` and `/api/v1/partner/tokens*` were reachable by any

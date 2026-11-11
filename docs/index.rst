@@ -39,6 +39,7 @@ This project is licensed under the terms of the BSD v3. and Apache 2 Dual licens
    settings
    token_exchange
    passkey
+   two_factor_auth
    password_recovery
    vault
    security
