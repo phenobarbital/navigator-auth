@@ -157,3 +157,6 @@ navigator-session = { path = "../navigator-session", editable = true }
 # only); override the transitive pin so `uv sync`/`uv pip install` produce a
 # working environment. FEAT-097 TASK-055.
 override-dependencies = ["pyopenssl>=24.3.0"]
+
+[tool.parrot.sdd]
+sandbox = "required"
