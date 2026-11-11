@@ -106,8 +106,7 @@ async def mfa_tables_present(db_pool: Any) -> bool:
 
     async def _probe(conn: Any) -> bool:
         count = await conn.fetchval(
-            "SELECT count(*) FROM unnest($1::text[]) AS t(name) "
-            "WHERE to_regclass(t.name) IS NOT NULL",
+            "SELECT count(*) FROM unnest($1::text[]) AS t(name) " "WHERE to_regclass(t.name) IS NOT NULL",
             names,
         )
         return count == len(MFA_TABLES)
