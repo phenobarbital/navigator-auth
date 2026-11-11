@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
 **Spec**: `sdd/specs/basicauth-otp-2fa.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: none

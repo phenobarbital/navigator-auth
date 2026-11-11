@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-106 — 2FA (OTP) for BasicAuth — TOTP + Email, per-tenant enforcement
 **Spec**: `sdd/specs/basicauth-otp-2fa.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -758,10 +758,8 @@ Spec §4 rows owned (fully or partly) by this task: `test_mfa_models_frozen_and_
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: gpt-5.6-terra (codex), 1 attempt, branch merge 2011216
+**Date**: 2026-11-11
+**Notes**: Delivered navigator_auth/mfa/{__init__,types,exceptions,abstract}.py, MfaSignal/MFARequired/MFARefused in exceptions.py, 12 settings in conf.py, tests/test_mfa_types.py. Merge-tier validation green (14 passed incl. TASK-145 tests). AC-6 grep empty; pyproject.toml unchanged. tests/test_basic_auth.py could not run in the sandbox (Postgres connection refused) — environmental, re-check in CI. ruff not installed in the shared venv, so AC-8 lint check was not run; engine black autofix applied (0c46189).
 
 **Deviations from spec**: `MfaSignal`/`MFARefused` (D1), ABC kwargs (D4), `AUTH_MFA_NOTIFY_CALLBACK` + `MfaSecurityNotice` (D6), `email_code_hash` `repr=False` — all pre-recorded decisions; list anything else here.
