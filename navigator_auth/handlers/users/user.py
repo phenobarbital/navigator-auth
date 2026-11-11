@@ -68,7 +68,7 @@ class UserManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandler):
         return await self.get_userid(session=self._session)
 
     async def _set_display_name(self, value, column, **kwargs):
-        data = kwargs.get('data')
+        data = kwargs.get("data")
         if not value:
             try:
                 return f"{data['first_name']} {data['last_name']}"
