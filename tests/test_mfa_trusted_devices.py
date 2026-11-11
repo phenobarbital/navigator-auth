@@ -5,6 +5,7 @@ import pytest
 from navigator_auth.mfa.trusted_devices import TrustedDeviceStore, may_offer_trusted_device
 from tests.fixtures.mfa import mfa_db, mfa_user_factory  # noqa: F401
 
+
 def test_trusted_device_not_offered_to_email_state():
     """Trusted devices require a strong factor and a positive window."""
     assert may_offer_trusted_device(has_strong_factor=True, remember_days=30)

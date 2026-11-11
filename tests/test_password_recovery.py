@@ -25,6 +25,7 @@ TEST_SECRET = b"test-secret-key"
 class TestRecoveryConfig:
     def test_defaults(self):
         from navigator_auth import conf
+
         assert conf.AUTH_RECOVERY_TTL == 3600
         assert conf.AUTH_RECOVERY_CONFIRM_TTL == 900
         assert conf.AUTH_RECOVERY_RATE_EMAIL == "3/hour"
@@ -33,6 +34,7 @@ class TestRecoveryConfig:
 
     def test_secret_falls_back_to_secret_key(self):
         from navigator_auth import conf
+
         assert conf.AUTH_RECOVERY_SECRET
         assert isinstance(conf.AUTH_RECOVERY_SECRET, bytes)
 
@@ -57,7 +59,7 @@ class TestPasswordPolicy:
         assert PasswordPolicy().validate("abc12345") == []
 
     def test_policy_min_length(self):
-        v = PasswordPolicy().validate("abc1234")      # 7 chars
+        v = PasswordPolicy().validate("abc1234")  # 7 chars
         assert [x.rule for x in v] == ["min_length"]
 
     def test_policy_requires_letter_and_digit(self):
@@ -86,9 +88,7 @@ class TestPasswordPolicy:
 
 @pytest_asyncio.fixture
 async def redis_pool():
-    pool = aioredis.ConnectionPool.from_url(
-        REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
-    )
+    pool = aioredis.ConnectionPool.from_url(REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
     yield pool
     await pool.disconnect()
 
@@ -139,6 +139,7 @@ class TestRecoveryTokenStore:
                 keys = await r.keys(f"{RECOVERY_KEY_PREFIX}*")
                 if keys:
                     await r.delete(*keys)
+
         await _purge()
         yield
         await _purge()
@@ -157,7 +158,7 @@ class TestRecoveryTokenStore:
     async def test_store_recovery_survives_validate(self, recovery_store, recovery_user):
         token, _ = await recovery_store.issue_recovery(recovery_user)
         assert await recovery_store.validate_recovery(token) is not None
-        assert await recovery_store.validate_recovery(token) is not None   # D4
+        assert await recovery_store.validate_recovery(token) is not None  # D4
 
     @pytest.mark.asyncio
     async def test_store_confirmation_rotates(self, recovery_store, recovery_user):
@@ -224,9 +225,7 @@ class TestRecoveryTokenStore:
         assert await store.validate_recovery(token) is None
 
     @pytest.mark.asyncio
-    async def test_drop_pair_deletes_both_records(
-        self, recovery_store, redis, recovery_user
-    ):
+    async def test_drop_pair_deletes_both_records(self, recovery_store, redis, recovery_user):
         token, _ = await recovery_store.issue_recovery(recovery_user)
         c, confirmation = await recovery_store.issue_confirmation(token)
         recovery_key_hash = confirmation.recovery_key
@@ -248,6 +247,7 @@ class TestRateLimiter:
                 keys = await r.keys(f"{RATE_KEY_PREFIX}*")
                 if keys:
                     await r.delete(*keys)
+
         await _purge()
         yield
         await _purge()
@@ -267,6 +267,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_limiter_fails_open(self, broken_redis_pool, caplog):
         import logging
+
         caplog.set_level(logging.WARNING)
         rl = RateLimiter(broken_redis_pool, "3/hour", "email")
         assert await rl.check("a@b.c") is True
@@ -297,6 +298,7 @@ class TestRateLimiter:
         assert await rl.check("expiring@b.c") is True
         assert await rl.check("expiring@b.c") is False
         import asyncio
+
         await asyncio.sleep(1.1)
         assert await rl.check("expiring@b.c") is True
 
@@ -339,9 +341,7 @@ class TestJTI:
     # Pre-existing environment limitation (see tests/test_basic_open_session.py):
     # the dev/test SECRET_KEY is shorter than PyJWT's recommended HMAC key
     # length. Not in scope for FEAT-098.
-    pytestmark = pytest.mark.filterwarnings(
-        "ignore::jwt.warnings.InsecureKeyLengthWarning"
-    )
+    pytestmark = pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning")
 
     def test_create_token_emits_jti(self, idp):
         tok, _, _, _ = idp.create_token(data={"user_id": 1})
@@ -361,7 +361,7 @@ class TestJTI:
         from navigator_auth.auth import AuthHandler
 
         fake_self = SimpleNamespace(backends={}, logger=logging.getLogger("test"))
-        payload = {"user_id": 1}          # minted the old way, no jti
+        payload = {"user_id": 1}  # minted the old way, no jti
         assert await AuthHandler._token_is_revoked(fake_self, payload) is False
 
 
@@ -392,7 +392,9 @@ class TestSessionRevoker:
         user_id = 837465
         jti = str(uuid4())
         record = OauthAccessTokenRecord(
-            jti=jti, user_id=user_id, client_id="basic",
+            jti=jti,
+            user_id=user_id,
+            client_id="basic",
             expires_at=datetime.now() + timedelta(hours=1),
         )
         await storage.save(record)
@@ -420,7 +422,9 @@ class TestSessionRevoker:
         storage = access_token_storage
         jti = str(uuid4())
         record = OauthAccessTokenRecord(
-            jti=jti, user_id=1, client_id="basic",
+            jti=jti,
+            user_id=1,
+            client_id="basic",
             expires_at=datetime.now() + timedelta(hours=2),
         )
         await storage.save(record)
@@ -448,7 +452,7 @@ class TestSessionRevoker:
         user = SimpleNamespace(user_id=user_id, username=None)
 
         count = await revoker.revoke_user(fake_request, user)
-        assert count == 1   # only the successful one counted
+        assert count == 1  # only the successful one counted
         assert storage.revoke.call_count == 2
 
 
@@ -550,10 +554,15 @@ class TestNotificationPayloadSecrecy:
     def test_repr_hides_token(self):
         from navigator_auth.handlers.recovery.types import NotificationPayload
         import datetime
+
         p = NotificationPayload(
-            email="a@b.c", display_name="A", username="a",
-            token="SUPERSECRETTOKEN", url="https://x/?token=SUPERSECRETTOKEN",
-            expires_at=datetime.datetime.now(), found=True,
+            email="a@b.c",
+            display_name="A",
+            username="a",
+            token="SUPERSECRETTOKEN",
+            url="https://x/?token=SUPERSECRETTOKEN",
+            expires_at=datetime.datetime.now(),
+            found=True,
         )
         assert "SUPERSECRETTOKEN" not in repr(p)
 
@@ -614,12 +623,8 @@ async def recovery_app():
     original_template = handler_module.AUTH_RECOVERY_URL_TEMPLATE
     original_rate_email = handler_module.AUTH_RECOVERY_RATE_EMAIL
     original_rate_ip = handler_module.AUTH_RECOVERY_RATE_IP
-    handler_module.AUTH_RECOVERY_CALLBACK = (
-        "tests.test_password_recovery._test_recovery_callback"
-    )
-    handler_module.AUTH_RECOVERY_URL_TEMPLATE = (
-        "https://app.example/reset?token={token}"
-    )
+    handler_module.AUTH_RECOVERY_CALLBACK = "tests.test_password_recovery._test_recovery_callback"
+    handler_module.AUTH_RECOVERY_URL_TEMPLATE = "https://app.example/reset?token={token}"
     # Generous: many tests in this class hit step 1 for the same address.
     handler_module.AUTH_RECOVERY_RATE_EMAIL = "1000/hour"
     handler_module.AUTH_RECOVERY_RATE_IP = "1000/hour"
@@ -647,15 +652,12 @@ async def recovery_app():
     async def _cleanup():
         for uname in usernames:
             try:
-                await db_pool.execute(
-                    f"DELETE FROM auth.users WHERE username = '{uname}'"
-                )
+                await db_pool.execute(f"DELETE FROM auth.users WHERE username = '{uname}'")
             except Exception:  # pylint: disable=W0703
                 pass
 
     await _cleanup()
-    await db_pool.execute(
-        f"""
+    await db_pool.execute(f"""
         INSERT INTO auth.users
             (username, password, email, first_name, last_name,
              is_active, is_superuser, is_new, is_staff)
@@ -663,11 +665,9 @@ async def recovery_app():
             '{RECOVERY_TEST_USERNAME}', '{hashed}', '{RECOVERY_TEST_EMAIL}',
             'Recovery', 'Test', true, false, false, true
         )
-        """
-    )
+        """)
     # Two active users sharing one e-mail, for the ambiguous-lookup test.
-    await db_pool.execute(
-        f"""
+    await db_pool.execute(f"""
         INSERT INTO auth.users
             (username, password, email, first_name, last_name,
              is_active, is_superuser, is_new, is_staff)
@@ -676,8 +676,7 @@ async def recovery_app():
              true, false, false, true),
             ('dup_recovery_b', '{hashed}', '{RECOVERY_DUP_EMAIL}', 'Dup', 'B',
              true, false, false, true)
-        """
-    )
+        """)
 
     # Same hang-avoidance as FEAT-096 TASK-046 (see test_basic_auth.py):
     # production AUTH_SUCCESSFUL_CALLBACKS reach an external service that
@@ -745,9 +744,7 @@ class TestRecoveryEndpoints:
 
     async def test_step1_never_returns_token(self, recovery_app):
         client, _ = recovery_app
-        resp = await client.post(
-            "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
-        )
+        resp = await client.post("/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL})
         assert resp.status == 200
         body = await resp.json()
         assert "token" not in body
@@ -755,21 +752,15 @@ class TestRecoveryEndpoints:
 
     async def test_step1_unknown_email_same_body(self, recovery_app):
         client, _ = recovery_app
-        known = await client.post(
-            "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
-        )
-        unknown = await client.post(
-            "/api/v1/password-recovery", json={"email": RECOVERY_UNKNOWN_EMAIL}
-        )
+        known = await client.post("/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL})
+        unknown = await client.post("/api/v1/password-recovery", json={"email": RECOVERY_UNKNOWN_EMAIL})
         assert known.status == unknown.status == 200
         assert await known.json() == await unknown.json()
 
     async def test_step1_invokes_callback_with_url(self, recovery_app):
         client, _ = recovery_app
         _CAPTURED_NOTIFICATIONS.clear()
-        resp = await client.post(
-            "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
-        )
+        resp = await client.post("/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL})
         assert resp.status == 200
         assert len(_CAPTURED_NOTIFICATIONS) == 1
         notif = _CAPTURED_NOTIFICATIONS[0]
@@ -783,9 +774,7 @@ class TestRecoveryEndpoints:
         client, _ = recovery_app
         _RAISE_ON_CALLBACK[0] = True
         try:
-            resp = await client.post(
-                "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
-            )
+            resp = await client.post("/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL})
             assert resp.status == 200
             assert await resp.json() == _GENERIC_STEP1_BODY
         finally:
@@ -794,9 +783,7 @@ class TestRecoveryEndpoints:
     async def test_step2_refresh_is_safe(self, recovery_app):
         client, _ = recovery_app
         _CAPTURED_NOTIFICATIONS.clear()
-        resp = await client.post(
-            "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
-        )
+        resp = await client.post("/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL})
         assert resp.status == 200
         recovery_token = _CAPTURED_NOTIFICATIONS[0].token
 
@@ -829,7 +816,9 @@ class TestRecoveryEndpoints:
         resp = await client.post(
             "/api/v1/password-recovery/confirm",
             json={
-                "password": weak, "confirm_password": weak, "token": confirm_token,
+                "password": weak,
+                "confirm_password": weak,
+                "token": confirm_token,
             },
         )
         assert resp.status == 422
@@ -842,7 +831,9 @@ class TestRecoveryEndpoints:
         resp2 = await client.post(
             "/api/v1/password-recovery/confirm",
             json={
-                "password": strong, "confirm_password": strong, "token": confirm_token,
+                "password": strong,
+                "confirm_password": strong,
+                "token": confirm_token,
             },
         )
         assert resp2.status == 202
@@ -854,7 +845,9 @@ class TestRecoveryEndpoints:
         resp = await client.post(
             "/api/v1/password-recovery/confirm",
             json={
-                "password": new_pw, "confirm_password": new_pw, "token": confirm_token,
+                "password": new_pw,
+                "confirm_password": new_pw,
+                "token": confirm_token,
             },
         )
         assert resp.status == 202
@@ -896,31 +889,28 @@ class TestRecoveryEndpoints:
 
     async def test_duplicate_email_takes_generic_path(self, recovery_app, caplog):
         import logging
+
         client, _ = recovery_app
         _CAPTURED_NOTIFICATIONS.clear()
         caplog.set_level(logging.WARNING)
-        resp = await client.post(
-            "/api/v1/password-recovery", json={"email": RECOVERY_DUP_EMAIL}
-        )
+        resp = await client.post("/api/v1/password-recovery", json={"email": RECOVERY_DUP_EMAIL})
         assert resp.status == 200
         assert len(_CAPTURED_NOTIFICATIONS) == 1
         assert _CAPTURED_NOTIFICATIONS[0].found is False
-        assert any(
-            "multiple users match" in rec.message for rec in caplog.records
-        )
+        assert any("multiple users match" in rec.message for rec in caplog.records)
 
     async def test_legacy_routes_aliased(self, recovery_app):
         client, _ = recovery_app
         _CAPTURED_NOTIFICATIONS.clear()
-        resp = await client.post(
-            "/api/v1/forgot-password", json={"email": RECOVERY_UNKNOWN_EMAIL}
-        )
+        resp = await client.post("/api/v1/forgot-password", json={"email": RECOVERY_UNKNOWN_EMAIL})
         assert resp.status == 200
 
         resp2 = await client.post(
             "/api/v1/reset-password",
             json={
-                "password": "x", "confirm_password": "x", "token": "not-a-real-token",
+                "password": "x",
+                "confirm_password": "x",
+                "token": "not-a-real-token",
             },
         )
         # Reaches step-3 logic (invalid token -> 400), proving the alias
@@ -931,9 +921,7 @@ class TestRecoveryEndpoints:
         client, _ = recovery_app
         _CAPTURED_NOTIFICATIONS.clear()
         caplog.set_level("DEBUG")
-        resp = await client.post(
-            "/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL}
-        )
+        resp = await client.post("/api/v1/password-recovery", json={"email": RECOVERY_TEST_EMAIL})
         assert resp.status == 200
         token = _CAPTURED_NOTIFICATIONS[0].token
         resp2 = await client.get(f"/api/v1/password-recovery/{token}")
@@ -963,8 +951,7 @@ async def e2e_user(recovery_app):
     email = f"e2e_recovery_{suffix}@example.com"
     password = "OldE2EPassw0rd1!"
     hashed = set_basic_password(password)
-    await db_pool.execute(
-        f"""
+    await db_pool.execute(f"""
         INSERT INTO auth.users
             (username, password, email, first_name, last_name,
              is_active, is_superuser, is_new, is_staff)
@@ -972,8 +959,7 @@ async def e2e_user(recovery_app):
             '{username}', '{hashed}', '{email}', 'E2E', 'Recovery',
             true, false, false, true
         )
-        """
-    )
+        """)
     yield {"username": username, "email": email, "password": password}
     try:
         await db_pool.execute(f"DELETE FROM auth.users WHERE username = '{username}'")
@@ -996,14 +982,13 @@ class TestRecoveryEndToEnd:
     async def test_full_recovery_flow(self, recovery_app, e2e_user):
         """1 -> 2 -> 3, then the user logs in with the new password."""
         client, _ = recovery_app
-        _, confirm_token = await _request_and_confirm_token(
-            client, email=e2e_user["email"]
-        )
+        _, confirm_token = await _request_and_confirm_token(client, email=e2e_user["email"])
         new_password = "NewE2EPassw0rd1!"
         resp = await client.post(
             "/api/v1/password-recovery/confirm",
             json={
-                "password": new_password, "confirm_password": new_password,
+                "password": new_password,
+                "confirm_password": new_password,
                 "token": confirm_token,
             },
         )
@@ -1025,17 +1010,13 @@ class TestRecoveryEndToEnd:
 
         async def timed_post(email: str) -> float:
             start = _time.monotonic()
-            resp = await client.post(
-                "/api/v1/password-recovery", json={"email": email}
-            )
+            resp = await client.post("/api/v1/password-recovery", json={"email": email})
             elapsed = _time.monotonic() - start
             assert resp.status == 200
             return elapsed
 
         known_samples = [await timed_post(RECOVERY_TEST_EMAIL) for _ in range(5)]
-        unknown_samples = [
-            await timed_post(RECOVERY_UNKNOWN_EMAIL) for _ in range(5)
-        ]
+        unknown_samples = [await timed_post(RECOVERY_UNKNOWN_EMAIL) for _ in range(5)]
         known_median = statistics.median(known_samples)
         unknown_median = statistics.median(unknown_samples)
         # 50ms tolerance against a ~250ms floor (task's own guidance).
@@ -1049,14 +1030,13 @@ class TestRecoveryEndToEnd:
 
         client, _ = recovery_app
         caplog.set_level(logging.DEBUG)
-        recovery_token, confirm_token = await _request_and_confirm_token(
-            client, email=e2e_user["email"]
-        )
+        recovery_token, confirm_token = await _request_and_confirm_token(client, email=e2e_user["email"])
         new_password = "TokenLeakTest1!"
         resp = await client.post(
             "/api/v1/password-recovery/confirm",
             json={
-                "password": new_password, "confirm_password": new_password,
+                "password": new_password,
+                "confirm_password": new_password,
                 "token": confirm_token,
             },
         )
@@ -1091,7 +1071,8 @@ class TestRecoveryEndToEnd:
         login_resp = await client.post(
             "/api/v1/login",
             json={
-                "username": e2e_user["username"], "password": e2e_user["password"],
+                "username": e2e_user["username"],
+                "password": e2e_user["password"],
             },
             headers={"X-Auth-Method": "BasicAuth"},
         )
@@ -1100,14 +1081,13 @@ class TestRecoveryEndToEnd:
         old_payload = pyjwt.decode(old_token, options={"verify_signature": False})
         old_jti = old_payload["jti"]
 
-        _, confirm_token = await _request_and_confirm_token(
-            client, email=e2e_user["email"]
-        )
+        _, confirm_token = await _request_and_confirm_token(client, email=e2e_user["email"])
         new_password = "RevokeSessTest1!"
         resp = await client.post(
             "/api/v1/password-recovery/confirm",
             json={
-                "password": new_password, "confirm_password": new_password,
+                "password": new_password,
+                "confirm_password": new_password,
                 "token": confirm_token,
             },
         )
@@ -1129,8 +1109,7 @@ class TestRecoveryEndToEnd:
         username = "e2e_federated_user"
         email = "e2e_federated_user@example.com"
         await db_pool.execute(f"DELETE FROM auth.users WHERE username = '{username}'")
-        await db_pool.execute(
-            f"""
+        await db_pool.execute(f"""
             INSERT INTO auth.users
                 (username, password, email, first_name, last_name,
                  is_active, is_superuser, is_new, is_staff)
@@ -1138,34 +1117,31 @@ class TestRecoveryEndToEnd:
                 '{username}', '', '{email}', 'Federated', 'User',
                 true, false, false, true
             )
-            """
-        )
+            """)
         try:
             _, confirm_token = await _request_and_confirm_token(client, email=email)
             new_password = "FederatedPass1!"
             resp = await client.post(
                 "/api/v1/password-recovery/confirm",
                 json={
-                    "password": new_password, "confirm_password": new_password,
+                    "password": new_password,
+                    "confirm_password": new_password,
                     "token": confirm_token,
                 },
             )
             assert resp.status == 202
         finally:
-            await db_pool.execute(
-                f"DELETE FROM auth.users WHERE username = '{username}'"
-            )
+            await db_pool.execute(f"DELETE FROM auth.users WHERE username = '{username}'")
 
     async def test_step3_sets_is_new_false(self, recovery_app, e2e_user):
         client, db_pool = recovery_app
-        _, confirm_token = await _request_and_confirm_token(
-            client, email=e2e_user["email"]
-        )
+        _, confirm_token = await _request_and_confirm_token(client, email=e2e_user["email"])
         new_password = "IsNewFalseTest1!"
         resp = await client.post(
             "/api/v1/password-recovery/confirm",
             json={
-                "password": new_password, "confirm_password": new_password,
+                "password": new_password,
+                "confirm_password": new_password,
                 "token": confirm_token,
             },
         )
@@ -1192,33 +1168,26 @@ class TestRecoveryEndToEnd:
         try:
             for _ in range(3):
                 _CAPTURED_NOTIFICATIONS.clear()
-                resp = await client.post(
-                    "/api/v1/password-recovery", json={"email": email}
-                )
+                resp = await client.post("/api/v1/password-recovery", json={"email": email})
                 assert resp.status == 200
                 assert len(_CAPTURED_NOTIFICATIONS) == 1  # allowed -> lookup ran
 
             _CAPTURED_NOTIFICATIONS.clear()
-            resp4 = await client.post(
-                "/api/v1/password-recovery", json={"email": email}
-            )
+            resp4 = await client.post("/api/v1/password-recovery", json={"email": email})
             assert resp4.status == 200  # same generic body (D9), not 429
             assert len(_CAPTURED_NOTIFICATIONS) == 0  # blocked -> no lookup at all
         finally:
             PasswordRecoveryHandler._email_limiter = original_limiter
 
-    async def test_step3_recovery_token_dead_after_success(
-        self, recovery_app, e2e_user
-    ):
+    async def test_step3_recovery_token_dead_after_success(self, recovery_app, e2e_user):
         client, _ = recovery_app
-        recovery_token, confirm_token = await _request_and_confirm_token(
-            client, email=e2e_user["email"]
-        )
+        recovery_token, confirm_token = await _request_and_confirm_token(client, email=e2e_user["email"])
         new_password = "DeadTokenTest1!"
         resp = await client.post(
             "/api/v1/password-recovery/confirm",
             json={
-                "password": new_password, "confirm_password": new_password,
+                "password": new_password,
+                "confirm_password": new_password,
                 "token": confirm_token,
             },
         )

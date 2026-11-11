@@ -14,6 +14,7 @@ best-effort so one failing deletion never aborts the rest:
     (found the same way ``AuthHandler._token_is_revoked`` finds it — by
     walking ``request.app['auth'].backends``).
 """
+
 import logging
 from typing import Optional
 
@@ -100,7 +101,8 @@ class SessionRevoker:
                             failures.append("session_delete")
                         logger.warning(
                             "SessionRevoker: failed to delete session:%s: %s",
-                            session_id, exc,
+                            session_id,
+                            exc,
                         )
                 try:
                     if await redis.delete(f"user:{username}"):
@@ -110,14 +112,16 @@ class SessionRevoker:
                         failures.append("session_index_delete")
                     logger.warning(
                         "SessionRevoker: failed to delete user:%s index: %s",
-                        username, exc,
+                        username,
+                        exc,
                     )
         except Exception as exc:  # pylint: disable=W0703
             if failures is not None:
                 failures.append("session_store_unreachable")
             logger.warning(
                 "SessionRevoker: unable to reach session Redis for user %s: %s",
-                username, exc,
+                username,
+                exc,
             )
         return revoked
 
@@ -151,7 +155,8 @@ class SessionRevoker:
                     failures.append("jti_index_unreadable")
                 logger.warning(
                     "SessionRevoker: unable to read jti index for user %s: %s",
-                    user_id, exc,
+                    user_id,
+                    exc,
                 )
                 continue
             for jti in jtis:
@@ -162,7 +167,9 @@ class SessionRevoker:
                     if failures is not None:
                         failures.append("jti_revoke")
                     logger.warning(
-                        "SessionRevoker: failed to revoke jti=%s: %s", jti, exc,
+                        "SessionRevoker: failed to revoke jti=%s: %s",
+                        jti,
+                        exc,
                     )
                     continue
                 try:
@@ -170,7 +177,8 @@ class SessionRevoker:
                 except Exception as exc:  # pylint: disable=W0703
                     logger.warning(
                         "SessionRevoker: failed to prune jti=%s from index: %s",
-                        jti, exc,
+                        jti,
+                        exc,
                     )
         if not seen_storage and failures is not None:
             failures.append("jti_backend_missing")

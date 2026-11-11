@@ -7,6 +7,7 @@ import pytest
 from navigator_auth.mfa.events import SECURITY_EVENTS, security_transition
 from navigator_auth.mfa.exceptions import MfaStorageError, MfaUnavailable
 
+
 @pytest.mark.asyncio
 async def test_security_transition_without_services_requires_authdb():
     """M3 changes no MFA from yielding None to an authdb transaction, failing closed without one."""
@@ -64,6 +65,7 @@ def _fake_services(monkeypatch, *, fail_enter=False, fail_bump=False):
             calls.append("revoke")
 
     services = type("S", (), {"available": True, "security": _Security(), "trusted_devices": _Devices()})()
+
     @asynccontextmanager
     async def _lease(app):
         yield services

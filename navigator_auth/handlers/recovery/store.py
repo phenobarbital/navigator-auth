@@ -14,6 +14,7 @@ token itself, and every payload carries an HMAC-SHA256 signature over its
 own fields. A dump of the Redis database yields hashed keys and signed
 payloads — no usable token can be reconstructed from it.
 """
+
 import hashlib
 import hmac
 import secrets
@@ -58,9 +59,7 @@ class RecoveryTokenStore:
     def _sign_recovery(self, user_id, username: str, issued_at, nonce: str) -> str:
         return self._sign(str(user_id), username, str(issued_at), nonce)
 
-    def _sign_confirmation(
-        self, user_id, username: str, recovery_key: str, issued_at
-    ) -> str:
+    def _sign_confirmation(self, user_id, username: str, recovery_key: str, issued_at) -> str:
         return self._sign(str(user_id), username, recovery_key, str(issued_at))
 
     # --- stage 1: recovery token --------------------------------------
@@ -99,9 +98,7 @@ class RecoveryTokenStore:
 
     def _decode_recovery(self, raw) -> Optional[RecoveryPayload]:
         data = json_decoder(raw)
-        expected = self._sign_recovery(
-            data["user_id"], data["username"], data["issued_at"], data["nonce"]
-        )
+        expected = self._sign_recovery(data["user_id"], data["username"], data["issued_at"], data["nonce"])
         if not secrets.compare_digest(expected, data["signature"]):
             return None
         return RecoveryPayload(
@@ -114,9 +111,7 @@ class RecoveryTokenStore:
         )
 
     # --- stage 2: confirmation token -----------------------------------
-    async def issue_confirmation(
-        self, token: str
-    ) -> tuple[str, ConfirmationPayload]:
+    async def issue_confirmation(self, token: str) -> tuple[str, ConfirmationPayload]:
         """Mint stage-2 and invalidate any previous stage-2 for this
         recovery (rotation, D4). Stage-1 is left intact."""
         recovery_hash = _hash_token(token)
@@ -126,9 +121,7 @@ class RecoveryTokenStore:
             if not raw:
                 raise LookupError("Recovery token not found or expired.")
             data = json_decoder(raw)
-            expected = self._sign_recovery(
-                data["user_id"], data["username"], data["issued_at"], data["nonce"]
-            )
+            expected = self._sign_recovery(data["user_id"], data["username"], data["issued_at"], data["nonce"])
             if not secrets.compare_digest(expected, data["signature"]):
                 raise LookupError("Recovery token failed signature check.")
 
@@ -140,9 +133,7 @@ class RecoveryTokenStore:
             confirm_token = secrets.token_urlsafe(32)
             confirm_hash = _hash_token(confirm_token)
             issued_at = time.time()
-            signature = self._sign_confirmation(
-                data["user_id"], data["username"], recovery_hash, issued_at
-            )
+            signature = self._sign_confirmation(data["user_id"], data["username"], recovery_hash, issued_at)
             confirmation = ConfirmationPayload(
                 user_id=data["user_id"],
                 username=data["username"],
@@ -151,9 +142,7 @@ class RecoveryTokenStore:
                 signature=signature,
             )
             confirm_key = f"{CONFIRM_KEY_PREFIX}{confirm_hash}"
-            await redis.setex(
-                confirm_key, AUTH_RECOVERY_CONFIRM_TTL, json_encoder(asdict(confirmation))
-            )
+            await redis.setex(confirm_key, AUTH_RECOVERY_CONFIRM_TTL, json_encoder(asdict(confirmation)))
 
             # Update the stage-1 back-pointer in place, preserving its
             # remaining TTL rather than extending it.
@@ -164,9 +153,7 @@ class RecoveryTokenStore:
 
     def _decode_confirmation(self, raw) -> Optional[ConfirmationPayload]:
         data = json_decoder(raw)
-        expected = self._sign_confirmation(
-            data["user_id"], data["username"], data["recovery_key"], data["issued_at"]
-        )
+        expected = self._sign_confirmation(data["user_id"], data["username"], data["recovery_key"], data["issued_at"])
         if not secrets.compare_digest(expected, data["signature"]):
             return None
         return ConfirmationPayload(

@@ -72,6 +72,7 @@ def _evaluation(state=MfaState.EMAIL, providers=("email",), preferred="email", s
 
 def _services(evaluation=None, available=True) -> MfaServices:
     """Build MFA services with isolated async collaborators."""
+
     @asynccontextmanager
     async def user_lock(_user_id):
         """Yield a lock connection as the gate requires for fresh reads."""

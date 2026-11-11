@@ -49,6 +49,7 @@ def provider(storage):
 
     prov = Oauth2Provider(user_model=MagicMock(), identity=MagicMock())
     prov.client_access_storage = storage
+
     # FEAT-106 review fixes TASK-185: this memory harness has no authdb.
     @asynccontextmanager
     async def _no_generation(request, user_id):
@@ -68,6 +69,7 @@ def _request():
 # ---------------------------------------------------------------------------
 # Storage semantics
 # ---------------------------------------------------------------------------
+
 
 class TestGateStorage:
     @pytest.mark.asyncio
@@ -117,6 +119,7 @@ class TestGateStorage:
 # ---------------------------------------------------------------------------
 # Approval queue (D7)
 # ---------------------------------------------------------------------------
+
 
 class TestApprovalQueue:
     @pytest.mark.asyncio
@@ -184,6 +187,7 @@ class TestApprovalQueue:
 # Enforcement
 # ---------------------------------------------------------------------------
 
+
 class TestGateEnforcement:
     @pytest.mark.asyncio
     async def test_gate_disabled_by_default(self, provider, monkeypatch):
@@ -192,9 +196,7 @@ class TestGateEnforcement:
             "navigator_auth.backends.oauth2.backend.OAUTH_ACCESS_GATE_ENABLED",
             False,
         )
-        result = await provider._enforce_access_gate(
-            _request(), _client(gated=False), USER_ID, REDIRECT_URI, STATE
-        )
+        result = await provider._enforce_access_gate(_request(), _client(gated=False), USER_ID, REDIRECT_URI, STATE)
         assert result is None
         # Nothing was queued either — the gate is entirely inert.
         assert await provider.client_access_storage.list_for_client(CLIENT_UID) == []
@@ -206,9 +208,7 @@ class TestGateEnforcement:
             "navigator_auth.backends.oauth2.backend.OAUTH_ACCESS_GATE_ENABLED",
             False,
         )
-        response = await provider._enforce_access_gate(
-            _request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE
-        )
+        response = await provider._enforce_access_gate(_request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE)
 
         assert response is not None
         assert isinstance(response, web.HTTPFound)
@@ -223,9 +223,7 @@ class TestGateEnforcement:
             "navigator_auth.backends.oauth2.backend.OAUTH_ACCESS_GATE_QUEUE",
             True,
         )
-        await provider._enforce_access_gate(
-            _request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE
-        )
+        await provider._enforce_access_gate(_request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE)
         rows = await provider.client_access_storage.list_for_client(CLIENT_UID)
         assert len(rows) == 1
         assert rows[0].status == STATUS_PENDING
@@ -236,17 +234,13 @@ class TestGateEnforcement:
             "navigator_auth.backends.oauth2.backend.OAUTH_ACCESS_GATE_QUEUE",
             False,
         )
-        await provider._enforce_access_gate(
-            _request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE
-        )
+        await provider._enforce_access_gate(_request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE)
         assert await provider.client_access_storage.list_for_client(CLIENT_UID) == []
 
     @pytest.mark.asyncio
     async def test_activated_user_passes(self, provider):
         await provider.client_access_storage.grant(USER_ID, CLIENT_UID, 1)
-        result = await provider._enforce_access_gate(
-            _request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE
-        )
+        result = await provider._enforce_access_gate(_request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE)
         assert result is None
 
     @pytest.mark.asyncio
@@ -255,58 +249,45 @@ class TestGateEnforcement:
             "navigator_auth.backends.oauth2.backend.OAUTH_ACCESS_GATE_ENABLED",
             True,
         )
-        response = await provider._enforce_access_gate(
-            _request(), _client(gated=False), USER_ID, REDIRECT_URI, STATE
-        )
+        response = await provider._enforce_access_gate(_request(), _client(gated=False), USER_ID, REDIRECT_URI, STATE)
         assert response is not None
 
     @pytest.mark.asyncio
-    async def test_gate_fails_closed_when_storage_missing(
-        self, provider, monkeypatch
-    ):
+    async def test_gate_fails_closed_when_storage_missing(self, provider, monkeypatch):
         monkeypatch.setattr(
             "navigator_auth.backends.oauth2.backend.OAUTH_ACCESS_GATE_ENABLED",
             True,
         )
         provider.client_access_storage = None
-        response = await provider._enforce_access_gate(
-            _request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE
-        )
+        response = await provider._enforce_access_gate(_request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE)
         assert response is not None
 
     @pytest.mark.asyncio
     async def test_gate_fails_closed_when_storage_errors(self, provider):
         provider.client_access_storage = MagicMock()
-        provider.client_access_storage.check = AsyncMock(
-            side_effect=RuntimeError("redis down")
-        )
+        provider.client_access_storage.check = AsyncMock(side_effect=RuntimeError("redis down"))
         provider.client_access_storage.request_access = AsyncMock()
-        response = await provider._enforce_access_gate(
-            _request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE
-        )
+        response = await provider._enforce_access_gate(_request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE)
         assert response is not None
 
     @pytest.mark.asyncio
     async def test_denial_without_redirect_uri_renders_error(self, provider):
         """No validated redirect_uri ⇒ render, never emit a bare redirect."""
-        response = await provider._enforce_access_gate(
-            _request(), _client(gated=True), USER_ID, None, ""
-        )
+        response = await provider._enforce_access_gate(_request(), _client(gated=True), USER_ID, None, "")
         assert response.status == 403
         assert not isinstance(response, web.HTTPFound)
         assert b"access_denied" in response.body
 
     @pytest.mark.asyncio
     async def test_denial_omits_state_when_absent(self, provider):
-        response = await provider._enforce_access_gate(
-            _request(), _client(gated=True), USER_ID, REDIRECT_URI, ""
-        )
+        response = await provider._enforce_access_gate(_request(), _client(gated=True), USER_ID, REDIRECT_URI, "")
         assert "state=" not in response.headers["Location"]
 
 
 # ---------------------------------------------------------------------------
 # Every issuance path must be gated
 # ---------------------------------------------------------------------------
+
 
 class TestConsentEndpointIsGated:
     """Regression: /oauth2/consent minted codes without consulting the gate.
@@ -382,8 +363,7 @@ class TestConsentEndpointIsGated:
         response = await consent_provider.consent(request)
 
         assert consent_provider.code_storage.codes == {}, (
-            "the gate was bypassed: /oauth2/consent issued a code to a "
-            "non-activated user"
+            "the gate was bypassed: /oauth2/consent issued a code to a " "non-activated user"
         )
         assert response.status == 302
         location = response.headers["Location"]
@@ -395,9 +375,7 @@ class TestConsentEndpointIsGated:
         await consent_provider.client_storage.save_client(_client(gated=True))
         await consent_provider.consent(self._consent_provider(consent_provider))
 
-        pending = await consent_provider.client_access_storage.list_pending(
-            CLIENT_UID
-        )
+        pending = await consent_provider.client_access_storage.list_pending(CLIENT_UID)
         assert [p.user_id for p in pending] == [USER_ID]
 
     @pytest.mark.asyncio
@@ -407,17 +385,13 @@ class TestConsentEndpointIsGated:
 
         # A successful issuance redirects by raising HTTPFound.
         with pytest.raises(web.HTTPFound) as issued:
-            await consent_provider.consent(
-                self._consent_provider(consent_provider)
-            )
+            await consent_provider.consent(self._consent_provider(consent_provider))
 
         assert len(consent_provider.code_storage.codes) == 1
         assert "code=" in issued.value.location
 
     @pytest.mark.asyncio
-    async def test_consent_unaffected_when_the_gate_is_off(
-        self, consent_provider, monkeypatch
-    ):
+    async def test_consent_unaffected_when_the_gate_is_off(self, consent_provider, monkeypatch):
         monkeypatch.setattr(
             "navigator_auth.backends.oauth2.backend.OAUTH_ACCESS_GATE_ENABLED",
             False,
@@ -425,9 +399,7 @@ class TestConsentEndpointIsGated:
         await consent_provider.client_storage.save_client(_client(gated=False))
 
         with pytest.raises(web.HTTPFound):
-            await consent_provider.consent(
-                self._consent_provider(consent_provider)
-            )
+            await consent_provider.consent(self._consent_provider(consent_provider))
 
         assert len(consent_provider.code_storage.codes) == 1
 
@@ -439,14 +411,13 @@ class TestConsentEndpointIsGated:
         for method in (Oauth2Provider.authorize, Oauth2Provider.consent):
             source = inspect.getsource(method)
             if "_issue_code" in source:
-                assert "_enforce_access_gate" in source, (
-                    f"{method.__name__} issues codes without a gate check"
-                )
+                assert "_enforce_access_gate" in source, f"{method.__name__} issues codes without a gate check"
 
 
 # ---------------------------------------------------------------------------
 # Device-flow parity
 # ---------------------------------------------------------------------------
+
 
 class TestDeviceFlowGate:
     def test_gate_device_flow_is_wired(self):
@@ -464,9 +435,7 @@ class TestDeviceFlowGate:
         source = inspect.getsource(Oauth2Provider.authorize)
         assert "_enforce_access_gate" in source
         # The gate must run before the consent-skip / consent handoff.
-        assert source.index("_enforce_access_gate") < source.index(
-            "nav_oauth2_consent"
-        )
+        assert source.index("_enforce_access_gate") < source.index("nav_oauth2_consent")
 
     @pytest.mark.asyncio
     async def test_device_denial_renders_not_redirects(self, provider):
@@ -480,6 +449,7 @@ class TestDeviceFlowGate:
 # ---------------------------------------------------------------------------
 # Deactivation cascade
 # ---------------------------------------------------------------------------
+
 
 class _Grants:
     def __init__(self):
@@ -555,20 +525,28 @@ class TestRevocationCascade:
         provider.access_token_storage = _AccessTokens(
             {
                 "oauth2:jti:aaa": {
-                    "jti": "aaa", "user_id": USER_ID,
-                    "client_id": CLIENT_UID, "revoked": False,
+                    "jti": "aaa",
+                    "user_id": USER_ID,
+                    "client_id": CLIENT_UID,
+                    "revoked": False,
                 },
                 "oauth2:jti:bbb": {
-                    "jti": "bbb", "user_id": USER_ID,
-                    "client_id": "another_client", "revoked": False,
+                    "jti": "bbb",
+                    "user_id": USER_ID,
+                    "client_id": "another_client",
+                    "revoked": False,
                 },
                 "oauth2:jti:ccc": {
-                    "jti": "ccc", "user_id": 999,
-                    "client_id": CLIENT_UID, "revoked": False,
+                    "jti": "ccc",
+                    "user_id": 999,
+                    "client_id": CLIENT_UID,
+                    "revoked": False,
                 },
                 "oauth2:jti:ddd": {
-                    "jti": "ddd", "user_id": USER_ID,
-                    "client_id": CLIENT_UID, "revoked": True,
+                    "jti": "ddd",
+                    "user_id": USER_ID,
+                    "client_id": CLIENT_UID,
+                    "revoked": True,
                 },
             }
         )
@@ -578,9 +556,7 @@ class TestRevocationCascade:
         assert result["grants"] == 1
         assert provider.grant_storage.revoked == [(USER_ID, CLIENT_UID)]
         # Only this client's live chains.
-        assert set(provider.refresh_token_storage.chains) == {
-            "rt-mine-1", "rt-mine-2"
-        }
+        assert set(provider.refresh_token_storage.chains) == {"rt-mine-1", "rt-mine-2"}
         # Only this (user, client)'s live jtis.
         assert provider.access_token_storage.revoked == ["aaa"]
         assert result["access_tokens"] == 1
@@ -592,8 +568,10 @@ class TestRevocationCascade:
         provider.access_token_storage = _AccessTokens(
             {
                 "oauth2:jti:revoked:aaa": {
-                    "jti": "aaa", "user_id": USER_ID,
-                    "client_id": CLIENT_UID, "revoked": False,
+                    "jti": "aaa",
+                    "user_id": USER_ID,
+                    "client_id": CLIENT_UID,
+                    "revoked": False,
                 },
             }
         )
@@ -605,12 +583,8 @@ class TestRevocationCascade:
     async def test_cascade_survives_storage_failures(self, provider):
         """A partial failure must not abort the rest of the cascade."""
         provider.grant_storage = MagicMock()
-        provider.grant_storage.revoke_grant = AsyncMock(
-            side_effect=RuntimeError("boom")
-        )
-        provider.refresh_token_storage = _RefreshTokens(
-            [_refresh("rt-1", CLIENT_UID)]
-        )
+        provider.grant_storage.revoke_grant = AsyncMock(side_effect=RuntimeError("boom"))
+        provider.refresh_token_storage = _RefreshTokens([_refresh("rt-1", CLIENT_UID)])
         provider.access_token_storage = None
 
         result = await provider.cascade_access_revocation(USER_ID, CLIENT_UID)
@@ -623,6 +597,7 @@ class TestRevocationCascade:
 # End-to-end lifecycle
 # ---------------------------------------------------------------------------
 
+
 class TestGateLifecycle:
     @pytest.mark.asyncio
     async def test_gate_lifecycle(self, provider):
@@ -632,9 +607,7 @@ class TestGateLifecycle:
         storage = provider.client_access_storage
 
         # 1. First attempt is denied and queued.
-        denied = await provider._enforce_access_gate(
-            request, client, USER_ID, REDIRECT_URI, STATE
-        )
+        denied = await provider._enforce_access_gate(request, client, USER_ID, REDIRECT_URI, STATE)
         assert denied is not None
         queue = await storage.list_pending(CLIENT_UID)
         assert [r.user_id for r in queue] == [USER_ID]
@@ -643,33 +616,27 @@ class TestGateLifecycle:
         await storage.approve(USER_ID, CLIENT_UID, granted_by=1)
 
         # 3. Authorization now proceeds.
-        assert await provider._enforce_access_gate(
-            request, client, USER_ID, REDIRECT_URI, STATE
-        ) is None
+        assert await provider._enforce_access_gate(request, client, USER_ID, REDIRECT_URI, STATE) is None
 
         # 4. Deactivation cascades.
         provider.grant_storage = _Grants()
-        provider.refresh_token_storage = _RefreshTokens(
-            [_refresh("rt-live", CLIENT_UID)]
-        )
+        provider.refresh_token_storage = _RefreshTokens([_refresh("rt-live", CLIENT_UID)])
         provider.access_token_storage = _AccessTokens(
             {
                 "oauth2:jti:live": {
-                    "jti": "live", "user_id": USER_ID,
-                    "client_id": CLIENT_UID, "revoked": False,
+                    "jti": "live",
+                    "user_id": USER_ID,
+                    "client_id": CLIENT_UID,
+                    "revoked": False,
                 }
             }
         )
         assert await storage.revoke(USER_ID, CLIENT_UID) is True
         cascade = await provider.cascade_access_revocation(USER_ID, CLIENT_UID)
-        assert cascade == {
-            "grants": 1, "refresh_chains": 1, "access_tokens": 1
-        }
+        assert cascade == {"grants": 1, "refresh_chains": 1, "access_tokens": 1}
 
         # 5. A new authorize is denied again.
-        assert await provider._enforce_access_gate(
-            request, client, USER_ID, REDIRECT_URI, STATE
-        ) is not None
+        assert await provider._enforce_access_gate(request, client, USER_ID, REDIRECT_URI, STATE) is not None
         # And the revoked row was not silently re-queued as pending.
         assert (await storage.get(USER_ID, CLIENT_UID)).status == STATUS_REVOKED
 
@@ -677,6 +644,7 @@ class TestGateLifecycle:
 # ---------------------------------------------------------------------------
 # Gate enforcement on the refresh grant
 # ---------------------------------------------------------------------------
+
 
 class TestRefreshGrantIsGated:
     """Regression: refresh tokens outlived a gate policy change.
@@ -772,9 +740,7 @@ class TestRefreshGrantIsGated:
         assert response is None or response.status != 400
 
     @pytest.mark.asyncio
-    async def test_refresh_unaffected_when_gate_is_off(
-        self, refresh_provider, monkeypatch
-    ):
+    async def test_refresh_unaffected_when_gate_is_off(self, refresh_provider, monkeypatch):
         monkeypatch.setattr(
             "navigator_auth.backends.oauth2.backend.OAUTH_ACCESS_GATE_ENABLED",
             False,
@@ -787,6 +753,7 @@ class TestRefreshGrantIsGated:
 # ---------------------------------------------------------------------------
 # Rate-limit source identity
 # ---------------------------------------------------------------------------
+
 
 class TestRateLimitSourceIsNotSpoofable:
     """Regression: X-Forwarded-For was trusted unconditionally.
@@ -805,12 +772,7 @@ class TestRateLimitSourceIsNotSpoofable:
 
     def test_untrusted_peer_cannot_spoof_its_identity(self, provider):
         provider._trusted_proxies = set()
-        identities = {
-            provider._client_source_ip(
-                self._request("203.0.113.5", f"9.9.9.{i}")
-            )
-            for i in range(50)
-        }
+        identities = {provider._client_source_ip(self._request("203.0.113.5", f"9.9.9.{i}")) for i in range(50)}
         # All 50 spoofing attempts collapse to the one real peer.
         assert identities == {"203.0.113.5"}
 
@@ -818,9 +780,7 @@ class TestRateLimitSourceIsNotSpoofable:
         from navigator_auth.authorizations._client_ip import parse_proxies
 
         provider._trusted_proxies = parse_proxies(["10.0.0.1"])
-        assert provider._client_source_ip(
-            self._request("10.0.0.1", "198.51.100.7")
-        ) == "198.51.100.7"
+        assert provider._client_source_ip(self._request("10.0.0.1", "198.51.100.7")) == "198.51.100.7"
 
     def test_left_side_injection_behind_a_trusted_proxy_is_ignored(self, provider):
         """The proxy appends what it observed on the RIGHT; the left is untrusted."""
@@ -828,15 +788,10 @@ class TestRateLimitSourceIsNotSpoofable:
 
         provider._trusted_proxies = parse_proxies(["10.0.0.1"])
         identities = {
-            provider._client_source_ip(
-                self._request("10.0.0.1", f"{i}.9.9.9, 198.51.100.7")
-            )
-            for i in range(50)
+            provider._client_source_ip(self._request("10.0.0.1", f"{i}.9.9.9, 198.51.100.7")) for i in range(50)
         }
         assert identities == {"198.51.100.7"}
 
     def test_falls_back_to_the_peer_when_no_headers(self, provider):
         provider._trusted_proxies = set()
-        assert provider._client_source_ip(
-            self._request("203.0.113.9")
-        ) == "203.0.113.9"
+        assert provider._client_source_ip(self._request("203.0.113.9")) == "203.0.113.9"
