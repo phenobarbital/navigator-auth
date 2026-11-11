@@ -12,6 +12,7 @@ here: the uniform step-1 response (no account enumeration, D9), latency
 padding, and keeping the raw token out of every HTTP response and log
 line.
 """
+
 import asyncio
 import importlib
 import logging
@@ -51,20 +52,19 @@ logger = logging.getLogger("navigator.recovery")
 # rather than "step 1, request" when a POST lands on post(). Route names,
 # not path strings, so the dispatch doesn't need to know the literal path
 # of every alias.
-_CONFIRM_ROUTE_NAMES = frozenset({
-    "api_password_recovery_confirm",
-    "api_reset_password",
-})
+_CONFIRM_ROUTE_NAMES = frozenset(
+    {
+        "api_password_recovery_confirm",
+        "api_reset_password",
+    }
+)
 
 # Minimum wall-clock time step 1 takes to respond, regardless of whether the
 # address is known. A real lookup hits Postgres; a miss may not — without
 # this floor the latency delta alone reveals account existence (D9).
 _STEP1_LATENCY_FLOOR = 0.25  # seconds
 
-_GENERIC_STEP1_BODY = {
-    "message": "If that email address is registered, recovery instructions "
-    "have been sent."
-}
+_GENERIC_STEP1_BODY = {"message": "If that email address is registered, recovery instructions " "have been sent."}
 
 
 async def _find_user_by_email(request, email: str) -> Optional[User]:
@@ -139,9 +139,7 @@ class PasswordRecoveryHandler(BaseView):
     def _ensure_resources(cls) -> None:
         if cls._pool is not None:
             return
-        cls._pool = aioredis.ConnectionPool.from_url(
-            REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
-        )
+        cls._pool = aioredis.ConnectionPool.from_url(REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
         cls._store = RecoveryTokenStore(cls._pool, secret=AUTH_RECOVERY_SECRET)
         cls._policy = PasswordPolicy(
             min_length=AUTH_RECOVERY_PWD_MIN_LENGTH,
@@ -188,9 +186,7 @@ class PasswordRecoveryHandler(BaseView):
                 # distinct 429 would itself tell an attacker the address is
                 # being tracked (D9 outweighs the RFC-flavoured 429 hint in
                 # the spec's Component Diagram; see Completion Note).
-                logger.warning(
-                    "PasswordRecovery: rate limit exceeded for step1 request"
-                )
+                logger.warning("PasswordRecovery: rate limit exceeded for step1 request")
         # else: no email in the body -> treated exactly like "not found",
         # no DB/Redis work, so its latency profile matches a real miss.
 
@@ -284,19 +280,13 @@ class PasswordRecoveryHandler(BaseView):
             try:
                 user = await User.get(user_id=confirmation.user_id)
             except NoDataFound:
-                return self.error(
-                    reason="Invalid or expired confirmation token", status=400
-                )
+                return self.error(reason="Invalid or expired confirmation token", status=400)
 
             current_hash = getattr(user, "password", None)
             violations = self._policy.validate(password, current_hash=current_hash)
             if violations:
                 return self.json_response(
-                    response={
-                        "violations": [
-                            {"rule": v.rule, "message": v.message} for v in violations
-                        ]
-                    },
+                    response={"violations": [{"rule": v.rule, "message": v.message} for v in violations]},
                     status=422,
                 )
 
@@ -304,9 +294,7 @@ class PasswordRecoveryHandler(BaseView):
             # with a concurrent step-3 call, the second one lands here.
             consumed = await self._store.consume_confirmation(token)
             if consumed is None:
-                return self.error(
-                    reason="Invalid or expired confirmation token", status=400
-                )
+                return self.error(reason="Invalid or expired confirmation token", status=400)
 
             async with security_transition(
                 self.request.app, user.user_id, "recovery_completion", actor_user_id=user.user_id
@@ -323,7 +311,8 @@ class PasswordRecoveryHandler(BaseView):
         revoked = await self._revoker.revoke_user(self.request, user)
         logger.info(
             "PasswordRecovery: revoked %d session/jti record(s) for user_id=%s",
-            revoked, user.user_id,
+            revoked,
+            user.user_id,
         )
 
         # D15 — no auto-login: no token/refresh_token in the response.
@@ -344,16 +333,12 @@ class PasswordRecoveryHandler(BaseView):
 
     def _build_url(self, token: str) -> str:
         if not AUTH_RECOVERY_URL_TEMPLATE:
-            logger.error(
-                "PasswordRecovery: AUTH_RECOVERY_URL_TEMPLATE is not configured"
-            )
+            logger.error("PasswordRecovery: AUTH_RECOVERY_URL_TEMPLATE is not configured")
             return ""
         try:
             return AUTH_RECOVERY_URL_TEMPLATE.format(token=token)
         except (KeyError, IndexError, ValueError) as ex:
-            logger.error(
-                "PasswordRecovery: invalid AUTH_RECOVERY_URL_TEMPLATE: %s", ex
-            )
+            logger.error("PasswordRecovery: invalid AUTH_RECOVERY_URL_TEMPLATE: %s", ex)
             return ""
 
     def _recovery_expiry(self, issued_at: float) -> datetime:
@@ -368,10 +353,7 @@ class PasswordRecoveryHandler(BaseView):
         """Hand off to AUTH_RECOVERY_CALLBACK. Never raises, never logs the
         raw token — only the NotificationPayload's own (redacting) repr."""
         if not AUTH_RECOVERY_CALLBACK:
-            logger.warning(
-                "PasswordRecovery: no AUTH_RECOVERY_CALLBACK configured; "
-                "dropping notification"
-            )
+            logger.warning("PasswordRecovery: no AUTH_RECOVERY_CALLBACK configured; " "dropping notification")
             return
         try:
             pkg, name = AUTH_RECOVERY_CALLBACK.rsplit(".", 1)

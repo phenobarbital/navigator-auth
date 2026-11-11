@@ -11,6 +11,7 @@ Errors:
       but its ciphertext fails integrity checks (tampered, moved, unknown key
       version, legacy format).
 """
+
 import logging
 from typing import Any
 
@@ -64,15 +65,11 @@ class VaultView(web.View, CorsViewMixin):
             _json_error(503, VAULT_UNAVAILABLE)
 
         try:
-            vault = await get_session_vault(
-                self.request, session, user_id=user_id
-            )
+            vault = await get_session_vault(self.request, session, user_id=user_id)
             if vault:
                 return vault
         except Exception:
-            logger.exception(
-                "Failed to load vault dynamically"
-            )
+            logger.exception("Failed to load vault dynamically")
 
         _json_error(503, VAULT_UNAVAILABLE)
 
@@ -176,7 +173,5 @@ class VaultView(web.View, CorsViewMixin):
             await vault.delete(key)
             return JSONResponse({"message": f"Secret '{key}' deleted successfully.", "key": key}, status=200)
         except Exception:
-            logger.exception(
-                "Error deleting vault secret"
-            )
+            logger.exception("Error deleting vault secret")
             _json_error(500, "Error deleting vault secret")
