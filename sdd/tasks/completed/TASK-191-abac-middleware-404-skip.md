@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-109 — PBAC example policy issues
 **Spec**: `sdd/specs/policy-issues.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -416,3 +416,7 @@ The complete test file is the Delegation Contract block `impl-test-404` above.
 **Notes**: What was implemented, any deviations from scope, issues encountered.
 
 **Deviations from spec**: none | describe if any
+
+## Completion Note
+
+Merged via parrot-sdd-coder seat. Merge-tier sweep: 4 order-dependent failures in tests/test_yaml_storage_double_load.py (asyncio.get_event_loop; passes 12/12 in isolation) — not caused by this task.

@@ -45,7 +45,7 @@
       "feature_id": "FEAT-109",
       "feature": "policy-issues",
       "spec": "sdd/specs/policy-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
@@ -53,8 +53,9 @@
       "parallelism_notes": "Root of the PBAC fix: no dependencies; sole owner of navigator_auth/abac/policies/abstract.py, navigator_auth/abac/policies/adapter.py and tests/test_policy_adapter_from_policy.py, so it runs alongside TASK-191 and TASK-192.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:12:15+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-189-policy-adapter-from-policy.md"
+      "completed_at": "2026-11-11T16:18:05+00:00",
+      "file": "sdd/tasks/completed/TASK-189-policy-adapter-from-policy.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-190",
@@ -83,7 +84,7 @@
       "feature_id": "FEAT-109",
       "feature": "policy-issues",
       "spec": "sdd/specs/policy-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [],
@@ -91,8 +92,9 @@
       "parallelism_notes": "Independent log-noise fix: touches only navigator_auth/abac/middleware.py and creates tests/test_abac_middleware_404.py; no symbol from any other FEAT-109 task is used.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:12:15+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-191-abac-middleware-404-skip.md"
+      "completed_at": "2026-11-11T16:18:05+00:00",
+      "file": "sdd/tasks/completed/TASK-191-abac-middleware-404-skip.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-192",
@@ -101,7 +103,7 @@
       "feature_id": "FEAT-109",
       "feature": "policy-issues",
       "spec": "sdd/specs/policy-issues.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [],
@@ -109,8 +111,9 @@
       "parallelism_notes": "Independent startup check: creates navigator_auth/libs/hmac_keys.py and tests/test_hmac_key_strength.py, edits navigator_auth/auth.py and docs/settings.rst, none of which another FEAT-109 task touches before TASK-194.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:12:15+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-192-hmac-key-length-warning.md"
+      "completed_at": "2026-11-11T16:18:06+00:00",
+      "file": "sdd/tasks/completed/TASK-192-hmac-key-length-warning.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-193",
