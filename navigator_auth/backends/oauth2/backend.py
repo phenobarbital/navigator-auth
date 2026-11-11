@@ -2675,13 +2675,18 @@ class Oauth2Provider(BaseAuthBackend):
         if payload.get("amr"):
             claims["amr"] = list(payload["amr"])
 
+        def _set(name: str, value: Any) -> None:
+            # FEAT-108 G7: never answer an empty-string claim — omit what we cannot supply.
+            if value not in (None, ""):
+                claims[name] = str(value)
+
         # Scope-gated claims.
         if "profile" in scopes:
-            claims["username"] = str(_claim("username"))
-            claims["given_name"] = str(_claim("given_name") or _claim("first_name"))
-            claims["family_name"] = str(_claim("family_name") or _claim("last_name"))
+            _set("username", _claim("username"))
+            _set("given_name", _claim("given_name") or _claim("first_name"))
+            _set("family_name", _claim("family_name") or _claim("last_name"))
         if "email" in scopes:
-            claims["email"] = str(_claim("email"))
+            _set("email", _claim("email"))
 
         return JSONResponse(claims, status=200)
 

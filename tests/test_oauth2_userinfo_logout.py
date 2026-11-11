@@ -9,7 +9,6 @@ Covers:
 """
 
 
-
 # ---------------------------------------------------------------------------
 # Config constants
 # ---------------------------------------------------------------------------
@@ -56,12 +55,17 @@ class TestUserinfoClaims:
         scopes = scope.split()
         claims = {"sub": str(payload.get("user_id", ""))}
 
+        def _set(name: str) -> None:
+            value = payload.get(name)
+            if value not in (None, ""):
+                claims[name] = value
+
         if "profile" in scopes:
-            claims["username"] = payload.get("username", "")
-            claims["given_name"] = payload.get("given_name", "")
-            claims["family_name"] = payload.get("family_name", "")
+            _set("username")
+            _set("given_name")
+            _set("family_name")
         if "email" in scopes:
-            claims["email"] = payload.get("email", "")
+            _set("email")
 
         return claims
 
