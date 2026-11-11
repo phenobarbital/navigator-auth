@@ -12,7 +12,8 @@
   `password_reset`. `username` is no longer updatable; users are created with
   PUT; owners edit with PATCH; reads are gated; and `?_filter=` answers 400 on
   the ModelView routes. Membership or definition of protected groups requires
-  `users:grant_role` (`AUTH_PROTECTED_GROUPS`). Deploy the new
+  `users:grant_role` (`AUTH_PROTECTED_GROUPS`). A user can no longer delete
+  their own account through `DELETE /api/v1/users/{id}`. Deploy the new
   `abac/default_policies/auth_crud_admin_access.yaml` pack. Find affected
   callers through the guard's audited 403s. See `docs/auth_crud_authorization.rst`.
 

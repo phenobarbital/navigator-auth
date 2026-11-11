@@ -23,15 +23,6 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
     policy_name: str = "users_grant_role"
     superuser_actions = frozenset()
 
-    @property
-    def request(self):
-        """Return the request, including for lightweight unit-test instances."""
-        return self._request
-
-    @request.setter
-    def request(self, value):
-        self._request = value
-
     async def _not_allowed(self):
         raise web.HTTPMethodNotAllowed(self.request.method, ["POST"])
 
@@ -89,40 +80,59 @@ class UserRoleHandler(OwnerOrSuperuserGuard, ModelHandler):
         schema = User.Meta.schema
         table = User.Meta.name
         qualified = f'"{schema}"."{table}"'
-        select = f'SELECT {columns} FROM {qualified} WHERE "user_id" = $1'
+        # FOR UPDATE: the "actor holds the flag" check and the write must see the
+        # same rows, so a concurrent demotion cannot slip between them.
+        select = f'SELECT {columns} FROM {qualified} WHERE "user_id" = $1 FOR UPDATE'
         db = self.request.app["authdb"]
         async with await db.acquire() as conn:
-            actor = await conn.fetch_one(select, actor_id)
-            target = await conn.fetch_one(select, target_id)
-            if not target:
-                await self.audit_decision(_ACTION, False, target_id, "target not found")
-                self.error(response={"error": "Not Found"}, status=404)
-            actor_role = actor.get("user_role") if actor else None
-            if isinstance(actor_role, UserType):
-                actor_role = actor_role.value
-            target_role = target.get("user_role") or 0
-            if isinstance(target_role, UserType):
-                target_role = target_role.value
-            for column in payload:
-                held = (
-                    actor_is_superuser
-                    if column == "is_superuser"
-                    else (
-                        bool(actor.get("is_staff"))
-                        if column == "is_staff"
-                        else actor_role is not None and actor_role >= max(target_role, payload[column])
-                    )
+            await conn.transaction()
+            try:
+                changes, updated = await self._change_roles(
+                    conn, select, qualified, payload, actor_id, actor_is_superuser, target_id
                 )
-                if not held:
-                    await self.audit_decision(_ACTION, False, target_id, f"{column}: actor does not hold it")
-                    self._refuse()
-            assignments = ", ".join(f'"{column}" = ${index}' for index, column in enumerate(payload, 2))
-            returning = ", ".join(f'"{column}"' for column in ("user_id",) + _ROLE_COLUMNS)
-            sql = f'UPDATE {qualified} SET {assignments} WHERE "user_id" = $1 RETURNING {returning}'
-            updated = await conn.fetch_one(sql, target_id, *payload.values())
-            if not updated:
-                await self.audit_decision(_ACTION, False, target_id, "write failed")
-                self.error(reason="Role update failed", status=500)
-            changes = " ".join(f"{column}: {target.get(column)} -> {updated.get(column)}" for column in payload)
+                await conn.commit()
+            except BaseException:
+                await conn.rollback()
+                raise
         await self.audit_decision(_ACTION, True, target_id, f"actor={actor_id} target={target_id} {changes}")
         return self.json_response(dict(updated), status=200)
+
+    async def _change_roles(self, conn, select, qualified, payload, actor_id, actor_is_superuser, target_id):
+        """Run the checks and the UPDATE inside the caller's transaction.
+
+        Rows are locked in id order so two concurrent grants cannot deadlock.
+        Every refusal raises, which makes the caller roll back.
+        """
+        rows = {uid: await conn.fetch_one(select, uid) for uid in sorted({actor_id, target_id})}
+        actor, target = rows.get(actor_id), rows.get(target_id)
+        if not target:
+            await self.audit_decision(_ACTION, False, target_id, "target not found")
+            self.error(response={"error": "Not Found"}, status=404)
+        if not actor:
+            await self.audit_decision(_ACTION, False, target_id, f"actor {actor_id} row not found")
+            self._refuse()
+        actor_role = actor.get("user_role")
+        if isinstance(actor_role, UserType):
+            actor_role = actor_role.value
+        target_role = target.get("user_role") or 0
+        if isinstance(target_role, UserType):
+            target_role = target_role.value
+        for column in payload:
+            if column == "is_superuser":
+                held = actor_is_superuser
+            elif column == "is_staff":
+                held = bool(actor.get("is_staff"))
+            else:
+                held = actor_role is not None and actor_role >= max(target_role, payload[column])
+            if not held:
+                await self.audit_decision(_ACTION, False, target_id, f"{column}: actor does not hold it")
+                self._refuse()
+        assignments = ", ".join(f'"{column}" = ${index}' for index, column in enumerate(payload, 2))
+        returning = ", ".join(f'"{column}"' for column in ("user_id",) + _ROLE_COLUMNS)
+        sql = f'UPDATE {qualified} SET {assignments} WHERE "user_id" = $1 RETURNING {returning}'
+        updated = await conn.fetch_one(sql, target_id, *payload.values())
+        if not updated:
+            await self.audit_decision(_ACTION, False, target_id, "write failed")
+            self.error(reason="Role update failed", status=500)
+        changes = " ".join(f"{column}: {target.get(column)} -> {updated.get(column)}" for column in payload)
+        return changes, updated

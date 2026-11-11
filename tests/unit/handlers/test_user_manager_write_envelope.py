@@ -301,3 +301,28 @@ class TestReads:
         handler = _handler(path="/api/v1/users", query=f"?user_id={OTHER_ID}")
         with _patch_sessions(_session()), pytest.raises(web.HTTPForbidden):
             await handler._pre_get()
+
+
+class TestSelfDelete:
+    """issue:36eea6f94200 — no CRUD path deletes the acting user's own account."""
+
+    @pytest.mark.asyncio
+    async def test_cannot_delete_own_account(self):
+        handler = _handler(path=f"/api/v1/users/{OWNER_ID}")
+        handler.audit_decision = AsyncMock()
+        with (
+            _patch_sessions(_session(OWNER_ID)),
+            patch.object(GuardedModelViewHooks, "_del_primary_data", new=AsyncMock(return_value=OWNER_ID)),
+            pytest.raises(web.HTTPForbidden),
+        ):
+            await handler._del_primary_data({})
+        handler.audit_decision.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_can_still_delete_another_account(self):
+        handler = _handler(path=f"/api/v1/users/{OTHER_ID}")
+        with (
+            _patch_sessions(_session(OWNER_ID)),
+            patch.object(GuardedModelViewHooks, "_del_primary_data", new=AsyncMock(return_value=OTHER_ID)),
+        ):
+            assert await handler._del_primary_data({}) == OTHER_ID

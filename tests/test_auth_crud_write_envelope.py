@@ -559,6 +559,16 @@ class TestLegitimateAdministration:
         }
 
         class RoleConn(FakeConn):
+            async def transaction(self):
+                self.calls.append(("transaction", "", ()))
+                return self
+
+            async def commit(self):
+                self.calls.append(("commit", "", ()))
+
+            async def rollback(self):
+                self.calls.append(("rollback", "", ()))
+
             async def fetch_one(self, sql, *args):
                 self.calls.append(("fetch_one", sql, args))
                 if sql.lstrip().startswith("UPDATE"):
@@ -597,6 +607,9 @@ class TestLegitimateAdministration:
         assert allowed.status == 200
         assert [c for c in conn.calls if c[1].lstrip().startswith("UPDATE")]
         assert pdp_with_pack._auditlog.log.await_count >= 1
+        # Selects lock the rows and the write commits (issue:952f6c12269b).
+        assert all("FOR UPDATE" in c[1] for c in conn.calls if c[0] == "fetch_one" and c[1].startswith("SELECT"))
+        assert [c[0] for c in conn.calls if c[0] in ("commit", "rollback")] == ["commit"]
 
 
 class TestPasswordPathsUnchanged:
@@ -651,9 +664,8 @@ class TestPasswordPathsUnchanged:
             pytest.raises(web.HTTPException) as caught,
         ):
             await handler.password_change(request)
-        # Quirk, pinned as-is (spec §1 Non-Goals): the 403 raised inside the
-        # try block is swallowed by ``except Exception`` and re-reported as 500.
-        assert caught.value.status == 500
+        # A wrong current password is a 403 (issue:f6cd44f3f6d2), not a 500.
+        assert caught.value.status == 403
         update.assert_not_awaited()
 
     @pytest.mark.asyncio

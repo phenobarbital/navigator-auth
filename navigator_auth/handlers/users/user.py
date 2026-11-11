@@ -50,11 +50,25 @@ class UserManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandler):
         """POST is an admin upsert (approved for create AND update): subset writable_by_admin."""
         return ["first_name", "last_name", "display_name"]
 
+    async def _del_primary_data(self, args: dict):
+        """Authorize the DELETE, then refuse deleting the acting user's own account.
+
+        Account deletion through generic CRUD is destructive and can lock out
+        the last administrator, so nobody (owner or admin) may remove their own
+        row here (issue:36eea6f94200).
+        """
+        objid = await super()._del_primary_data(args)
+        user_id, _ = await self.acting_user()
+        if str(objid) == str(user_id):
+            await self.audit_decision("user:delete", False, user_id, "self-delete through CRUD is not allowed")
+            self._refuse()
+        return objid
+
     async def _set_created_by(self, value, column, **kwargs):
         return await self.get_userid(session=self._session)
 
     async def _set_display_name(self, value, column, **kwargs):
-        data = kwargs.get("data")
+        data = kwargs.get('data')
         if not value:
             try:
                 return f"{data['first_name']} {data['last_name']}"

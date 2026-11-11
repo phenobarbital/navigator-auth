@@ -162,6 +162,10 @@ class UserSession(BaseHandler):
                     return self.error(
                         reason="Forbidden: Current Password doesn't match.", status=403
                     )
+        except web.HTTPException:
+            # self.error() raises: let the 403 above reach the client instead
+            # of being re-reported as a 500 by the generic handler below.
+            raise
         except ValidationError as ex:
             self.error(reason="User info has errors", exception=ex.payload, status=412)
         except Exception as err:  # pylint: disable=W0703
