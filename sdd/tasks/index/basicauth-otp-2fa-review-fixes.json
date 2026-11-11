@@ -190,7 +190,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [
@@ -201,8 +201,9 @@
       "parallelism_notes": "TASK-172: calls PasskeyStore.save_credential/delete_credential(conn=); TASK-177: security_transition yields the connection and raises MfaUnavailable, and both modify tests/test_mfa_security_transitions.py",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-178-passkey-transition-call-sites.md"
+      "completed_at": "2026-11-11T17:36:14+00:00",
+      "file": "sdd/tasks/completed/TASK-178-passkey-transition-call-sites.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-179",
@@ -211,7 +212,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -223,8 +224,9 @@
       "parallelism_notes": "TASK-175: increment_generation (security_state/store.py); TASK-176: PasswordRecoveryHandler.session_revoker() and strict revoke_user; TASK-177: TransitionAborted/MfaUnavailable/yielded connection and extends tests/test_mfa_review_fixes_transitions.py",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-179-password-change-reset-transitions.md"
+      "completed_at": "2026-11-11T17:36:14+00:00",
+      "file": "sdd/tasks/completed/TASK-179-password-change-reset-transitions.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-180",
@@ -233,7 +235,7 @@
       "feature_id": "FEAT-106",
       "feature": "basicauth-otp-2fa-review-fixes",
       "spec": "sdd/specs/basicauth-otp-2fa-review-fixes.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -246,8 +248,9 @@
       "parallelism_notes": "TASK-171: advisory_user_lock for confirmation rotation; TASK-175: record_confirmation/increment_generation; TASK-176: both modify handlers/recovery/handler.py and tests/test_password_recovery.py, uses strict revoke_user; TASK-177: TransitionAborted/MfaUnavailable",
       "assigned_to": null,
       "started_at": "2026-11-11T16:10:29+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-180-recovery-transactional-completion.md"
+      "completed_at": "2026-11-11T17:36:14+00:00",
+      "file": "sdd/tasks/completed/TASK-180-recovery-transactional-completion.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-181",
