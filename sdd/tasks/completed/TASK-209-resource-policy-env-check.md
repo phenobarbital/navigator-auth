@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-111 — Policy adapter fixes — ObjectPolicy objects= and ResourcePolicy environment
 **Spec**: `sdd/specs/policies-adapter-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-208
@@ -274,4 +274,13 @@ def test_from_policy_resource_policy_environment_rejected(environment):
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: Claude Code (/sdd-fix, actor agent:sdd-fix:64bffa2f)
+**Date**: 2026-11-11
+**Commits**: 823e036
+**Notes**: Value rules moved verbatim from `_normalize_environment` into `_environment_value_error`
+(+ `is_manager` must be bool); `NATIVE_ENV_KEYS` adds `is_manager`; `_resource_policy_error` guards the
+`ResourcePolicy` branch of `from_policy` (wrapped so it never raises). Existing tests passed unchanged after
+the refactor (52/52) before new tests were added. Validation: the 6 contract suites pass (146 tests); black
+and flake8 clean.
+
+**Deviations from spec**: none.

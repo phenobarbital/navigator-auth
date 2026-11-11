@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-111 — Policy adapter fixes — ObjectPolicy objects= and ResourcePolicy environment
 **Spec**: `sdd/specs/policies-adapter-fixes.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -294,4 +294,16 @@ def test_from_policy_objects_rejected(policy_class, kwargs, effect):
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: Claude Code (/sdd-fix, actor agent:sdd-fix:64bffa2f)
+**Date**: 2026-11-11
+**Commits**: b181916 (guard + tests + CHANGELOG), 6058f0f (review fix)
+**Notes**: Added `_object_resources` (shared with `_adapt_object`, storage output unchanged) and
+`_resolve_objects`; `from_policy` now passes resolved objects as the classic `resource` list with
+`objects: None`. All silent cases from spec §1 are rejected with a reason naming the object.
+Validation: the 6 contract suites pass (146 tests); black and flake8 clean on changed files.
+
+**Deviations from spec**: rule 6 is stricter than written. The adversarial codex review (CONFIRM) showed
+`type="!deployment"` turned every object into an enforcing DENY, and the follow-up probe showed `type="urn"`
+re-parsed `urn:<name>` as the wildcard `<name>:*`. `type=` must now match `[A-Za-z_][A-Za-z0-9_.-]*` and
+not be `urn`. Codex's 3 `test_yaml_storage_double_load.py` failures were hostname resolution in its sandbox
+(`socket.gethostbyname`), not a finding; they pass locally.
