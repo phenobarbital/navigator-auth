@@ -255,7 +255,9 @@ AUTH_PROBE_MAX_HOSTS = config.getint("AUTH_PROBE_MAX_HOSTS", fallback=10000)
 # Client IPs or CIDR ranges (comma-separated) that are never counted, e.g. the
 # subnets of an AWS load balancer whose health checks hit the server all the
 # time. Matched against the resolved client IP, not the direct peer.
-AUTH_PROBE_IGNORE_IPS = [e.strip() for e in config.get("AUTH_PROBE_IGNORE_IPS", fallback="").split(",") if e.strip()]
+AUTH_PROBE_IGNORE_IPS = [
+    e.strip() for e in config.get("AUTH_PROBE_IGNORE_IPS", fallback="").split(",") if e.strip()
+]
 
 ### Protected system paths (protected_paths_middleware):
 # Hidden files (/.env, /.git/...), the env/, etc/ and logs/ top-level
@@ -263,7 +265,9 @@ AUTH_PROBE_IGNORE_IPS = [e.strip() for e in config.get("AUTH_PROBE_IGNORE_IPS", 
 # 404 before authentication or any ABAC/PBAC policy runs. That built-in list
 # cannot be turned off; AUTH_DENY_PATHS only ADDS fnmatch patterns
 # (comma-separated, case-insensitive), e.g. "/private/*,*.yaml".
-AUTH_DENY_PATHS = [e.strip().lower() for e in config.get("AUTH_DENY_PATHS", fallback="").split(",") if e.strip()]
+AUTH_DENY_PATHS = [
+    e.strip().lower() for e in config.get("AUTH_DENY_PATHS", fallback="").split(",") if e.strip()
+]
 
 ### ISO-3166 country codes allowed when USERAGENT_SECURITY is on:
 USERAGENT_ALLOWED_COUNTRIES = [

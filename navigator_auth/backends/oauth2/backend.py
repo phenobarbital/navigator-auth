@@ -1657,16 +1657,15 @@ class Oauth2Provider(BaseAuthBackend):
             self._redirect_to_login(request, data)
         except IdentityStoreUnavailable:
             return self._owner_store_unavailable()
-        if gate_user is not None:
-            denied = await self._enforce_access_gate(
-                request,
-                client,
-                gate_user.user_id,
-                redirect_uri,
-                data.get("state", ""),
-            )
-            if denied is not None:
-                return denied
+        denied = await self._enforce_access_gate(
+            request,
+            client,
+            gate_user.user_id,
+            redirect_uri,
+            data.get("state", ""),
+        )
+        if denied is not None:
+            return denied
 
         # TASK-027: Consent-skip — if unrevoked grant exists for these scopes.
         prompt = data.get("prompt", "")
@@ -2073,6 +2072,10 @@ class Oauth2Provider(BaseAuthBackend):
             return await self._parser.view(filename="oauth/login.html", params=data)
         elif request.method == "POST":
             username, password, data = await self.get_login_form(request)
+            # FEAT-108: refuse a malformed device code before any credential check.
+            device_user_code = data.get("device_user_code")
+            if device_user_code and not _DEVICE_USER_CODE_RE.fullmatch(str(device_user_code)):
+                raise web.HTTPBadRequest(reason="Invalid device code.")
             try:
                 user = await self._idp.authenticate_credentials(login=username, password=password)
             except (FailedAuth, UserNotFound) as exc:
@@ -2237,9 +2240,13 @@ class Oauth2Provider(BaseAuthBackend):
                     return self._error_response("invalid_grant", "Authorization code is no longer valid.")
                 # FEAT-108: resolve the owner before consuming the code.  A
                 # transient identity-store outage therefore leaves it retryable.
+                # ``claim_code``/``release_claim`` are optional storage
+                # capabilities: a storage without them (e.g. the in-memory one)
+                # skips the claim and relies on ``mark_used`` alone.
                 claim = getattr(self.code_storage, "claim_code", None)
                 if claim is not None and not await claim(code):
                     return self._error_response("invalid_grant", "Authorization code already used.")
+                release = getattr(self.code_storage, "release_claim", None)
                 try:
                     session_claims = await self._token_session_claims(request, user_id, conn=conn)
                 except (UserNotFound, FailedAuth):
@@ -2247,10 +2254,15 @@ class Oauth2Provider(BaseAuthBackend):
                     await self.code_storage.delete_code(code)
                     return self._error_response("invalid_grant", "The resource owner of this grant cannot be resolved.")
                 except IdentityStoreUnavailable:
-                    release = getattr(self.code_storage, "release_claim", None)
                     if release is not None:
                         await release(code)
                     return self._owner_store_unavailable()
+                except BaseException:
+                    # Any other failure before the code is consumed must not
+                    # leave the claim held (it would block a retry for its TTL).
+                    if release is not None:
+                        await release(code)
+                    raise
                 # B5: mark code as used + delete from storage.
                 if not await self.code_storage.mark_used(code):
                     # A concurrent exchange already consumed this code (RFC 6749 §4.1.2: single use).
