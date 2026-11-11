@@ -29,10 +29,10 @@ from navigator_auth.backends.oauth2.models import (
 from navigator_auth.backends.oauth2.code_backend import MemoryDeviceCodeStorage
 from navigator_auth.backends.oauth2.pkce import generate_challenge
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _public_client(client_id: str = "device_client") -> OAuthClient:
     return OAuthClient(
@@ -176,12 +176,11 @@ def _make_provider(
 
     # Mock IDP: create_token returns (access_token_str, user_id, exp_ts, "Bearer")
     import time
+
     provider._idp = MagicMock()
     provider._idp.user_from_id = AsyncMock(return_value=_owner(42))
     provider._create_user_session = AsyncMock(return_value=None)
-    provider._idp.create_token = MagicMock(
-        return_value=("mock_access_token", 42, time.time() + 3600, "Bearer")
-    )
+    provider._idp.create_token = MagicMock(return_value=("mock_access_token", 42, time.time() + 3600, "Bearer"))
 
     return provider
 
@@ -199,6 +198,7 @@ def _make_post_request(form_data: dict) -> MagicMock:
 # test_device_poll_slow_down
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_device_poll_slow_down():
     """Polling faster than interval → slow_down + server-side interval bump."""
@@ -213,11 +213,13 @@ async def test_device_poll_slow_down():
     await store.save(dc)
 
     provider = _make_provider(client, device_store=store)
-    request = _make_post_request({
-        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-        "device_code": dc.device_code,
-        "client_id": client.client_id,
-    })
+    request = _make_post_request(
+        {
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            "device_code": dc.device_code,
+            "client_id": client.client_id,
+        }
+    )
     resp = await provider._handle_device_code(
         {
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
@@ -240,6 +242,7 @@ async def test_device_poll_slow_down():
 # ---------------------------------------------------------------------------
 # test_device_poll_pending
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_device_poll_pending():
@@ -271,6 +274,7 @@ async def test_device_poll_pending():
 # test_device_poll_denied
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_device_poll_denied():
     """DENIED state → access_denied."""
@@ -297,6 +301,7 @@ async def test_device_poll_denied():
 # test_device_poll_expired
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_device_poll_expired():
     """Expired device code → expired_token."""
@@ -322,6 +327,7 @@ async def test_device_poll_expired():
 # ---------------------------------------------------------------------------
 # test_device_poll_success_single_use
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_device_poll_success_single_use():
@@ -402,6 +408,7 @@ async def test_device_poll_success_single_use():
 # test_device_no_offline_access_no_refresh
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_device_no_offline_access_no_refresh():
     """Approved without offline_access → no refresh_token in response."""
@@ -451,6 +458,7 @@ async def test_device_no_offline_access_no_refresh():
 # test_device_pkce_verify_fails
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_device_pkce_verify_fails():
     """Bad code_verifier → invalid_grant."""
@@ -487,6 +495,7 @@ async def test_device_pkce_verify_fails():
 # test_device_poll_missing_device_code
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_device_poll_missing_device_code():
     """Missing device_code parameter → 400 invalid_request."""
@@ -508,6 +517,7 @@ async def test_device_poll_missing_device_code():
 # ---------------------------------------------------------------------------
 # test_device_poll_unknown_device_code
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_device_poll_unknown_device_code():

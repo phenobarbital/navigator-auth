@@ -32,6 +32,7 @@ TEMPLATES = Path(__file__).resolve().parent.parent / "templates" / "oauth"
 # 1. decode_token and the `aud` claim
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def idp():
     return IdentityProvider()
@@ -57,9 +58,7 @@ class TestDecodeTokenAudience:
 
     def test_audience_is_verified_when_requested(self, idp):
         """Opt-in verification still rejects a token minted for another audience."""
-        token, _, _, _ = idp.create_token(
-            {"user_id": 7}, expiration=300, audience="app"
-        )
+        token, _, _, _ = idp.create_token({"user_id": 7}, expiration=300, audience="app")
         assert idp.decode_token(token, audience="app")[1]["user_id"] == 7
         with pytest.raises(Exception):
             idp.decode_token(token, audience="user")
@@ -68,6 +67,7 @@ class TestDecodeTokenAudience:
 # ---------------------------------------------------------------------------
 # 2. Access tokens are bound to a session
 # ---------------------------------------------------------------------------
+
 
 class DummyUser(dict):
     """Minimal stand-in for a navigator-auth User row."""
@@ -107,9 +107,7 @@ class TestTokenSessionBinding:
         storage = MagicMock()
         storage.new_session = AsyncMock(return_value=session)
 
-        provider._idp.user_from_id = AsyncMock(
-            return_value=DummyUser(user_id=11, username="demo")
-        )
+        provider._idp.user_from_id = AsyncMock(return_value=DummyUser(user_id=11, username="demo"))
         request = make_request(storage)
 
         claims = await provider._token_session_claims(request, 11)
@@ -142,6 +140,7 @@ class TestTokenSessionBinding:
 # 3. PKCE survives the interactive hops
 # ---------------------------------------------------------------------------
 
+
 class TestPkcePropagation:
     @pytest.mark.parametrize("template", ["login.html", "consent.html"])
     def test_template_forwards_the_code_challenge(self, template):
@@ -155,6 +154,7 @@ class TestPkcePropagation:
 # ---------------------------------------------------------------------------
 # 4. The grants API can identify the caller
 # ---------------------------------------------------------------------------
+
 
 class TestRequestUserId:
     def test_reads_the_token_claims(self, provider):

@@ -25,8 +25,7 @@ try:
     import redis.asyncio as redis
 except ImportError:
     raise ImportError(
-        "redis>=4.2.0 with asyncio support is required. "
-        "Install it with: pip install 'redis[asyncio]>=4.2'"
+        "redis>=4.2.0 with asyncio support is required. " "Install it with: pip install 'redis[asyncio]>=4.2'"
     )
 
 
@@ -41,6 +40,7 @@ def _now_utc() -> datetime:
 # ---------------------------------------------------------------------------
 # Authorization Code Storage (Redis)
 # ---------------------------------------------------------------------------
+
 
 class AuthorizationCodeStorage:
     """Redis-backed authorization code store.
@@ -118,6 +118,7 @@ class AuthorizationCodeStorage:
 # ---------------------------------------------------------------------------
 # Refresh Token Storage (Redis) — TASK-026 extended
 # ---------------------------------------------------------------------------
+
 
 class RefreshTokenStorage:
     """Redis-backed refresh token store.
@@ -253,6 +254,7 @@ class RefreshTokenStorage:
 # Grant Storage (durable consent records, TASK-027)
 # ---------------------------------------------------------------------------
 
+
 class GrantStorage:
     """Redis-backed durable consent grant store (TASK-027)."""
 
@@ -321,6 +323,7 @@ class GrantStorage:
 # Access Token Record Storage (jti revocation, TASK-027)
 # ---------------------------------------------------------------------------
 
+
 class AccessTokenStorage:
     """Redis-backed jti record store for access token revocation (TASK-027)."""
 
@@ -375,6 +378,7 @@ class AccessTokenStorage:
 # ---------------------------------------------------------------------------
 # Device Code Storage (FEAT-094 TASK-032)
 # ---------------------------------------------------------------------------
+
 
 class MemoryDeviceCodeStorage:
     """In-memory DeviceCodeStorage for tests and single-process deployments.
@@ -459,6 +463,7 @@ class RedisDeviceCodeStorage:
     async def get_by_device_code(self, device_code: str):
         """Retrieve an OauthDeviceCode by device_code."""
         from .models import OauthDeviceCode  # avoid circular import
+
         key = f"{self.prefix}{device_code}"
         data = await self.redis.get(key)
         if data:
@@ -502,6 +507,7 @@ class RedisDeviceCodeStorage:
 # ---------------------------------------------------------------------------
 # Factory helpers (backend.py uses these)
 # ---------------------------------------------------------------------------
+
 
 def get_refresh_token_storage(storage_type: str = "redis", dsn: str = None) -> RefreshTokenStorage:
     """Return an appropriate RefreshTokenStorage.
