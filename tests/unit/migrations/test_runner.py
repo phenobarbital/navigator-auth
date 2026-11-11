@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from asyncdb.interfaces.abstract import AbstractDriver
 
+from navigator_auth.conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE
 from navigator_auth.migrations import MigrationStatus, UpgradeReport, get_status as exported_get_status
 from navigator_auth.migrations import catalog
 from navigator_auth.migrations.runner import (
@@ -18,8 +19,8 @@ from navigator_auth.migrations.runner import (
     execute_checked,
     ledger_exists,
     quote_ident,
+    upgrade,
 )
-
 
 class AwaitableAcquire:
     """Awaitable pool-acquire result without async-context-manager methods."""
@@ -161,3 +162,178 @@ def test_migrations_package_exports_runner_models() -> None:
     assert exported_get_status is not None
     assert MigrationStatus is not None
     assert UpgradeReport is not None
+
+
+ROLE = "app"
+
+
+def _ready(fake_conn, *relations: str) -> None:
+    """Configure the fake for a valid role, satisfied privileges and base tables."""
+    fake_conn.relations = {"auth.users", "auth.user_identities", *relations}
+    fake_conn.respond("pg_roles", True)
+    fake_conn.respond("has_schema_privilege", True)
+    fake_conn.respond("has_table_privilege", True)
+    fake_conn.respond("has_sequence_privilege", True)
+    fake_conn.respond("pg_depend", [])
+
+
+def _sqls(fake_conn) -> list[str]:
+    return [sql for method, sql, _ in fake_conn.statements if method == "execute"]
+
+
+@pytest.mark.asyncio
+async def test_upgrade_applies_pending_in_order_and_records_ledger(tmp_catalog, fake_conn) -> None:
+    """Each file runs in a transaction and is recorded; three ledger rows."""
+    _ready(fake_conn)
+    report = await upgrade(fake_conn, runtime_role=ROLE)
+    assert sorted(r.file.filename for r in report.applied) == ["001_first.sql", "001_third.sql", "002_second.sql"]
+    vault = [r.file.filename for r in report.applied if r.file.migration_set == "vault"]
+    assert vault == ["001_first.sql", "002_second.sql"]
+    assert not report.failed
+    assert len(fake_conn.ledger) == 3
+    transactions = [s[1] for s in fake_conn.statements if s[0] == "transaction"]
+    assert transactions.count("BEGIN") == 3 and transactions.count("COMMIT") == 3
+    sqls = _sqls(fake_conn)
+    insert_positions = [i for i, q in enumerate(sqls) if "INSERT INTO" in q]
+    assert len(insert_positions) == 3
+    assert any("GRANT" in q for q in sqls[: insert_positions[0]])
+
+
+@pytest.mark.asyncio
+async def test_upgrade_continues_after_failure_and_reports_it(tmp_catalog, fake_conn) -> None:
+    """A failing file is reported, has no row, and later files still run."""
+    _ready(fake_conn)
+    (tmp_catalog / "vault" / "002_second.sql").write_text("SELECT 'BOOM';")
+    fake_conn.fail_on("BOOM", RuntimeError("boom"))
+    report = await upgrade(fake_conn, runtime_role=ROLE)
+    assert [r.file.filename for r in report.failed] == ["002_second.sql"]
+    assert ("vault", "002_second.sql") not in fake_conn.ledger
+    assert ("identity", "001_third.sql") in fake_conn.ledger
+    assert ("vault", "001_first.sql") in fake_conn.ledger
+
+
+@pytest.mark.asyncio
+async def test_upgrade_fail_fast_stops(tmp_catalog, fake_conn) -> None:
+    """fail_fast stops at the first failure."""
+    _ready(fake_conn)
+    (tmp_catalog / "vault" / "002_second.sql").write_text("SELECT 'BOOM';")
+    fake_conn.fail_on("BOOM", RuntimeError("boom"))
+    report = await upgrade(fake_conn, runtime_role=ROLE, fail_fast=True)
+    assert len(report.failed) == 1
+    assert ("identity", "001_third.sql") not in fake_conn.ledger
+    assert not any("'identity'" in q for q in _sqls(fake_conn))
+
+
+@pytest.mark.asyncio
+async def test_upgrade_skips_changed_unless_reapply(tmp_catalog, fake_conn) -> None:
+    """Changed files are skipped unless reapply_changed, which updates the row."""
+    _ready(fake_conn)
+    fake_conn.ledger_present = True
+    files = catalog.discover()
+    target = files[0]
+    key = (target.migration_set, target.filename)
+    fake_conn.ledger[key] = {
+        "migration_set": key[0],
+        "filename": key[1],
+        "checksum": "stale",
+        "applied_at": datetime.now(timezone.utc),
+    }
+    report = await upgrade(fake_conn, runtime_role=ROLE)
+    assert [s.file.filename for s in report.skipped_changed] == [target.filename]
+    assert fake_conn.ledger[key]["checksum"] == "stale"
+
+    report = await upgrade(fake_conn, runtime_role=ROLE, reapply_changed=True)
+    assert not report.skipped_changed
+    assert fake_conn.ledger[key]["checksum"] == target.checksum
+
+
+@pytest.mark.asyncio
+async def test_upgrade_takes_and_releases_advisory_lock(tmp_catalog, fake_conn) -> None:
+    """The lock is taken once and released on success and on run-level errors."""
+    _ready(fake_conn)
+    await upgrade(fake_conn, runtime_role=ROLE)
+    sqls = _sqls(fake_conn)
+    assert sum("pg_advisory_lock" in q for q in sqls) == 1
+    assert sum("pg_advisory_unlock" in q for q in sqls) == 1
+
+    broken = type(fake_conn)()
+    _ready(broken)
+    broken.schema_missing = True
+    with pytest.raises(MigrationError):
+        await upgrade(broken, runtime_role=ROLE)
+    sqls = _sqls(broken)
+    assert sum("pg_advisory_lock" in q for q in sqls) == 1
+    assert sum("pg_advisory_unlock" in q for q in sqls) == 1
+
+
+@pytest.mark.asyncio
+async def test_guarded_skip_stays_pending_and_retries(tmp_catalog, fake_conn) -> None:
+    """Identity 006 fails while uid exists, stays pending, and applies once it is gone."""
+    _ready(fake_conn)
+    (tmp_catalog / "identity" / "006_identity_drop_legacy_uid.sql").write_text("SELECT 6;")
+    uid_present = {"on": True}
+    fake_conn.respond("pg_attribute", lambda _s, _a: {"attnotnull": False} if uid_present["on"] else None)
+    report = await upgrade(fake_conn, runtime_role=ROLE)
+    assert [r.file.filename for r in report.failed] == ["006_identity_drop_legacy_uid.sql"]
+    assert ("identity", "006_identity_drop_legacy_uid.sql") not in fake_conn.ledger
+
+    uid_present["on"] = False
+    report = await upgrade(fake_conn, runtime_role=ROLE)
+    assert [r.file.filename for r in report.applied] == ["006_identity_drop_legacy_uid.sql"]
+    assert ("identity", "006_identity_drop_legacy_uid.sql") in fake_conn.ledger
+
+
+@pytest.mark.asyncio
+async def test_missing_prerequisites_and_oauth2_postconditions_fail(tmp_catalog, fake_conn) -> None:
+    """OAuth2 fails without base tables and without its postconditions; no rows are written."""
+    _ready(fake_conn)
+    (tmp_catalog / "oauth2").mkdir()
+    (tmp_catalog / "oauth2" / "001_oauth2_schema.sql").write_text("SELECT 'oauth';")
+    report = await upgrade(fake_conn, sets=["oauth2"], runtime_role=ROLE)
+    assert len(report.failed) == 1 and "missing base table" in report.failed[0].error
+    assert not fake_conn.ledger
+
+    fake_conn.relations |= {
+        f"{AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE}",
+        f"{AUTH_DB_SCHEMA}.clients",
+        f"{AUTH_DB_SCHEMA}.policies",
+    }
+    report = await upgrade(fake_conn, sets=["oauth2"], runtime_role=ROLE)
+    assert len(report.failed) == 1 and "client_access" in report.failed[0].error
+    assert not fake_conn.ledger
+
+
+@pytest.mark.asyncio
+async def test_runtime_grants_and_reconciliation(tmp_catalog, fake_conn) -> None:
+    """Grants precede the upsert, applied files are reconciled without SQL, failures are reported."""
+    _ready(fake_conn, "auth.user_vault_secrets")
+    await upgrade(fake_conn, sets=["vault"], runtime_role=ROLE)
+    assert len(fake_conn.ledger) == 2
+
+    fake_conn.statements.clear()
+    report = await upgrade(fake_conn, sets=["vault"], runtime_role=ROLE)
+    sqls = _sqls(fake_conn)
+    assert not report.applied and not report.access_errors
+    assert any("GRANT" in q for q in sqls)
+    assert not any(q.startswith("SELECT 1;") or q.startswith("SELECT 2;") for q in sqls)
+
+    fake_conn.fail_on("GRANT USAGE ON SCHEMA", RuntimeError("denied"))
+    report = await upgrade(fake_conn, sets=["vault"], runtime_role=ROLE)
+    assert report.access_errors and "denied" in report.access_errors[0]
+
+    other = type(fake_conn)()
+    _ready(other, "auth.user_vault_secrets")
+    other.fail_on("GRANT USAGE ON SCHEMA", RuntimeError("denied"))
+    report = await upgrade(other, sets=["vault"], runtime_role=ROLE)
+    assert len(report.failed) == 2
+    assert not other.ledger
+
+
+@pytest.mark.asyncio
+async def test_upgrade_rejects_invalid_runtime_role_before_writes(tmp_catalog, fake_conn) -> None:
+    """An absent role raises before the lock or any DDL."""
+    fake_conn.respond("pg_roles", False)
+    with pytest.raises(MigrationError):
+        await upgrade(fake_conn, runtime_role=ROLE)
+    assert not fake_conn.writes()
+    assert not any("advisory" in q for q in _sqls(fake_conn))
