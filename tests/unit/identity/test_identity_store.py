@@ -213,9 +213,20 @@ class TestDuplicateRowOrdering:
 class TestUpdateTokens:
     """issue:d73106586c38 — a refreshed id_token must reach the vault."""
 
+    IDENTITY_ID = "3c4265e1-d10a-4a72-8225-c894c96d31b4"
+
+    @staticmethod
+    def _store_and_conn(returned=None):
+        pool, conn = _make_pool()
+        conn.fetch_one = AsyncMock(
+            return_value=returned if returned is not None else {"identity_id": TestUpdateTokens.IDENTITY_ID}
+        )
+        return IdentityStore(pool, cipher=IdentityCipher(master_keys=MASTER_KEYS)), conn
+
     @staticmethod
     def _identity(store):
         identity = MagicMock()
+        identity.identity_id = TestUpdateTokens.IDENTITY_ID
         identity.user_id = 1
         identity.auth_provider = "github"
         identity.provider_user_id = "99"
@@ -227,7 +238,7 @@ class TestUpdateTokens:
 
     @pytest.mark.asyncio
     async def test_refreshed_id_token_is_resealed(self):
-        store = _store()
+        store, conn = self._store_and_conn()
         identity = self._identity(store)
         await store.update_tokens(
             identity,
@@ -241,17 +252,58 @@ class TestUpdateTokens:
         assert store._open(identity, "access_token") == "AT.new"
         assert store._open(identity, "refresh_token") == "RT.new"
         assert store._open(identity, "id_token") == "ID.new"
-        identity.update.assert_awaited_once()
+        conn.fetch_one.assert_awaited_once()
+        sql, *params = conn.fetch_one.await_args.args
+        assert "refresh_token = $" in sql and "id_token = $" in sql
+        assert identity.refresh_token in params and identity.id_token in params
 
     @pytest.mark.asyncio
     async def test_stored_id_token_survives_a_refresh_without_one(self):
-        store = _store()
+        store, conn = self._store_and_conn()
         identity = self._identity(store)
         await store.update_tokens(identity, TokenResponse(access_token="AT.new", expires_in=3600))
         assert store._open(identity, "access_token") == "AT.new"
         # neither secret the refresh omitted was erased
         assert store._open(identity, "refresh_token") == "RT.old"
         assert store._open(identity, "id_token") == "ID.old"
+        # ...and neither column is part of the write at all
+        sql = conn.fetch_one.await_args.args[0]
+        assert "refresh_token" not in sql and "id_token" not in sql
+
+    @pytest.mark.asyncio
+    async def test_write_is_keyed_by_row_and_account_not_model_update(self):
+        """Not asyncdb's Model.update(): no 2 s client timeout, no shared old-value WHERE."""
+        store, conn = self._store_and_conn()
+        identity = self._identity(store)
+        await store.update_tokens(identity, TokenResponse(access_token="AT.new", scopes=["read:user"]))
+        identity.update.assert_not_awaited()
+        sql, *params = conn.fetch_one.await_args.args
+        assert sql.startswith("UPDATE auth.user_identities SET ")
+        assert "WHERE identity_id = $" in sql
+        assert "provider_user_id IS NOT DISTINCT FROM $" in sql
+        assert sql.rstrip().endswith("RETURNING identity_id")
+        assert params[-2:] == [self.IDENTITY_ID, "99"]
+        assert '["read:user"]' in params  # scopes bound as JSON text, cast to jsonb in SQL
+
+    @pytest.mark.asyncio
+    async def test_missing_row_raises(self):
+        """Unlinked (or re-bound) meanwhile: the refresh is reported, not silently lost."""
+        from asyncdb.exceptions import NoDataFound
+
+        store, conn = self._store_and_conn()
+        conn.fetch_one = AsyncMock(return_value=None)
+        with pytest.raises(NoDataFound):
+            await store.update_tokens(self._identity(store), TokenResponse(access_token="AT.new"))
+
+    @pytest.mark.asyncio
+    async def test_row_without_identity_id_is_refused(self):
+        """An unkeyed UPDATE would rewrite every row of the table."""
+        store, conn = self._store_and_conn()
+        identity = self._identity(store)
+        identity.identity_id = None
+        with pytest.raises(ValueError):
+            await store.update_tokens(identity, TokenResponse(access_token="AT.new"))
+        conn.fetch_one.assert_not_awaited()
 
 
 class TestSaveLinkedIdentityNullTokens:

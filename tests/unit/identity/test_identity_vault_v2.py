@@ -5,7 +5,7 @@ import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from asyncdb.exceptions import NoDataFound
@@ -61,9 +61,13 @@ def fake_model():
     FakeUserIdentity.existing = None
     pool = MagicMock()
 
+    conn = MagicMock()
+    # IdentityStore.update_tokens writes with a keyed UPDATE ... RETURNING.
+    conn.fetch_one = AsyncMock(return_value={"identity_id": "row"})
+
     @asynccontextmanager
     async def ctx():
-        yield MagicMock()
+        yield conn
 
     async def acquire():
         return ctx()
@@ -152,8 +156,8 @@ class TestStoreContextBinding:
     @pytest.mark.asyncio
     async def test_update_tokens_uses_row_context(self, cipher, fake_model):
         store = IdentityStore(fake_model, cipher=cipher)
-        identity = FakeUserIdentity(user_id="7", auth_provider="github", provider_user_id="gh-1",
-                                    token_type="Bearer", expires_at=None, scopes=[])
+        identity = FakeUserIdentity(identity_id="row", user_id="7", auth_provider="github",
+                                    provider_user_id="gh-1", token_type="Bearer", expires_at=None, scopes=[])
         await store.update_tokens(identity, TokenResponse(access_token="at2", refresh_token="rt2"))
         credential = store.decrypt_credential(identity)
         assert (credential.access_token, credential.refresh_token) == ("at2", "rt2")

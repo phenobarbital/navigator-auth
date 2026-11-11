@@ -3,6 +3,7 @@
 DB is the source of truth; the Session Vault is used as a per-session
 cache of the decrypted credential to avoid database round-trips.
 """
+import json
 from typing import Any, Optional
 from datetime import datetime, timezone
 
@@ -414,32 +415,79 @@ class IdentityStore:
         only when the refresh actually returned one, so a provider that omits
         either on the refresh grant does not erase what is stored.
 
+        The write is a plain ``UPDATE`` of the refreshed columns only, keyed
+        by the row's own ``identity_id``. It does not use asyncdb's
+        ``Model.update()``, which rewrites every column, builds its ``WHERE``
+        from old values kept in a dict shared by all ``UserIdentity``
+        instances, and caps the statement at a hard-coded 2-second client
+        timeout. That timeout reported committed refreshes as failures
+        ("Error on Insert over table user_identities").
+
         Args:
             identity: The row to update, as read from this store.
             token: The rotated credential.
 
         Returns:
             The updated row.
+
+        Raises:
+            ValueError: The row has no ``identity_id`` to key the write on.
+            NoDataFound: The row no longer exists, or was re-bound to another
+                external account, so the sealed tokens would not match it.
         """
+        if getattr(identity, "identity_id", None) is None:
+            raise ValueError("update_tokens: identity has no identity_id")
         user_id, provider = identity.user_id, identity.auth_provider
         puid = identity.provider_user_id
         identity.access_token = self._seal(token.access_token, user_id, provider, puid, "access_token")
+        changes: dict[str, Any] = {"access_token": identity.access_token}
         if token.refresh_token:
             identity.refresh_token = self._seal(token.refresh_token, user_id, provider, puid, "refresh_token")
+            changes["refresh_token"] = identity.refresh_token
         if token.id_token:
             # Only when the refresh returned one: an OIDC provider may omit
             # id_token on the refresh grant, and the stored one is still the
             # truth about the account (issue:d73106586c38).
             identity.id_token = self._seal(token.id_token, user_id, provider, puid, "id_token")
-        identity.token_type = token.token_type
-        identity.expires_at = token.expires_at
+            changes["id_token"] = identity.id_token
+        # A refresh that omits token_type / expires_at keeps the stored value,
+        # as the asyncdb model write did (it skipped None columns).
+        if token.token_type is not None:
+            identity.token_type = token.token_type
+            changes["token_type"] = identity.token_type
+        if token.expires_at is not None:
+            identity.expires_at = token.expires_at
+            changes["expires_at"] = identity.expires_at
         identity.refreshed_at = datetime.now(timezone.utc)
         identity.key_version = self._cipher.key_id
+        changes.update(refreshed_at=identity.refreshed_at, key_version=identity.key_version)
         if token.scopes:
             identity.scopes = list(token.scopes)
+            # Bound as text and cast in SQL, so the value does not depend on
+            # whether the connection has a jsonb codec registered.
+            changes["scopes"] = json.dumps(identity.scopes)
+        params = list(changes.values())
+        assignments = [
+            f"{column} = ${index}::text::jsonb" if column == "scopes" else f"{column} = ${index}"
+            for index, column in enumerate(changes, start=1)
+        ]
+        params += [identity.identity_id, None if puid is None else str(puid)]
+        sql = (
+            f"UPDATE {_IDENTITY_TABLE} SET {', '.join(assignments)} "
+            f"WHERE identity_id = ${len(params) - 1} "
+            # the tokens were sealed for this external account: never write
+            # them onto a row that was re-bound to another one meanwhile.
+            f"AND provider_user_id IS NOT DISTINCT FROM ${len(params)}::varchar "
+            "RETURNING identity_id"
+        )
         async with await self._pool.acquire() as conn:
-            UserIdentity.Meta.connection = conn
-            return await identity.update()
+            row = await conn.fetch_one(sql, *params)
+        if row is None:
+            raise NoDataFound(
+                f"{provider}: identity {identity.identity_id} no longer exists "
+                "for this account; the refreshed credential was not stored."
+            )
+        return identity
 
     def decrypt_credential(self, identity: UserIdentity) -> TokenResponse:
         """Decrypt a stored identity row into a TokenResponse.
