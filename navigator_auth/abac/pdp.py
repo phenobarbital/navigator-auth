@@ -131,8 +131,9 @@ class PDP:
 
         Raises:
             ValueError: ``PolicyAdapter.from_policy`` rejected the policy (the
-                message carries its reason), or a policy with the same name is
-                already registered. Nothing is changed when it raises.
+                message carries its reason), a policy with the same name is
+                already registered, or the evaluator failed to load it (the
+                original error is chained). Nothing is changed when it raises.
         """
         name = getattr(policy, "name", repr(policy))
         result = PolicyAdapter.from_policy(policy)
@@ -147,7 +148,10 @@ class PDP:
             adapted_names.add(adapted_policy.name)
         for warning in result.warnings:
             self.logger.warning("Policy adaptation warning: %s", warning)
-        self._evaluator.load_policies(adapted)
+        try:
+            self._evaluator.load_policies(adapted)
+        except Exception as exc:
+            raise ValueError(f"Policy '{name}' cannot be loaded into the evaluator: {exc}") from exc
         self._registered.extend(adapted)
         self._policies.extend(adapted)
         self._evaluator.invalidate_cache()
@@ -206,17 +210,21 @@ class PDP:
         self._policies.sort(key=lambda policy: policy.priority)
 
     def _load_policy_dicts(self, policies: list):
-        """Convert all policy dicts and load into evaluator."""
+        """Convert policy dicts and load them into the evaluator.
+
+        The evaluator is loaded first, so a load failure also leaves the
+        compatibility list ``self._policies`` unchanged.
+        """
         resource_policies, warnings = PolicyAdapter.adapt_batch(policies)
         for w in warnings:
             self.logger.warning("Policy adaptation warning: %s", w)
 
+        # Load into evaluator (all or nothing).
+        self._evaluator.load_policies(resource_policies)
+
         # Also keep them in self._policies for backward compatibility
         # (mostly for filter_files which still uses them)
         self._policies.extend(resource_policies)
-
-        # Load into evaluator
-        self._evaluator.load_policies(resource_policies)
 
     async def _get_tenant_evaluator(self, org_id: int, client_id: int) -> PolicyEvaluator:
         """Return a per-tenant PolicyEvaluator, building and caching it if needed.
