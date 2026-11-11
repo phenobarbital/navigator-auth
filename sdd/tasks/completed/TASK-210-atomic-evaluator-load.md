@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-112 — PDP policy registry hardening
 **Spec**: `sdd/specs/abac-pdp-tech-debt.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: none
@@ -375,7 +375,13 @@ When you pick up this task:
 ## Completion Note
 *(Agent fills this in when done)*
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: Claude Code (/sdd-fix, actor agent:sdd-fix:953638ae)
+**Date**: 2026-11-11
+**Notes**: Implemented as blueprinted in commit e924d62. `PolicyIndex.copy()` + copy-on-write
+`PolicyEvaluator.load_policies`; `PDP.add_policy` wraps the load in `ValueError` (cause chained);
+`_load_policy_dicts` loads the evaluator before the compatibility list. Four tests in
+`tests/test_pdp_registry_hardening.py`; all four fail on the base code and pass with the fix.
+Validation: test_pdp_registry_hardening (4), test_pdp_add_policy (13), test_unified_evaluation (17),
+test_yaml_storage_double_load (12) — all passed. black/flake8: no new findings (evaluator.py's
+black diff is pre-existing and unchanged).
 **Deviations from spec**: none

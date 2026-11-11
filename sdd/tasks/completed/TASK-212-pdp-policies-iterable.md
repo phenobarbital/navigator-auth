@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-112 — PDP policy registry hardening
 **Spec**: `sdd/specs/abac-pdp-tech-debt.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: low
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-211
@@ -233,7 +233,13 @@ When you pick up this task:
 ## Completion Note
 *(Agent fills this in when done)*
 
-**Completed by**:
-**Date**:
-**Notes**:
-**Deviations from spec**: none
+**Completed by**: Claude Code (/sdd-fix, actor agent:sdd-fix:953638ae)
+**Date**: 2026-11-11
+**Notes**: Implemented as blueprinted. `PDP.__init__` accepts any iterable; `str`/`bytes`/`Mapping`
+and non-iterables raise `TypeError` naming the type; type hint `Optional[Iterable[AbstractPolicy]]`;
+Google-style `__init__` docstring; CHANGELOG bullet for all of FEAT-112. Tests also cover `bytes` and
+`int`. Eight of the ten constructor tests fail on the TASK-211 state (the two "empty" cases are
+negatives) and all pass now. `List`/`Policy` imports kept as the blueprint says.
+Validation: test_pdp_registry_hardening (18), test_pdp_add_policy (13), test_policy_server_example (4)
+— all passed. black -l 120 / flake8 clean on the changed files.
+**Deviations from spec**: none (two extra rejection cases in the tests: `bytes`, `int`).

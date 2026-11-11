@@ -13,6 +13,15 @@
   `environment` accepts `day_of_week` as an alias of `dow`; unsupported keys are
   rejected. `Policy(resource="...")` with a single string no longer raises
   `TypeError`.
+- **PDP policy registry hardening (FEAT-112).** `PolicyEvaluator.load_policies`
+  is now all-or-nothing: a failure (e.g. a policy that cannot be serialized)
+  leaves the evaluator unchanged, and `PDP.add_policy` raises `ValueError`
+  instead of leaving a half-loaded policy that made `on_startup` skip the
+  storage load. `add_policy` also rejects a name already loaded from
+  storage/YAML, and a storage/YAML policy named like a registered one logs a
+  WARNING on startup and reload (both stay enforced). `PDP(policies=...)`
+  accepts any iterable and raises `TypeError` for strings, mappings and
+  non-iterables instead of silently ignoring a tuple.
 - **`PolicyAdapter.from_policy` validates `ObjectPolicy(objects=...)` (FEAT-111).**
   Objects are converted with the policy's `type=` (default `object`) and
   validated like `resource=`. A policy is rejected (`add_policy` raises

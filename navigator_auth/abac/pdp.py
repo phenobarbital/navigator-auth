@@ -1,5 +1,6 @@
 from typing import List, Optional, Union, Any, Tuple
 from collections import OrderedDict
+from collections.abc import Iterable, Mapping
 import asyncio
 from aiohttp import web
 from navconfig.logging import logger
@@ -74,10 +75,23 @@ class PDP:
     def __init__(
         self,
         storage: AbstractStorage,
-        policies: Optional[List[Policy]] = None,
+        policies: Optional[Iterable[AbstractPolicy]] = None,
         yaml_storage: Optional[YAMLStorage] = None,
         evaluator: Optional[PolicyEvaluator] = None,
     ):
+        """Create the PDP.
+
+        Args:
+            storage: Storage the policies are loaded from on startup and reload.
+            policies: Policies to register with ``add_policy``: any iterable
+                (list, tuple, generator, set). ``None`` registers nothing.
+            yaml_storage: Optional YAML policy storage.
+            evaluator: Shared evaluator to use instead of a new one.
+
+        Raises:
+            TypeError: ``policies`` is a string, bytes, a mapping or not iterable.
+            ValueError: ``add_policy`` rejected one of ``policies``.
+        """
         self._policies: list = []
         # Policies registered through add_policy / policies=: enforced by the
         # evaluator and kept across reload_policies() and tenant evaluators.
@@ -94,7 +108,9 @@ class PDP:
         self._tenant_evaluators: OrderedDict[Tuple[int, int], PolicyEvaluator] = OrderedDict()
         # Register constructor policies last: add_policy needs the evaluator and
         # the tenant LRU created above. The caller's list is not aliased.
-        if isinstance(policies, list):
+        if policies is not None:
+            if isinstance(policies, (str, bytes, Mapping)) or not isinstance(policies, Iterable):
+                raise TypeError(f"PDP policies= must be an iterable of policies, got {type(policies).__name__}")
             for policy in policies:
                 self.add_policy(policy)
 
@@ -131,8 +147,11 @@ class PDP:
 
         Raises:
             ValueError: ``PolicyAdapter.from_policy`` rejected the policy (the
-                message carries its reason), or a policy with the same name is
-                already registered. Nothing is changed when it raises.
+                message carries its reason), a policy with the same name is
+                already registered or already loaded in the evaluator (from
+                storage, YAML or a pre-loaded evaluator), or the evaluator
+                failed to load it (the original error is chained). Nothing is
+                changed when it raises.
         """
         name = getattr(policy, "name", repr(policy))
         result = PolicyAdapter.from_policy(policy)
@@ -140,14 +159,20 @@ class PDP:
             raise ValueError(f"Policy '{name}' cannot be registered: {result.reason}")
         adapted = [p for p in [result.policy, *result.additional_policies] if p is not None]
         registered_names = {registered.name for registered in self._registered}
+        loaded_names = {loaded.name for loaded in self._evaluator._index.all()}
         adapted_names: set[str] = set()
         for adapted_policy in adapted:
             if adapted_policy.name in registered_names or adapted_policy.name in adapted_names:
                 raise ValueError(f"Policy name '{adapted_policy.name}' is already registered")
+            if adapted_policy.name in loaded_names:
+                raise ValueError(f"Policy name '{adapted_policy.name}' is already loaded in the evaluator")
             adapted_names.add(adapted_policy.name)
         for warning in result.warnings:
             self.logger.warning("Policy adaptation warning: %s", warning)
-        self._evaluator.load_policies(adapted)
+        try:
+            self._evaluator.load_policies(adapted)
+        except Exception as exc:
+            raise ValueError(f"Policy '{name}' cannot be loaded into the evaluator: {exc}") from exc
         self._registered.extend(adapted)
         self._policies.extend(adapted)
         self._evaluator.invalidate_cache()
@@ -165,6 +190,26 @@ class PDP:
         """
         registered = {id(policy) for policy in self._registered}
         return any(id(policy) not in registered for policy in self._evaluator._index.all())
+
+    def _warn_registered_name_collisions(self, policies: list[ResourcePolicy], source: str) -> None:
+        """Log a WARNING for each policy whose name is also a registered policy's name.
+
+        Both policies stay loaded and enforced (a DENY still wins); only lookups
+        by name, such as ``PolicyIndex.get_by_name`` used by the decorators,
+        return one of them.
+
+        Args:
+            policies: Policies about to be loaded from storage.
+            source: Where they come from, for the log message.
+        """
+        registered_names = {policy.name for policy in self._registered}
+        for name in sorted({policy.name for policy in policies} & registered_names):
+            self.logger.warning(
+                "Policy name '%s' from %s is also a registered policy; both are enforced, "
+                "but lookups by name return only one of them. Rename one.",
+                name,
+                source,
+            )
 
     def sorted_policies(self):
         """Sort locally registered policies by priority in place.
@@ -191,7 +236,7 @@ class PDP:
         # Load policies from DB storage
         try:
             policies = await self.storage.load_policies()
-            self._load_policy_dicts(policies)
+            self._load_policy_dicts(policies, "DB storage")
         except Exception as exc:
             self.logger.error("Error loading policies from DB storage: %s", exc)
 
@@ -199,24 +244,33 @@ class PDP:
         if self.yaml_storage is not None:
             try:
                 yaml_policies = await self.yaml_storage.load_policies()
-                self._load_policy_dicts(yaml_policies)
+                self._load_policy_dicts(yaml_policies, "YAML storage")
             except Exception as exc:
                 self.logger.error(f"Error loading policies from YAML storage: {exc}")
 
         self._policies.sort(key=lambda policy: policy.priority)
 
-    def _load_policy_dicts(self, policies: list):
-        """Convert all policy dicts and load into evaluator."""
+    def _load_policy_dicts(self, policies: list, source: str = "storage"):
+        """Convert policy dicts and load them into the evaluator.
+
+        The evaluator is loaded first, so a load failure also leaves the
+        compatibility list ``self._policies`` unchanged.
+
+        Args:
+            policies: Raw policy dicts from a storage backend.
+            source: Label used in name-collision warnings.
+        """
         resource_policies, warnings = PolicyAdapter.adapt_batch(policies)
         for w in warnings:
             self.logger.warning("Policy adaptation warning: %s", w)
+        self._warn_registered_name_collisions(resource_policies, source)
+
+        # Load into evaluator (all or nothing).
+        self._evaluator.load_policies(resource_policies)
 
         # Also keep them in self._policies for backward compatibility
         # (mostly for filter_files which still uses them)
         self._policies.extend(resource_policies)
-
-        # Load into evaluator
-        self._evaluator.load_policies(resource_policies)
 
     async def _get_tenant_evaluator(self, org_id: int, client_id: int) -> PolicyEvaluator:
         """Return a per-tenant PolicyEvaluator, building and caching it if needed.
@@ -365,6 +419,7 @@ class PDP:
             self.logger.warning("Reload warning: %s", w)
 
         # Registered policies survive a reload (storage alone does not hold them).
+        self._warn_registered_name_collisions(resource_policies, "storage reload")
         resource_policies.extend(self._registered)
 
         # Build new index

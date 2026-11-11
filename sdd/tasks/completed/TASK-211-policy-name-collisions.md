@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-112 — PDP policy registry hardening
 **Spec**: `sdd/specs/abac-pdp-tech-debt.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-210
@@ -270,7 +270,15 @@ When you pick up this task:
 ## Completion Note
 *(Agent fills this in when done)*
 
-**Completed by**:
-**Date**:
-**Notes**:
+**Completed by**: Claude Code (/sdd-fix, actor agent:sdd-fix:953638ae)
+**Date**: 2026-11-11
+**Notes**: Implemented as blueprinted in commit f3752d5. `add_policy` checks names against
+`_registered` and every policy in `self._evaluator._index.all()` ("already loaded in the evaluator");
+new `_warn_registered_name_collisions` called from `_load_policy_dicts` (new `source` keyword; startup
+passes "DB storage" / "YAML storage") and from `reload_policies` ("storage reload").
+`_build_tenant_evaluator` untouched. Tests use a `MagicMock` logger. The two positive collision
+tests and the storage-name rejection fail on the TASK-210 state and pass now.
+Validation: test_pdp_registry_hardening (8), test_pdp_add_policy (13), test_yaml_storage_double_load
+(12), test_tenant_sql_filtering (13 passed, 2 skipped — live-DB tests), test_policy_server_example (4)
+— all passed. black -l 120 / flake8 clean on the changed files.
 **Deviations from spec**: none
