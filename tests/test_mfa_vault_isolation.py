@@ -152,6 +152,10 @@ class TestVaultHttp:
 
     @pytest.mark.asyncio
     async def test_ordinary_secrets_still_work(self, create_view, mock_vault):
-        assert (await create_view("POST", "/vault", body={"key": "jira:access_token", "value": "x"}).post()).status == 201
+        assert (
+            await create_view("POST", "/vault", body={"key": "jira:access_token", "value": "x"}).post()
+        ).status == 201
         assert (await create_view("GET", "/vault/jira:access_token", {"key": "jira:access_token"}).get()).status == 200
-        assert (await create_view("DELETE", "/vault/jira:access_token", {"key": "jira:access_token"}).delete()).status == 200
+        assert (
+            await create_view("DELETE", "/vault/jira:access_token", {"key": "jira:access_token"}).delete()
+        ).status == 200
