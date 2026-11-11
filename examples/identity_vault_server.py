@@ -68,8 +68,8 @@ Requirements
   storage-less: linked identities live in ``auth.user_identities``. On
   startup it applies ``examples/sql/identity_vault_schema.sql`` (schema +
   a ``demo`` user) unless ``EXAMPLE_BOOTSTRAP_DB=false``. The credential
-  columns and the Session Vault tables are added by the library's own
-  startup migrations.
+  columns and the Session Vault tables are added by the example itself
+  through ``navigator_auth.migrations.upgrade`` (startup no longer migrates).
 * **Redis** — sessions and per-flow OAuth2 state.
 * **Vault master keys** — credentials are ciphered with the Session Vault
   keys (``VAULT_MASTER_KEY_v1`` + ``VAULT_ACTIVE_KEY_ID``). Without them
@@ -79,6 +79,7 @@ Requirements
   its client id is configured (see ``PROVIDERS`` below), so you can try
   the example with just GitHub, or just Azure, or none at all.
 """
+
 import os
 
 # ---------------------------------------------------------------------------
@@ -145,6 +146,7 @@ from navigator_auth.conf import (  # noqa: E402
     AUTH_EXCLUDE_LIST_KEY,
     AUTH_SESSION_OBJECT,
     AZURE_SESSION_TIMEOUT,
+    DBUSER,
     ODOO_DOMAIN,
     ODOO_USERINFO_PATH,
     default_dsn,
@@ -152,7 +154,7 @@ from navigator_auth.conf import (  # noqa: E402
 from navigator_auth.decorators import is_authenticated, user_session  # noqa: E402
 from navigator_auth.exceptions import ConfigError, UserNotFound  # noqa: E402
 from navigator_auth.identity.crypto import IdentityCipher  # noqa: E402
-
+from navigator_auth.migrations import upgrade  # noqa: E402
 
 HERE = Path(__file__).parent
 STATIC_DIR = HERE / "static"
@@ -212,9 +214,9 @@ PROVIDER_USERINFO = {
 async def bootstrap_database() -> None:
     """Apply the example schema and upsert the demo user.
 
-    Runs *before* the application starts, on its own connection, so the
-    library's own startup migrations (identity credential columns, Session
-    Vault tables) find the tables they extend already in place. The
+    Runs *before* the application starts, on its own connection, then applies
+    the library migrations (identity credential columns, Session Vault tables)
+    itself through ``navigator_auth.migrations.upgrade``. The
     password is hashed by the real ``IdentityProvider``, exactly as
     ``/api/v2/user/set_password`` would.
     """
@@ -222,6 +224,12 @@ async def bootstrap_database() -> None:
     db = AsyncDB("pg", dsn=default_dsn)
     async with await db.connection() as conn:
         await conn.execute(SCHEMA_FILE.read_text())
+        # Startup no longer migrates (FEAT-110): apply the identity and vault sets here, on the raw
+        # asyncpg connection, exactly as `navauth self upgrade --set vault --set identity` would.
+        report = await upgrade(conn.get_connection(), ["vault", "identity"], runtime_role=DBUSER)
+        if report.failed or report.access_errors:
+            failed = ", ".join(f"{r.file.migration_set}/{r.file.filename}" for r in report.failed)
+            raise RuntimeError(f"Library migrations failed: files=[{failed}] access_errors={report.access_errors}")
         await conn.execute(
             """
             INSERT INTO auth.users
