@@ -87,7 +87,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -97,8 +97,9 @@
       "parallelism_notes": "Imports MigrationError and quote_ident from TASK-160 (navigator_auth/migrations/runner.py); its tests drive FakeConnection from TASK-160 (tests/unit/migrations/conftest.py).",
       "assigned_to": null,
       "started_at": "2026-11-11T21:35:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-161-migration-completion-checks.md"
+      "completed_at": "2026-11-11T21:53:22+00:00",
+      "file": "sdd/tasks/completed/TASK-161-migration-completion-checks.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-162",
@@ -107,7 +108,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -117,8 +118,9 @@
       "parallelism_notes": "Imports MigrationError, execute_checked and quote_ident from TASK-160 (navigator_auth/migrations/runner.py); new module access.py, no file shared with TASK-161.",
       "assigned_to": null,
       "started_at": "2026-11-11T21:35:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-162-migration-runtime-access.md"
+      "completed_at": "2026-11-11T21:53:22+00:00",
+      "file": "sdd/tasks/completed/TASK-162-migration-runtime-access.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-163",
@@ -148,7 +150,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [
@@ -158,8 +160,9 @@
       "parallelism_notes": "Uses acquire_pooled and execute_checked from TASK-160 (navigator_auth/migrations/runner.py) and set_filenames from TASK-159; modifies the three legacy migrations.py files TASK-159 repointed (ordered through TASK-160).",
       "assigned_to": null,
       "started_at": "2026-11-11T21:35:00+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-164-legacy-migration-shims.md"
+      "completed_at": "2026-11-11T21:53:23+00:00",
+      "file": "sdd/tasks/completed/TASK-164-legacy-migration-shims.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-165",
