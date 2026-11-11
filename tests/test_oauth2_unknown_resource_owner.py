@@ -2,6 +2,7 @@
 
 TASK-200 adds the IdentityProvider.user_from_id tests; TASK-203/204 append provider tests.
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
