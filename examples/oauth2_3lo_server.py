@@ -38,6 +38,7 @@ Notes
   tokens, the JWT access token and the session it is bound to — is the real
   ``navigator_auth`` implementation.
 """
+
 import os
 
 # ---------------------------------------------------------------------------
@@ -163,6 +164,7 @@ class DemoIdentityProvider(IdentityProvider):
 # Application handlers
 # ---------------------------------------------------------------------------
 
+
 async def index(request: web.Request) -> web.StreamResponse:
     """Serve the single-page client application (also handles /callback)."""
     return web.FileResponse(STATIC_DIR / "oauth2_3lo_app.html")
@@ -184,10 +186,7 @@ async def client_config(request: web.Request) -> web.StreamResponse:
             "userinfo_endpoint": "/oauth2/userinfo",
             "revocation_endpoint": "/oauth2/revoke",
             "protected_endpoint": "/api/v1/me",
-            "demo_users": [
-                {"username": u["username"], "password": u["password"]}
-                for u in DEMO_USERS
-            ],
+            "demo_users": [{"username": u["username"], "password": u["password"]} for u in DEMO_USERS],
         }
     )
 
@@ -230,6 +229,7 @@ async def me(request: web.Request, *, session=None, user=None) -> web.StreamResp
 # Application factory
 # ---------------------------------------------------------------------------
 
+
 def make_app() -> web.Application:
     app = web.Application()
 
@@ -271,7 +271,7 @@ async def register_demo_clients(app: web.Application) -> None:
         client_id=CLIENT_ID,
         client_pk=None,
         client_name="Navigator OAuth2 Example (SPA)",
-        client_secret=None,          # public client -> PKCE S256 required
+        client_secret=None,  # public client -> PKCE S256 required
         client_type="public",
         redirect_uris=[REDIRECT_URI],
         policy_uri="",
