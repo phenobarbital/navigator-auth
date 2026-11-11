@@ -1,5 +1,6 @@
 """PDP.add_policy / PDP(policies=) are enforced by the evaluator (FEAT-109 M2)."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -10,6 +11,13 @@ from navigator_auth.abac.pdp import PDP
 from navigator_auth.abac.policies import Policy, PolicyEffect
 from navigator_auth.abac.policies.resources import ResourceType
 from navigator_auth.conf import AUTH_SESSION_OBJECT
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_event_loop():
+    """pytest-asyncio leaves no current loop; legacy tests call get_event_loop()."""
+    yield
+    asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 def _dashboard_policy(name: str = "public_dashboard") -> Policy:
