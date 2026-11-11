@@ -2,11 +2,15 @@
 
 import asyncio
 import secrets
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from navigator_auth.conf import AUTH_DB_SCHEMA
+from navigator_auth.handlers.mfa import MfaHandler
 from navigator_auth.mfa.exceptions import MfaStorageError
+from navigator_auth.mfa.types import MfaState
 from navigator_auth.passkey.migrations import ensure_passkey_tables
 from tests.fixtures.mfa import (  # noqa: F401
     frozen_totp_clock,
@@ -17,6 +21,43 @@ from tests.fixtures.mfa import (  # noqa: F401
     single_connection_authdb,
 )
 from tests.test_mfa_enrollment_security import Env, FakeSession, env  # noqa: F401
+
+
+@pytest.mark.asyncio
+async def test_management_context_uses_shared_evaluation() -> None:
+    """Management keeps the evaluator's policy/state/digest and the caller's connection."""
+    record, conn, policy = object(), object(), object()
+    evaluation = SimpleNamespace(policy=policy, state=MfaState.TOTP, has_strong_factor=True, context_digest="digest")
+    services = SimpleNamespace(evaluate=AsyncMock(return_value=evaluation))
+    assert await MfaHandler()._security_context(services, record, conn) == (policy, MfaState.TOTP, True, "digest")
+    services.evaluate.assert_awaited_once_with(record, conn=conn)
+
+
+@pytest.mark.asyncio
+async def test_enforced_superuser_without_factor_cannot_start_enrollment(env) -> None:
+    """The shared evaluator's strong-factor refusal survives the HTTP management boundary."""
+    user = await env.new_user(superuser=True)
+    await env.enforced_org(user["user_id"])
+    response, body = await env.enroll(user, FakeSession(user["user_id"]))
+    assert response.status == 403
+    assert body == {"error": "strong_factor_required", "message": "strong_factor_required"}
+    assert response.headers["Cache-Control"] == "no-store"
+    assert not await env.services.state.totp_confirmed(user["user_id"])
+
+
+@pytest.mark.asyncio
+async def test_enforced_ordinary_user_can_enroll(env) -> None:
+    """Session-authenticated ordinary users retain enrollment access under enforced policy."""
+    user = await env.new_user()
+    await env.enforced_org(user["user_id"])
+    session = FakeSession(user["user_id"])
+    response, started = await env.enroll(user, session)
+    assert response.status == 201
+    response, confirmed = await env.confirm(
+        user, session, started["enrollment_token"], env.code(started["secret_b32"])[0]
+    )
+    assert response.status == 200
+    assert confirmed["status"] == "confirmed"
 
 
 @pytest.mark.asyncio

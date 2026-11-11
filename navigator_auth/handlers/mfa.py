@@ -16,7 +16,7 @@ from aiohttp import web
 
 from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY, AUTH_OTP_CHALLENGE_TTL
 from navigator_auth.decorators import policy_allows
-from navigator_auth.exceptions import InvalidAuth, UserNotFound
+from navigator_auth.exceptions import InvalidAuth, MFARefused, UserNotFound
 from navigator_auth.mfa.login import SecondFactorGate, VerifyRefused
 from navigator_auth.mfa.exceptions import MfaStorageError
 from navigator_auth.mfa.services import MFA_APP_KEY, MfaServices, mfa_services_lease
@@ -27,7 +27,6 @@ from navigator_auth.mfa.types import (
     MFA_DEVICE_TOKEN_KEY,
     EnrollmentAuthorization,
     MfaAuditEntry,
-    MfaMode,
     MfaSecurityNotice,
     MfaState,
     PROVIDER_EMAIL,
@@ -71,12 +70,15 @@ def _with_mfa_services(
     async def wrapper(self: Any, request: web.Request) -> web.Response:
         # Older endpoint test doubles used a lightweight service namespace before
         # TASK-173 introduced leases. Real services always take the leased path.
-        slot = request.app.get(MFA_APP_KEY) if request.app is not None else None
-        current = getattr(slot, "services", None)
-        if current is not None and not isinstance(current, MfaServices):
-            return await method(self, request, current)
-        async with mfa_services_lease(request.app) as services:
-            return await method(self, request, services)
+        try:
+            slot = request.app.get(MFA_APP_KEY) if request.app is not None else None
+            current = getattr(slot, "services", None)
+            if current is not None and not isinstance(current, MfaServices):
+                return await method(self, request, current)
+            async with mfa_services_lease(request.app) as services:
+                return await method(self, request, services)
+        except MFARefused as err:
+            return JSONResponse(err.payload(), status=err.status, headers=NO_STORE)
 
     return wrapper
 
@@ -184,16 +186,8 @@ class MfaHandler:
 
     async def _security_context(self, services: Any, record: Any, conn: Any) -> tuple[Any, MfaState, bool, str]:
         """Return policy, state, strong-factor status, and the current context digest."""
-        uid = int(record["user_id"] if isinstance(record, dict) else getattr(record, "user_id"))
-        memberships = await services.resolver.memberships(uid, conn=conn)
-        policy = await services.resolver.effective(record, conn=conn, memberships=memberships)
-        totp = await services.state.totp_confirmed(uid, conn=conn)
-        strong = await services.state.has_strong_factor(record, conn=conn)
-        state = MfaState.TOTP if totp else (MfaState.EMAIL if policy.mode == MfaMode.ENFORCED else MfaState.NONE)
-        digest = services.security.context_digest(
-            user=record, memberships=memberships, policy=policy, state=state, has_strong_factor=strong
-        )
-        return policy, state, strong, digest
+        evaluation = await services.evaluate(record, conn=conn)
+        return evaluation.policy, evaluation.state, evaluation.has_strong_factor, evaluation.context_digest
 
     async def _revalidate(
         self, request: web.Request, services: MfaServices, conn: Any, token: str, record: MfaChallenge
