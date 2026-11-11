@@ -58,9 +58,7 @@ class MfaSecurity:
         async with await self._pool.acquire() as conn:
             try:
                 await conn.transaction()
-                await conn.fetchval(
-                    "SELECT pg_advisory_xact_lock($1::int4, $2::int4)", LOCK_NAMESPACE, key
-                )
+                await conn.fetchval("SELECT pg_advisory_xact_lock($1::int4, $2::int4)", LOCK_NAMESPACE, key)
             except Exception as err:
                 try:
                     await conn.rollback()
