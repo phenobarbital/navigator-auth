@@ -28,7 +28,7 @@ from ..passkey import (
     RelyingPartyResolver,
     StoredCredential,
 )
-from ..passkey.migrations import ensure_passkey_tables
+from ..migrations.startup import tables_present
 from ..responses import JSONResponse
 from .abstract import user_is_active
 from .basic import BasicAuth
@@ -98,7 +98,7 @@ class PasskeyAuth(BasicAuth):
         super().configure(app)
 
     async def on_startup(self, app: web.Application) -> None:
-        """BasicAuth startup, lazy webauthn import, Redis pool, store and migration."""
+        """BasicAuth startup, lazy webauthn import, Redis pool, store and table check."""
         await super().on_startup(app)
         try:
             import webauthn  # pylint: disable=C0415
@@ -107,10 +107,15 @@ class PasskeyAuth(BasicAuth):
         self._webauthn = webauthn
         self._pool = aioredis.ConnectionPool.from_url(auth_conf.REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
         self._store = PasskeyStore(app["authdb"])
+        schema = auth_conf.AUTH_DB_SCHEMA
         try:
-            await ensure_passkey_tables(app["authdb"])
+            present = await tables_present(
+                app["authdb"], f"{schema}.user_credentials", f"{schema}.user_passkey_handles"
+            )
         except Exception as err:  # pylint: disable=W0703
-            raise ConfigError(f"PasskeyAuth: could not create passkey tables: {err}") from err
+            raise ConfigError(f"PasskeyAuth: could not verify passkey tables ({type(err).__name__})") from err
+        if not present:
+            raise ConfigError("PasskeyAuth: passkey tables are missing — run `navauth self upgrade`")
 
     async def on_cleanup(self, app: web.Application) -> None:
         """Disconnect the Redis pool, then BasicAuth cleanup."""
