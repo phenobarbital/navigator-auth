@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-107 — Write-envelope hardening for the remaining auth CRUD handlers
 **Spec**: `sdd/specs/auth-model-crud-hardening.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-149, TASK-151, TASK-152
@@ -415,10 +415,7 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
-
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: `object:verb` actions; reads gated (user decision); both membership routes | other
+**Completed by**: sdd-worker (orchestrator)
+**Date**: 2026-11-11
+**Seat**: Backend: codex · Model: gpt-5.6-luna
+**Notes**: Group/UserGroup/GroupPermission managers behind guard + protected-group checks. Merge-tier validation: 19 passed. Review: zero fixes (feedback coder-review:991b6593f98fbc132144a038).

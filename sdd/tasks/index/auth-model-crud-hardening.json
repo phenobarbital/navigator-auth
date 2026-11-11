@@ -95,7 +95,7 @@
       "feature_id": "FEAT-107",
       "feature": "auth-model-crud-hardening",
       "spec": "sdd/specs/auth-model-crud-hardening.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -106,8 +106,9 @@
       "parallelism_notes": "Spec Module 2. Edits only handlers/users/user.py and its own test; extends TASK-151's mixin. Disjoint from TASK-154 and TASK-155.",
       "assigned_to": null,
       "started_at": "2026-11-11T00:20:19+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-153-user-manager-guard.md"
+      "completed_at": "2026-11-11T02:08:59+00:00",
+      "file": "sdd/tasks/completed/TASK-153-user-manager-guard.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-154",
@@ -116,7 +117,7 @@
       "feature_id": "FEAT-107",
       "feature": "auth-model-crud-hardening",
       "spec": "sdd/specs/auth-model-crud-hardening.spec.md",
-      "status": "in-progress",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -128,8 +129,9 @@
       "parallelism_notes": "Spec Modules 3, 4 (GroupManager) and 9 (call sites). Edits only handlers/groups.py and its own test; extends TASK-151 and calls TASK-152. Disjoint from TASK-153 and TASK-155.",
       "assigned_to": null,
       "started_at": "2026-11-11T00:20:19+00:00",
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-154-group-handlers-guard.md"
+      "completed_at": "2026-11-11T02:08:59+00:00",
+      "file": "sdd/tasks/completed/TASK-154-group-handlers-guard.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-155",
