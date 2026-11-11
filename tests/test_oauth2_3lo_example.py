@@ -173,9 +173,7 @@ async def test_3lo_list_grants_200(example_client):
     client, example = example_client
     tokens = await _login_and_get_tokens(client, example)
 
-    response = await client.get(
-        "/api/v1/oauth2/grants", headers={"Authorization": f"Bearer {tokens['access_token']}"}
-    )
+    response = await client.get("/api/v1/oauth2/grants", headers={"Authorization": f"Bearer {tokens['access_token']}"})
     assert response.status == 200
     grants = await response.json()
     assert any(grant["client_id"] == example.CLIENT_ID for grant in grants)
@@ -211,9 +209,7 @@ async def test_3lo_refresh_binds_session(example_client, caplog):
     )
     assert refreshed.status == 200, await refreshed.text()
     refreshed_tokens = await refreshed.json()
-    response = await client.get(
-        "/api/v1/me", headers={"Authorization": f"Bearer {refreshed_tokens['access_token']}"}
-    )
+    response = await client.get("/api/v1/me", headers={"Authorization": f"Bearer {refreshed_tokens['access_token']}"})
     assert response.status == 200
     assert not [record for record in caplog.records if "cannot bind a session" in record.getMessage().lower()]
 
