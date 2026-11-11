@@ -285,15 +285,25 @@ class PolicyAdapter:
         if isinstance(objects, str):
             objects = [objects]
 
-        # Convert objects to type:pattern
-        new_resources = []
-        for obj in objects:
-            if ":" not in obj and not obj.startswith("urn:"):
-                new_resources.append(f"{obj_type}:{obj}")
-            else:
-                new_resources.append(obj)
-        policy_dict["resources"] = new_resources
+        policy_dict["resources"] = PolicyAdapter._object_resources(objects, obj_type)
         return PolicyAdapter._adapt_classic(policy_dict)
+
+    @staticmethod
+    def _object_resources(objects: List[str], obj_type: str) -> List[str]:
+        """Convert ObjectPolicy object names to classic resource strings.
+
+        Shared by ``_adapt_object`` (storage) and ``from_policy`` (programmatic)
+        so both paths build the same resources.
+
+        Args:
+            objects: Object names, ``type:pattern`` strings or URNs.
+            obj_type: Resource type prefixed to bare names.
+
+        Returns:
+            ``f"{obj_type}:{name}"`` for a bare name; any value containing ``:``
+            (``type:pattern`` or ``urn:...``) unchanged.
+        """
+        return [obj if (":" in obj or obj.startswith("urn:")) else f"{obj_type}:{obj}" for obj in objects]
 
     # Environment keys the Rust engine evaluates (rs_pep/src/lib.rs:241-247). The
     # engine silently ignores any other key, so from_policy rejects it instead.
@@ -317,6 +327,45 @@ class PolicyAdapter:
             if warning:
                 return f"invalid resource {raw!r}: {warning}"
         return None
+
+    @staticmethod
+    def _resolve_objects(policy: AbstractPolicy) -> Tuple[Optional[List[str]], Optional[str]]:
+        """Resolve a programmatic policy's ``objects=`` into classic resources.
+
+        Every case where the objects would otherwise be dropped, retyped,
+        de-negated or flattened is rejected instead.
+
+        Args:
+            policy: The policy given to :meth:`from_policy`. Never mutated.
+
+        Returns:
+            ``(None, None)`` when the policy has no objects; ``(resources, None)``
+            with validated ``type:pattern`` strings; ``(None, reason)`` otherwise.
+        """
+        objects = policy.objects
+        if not objects:
+            return None, None
+        if isinstance(policy, FilePolicy) or not isinstance(policy, ObjectPolicy):
+            return None, "objects= is only supported on ObjectPolicy"
+        if policy.raw_resources:
+            return None, "resource= and objects= cannot be combined (objects= would be ignored)"
+        if isinstance(objects, str):
+            objects = [objects]
+        # A dict would lose its values and a set its order; only plain names are converted.
+        if not isinstance(objects, (list, tuple)) or not all(isinstance(obj, str) and obj for obj in objects):
+            return None, f"unsupported objects shape: {objects!r} (expected a list of non-empty strings)"
+        negated = [obj for obj in objects if obj.startswith("!")]
+        if negated:
+            return None, f"negated objects are not supported: {negated!r}; use resource=['!...'] instead"
+        obj_type = policy.attributes.get("type", "object")
+        if not isinstance(obj_type, str) or not obj_type or ":" in obj_type:
+            return None, f"unsupported object type for objects=: {obj_type!r}"
+        resources = PolicyAdapter._object_resources(list(objects), obj_type)
+        for obj, resource in zip(objects, resources):
+            error = PolicyAdapter._classic_resource_error([resource])
+            if error:
+                return None, f"invalid object {obj!r}: {error}"
+        return resources, None
 
     @staticmethod
     def _normalize_environment(environment: Any) -> Tuple[Optional[dict], Optional[str]]:
@@ -381,8 +430,9 @@ class PolicyAdapter:
 
         ``ResourcePolicy`` passes through unchanged. ``FilePolicy`` -> "file",
         ``ObjectPolicy`` -> "object", any other ``AbstractPolicy`` -> "policy": they
-        are converted to the classic policy dict (``resource`` = ``raw_resources``)
-        and passed to :meth:`adapt` only after validation.
+        are converted to the classic policy dict (``resource`` = ``raw_resources``,
+        or the resolved ``objects=`` of an ``ObjectPolicy``) and passed to
+        :meth:`adapt` only after validation.
 
         Args:
             policy: The policy object to adapt. It is never mutated.
@@ -390,8 +440,10 @@ class PolicyAdapter:
         Returns:
             AdapterResult: the policy (plus a ``<name>_negated`` DENY for ``!``
             resources) on success; ``skipped=True`` with ``reason`` and no policies
-            when a context/conditions/scopes restriction, an invalid resource or an
-            unsupported environment condition would be lost. Never raises.
+            when a context/conditions/scopes restriction, an invalid resource, an
+            unsupported or invalid ``objects=`` value (combined with ``resource=``,
+            negated, non-string, or on a non-``ObjectPolicy``) or an unsupported
+            environment condition would be lost. Never raises.
         """
         if isinstance(policy, ResourcePolicy):
             return AdapterResult(policy=policy)
@@ -416,6 +468,9 @@ class PolicyAdapter:
                         "enforced by the policy evaluator; use subject/groups instead"
                     ),
                 )
+            object_resources, error = PolicyAdapter._resolve_objects(policy)
+            if error:
+                return AdapterResult(skipped=True, reason=f"Policy '{name}': {error}")
             error = PolicyAdapter._classic_resource_error(policy.raw_resources)
             if error:
                 return AdapterResult(skipped=True, reason=f"Policy '{name}': {error}")
@@ -433,7 +488,8 @@ class PolicyAdapter:
                 "name": name,
                 "description": policy.description,
                 "effect": "ALLOW" if policy.effect == PolicyEffect.ALLOW else "DENY",
-                "resource": list(policy.raw_resources),
+                # _resolve_objects guarantees raw_resources is empty when objects= is set.
+                "resource": object_resources if object_resources is not None else list(policy.raw_resources),
                 "actions": [f"{action.object}:{action.action}" for action in policy.actions],
                 "subject": list(policy.subject or []),
                 "groups": list(policy.groups or []),
@@ -441,7 +497,8 @@ class PolicyAdapter:
                 "environment": environment,
                 "priority": policy.priority,
                 "enforcing": policy.enforcing,
-                "objects": policy.objects,
+                # Already resolved into "resource"; _adapt_object must not rebuild them.
+                "objects": None,
                 "org_id": policy.attributes.get("org_id", 1),
                 "client_id": policy.attributes.get("client_id", 1),
             }
