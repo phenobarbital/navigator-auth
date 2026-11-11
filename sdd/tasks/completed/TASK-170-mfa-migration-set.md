@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-110 — navauth self upgrade database migration command
 **Spec**: `sdd/specs/new-command-migration.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-161, TASK-162, TASK-169
@@ -168,6 +168,15 @@ FEAT-106 tests touching these names (branch @ `0b80d88`): `tests/test_mfa_migrat
 - ~~`BasicAuth.on_startup` calling `setup_mfa_tables`~~ — the spec's guess; on the FEAT-106 branch the call is in
   `navigator_auth/mfa/services.py::build_mfa_services` (line 132). Re-locate after the gate.
 - ~~`execute_checked` in `mfa/migrations.py`~~ — keep the module's own check (spec M3).
+
+### Gate cleared — verified on this branch (2026-11-11, after `dev` sync c3968cf)
+- GATE passed: FEAT-106 + FEAT-114 (18/18 tasks done) are in this branch; `navigator_auth/mfa/` and `mfa/sql/` exist.
+- `navigator_auth/mfa/sql/` holds `001_mfa_tables.sql` (sha256 `0f1211a10d13c7a3a6dc6118d12a9e423fe75bfe08cc4e867bfc0f0b3dda776d`) and `002_mfa_secrets.sql` (sha256 `6a2f97527369ea862e09b83f07eb3b27d90dc74aeb4b71a7f455f7a4990e78a9`). Move BOTH.
+- `mfa/migrations.py`: line 12 `SQL_DIR = Path(__file__).parent / "sql"`, line 13 `_MIGRATION_FILES = ("001_mfa_tables.sql", "002_mfa_secrets.sql")`, `MFA_TABLES` has SEVEN names (the six + `user_mfa_secrets`), `render_sql` at line ~24.
+- `002_mfa_secrets.sql` creates `{schema}.user_mfa_secrets` -> postcondition for 002 = that table; 001 postcondition = the first six tables.
+- Startup call: `navigator_auth/mfa/services.py` line 17 import and line 246 `available = await setup_mfa_tables(db_pool)` inside `build_mfa_services`' try block (no `preflight.py` module under navigator_auth/mfa; tests monkeypatch `preflight.mfa_tables_present` elsewhere — keep `mfa_tables_present` importable from `navigator_auth.mfa.migrations`).
+- `checks.py`: `prerequisite_tables` ends with `return ()` after the oauth2 branch (line ~137); `access.py` line 31 `"mfa": (),`.
+- The MFA tests `test_catalog.py` currently scope to `RELEASED_SETS = [vault, identity, passkey]`; add MFA checksums as a separate assertion, do not add mfa to RELEASED_SETS.
 
 ---
 
@@ -339,10 +348,8 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (codex gpt-5.6-terra · attempt 1 · 464s · tokens n/a)
+**Date**: 2026-11-11
+**Notes**: Initially BLOCKED (FEAT-114 not on dev); gate cleared after the dev sync (c3968cf), contract re-verified, then implemented. Both MFA SQL files moved byte-identical, mfa/migrations.py catalog-backed, startup flag via mfa_tables_present, checks/access/README/tests updated. Merge-tier: 163 passed, 5 skipped. Orchestrator review: no defects. Closed via `parrot sdd task close` (durable evidence root read-only in sandbox).
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

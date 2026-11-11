@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-110 — navauth self upgrade database migration command
 **Spec**: `sdd/specs/new-command-migration.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-162, TASK-163
@@ -394,10 +394,8 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (codex gpt-5.6-terra · attempt 1 · 362s)
+**Date**: 2026-11-11
+**Notes**: CLI delivered and merged. Merge-tier surfaced two failures in TASK-159's test_catalog.py caused by TASK-167's oauth2 set; fixed by orchestrator (tests scoped to released sets), tests/unit/migrations 58 passed. Closed via `parrot sdd task close` (durable evidence root read-only).
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: none

@@ -40,11 +40,12 @@ Notes
 -----
 * ``enable_authdb=False`` keeps the example free of PostgreSQL: clients, the
   access gate and users all live in memory. A real deployment drops this and
-  applies ``navigator_auth/backends/oauth2/ddl.sql``.
+  runs ``navauth self upgrade --set oauth2``.
 * Demo credentials: ``demo`` / ``demo123``. The demo user is pre-activated on
   the gate at startup so the flow completes end to end; comment that out to
   watch the approval queue fill up instead.
 """
+
 import os
 
 # ---------------------------------------------------------------------------
@@ -100,7 +101,6 @@ from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY  # noqa: E402
 from navigator_auth.exceptions import UserNotFound  # noqa: E402
 from navigator_auth.models import User  # noqa: E402
 
-
 MCP_RESOURCE = f"{BASE_URL}/mcp"
 
 #: Pre-registered static client, so the example works without DCR too.
@@ -121,6 +121,7 @@ DEMO_USERS = {
 # ---------------------------------------------------------------------------
 # A minimal IdP so the example needs no auth.users table.
 # ---------------------------------------------------------------------------
+
 
 class DemoIdentityProvider(IdentityProvider):
     """Authenticates against DEMO_USERS instead of the database."""
@@ -163,6 +164,7 @@ class DemoIdentityProvider(IdentityProvider):
 # Resource server: what Claude actually calls.
 # ---------------------------------------------------------------------------
 
+
 async def mcp_protected_resource_metadata(request: web.Request):
     """RFC 9728 document for THIS resource server.
 
@@ -186,10 +188,7 @@ async def mcp_tools(request: web.Request):
     """
     auth = request.app["auth"]
     challenge = {
-        "WWW-Authenticate": (
-            f'Bearer resource_metadata="{BASE_URL}'
-            f'/.well-known/oauth-protected-resource"'
-        )
+        "WWW-Authenticate": (f'Bearer resource_metadata="{BASE_URL}' f'/.well-known/oauth-protected-resource"')
     }
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):
@@ -201,13 +200,9 @@ async def mcp_tools(request: web.Request):
     try:
         _, payload = auth._idp.decode_token(header[7:])
     except Exception:
-        return web.json_response(
-            {"error": "invalid_token"}, status=401, headers=challenge
-        )
+        return web.json_response({"error": "invalid_token"}, status=401, headers=challenge)
     if not payload:
-        return web.json_response(
-            {"error": "invalid_token"}, status=401, headers=challenge
-        )
+        return web.json_response({"error": "invalid_token"}, status=401, headers=challenge)
     return web.json_response(
         {
             "tools": [
@@ -245,6 +240,7 @@ async def index(request: web.Request):
 # Startup: seed a static client and activate the demo user on the gate.
 # ---------------------------------------------------------------------------
 
+
 async def seed(app: web.Application):
     auth = app["auth"]
     provider = None
@@ -277,9 +273,7 @@ async def seed(app: web.Application):
     # then approve them via
     #   POST /api/v1/oauth2/clients/{client_uid}/access {"user_id":1,"action":"approve"}
     if provider.client_access_storage:
-        await provider.client_access_storage.grant(
-            user_id=1, client_uid=STATIC_CLIENT_UID, granted_by=1
-        )
+        await provider.client_access_storage.grant(user_id=1, client_uid=STATIC_CLIENT_UID, granted_by=1)
 
     logging.info("Seeded static client %s and activated the demo user.", STATIC_CLIENT_UID)
 

@@ -10,9 +10,9 @@
 --
 -- The *credential* columns of auth.user_identities (access_token,
 -- refresh_token, expires_at, ...) are NOT created here on purpose: they are
--- added at startup by the idempotent migration shipped with the library
--- (navigator_auth/identity/sql/001_identity_credentials.sql), which
--- AuthHandler runs on every boot. The same is true for the Session Vault
+-- added by the idempotent migrations shipped with the library
+-- (navigator_auth/migrations/sql/identity/), which the example applies
+-- through navigator_auth.migrations.upgrade. The same is true for the Session Vault
 -- tables (auth.user_vault_secrets).
 --
 -- Apply with:

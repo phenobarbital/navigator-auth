@@ -31,11 +31,10 @@ from .authorizations._client_ip import get_client_ip
 from .vault.integration import (
     load_vault_for_session,
     setup_vault_keyring,
-    setup_vault_tables,
     VAULT_KEYRING_APP_KEY,
     VAULT_SESSION_KEY,
 )
-from .identity.migrations import setup_identity_columns
+from .migrations.startup import warn_pending_migrations
 from .security_state import setup_security_state_tables
 from .backends.idp import IdentityProvider
 from .backends.oauth2.models import is_oauth_user_token
@@ -193,11 +192,13 @@ class AuthHandler:
             except Exception as err:
                 logging.exception(f"Error on Startup Auth Backend {name} init: {err.message}")
                 raise AuthException(f"Error on Startup Auth Backend {name} init: {err.message}") from err
-        # Create vault tables if they don't exist (non-blocking)
+        # Load the vault keyring (non-blocking).
         setup_vault_keyring(app)
+        # Schema changes are applied by `navauth self upgrade` (FEAT-110); startup only checks.
         if "authdb" in app:
-            await setup_vault_tables(app["authdb"])
-            await setup_identity_columns(app["authdb"])
+            await warn_pending_migrations(app["authdb"], self._backend_list)
+            # security_state (FEAT-106 review fixes) is not in the migration
+            # catalog yet, so its DDL still runs here until it joins it.
             await setup_security_state_tables(app["authdb"])
         # Re-hydrate exclude-provider paths after each startup (FEAT-241 M2):
         for provider in self._exclude_providers:

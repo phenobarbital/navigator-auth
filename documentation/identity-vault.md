@@ -33,7 +33,8 @@ to be registered at the provider.
 ## Storage & encryption
 
 Credential columns are added to `auth.user_identities` by an idempotent
-startup migration (`navigator_auth/identity/sql/001_identity_credentials.sql`):
+migration applied by `navauth self upgrade`
+(`navigator_auth/migrations/sql/identity/001_identity_credentials.sql`):
 `provider_user_id`, `scopes` (jsonb), `access_token` / `refresh_token`
 (BYTEA, ciphered), `token_type`, `expires_at`, `refreshed_at`, `enabled`,
 `key_version`, plus a partial unique index on
