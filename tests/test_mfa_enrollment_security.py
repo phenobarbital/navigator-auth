@@ -60,7 +60,7 @@ SECURITY = f"{AUTH_DB_SCHEMA}.user_mfa_security"
 POLICY = f"{AUTH_DB_SCHEMA}.tenant_mfa_policy"
 ORGS = f"{AUTH_DB_SCHEMA}.organizations"
 ORG_USERS = f"{AUTH_DB_SCHEMA}.organization_users"
-VAULT = "auth.user_vault_secrets"
+VAULT = f"{AUTH_DB_SCHEMA}.user_mfa_secrets"  # FEAT-106 review fix #2: seeds moved out of the user vault (spec M7)
 WRONG_CODE = "000000"
 
 
