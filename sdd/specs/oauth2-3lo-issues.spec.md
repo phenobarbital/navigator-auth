@@ -475,6 +475,8 @@ tests:
 - tests/test_oauth2_pkce.py
 - tests/test_device_verification.py
 - tests/test_oauth2_introspection_device_integration.py
+- tests/test_device_token_polling.py
+- tests/test_oauth2_introspection.py
 markers: none
 
 ### Test Data / Fixtures
