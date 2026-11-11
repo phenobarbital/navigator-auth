@@ -335,6 +335,54 @@
   helper and a `tenant` column/index on the audit table. Backwards-compatible —
   existing PDP callers are unaffected. See `documentation/audit-log.md`.
 
+- **Behaviour change — `@is_authenticated()` never admits anonymous backends
+  (FEAT-108, behaviour change).** `@is_authenticated()` no longer lets a request
+  through `NoAuth` or any backend with `_anonymous_auth = True`, and it rejects a
+  restored guest session (`AnonymousUser`) with `401`. A backend's unexpected
+  exception is logged and that backend is skipped, so the request answers `401`,
+  never `500`. Migration: keep anonymous access for a path by listing it in the
+  auth exclude list, or by marking the handler with `@allow_anonymous` (or setting
+  `request.allow_anonymous`). Deployments that relied on `NoAuth` to serve public
+  pages must make that change.
+
+- **Behaviour change — the OAuth2 token endpoint refuses unknown or disabled resource
+  owners (FEAT-108, behaviour change).** When the resource owner of a grant is
+  unknown or disabled, the token endpoint answers `400 invalid_grant`
+  ("The resource owner of this grant cannot be resolved.") instead of issuing a
+  session-less token. The authorization code is consumed, and the refresh grant
+  revokes that refresh chain. `/oauth2/authorize` and device verification send such
+  a session to the login form; consent answers `401 access_denied`.
+
+- **Behaviour change and contract — identity-store outages answer `503`
+  (FEAT-108, behaviour change + contract).** Identity-store failures answer a generic
+  `503` (`server_error`) and never revoke refresh chains; an authorization code
+  stays redeemable after an outage. `IdentityProvider.user_from_id` raises the new
+  public `navigator_auth.exceptions.IdentityStoreUnavailable` (status `503`) for
+  infrastructure failures instead of `UserNotFound`. Custom identity providers must
+  raise `UserNotFound` only for a confirmed missing user, and
+  `IdentityStoreUnavailable` for infrastructure failures.
+
+- **`/oauth2/userinfo` omits the claims it cannot supply (FEAT-108).** Profile and
+  email claims that the server cannot resolve are left out of the response instead
+  of being returned as `""`.
+
+- **Device login returns to the device verification form (FEAT-108).** After login,
+  a device flow resumes the pre-filled device verification form. Approval still
+  requires an explicit submit, so logging in alone approves nothing. A
+  `device_user_code` that is not a plain code is refused with `400`; no return URL
+  is accepted.
+
+- **`APIKeyAuth` declines non-API-key bearers; `allow_hosts` publishes userdata
+  (FEAT-108).** `APIKeyAuth` declines a bearer token that is not an API key instead of
+  treating it as one. The `allow_hosts` exempt branch now publishes
+  `request["userdata"]`.
+
+- **Examples pin their backends and use PKCE (FEAT-108).** Both OAuth2 examples pin
+  `backends=[Oauth2Provider]` and `authz_backends=[]`, so an inherited `NoAuth`,
+  `APIKeyAuth` or `allow_hosts` setting cannot admit a request without a session. The
+  `oauth2_server.py` browser pages perform PKCE with `S256` and a random `state`. See
+  `examples/README.md`.
+
 # v0.0.6
 
 - NoAuth, Basic Authentication
