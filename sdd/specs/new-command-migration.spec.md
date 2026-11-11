@@ -17,7 +17,7 @@ docs:
 **Feature ID**: FEAT-110
 **Date**: 2026-11-11
 **Author**: Jesus Lara
-**Status**: draft
+**Status**: approved
 **Target version**: next minor release (0.30.0 expected; currently 0.29.0)
 
 ---
@@ -112,12 +112,15 @@ changes:
    pending.
 3. **Runner** — works on a raw asyncpg connection (which raises on error).
    It takes a session advisory lock, creates the ledger if missing, and for
-   each pending file runs the rendered SQL and the ledger upsert inside one
-   transaction. A failing file is recorded and the run continues with the
+   each pending file runs the rendered SQL, postcondition checks, runtime
+   grants and the ledger upsert inside one
+   transaction. Missing prerequisites or unmet postconditions are failures,
+   even when PostgreSQL returns successfully after a guarded skip. A failing
+   file is recorded and the run continues with the
    next file (the behaviour identity migrations already have); the run ends
    with a non-zero exit code naming every failed file.
 4. **CLI** — `navauth self upgrade [--check] [--dsn DSN] [--user USER]
-   [--set NAME]… [--reapply-changed] [--fail-fast] [-v]`, argparse-based,
+   [--set NAME]… [--runtime-role ROLE] [--reapply-changed] [--fail-fast] [-v]`, argparse-based,
    connecting with asyncpg directly.
 5. **Startup** — `auth_startup` no longer applies SQL. It reads the ledger
    with the runtime pool and logs one warning listing what is pending. The
@@ -201,6 +204,7 @@ class UpgradeReport(BaseModel):
     applied: list[MigrationResult]
     failed: list[MigrationResult]
     skipped_changed: list[MigrationStatus]
+    access_errors: list[str]             # runtime grant/verification failures
 ```
 
 Ledger table (created by the runner, not by a numbered file; `{schema}` is
@@ -232,13 +236,15 @@ navauth self upgrade --check         report applied / pending / changed; change 
         --dsn DSN                    admin DSN (highest precedence)
         --user USER                  admin user; password from AUTH_ADMIN_PWD or a prompt
         --set NAME                   restrict to one set; repeatable
+        --runtime-role ROLE          application database role; defaults to DBUSER
         --reapply-changed            also re-run files whose checksum changed
         --fail-fast                  stop at the first failed file
         -v / --verbose               debug logging
 ```
 
 Exit codes: `0` success (or nothing pending) · `1` `--check` found pending or
-changed files · `2` one or more migrations failed · `3` usage, configuration
+changed files or missing runtime privileges · `2` one or more migrations or
+runtime grant operations failed · `3` usage, configuration
 or connection error.
 
 DSN precedence: `--dsn` → `AUTH_ADMIN_DSN` → `--user`/`AUTH_ADMIN_USER` with
@@ -338,8 +344,11 @@ database and user.
       """conn.execute(sql, *args) that always raises on failure.
 
       asyncdb returns [result, error] instead of raising; when the return value
-      is a 2-item list/tuple whose second item is an exception, raise
-      MigrationError chained to it. Any other return value is passed through.
+      is a 2-item list/tuple whose second item is not None, raise
+      MigrationError. Chain exception-valued errors; include string-valued
+      errors in the message without attempting exception chaining. Test
+      against None explicitly, not truthiness. [result, None] and native
+      asyncpg command-status strings pass through.
       """
 
   async def ledger_exists(conn: Any) -> bool:
@@ -355,18 +364,98 @@ database and user.
       conn: Any,
       sets: Iterable[str] | None = None,
       *,
+      runtime_role: str,
       reapply_changed: bool = False,
       fail_fast: bool = False,
   ) -> UpgradeReport:
       """Apply pending files (and changed ones when reapply_changed).
 
-      Holds pg_advisory_lock(ADVISORY_LOCK_KEY) for the run. Each file: rendered
-      SQL + ledger upsert in one transaction. A failure is recorded in
-      report.failed and the run continues, unless fail_fast.
+      Holds pg_advisory_lock(ADVISORY_LOCK_KEY) for the run. Each file:
+      prerequisite checks + SQL + postcondition checks + runtime grants +
+      ledger upsert in one transaction. A failure rolls back the entire file,
+      is recorded in report.failed and the run continues, unless fail_fast.
+      Reconcile access for already-applied selected files as well; failures
+      appear in report.access_errors and make the CLI exit 2.
       """
   ```
   `conn` is a raw asyncpg connection: `execute`, `fetch`, `fetchval`,
   `transaction()`.
+
+### Completion and retry contract (Module 2)
+
+A successful `execute()` is necessary but insufficient for recording a file.
+Keep released SQL byte-identical and implement read-only prerequisite and
+postcondition probes in `runner.py`. Use parameterized catalog lookups; do not
+interpret arbitrary NOTICE/WARNING text as a completion signal.
+
+- Before each file, require its referenced base tables: `auth.users` for vault,
+  `auth.user_identities` for identity, configured `{schema}.{users_table}` for
+  passkey, and configured users, clients and policies tables for OAuth2. A
+  missing base table fails that file without a ledger row; provisioning base
+  tables remains outside this command.
+- Identity `006` is complete only when `auth.user_identities.uid` is absent.
+  Its existing guards can return normally when `identity_id` is missing,
+  dependent objects exist, or duplicate identifiers prevent conversion. An
+  unmet postcondition raises `MigrationError` inside the file transaction,
+  names the unmet condition, rolls back and leaves the file pending. After
+  repairing the blocker, an ordinary upgrade retries the unchanged file.
+- OAuth2 completion requires all §7 objects and required constraints,
+  including non-null `client_name`, non-null/unique `client_uid`, and the
+  documented foreign keys. A guarded skip of required DDL is a failure.
+  Missing data is reported for operator repair, never fabricated.
+- Every future migration with a conditional early return must declare how
+  completion is verified. A no-op is successful only if the intended schema
+  already exists. Postcondition rules supplement filesystem discovery; they
+  do not replace it with a hand-written migration execution list.
+- A failed reapplication preserves the previous ledger row through rollback;
+  it remains changed. A failed pending file remains pending. Continuing past
+  a failure must never mark a dependent file complete merely because it skips.
+
+### Runtime access contract (Modules 2, 5 and 7)
+
+The CLI resolves the target application role from `--runtime-role`, otherwise
+`DBUSER`, independently of admin credentials. Require a non-empty role that
+exists in `pg_roles`; invalid configuration exits 3 before writes. Library
+callers must pass `runtime_role` explicitly. Quote identifiers safely (including
+role names); never interpolate an unquoted role into SQL.
+
+The runner grants `USAGE` on the actual schemas used by selected migrations
+and `SELECT, INSERT, UPDATE, DELETE` on their application tables to this role.
+The explicit grant scope is vault's `user_vault_secrets`, `user_vault_audit`,
+`vault_key_registry`; identity's `user_identities`; passkey's
+`user_credentials`, `user_passkey_handles`; and OAuth2's `clients`, `policies`,
+`oauth_refresh_tokens`, `oauth_grants`, `oauth_access_tokens`,
+`oauth_device_codes`, `client_access`. Grant `USAGE, SELECT` on sequences owned
+by columns of these tables, discovered through PostgreSQL catalog dependencies.
+Released vault/identity tables remain in `auth`; configured schema names apply
+only to templated migrations. Do not grant access to unrelated tables, transfer
+ownership, grant DDL rights, or grant application data access to PUBLIC.
+
+For pending/reapplied files, grant access to the existing objects in the selected
+set's scope and verify it before the ledger upsert in
+the same transaction. For already-applied files, reconcile missing grants in a
+separate transaction while holding the same advisory lock, so a corrected
+runtime role or revoked grant can be repaired without replaying SQL. Repeated
+grants are idempotent. Grant failures are actionable errors and never success;
+report errors for already-applied files in `access_errors` without deleting
+historical ledger rows. `--fail-fast` also stops on an access failure.
+Absent objects required by the current file fail its postconditions; objects
+introduced only by later files are not required prematurely. Future files that
+introduce application tables must extend the grant scope and its tests.
+
+`--check` uses `has_schema_privilege`, `has_table_privilege`, and
+`has_sequence_privilege` to report missing access for existing selected objects,
+exiting 1 without executing GRANT or any other writes. Ledger migration state
+and runtime access are reported separately; access checks do not turn an applied
+file into pending. Pending objects are already represented by pending files.
+`get_status` and the startup warning remain ledger-only. Passkey's presence
+check alone is not evidence of usable runtime permissions.
+
+Document the target-role default, exact grant scope, and the requirement that
+the admin principal can grant these privileges. Never assume default privileges
+have been configured. Include a live test with distinct admin/runtime roles and
+no default grants, proving runtime reads and writes, including sequence-backed
+inserts, after upgrade.
 
 ### Module 3: Legacy runner shims
 - **Path**: `navigator_auth/identity/migrations.py`, `navigator_auth/vault/migrations.py`, `navigator_auth/passkey/migrations.py`
@@ -486,7 +575,8 @@ database and user.
 - **Responsibility**: the documented view of the migrations.
 - **Depends on**: Module 1, Module 4, Module 5
 - **Interface Skeleton**: `docs/migrations/README.md` has four sections —
-  *Running* (`navauth self upgrade`, `--check`, credentials, exit codes),
+  *Running* (`navauth self upgrade`, `--check`, credentials, runtime role and
+  grants, exit codes, repairing blocked postconditions),
   *Index* (one table row per SQL file: set, file, feature, what it changes),
   *Adding a migration* (naming, idempotency rules, placeholders, no
   registration needed, add the index row), *Upgrading from ≤ 0.29* (startup no
@@ -508,7 +598,11 @@ database and user.
 | `test_discover_rejects_bad_filename_and_duplicate_prefix` | M1 | `MigrationCatalogError` on each (tmp catalog) |
 | `test_released_files_are_byte_identical` | M1 | checksums of the nine moved files equal the values recorded at spec time (computed by the task from `git show`) |
 | `test_render_sql_leaves_hardcoded_schema_untouched` | M1 | identity/vault files render to themselves |
-| `test_execute_checked_raises_on_asyncdb_error_pair` | M2 | `[None, Exception]` → `MigrationError`; plain results pass through |
+| `test_execute_checked_raises_on_asyncdb_error_pair` | M2 | exception and string errors (including empty strings) raise; `[result, None]` and native status strings pass; exception chaining only for exceptions |
+| `test_guarded_skip_stays_pending_and_retries` | M2 | 006 blocked by missing identity_id, dependencies or duplicates: no ledger row; repair then ordinary upgrade retries |
+| `test_missing_prerequisites_and_oauth2_postconditions_fail` | M2 | missing base tables or unmet required constraints cannot be recorded as applied |
+| `test_runtime_grants_and_reconciliation` | M2 | scoped table/schema/sequence grants; already-applied access repair without SQL replay; grant failure rolls back and exits 2 |
+| `test_check_reports_missing_runtime_access_without_writes` | M5 | missing privileges exit 1; invalid runtime role exits 3; no GRANT/DDL; quoted role identifiers |
 | `test_status_without_ledger_is_all_pending_and_writes_nothing` | M2 | fake connection records no DDL |
 | `test_status_marks_changed_on_checksum_mismatch` | M2 | |
 | `test_upgrade_applies_pending_in_order_and_records_ledger` | M2 | SQL + upsert inside one transaction per file |
@@ -535,7 +629,18 @@ database and user.
 | Test | Description |
 |---|---|
 | `test_upgrade_twice_is_noop_live` | against live PostgreSQL (skipped when unavailable, same convention as `tests/test_passkey_store.py`): first run applies and records, second run applies nothing |
+| `test_runtime_access_live` | distinct admin/runtime roles, no default grants: verify reads, writes and sequence inserts; revoke a grant and verify read-only check detects it and upgrade repairs it without SQL replay |
+| `test_guarded_skip_retry_live` | legacy identity table with a uid-dependent view: 006 fails without ledger insertion; remove blocker and verify normal upgrade retries successfully |
+| `test_oauth2_completion_live` | populated clients with missing names fail completion without ledger insertion; repair data and retry, then directly re-execute converted SQL to verify idempotency |
 | `test_wheel_contains_sql` | build a wheel and assert `navigator_auth/migrations/sql/identity/004_identity_base_columns.sql` is inside (skipped when the build toolchain is unavailable) |
+
+Place runner/access live scenarios in `tests/unit/migrations/test_runner.py`
+and OAuth2 live scenarios in `tests/unit/migrations/test_oauth2_sql.py`, so the
+Validation Contract collects them. Use an explicitly configured disposable
+PostgreSQL database and isolated fixture roles; never modify application data
+or roles in a developer's normal database. These tests may skip locally when
+the database is unavailable, but release validation must run them and retain
+the results in `artifacts/logs/`; skips do not verify these acceptance criteria.
 
 ### Validation Contract
 
@@ -580,6 +685,8 @@ No E2E scenarios: this feature has no deterministic E2E gate surface.
 
 - [ ] `navauth self upgrade --check` on a database without the ledger lists every catalog file as pending, exits `1`, and creates nothing.
 - [ ] `navauth self upgrade` applies every pending file in catalog order, records each in `<schema>.schema_migrations`, and exits `0`; a second run applies nothing and exits `0`.
+- [ ] Missing prerequisites and unmet postconditions fail without a new ledger row; identity 006 retries after blocker repair without changing its checksum.
+- [ ] Separate admin/runtime roles work without default grants; runtime tables and owned sequences receive scoped privileges, and already-applied access can be repaired without replaying SQL. `--check` detects missing access without writes.
 - [ ] A failing file is reported by name, later files still run, and the exit code is `2`; with `--fail-fast` the run stops at that file.
 - [ ] No code path uses the return value of asyncdb `execute()` unchecked: every migration statement goes through `execute_checked` or a raw asyncpg connection.
 - [ ] Adding `NNN_new.sql` to a set directory makes it pending with no other code change.
@@ -790,7 +897,8 @@ Verified against: `27ec076`
 2. **`NOT NULL` columns on a populated table**: `client_name VARCHAR(255) NOT
    NULL` (line 8) fails when rows exist and the column does not. Use: add
    nullable → backfill (`client_name = client`) → `SET NOT NULL` inside a
-   guarded block that skips (with `RAISE NOTICE`) when NULLs remain. Columns
+   guarded block; when NULLs remain, the runner postcondition fails the file
+   and rolls back rather than recording an incomplete migration. Columns
    with `NOT NULL DEFAULT …` (`client_type`, `registration_source`,
    `enforce_access_gate`) are safe as written.
 3. **Constraint**: `DROP CONSTRAINT IF EXISTS clients_client_uid_key` followed
@@ -800,8 +908,10 @@ Verified against: `27ec076`
    `client` ↔ `client_name`, `client_uid`, `registration_source`.
 5. **Duplicated blocks** (lines 76-93 repeat 39-51) appear once.
 6. **Every statement is guarded on the table's existence** with
-   `ALTER TABLE IF EXISTS` or `to_regclass`, so the file is a no-op on a
-   database without `clients` / `policies` rather than an error.
+   `ALTER TABLE IF EXISTS` or `to_regclass`, and the runner checks prerequisites
+   before execution. A database without
+   `clients` / `policies` fails this migration and leaves it pending; guarded
+   no-ops must not be recorded as completed schema changes.
 7. **Coverage** — the new file must still create or alter all of:
    `clients` columns `client`, `client_name`, `client_type`, `client_secret`
    (nullable), `redirect_uris`, `policy_uri`, `client_logo_uri`, `user_id`
@@ -826,12 +936,14 @@ Verified against: `27ec076`
 - **Pre-ledger databases** show everything as pending once. The first
   `navauth self upgrade` re-runs idempotent files and records them.
 - **`006_identity_drop_legacy_uid.sql` removes a column.** It keeps its catalog
-  guards untouched; operators should run `--check` first. Nothing in this
-  feature weakens the guard.
+  guards untouched; operators should run `--check` first. The runner verifies
+  that `uid` is gone before
+  recording completion, and leaves blocked executions retryable.
 - **Optional-feature tables are applied to every database** (passkey now,
   MFA later). Decided in the proposal; `--set` lets an operator restrict a run.
 - **Runtime user and the ledger**: the startup check needs `SELECT` on the
-  ledger and `USAGE` on the schema. The grant to `PUBLIC` covers the table; if
+  ledger and `USAGE` on the schema. The grant to `PUBLIC` covers only the ledger;
+  application tables and sequences follow the runtime access contract. If
   the check still fails it logs "could not verify" and startup continues.
 - **Advisory lock** is session-level, so the whole run must use one
   connection. The CLI holds a single asyncpg connection; never run the upgrade
@@ -949,3 +1061,4 @@ Summary: **0** confirmed · **0** rejected · **0** escalated.
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-11-11 | Jesus Lara | Initial draft from `sdd/proposals/new-command-migration.proposal.md` |
+| 0.2 | 2026-11-11 | Codex | Review fixes: non-None asyncdb errors fail closed; prerequisite/postcondition checks preserve retries; explicit runtime-role grants and read-only access checks, with regression validation. |

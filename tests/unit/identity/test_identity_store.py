@@ -464,6 +464,7 @@ class TestRefreshLock:
         pool, conn = _make_pool()
         conn.fetchval = AsyncMock(side_effect=fetchval)
         conn.fetch_one = AsyncMock(return_value={"identity_id": "row-1"})
+        conn.is_connected = MagicMock(return_value=True)
         return IdentityStore(pool, cipher=IdentityCipher(master_keys=MASTER_KEYS)), pool, conn
 
     @pytest.mark.asyncio
@@ -528,3 +529,26 @@ class TestRefreshLock:
         async with store.refresh_lock("azure", "35", "acct", timeout=1):
             result = "refreshed"
         assert result == "refreshed"
+
+    @pytest.mark.asyncio
+    async def test_dead_lock_connection_falls_back_and_skips_unlock(self):
+        """The lock connection died mid-refresh: the rotated token is still
+        written (fresh connection), and the dead connection is not queried."""
+        store, pool, conn = self._store([True])
+        identity = TestUpdateTokens._identity(store)
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            conn.is_connected.return_value = False  # killed while calling the provider
+            await store.update_tokens(identity, TokenResponse(access_token="AT.rotated"))
+        assert pool.acquire.call_count == 2  # the lock + a fresh one for the write
+        assert conn.fetchval.await_count == 1  # the lock only: no unlock on a dead connection
+
+    @pytest.mark.asyncio
+    async def test_failed_release_of_the_lock_connection_does_not_fail_the_refresh(self):
+        """asyncdb raises when it releases a connection that died while checked out."""
+        store, pool, _ = self._store([True, True])
+        ctx = await pool.acquire()
+        ctx.__aexit__ = AsyncMock(side_effect=RuntimeError("connection has been released back to the pool"))
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            result = "refreshed"
+        assert result == "refreshed"
+        ctx.__aexit__.assert_awaited_once()

@@ -38,6 +38,14 @@ _REFRESH_CONNECTION: ContextVar[Optional[tuple[Any, Any]]] = ContextVar(
 )
 
 
+def _is_live(conn: Any) -> bool:
+    """Whether a pooled asyncdb connection is still open (False when unsure)."""
+    try:
+        return bool(conn.is_connected())
+    except Exception:  # pylint: disable=W0703
+        return False
+
+
 class IdentityRefreshBusy(AuthException):
     """Another worker kept refreshing this credential past the lock timeout."""
 
@@ -249,9 +257,12 @@ class IdentityStore:
         ``asyncio.gather`` of store calls there).
         """
         held = _REFRESH_CONNECTION.get()
-        if held is not None and held[0] is self._pool:
+        if held is not None and held[0] is self._pool and _is_live(held[1]):
             yield held[1]
             return
+        # No lock held, or its connection died during the refresh (the lock
+        # went with it): write through a fresh connection rather than lose a
+        # credential the provider has already rotated.
         async with await self._pool.acquire() as conn:
             yield conn
 
@@ -295,7 +306,12 @@ class IdentityStore:
         )
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
-        async with await self._pool.acquire() as conn:
+        # Acquired and released by hand: releasing a connection that died
+        # while checked out raises in asyncdb, and that must not turn a
+        # refresh that already stored its tokens into a failure.
+        acquired = await self._pool.acquire()
+        conn = await acquired.__aenter__()
+        try:
             while not await conn.fetchval(_REFRESH_TRY_LOCK, key):
                 if loop.time() >= deadline:
                     raise IdentityRefreshBusy(
@@ -308,13 +324,21 @@ class IdentityStore:
                 yield
             finally:
                 _REFRESH_CONNECTION.reset(held)
-                try:
-                    await conn.fetchval(_REFRESH_UNLOCK, key)
-                except Exception as err:  # pylint: disable=W0703
-                    # Returning the connection to the pool runs
-                    # pg_advisory_unlock_all(), and a dead connection drops its
-                    # locks: never let a failed unlock mask the refresh result.
-                    logger.warning("identity refresh lock: unlock failed (%s)", err)
+                # A dead connection already lost its locks; querying it
+                # anyway can wedge it in the pool, so leave it alone.
+                if _is_live(conn):
+                    try:
+                        await conn.fetchval(_REFRESH_UNLOCK, key)
+                    except Exception as err:  # pylint: disable=W0703
+                        # Returning the connection to the pool runs
+                        # pg_advisory_unlock_all(): never let a failed unlock
+                        # mask the refresh result.
+                        logger.warning("identity refresh lock: unlock failed (%s)", err)
+        finally:
+            try:
+                await acquired.__aexit__(None, None, None)
+            except Exception as err:  # pylint: disable=W0703
+                logger.warning("identity refresh lock: releasing its connection failed (%s)", err)
 
     # ------------------------------------------------------------------
     # Context-bound sealing helpers
