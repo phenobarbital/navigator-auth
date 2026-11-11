@@ -195,9 +195,11 @@ class TestWrites:
         """An owner cannot escalate through a PATCH payload."""
         handler = _handler(body=ESCALATION_PAYLOAD)
         row = Row()
-        with _patch_sessions(_session()), pytest.raises(web.HTTPForbidden), patch.object(
-            ModelHandler, "_set_update", new=AsyncMock()
-        ) as update:
+        with (
+            _patch_sessions(_session()),
+            pytest.raises(web.HTTPForbidden),
+            patch.object(ModelHandler, "_set_update", new=AsyncMock()) as update,
+        ):
             await handler._pre_patch()
             await handler._set_update(row, dict(ESCALATION_PAYLOAD))
         update.assert_not_awaited()
@@ -210,9 +212,11 @@ class TestWrites:
         """An authorized superuser cannot escalate through a PATCH payload."""
         handler = _handler(body=ESCALATION_PAYLOAD, pdp=_pdp(UserManager.superuser_actions))
         row = Row(owner=OTHER_ID)
-        with _patch_sessions(_session(groups=["superuser"])), pytest.raises(web.HTTPForbidden), patch.object(
-            ModelHandler, "_set_update", new=AsyncMock()
-        ) as update:
+        with (
+            _patch_sessions(_session(groups=["superuser"])),
+            pytest.raises(web.HTTPForbidden),
+            patch.object(ModelHandler, "_set_update", new=AsyncMock()) as update,
+        ):
             await handler._pre_patch()
             await handler._set_update(row, dict(ESCALATION_PAYLOAD))
         update.assert_not_awaited()
@@ -233,10 +237,10 @@ class TestWrites:
     async def test_admin_can_update_non_privileged_column(self):
         """An approved superuser may PATCH another user's e-mail address."""
         handler = _handler(body={"email": "after@example.test"}, pdp=_pdp(UserManager.superuser_actions))
-        with _patch_sessions(_session(groups=["superuser"])), patch.object(
-            ModelHandler, "_set_update", new=AsyncMock()
-        ) as update, patch(
-            "navigator_auth.handlers.guards.policy_allows", new=AsyncMock(return_value=(True, "allowed", None))
+        with (
+            _patch_sessions(_session(groups=["superuser"])),
+            patch.object(ModelHandler, "_set_update", new=AsyncMock()) as update,
+            patch("navigator_auth.handlers.guards.policy_allows", new=AsyncMock(return_value=(True, "allowed", None))),
         ):
             await handler._pre_patch()
             await handler._set_update(Row(owner=OTHER_ID), {"email": "after@example.test"})
@@ -246,9 +250,11 @@ class TestWrites:
     async def test_username_not_updatable(self):
         """An admin cannot change a username after user creation."""
         handler = _handler(body={"username": "different"}, pdp=_pdp(UserManager.superuser_actions))
-        with _patch_sessions(_session(groups=["superuser"])), pytest.raises(web.HTTPForbidden), patch.object(
-            ModelHandler, "_set_update", new=AsyncMock()
-        ) as update:
+        with (
+            _patch_sessions(_session(groups=["superuser"])),
+            pytest.raises(web.HTTPForbidden),
+            patch.object(ModelHandler, "_set_update", new=AsyncMock()) as update,
+        ):
             await handler._pre_patch()
             await handler._set_update(Row(owner=OTHER_ID), {"username": "different"})
         update.assert_not_awaited()
@@ -259,8 +265,9 @@ class TestWrites:
         """An approved superuser may create through PUT without password data."""
         body = {"first_name": "New", "last_name": "User", "username": "newuser", "email": "new@example.test"}
         handler = _handler(path="/api/v1/users", body=body, pdp=_pdp(UserManager.superuser_actions))
-        with _patch_sessions(_session(groups=["superuser"])), patch(
-            "navigator_auth.handlers.guards.policy_allows", new=AsyncMock(return_value=(True, "allowed", None))
+        with (
+            _patch_sessions(_session(groups=["superuser"])),
+            patch("navigator_auth.handlers.guards.policy_allows", new=AsyncMock(return_value=(True, "allowed", None))),
         ):
             assert await handler._pre_put() is True
         assert "password" not in handler._guard_write_keys
@@ -283,9 +290,7 @@ class TestReads:
     async def test_non_superuser_list_bound_to_own_row(self):
         """A non-superuser list binds the owner filter to the acting user."""
         handler = _handler(path="/api/v1/users")
-        with _patch_sessions(_session()), patch.object(
-            ModelHandler, "_get_data", new=AsyncMock(return_value=[])
-        ):
+        with _patch_sessions(_session()), patch.object(ModelHandler, "_get_data", new=AsyncMock(return_value=[])):
             await handler._pre_get()
             await handler._get_data({}, {})
         assert await handler._filter_user_id() == OWNER_ID

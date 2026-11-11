@@ -47,11 +47,11 @@ class UserManager(OwnerOrSuperuserGuard, GuardedModelViewHooks, ModelHandler):
 
     def required_by_put(self):
         """PUT creates on this base (navigator model.py:996-1007): subset creatable_by_admin."""
-        return ['first_name', 'last_name', 'username', 'email']
+        return ["first_name", "last_name", "username", "email"]
 
     def required_by_post(self):
         """POST is an admin upsert (approved for create AND update): subset writable_by_admin."""
-        return ['first_name', 'last_name', 'display_name']
+        return ["first_name", "last_name", "display_name"]
 
     async def _set_created_by(self, value, column, **kwargs):
         return await self.get_userid(session=self._session)
