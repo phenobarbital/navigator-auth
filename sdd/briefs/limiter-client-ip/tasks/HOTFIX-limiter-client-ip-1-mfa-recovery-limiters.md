@@ -2,7 +2,7 @@
 
 **Feature**: BRIEF-limiter-client-ip — IP rate limiters must key on the real client IP
 **Spec**: `sdd/briefs/limiter-client-ip.brief.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -330,10 +330,10 @@ async def test_recovery_step1_keys_ip_limiter_on_client(monkeypatch):
 
 ## Completion Note
 
-*(Agent fills this in when done)*
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**:
+
+**Completed by**: sdd-worker (sequential fallback; coder engine could not route HOTFIX-* ids: complexity_audit_failed)
+**Date**: 2026-11-12
+**Notes**: Implemented per blueprint; validation commands run. Env-only failures: tests/test_password_recovery.py needs Redis/DB (ConnectionError); several MFA tests skipped; test_passkey_backend_unit.py::test_on_startup_without_webauthn_raises fails on a google FutureWarning (pre-existing, unrelated).
 
 **Deviations from spec**: none
