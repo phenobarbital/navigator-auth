@@ -499,13 +499,40 @@ class AzureAuth(ExternalAuth):
             names.add(name)
         return names
 
+    @staticmethod
+    def _refresh_request_scopes(scopes: Optional[list]) -> list:
+        """Scopes to send when refreshing a stored grant.
+
+        A grant obtained with a ``<resource>/.default`` selector (the
+        interactive login) is recorded by Entra as that selector PLUS every
+        permission it expanded to. Entra rejects a request that combines
+        ``.default`` with resource-specific scopes (``AADSTS70011``), so such a
+        grant is refreshed with the selector alone — exactly what the login
+        asked for, and it still yields every consented permission. Any other
+        grant is refreshed with its own scopes. MSAL-reserved scopes are
+        dropped either way: MSAL adds them itself.
+
+        Args:
+            scopes: The scopes recorded on the stored grant.
+
+        Returns:
+            The scopes list for ``acquire_token_by_refresh_token``; empty when
+            the grant records nothing usable.
+        """
+        requested = [s for s in (scopes or []) if s not in MSAL_RESERVED_SCOPES]
+        selectors = [s for s in requested if s.rsplit("/", 1)[-1] == ".default"]
+        if selectors:
+            return list(dict.fromkeys(selectors))
+        return requested
+
     async def refresh_provider_tokens(self, token: TokenResponse) -> Optional[TokenResponse]:
         """Refresh an Azure LOGIN grant without downgrading its scopes.
 
         ``refresh_identity_tokens`` asks for ``AZURE_IDENTITY_SCOPES`` (default
         ``User.Read``), which is correct for an identity LINK and wrong for a
         login grant that may hold more. This override requests the stored
-        grant's own scopes, minus the MSAL-reserved ones MSAL adds itself.
+        grant's own scopes (see ``_refresh_request_scopes``: a ``.default``
+        grant is re-requested through its selector alone).
 
         Returns:
             The rotated credential, or ``None`` when the refresh fails or comes
@@ -514,7 +541,7 @@ class AzureAuth(ExternalAuth):
         """
         if not token.refresh_token:
             return None
-        requested = [s for s in (token.scopes or []) if s not in MSAL_RESERVED_SCOPES]
+        requested = self._refresh_request_scopes(token.scopes)
         if not requested:
             self.logger.warning(
                 "azure: stored grant records no scopes; falling back to " "identity scopes for the refresh."

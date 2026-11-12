@@ -458,6 +458,39 @@ class TestAzureRefreshScopes:
         assert refreshed.access_token == "AT.new"
         assert refreshed.refresh_token == "RT.secret"  # not rotated: kept
 
+    @pytest.mark.asyncio
+    async def test_azure_default_grant_refreshes_with_selector_only(self, backend):
+        """A `.default` login grant is recorded by Entra as the selector PLUS
+        its expanded permissions; sending both back fails with AADSTS70011
+        (".default scope can't be combined with resource-specific scopes")."""
+        granted = (
+            "email https://graph.microsoft.com/.default "
+            "https://graph.microsoft.com/Mail.Read "
+            "https://graph.microsoft.com/User.Read openid profile offline_access"
+        )
+        app = MagicMock()
+        app.acquire_token_by_refresh_token = MagicMock(
+            return_value={"access_token": "AT.new", "expires_in": 3599, "scope": granted}
+        )
+        backend.get_msal_app = MagicMock(return_value=app)
+        stored = TokenResponse(
+            access_token="AT.old", refresh_token="RT.secret", scopes=granted.split()
+        )
+        refreshed = await backend.refresh_provider_tokens(stored)
+        sent = app.acquire_token_by_refresh_token.call_args.kwargs["scopes"]
+        assert sent == ["https://graph.microsoft.com/.default"]
+        assert refreshed is not None
+        assert refreshed.access_token == "AT.new"
+
+    def test_azure_refresh_request_scopes(self):
+        pick = AzureAuth._refresh_request_scopes
+        assert pick(None) == []
+        assert pick(["openid", "offline_access"]) == []
+        assert pick(["User.Read", "openid", "Mail.Read"]) == ["User.Read", "Mail.Read"]
+        assert pick(
+            ["https://graph.microsoft.com/.default", "https://graph.microsoft.com/.default"]
+        ) == ["https://graph.microsoft.com/.default"]
+
     def test_azure_missing_scope_fallback(self, msal_result_full):
         result = dict(msal_result_full)
         result.pop("scope")
