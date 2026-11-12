@@ -588,9 +588,7 @@ async def _bad_user_code_attempt(remote, forwarded_for, trusted=None):
     provider = _make_provider(client=None, device_store=store)
     if trusted is not None:
         provider._trusted_proxies = trusted
-    request = _make_post_request(
-        {"action": "approve", "user_code": "XXXXXXXX"}, remote=remote
-    )
+    request = _make_post_request({"action": "approve", "user_code": "XXXXXXXX"}, remote=remote)
     request.headers = {"X-Forwarded-For": forwarded_for}
     await provider.device_verification(request)
     return store.redis.incr_keys
@@ -606,7 +604,5 @@ async def test_device_lockout_ignores_spoofed_forwarded_for():
 @pytest.mark.asyncio
 async def test_device_lockout_honours_trusted_proxy():
     """Behind a configured proxy the lockout keys on the forwarded client."""
-    keys = await _bad_user_code_attempt(
-        "10.0.0.1", "203.0.113.7", trusted={ip_address("10.0.0.1")}
-    )
+    keys = await _bad_user_code_attempt("10.0.0.1", "203.0.113.7", trusted={ip_address("10.0.0.1")})
     assert keys == ["oauth2:device:attempts:203.0.113.7"]

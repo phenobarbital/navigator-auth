@@ -239,9 +239,7 @@ async def test_rate_limit_keys_on_trusted_forwarded_client(backend, monkeypatch)
     req = make_mocked_request("POST", "/", headers={"X-Forwarded-For": "203.0.113.7"})
     monkeypatch.setattr(type(req), "remote", property(lambda self: "10.0.0.1"), raising=False)
 
-    monkeypatch.setattr(
-        "navigator_auth.backends.passkey._TRUSTED_PROXIES", {ip_address("10.0.0.1")}
-    )
+    monkeypatch.setattr("navigator_auth.backends.passkey._TRUSTED_PROXIES", {ip_address("10.0.0.1")})
     await backend._rate_limit(req)
     assert keys[-1] == "passkey_rl_203.0.113.7"
 

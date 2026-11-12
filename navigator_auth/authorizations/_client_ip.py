@@ -4,6 +4,7 @@ Used by both ``authz_allowed_ips`` (CIDR matching) and ``authz_useragent``
 (geo-fencing) so the trusted-proxy / ``X-Forwarded-For`` logic lives in one
 place.
 """
+
 import ipaddress
 import logging
 from aiohttp import web
@@ -51,8 +52,7 @@ def parse_proxies(entries: list[str]) -> set[IPAddress]:
             proxies.add(ipaddress.ip_address(entry))
         except ValueError:
             logging.warning(
-                "authz: ignoring invalid trusted proxy IP at position %d "
-                "of ALLOWED_IP_TRUSTED_PROXIES",
+                "authz: ignoring invalid trusted proxy IP at position %d " "of ALLOWED_IP_TRUSTED_PROXIES",
                 position,
             )
     return proxies
