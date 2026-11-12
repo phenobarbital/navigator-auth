@@ -26,13 +26,16 @@ FEAT-094 changes (in task order):
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Any
-from collections.abc import Awaitable
+from typing import Any, NoReturn, Optional
+from collections.abc import AsyncIterator, Awaitable
+from contextlib import asynccontextmanager
 from html import escape
 import base64
+import hashlib
 import hmac
 import importlib
 import json
+import re
 import secrets
 from urllib.parse import urlencode, unquote_plus, urlparse, urlunparse
 from uuid import uuid4
@@ -46,6 +49,7 @@ import redis.asyncio as aioredis
 from ...identities import AuthUser
 from ...conf import (
     AUTH_MECHANISM_BEARER,
+    AUTH_BEARER_CONTEXT_KEY,
     AUTH_LOGIN_FAILED_URI,
     AUTH_LOGOUT_REDIRECT_URI,
     AUTH_MISSING_ACCOUNT,
@@ -60,7 +64,6 @@ from ...conf import (
     OAUTH_REFRESH_ROTATION,
     OAUTH_SCOPES,
     # FEAT-094
-    OAUTH_INTROSPECT_INCLUDE_ABAC_SCOPES,
     OAUTH_DEVICE_CODE_TTL,
     OAUTH_DEVICE_POLL_INTERVAL,
     OAUTH_DEVICE_SLOW_DOWN_INCREMENT,
@@ -98,19 +101,36 @@ from navigator_session.conf import (
     SESSION_OBJECT,
     SESSION_REQUEST_KEY,
     SESSION_STORAGE,
+    SESSION_TIMEOUT,
 )
 from ...exceptions import (
     FailedAuth,
     UserNotFound,
     InvalidAuth,
+    IdentityStoreUnavailable,
 )
-from ...responses import JSONResponse
+from ...responses import JSONResponse, RedirectResponse
 from ..abstract import BaseAuthBackend, user_is_active
+from ... import conf as auth_conf
+from ...exceptions import MFARefused
+from ...mfa.login import SecondFactorGate, VerifyRefused
+from ...mfa.services import mfa_services_lease
+from ...mfa.types import TRUSTED_COOKIE, trusted_cookie_kwargs
+from ...mfa.exceptions import MfaStorageError
+from ...mfa.security import advisory_user_lock
+from ...security_state.store import (
+    SecurityStateError,
+    current_generation,
+    generation_matches,
+    generation_of,
+    stamp_generation,
+)
 from .models import (
     OauthUser,
     OauthRefreshToken,
     OauthGrant,
     OauthAccessTokenRecord,
+    is_oauth_user_token,
 )
 from .client_backend import PostgresClientStorage, RedisClientStorage, MemoryClientStorage
 from .code_backend import (
@@ -153,6 +173,12 @@ METADATA_CACHE_MAX_ENTRIES: int = 32
 #: client_secret presented via HTTP Basic (FEAT-095 review finding).  Never
 #: read as a credential itself — only `_secret_matches` consults it.
 BASIC_SECRET_ALT_KEY: str = "_basic_client_secret_decoded"
+
+#: FEAT-106 review fix #1 (M6): opaque handle of one browser authentication event.
+#: The record (Redis, keyed by sha256 of the handle) carries the login's assurance so it
+#: never lives in the identity-shared OAuth2 session. Validated by TASK-186.
+OAUTH2_EVENT_COOKIE: str = "nav_oauth2_event"
+OAUTH2_EVENT_KEY_PREFIX: str = "oauth2:event:"
 
 
 def validate_resource_uri(resource: str) -> bool:
@@ -255,6 +281,9 @@ def issuer_url(request: Optional[web.Request] = None) -> str:
     return f"{scheme}://{host}".rstrip("/")
 
 
+_DEVICE_USER_CODE_RE = re.compile(r"[A-Za-z0-9 -]{1,32}")
+
+
 class Oauth2Provider(BaseAuthBackend):
     """Oauth2Provider.
 
@@ -327,6 +356,9 @@ class Oauth2Provider(BaseAuthBackend):
 
         router.add_route("*", self.login_uri, self.auth_login, name="nav_oauth2_login")
         app[AUTH_EXCLUDE_LIST_KEY].append(self.login_uri)
+        # FEAT-106 review fix #1 (M6): second-factor step of the OAuth2 password form.
+        router.add_route("POST", f"{self.login_uri}/mfa", self.auth_login_mfa, name="nav_oauth2_login_mfa")
+        app[AUTH_EXCLUDE_LIST_KEY].append(f"{self.login_uri}/mfa")
 
         router.add_route("*", self.consent_uri, self.consent, name="nav_oauth2_consent")
 
@@ -499,6 +531,47 @@ class Oauth2Provider(BaseAuthBackend):
             status=status,
         )
 
+    def _owner_store_unavailable(self) -> web.StreamResponse:
+        """Generic 503 for an identity-store outage (FEAT-108 D6) — no database detail."""
+        return self._error_response("server_error", "The identity service is temporarily unavailable.", status=503)
+
+    def _redirect_to_login(self, request: web.Request, data: dict) -> NoReturn:
+        """Raise HTTPFound to nav_oauth2_login carrying the authorization request (FEAT-108).
+
+        Extracted from ``authorize``'s no-session branch so the no-session and the
+        unknown-owner paths share it. The session is never invalidated here (D3).
+        """
+        location = request.app.router["nav_oauth2_login"].url_for()
+        payload = {"action_url": str(location), **data}
+        url = location.with_query(**payload)
+        self.redirect(url, location=True)
+
+    async def _resolve_resource_owner(self, user_id: Any) -> Any:
+        """Return the IdP user for ``user_id`` (FEAT-108).
+
+        Raises:
+            UserNotFound: the IdP raised UserNotFound or a datamodel ValidationError.
+            FailedAuth: ``user_is_active(user)`` is False (D4).
+            IdentityStoreUnavailable: the store failed, or the IdP raised anything else.
+        """
+        try:
+            user = await self._idp.user_from_id(user_id)
+        except (UserNotFound, ValidationError) as exc:
+            raise UserNotFound("Unknown resource owner.") from exc
+        except IdentityStoreUnavailable:
+            raise
+        except Exception as exc:  # pylint: disable=W0703
+            # Class name only: a store exception string can carry DSN fragments.
+            self.logger.error(f"Oauth2: resource-owner lookup failed for user_id={user_id}: {type(exc).__name__}")
+            raise IdentityStoreUnavailable() from exc
+        if user is None:
+            # A custom IdP may return None instead of raising; user_is_active(None)
+            # is True, so without this a missing owner would pass (fail-open).
+            raise UserNotFound("Unknown resource owner.")
+        if not user_is_active(user):
+            raise FailedAuth("Disabled resource owner.")
+        return user
+
     async def get_payload(self, request):
         ctype = request.content_type
         if request.method == "POST":
@@ -634,8 +707,13 @@ class Oauth2Provider(BaseAuthBackend):
         request: web.Request,
         user: Any,
         response: web.StreamResponse = None,
+        extra: Optional[dict] = None,
     ):
         """Create (or refresh) the server-side session for a resource owner.
+
+        ``extra`` is ``None`` for 2FA-off and token-endpoint sessions (pre-FEAT-106
+        behaviour); a dict additionally records a browser authentication event that
+        carries the login's assurance, never stored in the shared session data.
 
         The session is keyed by the user's identity, so the interactive login
         and any token minted for that same user share one session — the same
@@ -683,22 +761,118 @@ class Oauth2Provider(BaseAuthBackend):
         if not session:
             self.logger.error("Oauth2: unable to create the User session.")
             return None
+        if extra is not None:
+            await self._issue_auth_event(request, response, session, user, extra)
         return session
 
-    async def _token_session_claims(self, request: web.Request, user_id: int) -> dict:
+    async def _issue_auth_event(
+        self,
+        request: web.Request,
+        response: Optional[web.StreamResponse],
+        session: Any,
+        user: Any,
+        extra: dict,
+    ) -> None:
+        """Record one browser authentication event and bind it to the browser.
+
+        Args:
+            request: The login request.
+            response: The redirect carrying the session cookie; receives the event cookie.
+            session: The ``SessionData`` just created for ``user``.
+            user: The authenticated resource owner.
+            extra: ``{"auth_method": ..., "mfa"?: True, "amr"?: [...]}`` from the gate adapter.
+
+        Raises:
+            web.HTTPServiceUnavailable: the event could not be stored (fail closed).
+        """
+        handle = secrets.token_urlsafe(32)
+        if isinstance(user, dict):
+            raw_uid = user.get(self.userid_attribute)
+        else:
+            try:
+                raw_uid = user[self.userid_attribute]
+            except (KeyError, TypeError, AttributeError):
+                raw_uid = getattr(user, self.userid_attribute, None)
+        try:
+            user_id = int(raw_uid)
+        except (TypeError, ValueError) as err:
+            self.logger.error("Oauth2: cannot resolve the user id for the login event")
+            raise web.HTTPServiceUnavailable(reason="Auth: login temporarily unavailable.") from err
+        record = {
+            "user_id": user_id,
+            "session_id": session.session_id,
+            "mfa": bool(extra.get("mfa", False)),
+            "amr": list(extra["amr"]) if extra.get("amr") else None,
+            "auth_method": extra.get("auth_method", "oauth2"),
+            "issued_at": int(datetime.now(timezone.utc).timestamp()),
+        }
+        ttl = int(SESSION_TIMEOUT)
+        key = OAUTH2_EVENT_KEY_PREFIX + hashlib.sha256(handle.encode("utf-8")).hexdigest()
+        try:
+            await self.flow_store.set(key, record, ttl=ttl)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.error(f"Oauth2: cannot record the login event: {type(err).__name__}")
+            raise web.HTTPServiceUnavailable(reason="Auth: login temporarily unavailable.") from err
+        if response is not None:
+            response.set_cookie(
+                OAUTH2_EVENT_COOKIE,
+                handle,
+                max_age=ttl,
+                httponly=True,
+                samesite="Lax",
+                secure=(PREFERRED_AUTH_SCHEME == "https"),
+                path="/oauth2",
+            )
+
+    async def _load_auth_event(self, request: web.Request) -> Optional[dict]:
+        """Return the raw event record named by the browser's event cookie, if any.
+
+        Load only: TASK-186 validates it against the current session. ``None`` when
+        the cookie is missing, unknown, expired or unreadable.
+        """
+        handle = request.cookies.get(OAUTH2_EVENT_COOKIE)
+        if not handle:
+            return None
+        key = OAUTH2_EVENT_KEY_PREFIX + hashlib.sha256(handle.encode("utf-8")).hexdigest()
+        try:
+            record = await self.flow_store.get(key)
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"Oauth2: cannot read the login event: {type(err).__name__}")
+            return None
+        return record if isinstance(record, dict) else None
+
+    async def _token_session_claims(
+        self,
+        request: web.Request,
+        user_id: int,
+        *,
+        conn: Any = None,
+        user: Any = None,
+    ) -> dict:
         """Bind a freshly issued access token to a session.
 
         Returns the extra JWT claims (``id``, ``session_id``, ``username``)
         that let ``auth_middleware`` resolve the session — and therefore the
-        user — from the bearer token alone. Returns an empty dict when the
-        resource owner cannot be resolved, leaving the token usable for
-        introspection-based resource servers.
+        user — from the bearer token alone. Returns an empty dict when a
+        session cannot be created. An unresolvable owner raises so grants can
+        fail closed without consuming state during an identity-store outage.
+
+        Args:
+            request: The token request.
+            user_id: The resource owner's id.
+            conn: The per-user lock connection, when the caller holds it.
+            user: An owner the caller already resolved with
+                ``_resolve_resource_owner``; skips the second lookup.
+
+        Returns:
+            dict: The session-binding claims, or ``{}`` without a session.
         """
-        try:
-            user = await self._idp.user_from_id(user_id)
-        except Exception as exc:  # pylint: disable=W0703
-            self.logger.warning(f"Oauth2: cannot bind a session to the token for user_id={user_id}: {exc}")
-            return {}
+
+        # FEAT-108: an unresolvable or disabled owner must not get a token.
+        # UserNotFound, FailedAuth and IdentityStoreUnavailable propagate to
+        # the grant handler, which maps each outcome without leaking details.
+        if user is None:
+            user = await self._resolve_resource_owner(user_id)
         session = await self._create_user_session(request, user)
         if not session:
             return {}
@@ -708,6 +882,67 @@ class Oauth2Provider(BaseAuthBackend):
             self.session_id_property: session.session_id,
             self.username_attribute: identity,
         }
+
+    async def _session_auth_context(self, request: web.Request) -> dict:
+        """Return the second-factor assurance of the validated browser event.
+
+        The event must belong to the current browser session and its user. The
+        identity-shared session is never consulted for assurance, so a later
+        login elsewhere cannot upgrade an older event.
+
+        Returns:
+            ``{"mfa": True, "amr": [...]}`` for an MFA event, or an empty
+            dictionary when 2FA is disabled or no event is present.
+
+        Raises:
+            InvalidAuth: If a present event is malformed or bound to another
+                session or user.
+        """
+        if not auth_conf.AUTH_BASIC_2FA_ENABLED:
+            return {}
+
+        record = await self._load_auth_event(request)
+        if record is None:
+            # Passkey and upstream-IdP sessions do not issue OAuth2 events.
+            return {}
+
+        try:
+            session = await get_session(request, None, new=False, ignore_cookie=False)
+            user = self._decode_session_user(session.get("user") if session else None)
+            if session is None or user is None:
+                raise ValueError("session user unavailable")
+            if not hmac.compare_digest(str(record.get("session_id")), str(session.session_id)):
+                raise ValueError("session binding mismatch")
+            if not hmac.compare_digest(str(record.get("user_id")), str(user.user_id)):
+                raise ValueError("user binding mismatch")
+        except Exception as err:  # pylint: disable=W0703
+            self.logger.warning(f"Oauth2: invalid login event binding: {type(err).__name__}")
+            raise InvalidAuth("Oauth2: login required.", status=401) from err
+
+        if not record.get("mfa"):
+            return {}
+        amr = record.get("amr")
+        if not isinstance(amr, list) or not amr or not all(isinstance(value, str) for value in amr):
+            raise InvalidAuth("Oauth2: invalid login event.", status=401)
+        return {"mfa": True, "amr": list(amr)}
+
+    def _auth_pool(self, request: web.Request) -> Any:
+        """Return the configured auth database pool, failing closed when absent."""
+        app = getattr(request, "app", None)
+        pool = app.get("authdb") if app is not None else None
+        if pool is None:
+            raise SecurityStateError("authdb is not configured")
+        return pool
+
+    @asynccontextmanager
+    async def _user_generation(self, request: web.Request, user_id: int) -> AsyncIterator[tuple[Any, int]]:
+        """Hold the per-user lock and yield its connection and generation."""
+        async with advisory_user_lock(self._auth_pool(request), int(user_id)) as conn:
+            yield conn, await current_generation(conn, int(user_id))
+
+    async def _generation_ok(self, request: web.Request, user_id: int, presented: int) -> bool:
+        """Return whether a presented generation matches the authoritative value."""
+        return await generation_matches(self._auth_pool(request), int(user_id), int(presented))
 
     async def validate_client(self, client_id, redirect_uri=None, request=None):
         """Fetch client by public uid; optionally validate redirect_uri (exact match)."""
@@ -999,7 +1234,7 @@ class Oauth2Provider(BaseAuthBackend):
         }
         if state:
             params["state"] = state
-        return web.HTTPFound(self.prepare_url(redirect_uri, params))
+        return RedirectResponse(self.prepare_url(redirect_uri, params))
 
     async def cascade_access_revocation(self, user_id: int, client_uid: str, request: web.Request = None) -> dict:
         """Revoke everything a (user, client) pair currently holds.
@@ -1145,7 +1380,7 @@ class Oauth2Provider(BaseAuthBackend):
                 status=500,
             )
 
-        response = web.HTTPFound(f"/auth/{provider}/login")
+        response = RedirectResponse(f"/auth/{provider}/login")
         # Only the opaque handle rides in the browser.
         response.set_cookie(
             OAUTH2_RESUME_COOKIE,
@@ -1422,25 +1657,38 @@ class Oauth2Provider(BaseAuthBackend):
         # Check user session.
         session = await self.check_session(request)
         if not session:
+            self._redirect_to_login(request, data)
+
+        # FEAT-106 review fixes (M9): a stale or foreign browser event never lends assurance.
+        try:
+            await self._session_auth_context(request)
+        except InvalidAuth:
             location = request.app.router["nav_oauth2_login"].url_for()
             payload = {"action_url": str(location), **data}
-            url = location.with_query(**payload)
-            self.redirect(url, location=True)
+            self.redirect(location.with_query(**payload), location=True)
 
         # FEAT-095 TASK-042: ACCESS GATE — after login, BEFORE consent.
         # A non-activated user must never see the consent screen and never
         # receive a code.
         gate_user = self._decode_session_user(session)
-        if gate_user is not None:
-            denied = await self._enforce_access_gate(
-                request,
-                client,
-                gate_user.user_id,
-                redirect_uri,
-                data.get("state", ""),
-            )
-            if denied is not None:
-                return denied
+        if gate_user is None:
+            self._redirect_to_login(request, data)
+        try:
+            await self._resolve_resource_owner(gate_user.user_id)
+        except (UserNotFound, FailedAuth):
+            # FEAT-108 D3: re-authenticate THIS authorization; the shared session is kept.
+            self._redirect_to_login(request, data)
+        except IdentityStoreUnavailable:
+            return self._owner_store_unavailable()
+        denied = await self._enforce_access_gate(
+            request,
+            client,
+            gate_user.user_id,
+            redirect_uri,
+            data.get("state", ""),
+        )
+        if denied is not None:
+            return denied
 
         # TASK-027: Consent-skip — if unrevoked grant exists for these scopes.
         prompt = data.get("prompt", "")
@@ -1491,20 +1739,28 @@ class Oauth2Provider(BaseAuthBackend):
         from .models import OauthAuthorizationCode
 
         auth_code = secrets.token_urlsafe(32)
-        code_obj = OauthAuthorizationCode(
-            client=client,
-            user_id=user_obj.user_id,
-            code=auth_code,
-            redirect_uri=redirect_uri or (client.redirect_uris[0] if client.redirect_uris else ""),
-            scope=scope,
-            state=state,
-            response_type="code",
-            code_challenge=code_challenge,
-            code_challenge_method=code_challenge_method,
-            # RFC 8707: carried through the code to the token exchange.
-            resource=resource,
-        )
-        await self.code_storage.save_code(code_obj)
+        try:
+            async with self._user_generation(request, user_obj.user_id) as (_conn, generation):
+                code_obj = OauthAuthorizationCode(
+                    client=client,
+                    user_id=user_obj.user_id,
+                    code=auth_code,
+                    redirect_uri=redirect_uri or (client.redirect_uris[0] if client.redirect_uris else ""),
+                    scope=scope,
+                    state=state,
+                    response_type="code",
+                    code_challenge=code_challenge,
+                    code_challenge_method=code_challenge_method,
+                    # RFC 8707: carried through the code to the token exchange.
+                    resource=resource,
+                    # FEAT-106 review fixes (M9): assurance of the validated browser event.
+                    **await self._session_auth_context(request),
+                    generation=generation,
+                )
+                await self.code_storage.save_code(code_obj)
+        except (SecurityStateError, MfaStorageError) as err:
+            self.logger.error(f"Oauth2: cannot read the credential generation: {type(err).__name__}")
+            raise web.HTTPServiceUnavailable(reason="Authorization temporarily unavailable.") from err
         payload = {"code": auth_code, "state": state}
         uri = self.prepare_url(code_obj.redirect_uri, params=payload)
         self.redirect(uri)
@@ -1543,6 +1799,16 @@ class Oauth2Provider(BaseAuthBackend):
                 user_obj = self._decode_session_user(session_user)
                 if not user_obj:
                     return self._error_response("access_denied", "Cannot resolve user from session.", status=401)
+                try:
+                    await self._resolve_resource_owner(user_obj.user_id)
+                except (UserNotFound, FailedAuth):
+                    return self._error_response("access_denied", "Unknown or disabled resource owner.", status=401)
+                except IdentityStoreUnavailable:
+                    return self._owner_store_unavailable()
+                try:
+                    await self._session_auth_context(request)
+                except InvalidAuth:
+                    return self._error_response("access_denied", "User not authenticated.", status=401)
 
                 client = await self.client_storage.get_client(client_id, request=request)
                 if not client:
@@ -1613,6 +1879,203 @@ class Oauth2Provider(BaseAuthBackend):
         else:
             raise self.auth_error(reason=f"Invalid HTTP Form Data: {request.method}", status=400)
 
+    def _authorize_redirect(self, request: web.Request, data: dict) -> web.Response:
+        """Build the redirect back to ``/oauth2/authorize`` carrying the authorize request.
+
+        Extracted verbatim from ``auth_login``; the key list is fixed.
+        """
+        device_user_code = data.get("device_user_code")
+        if device_user_code:
+            # FEAT-108: device login resumes the verification form; the code is data, never a URL.
+            if not _DEVICE_USER_CODE_RE.fullmatch(str(device_user_code)):
+                raise web.HTTPBadRequest(reason="Invalid device code.")
+            device_location = request.app.router["nav_oauth2_device"].url_for()
+            return RedirectResponse(device_location.with_query(user_code=str(device_user_code)))
+        location = request.app.router["nav_oauth2_authorize"].url_for()
+        payload = {
+            "client_id": data.get("client_id"),
+            "redirect_uri": data.get("redirect_uri"),
+            "response_type": data.get("response_type", "code") or "code",
+        }
+        # Carry the rest of the authorization request across the login hop.
+        # PKCE in particular MUST survive it: dropping code_challenge here
+        # makes every public-client exchange fail later with
+        # "PKCE required for public clients".
+        for key in (
+            "state",
+            "scope",
+            "code_challenge",
+            "code_challenge_method",
+            "nonce",
+            "prompt",
+        ):
+            value = data.get(key)
+            if value:
+                payload[key] = value
+        payload = {k: v for k, v in payload.items() if v is not None}
+        url = location.with_query(**payload)
+        return RedirectResponse(url)
+
+    def _second_factor_issuer(self, request: web.Request, response: web.Response):
+        """Return the gate issuer that creates the session on ``response``."""
+
+        async def _issue(fresh: Any, extra: dict) -> web.Response:
+            try:
+                session = await self._create_user_session(
+                    request, fresh, response=response, extra={**extra, "auth_method": "oauth2"}
+                )
+            except web.HTTPException:
+                raise
+            except Exception as err:  # pylint: disable=W0703
+                self.logger.error(f"Error creating session: {type(err).__name__}")
+                raise web.HTTPBadRequest(reason="Auth: unable to create the User session.") from err
+            if not session:
+                raise web.HTTPBadRequest(reason="Auth: unable to create the User session.")
+            return response
+
+        return _issue
+
+    async def _oauth2_second_factor(self, request: web.Request, user: Any, data: dict, response: web.Response):
+        """2FA-on tail of the password POST: decide through the shared gate (spec M6, D4)."""
+        async with mfa_services_lease(request.app) as services:
+            if services is None or not services.available:
+                raise web.HTTPServiceUnavailable(reason="Auth: second factor temporarily unavailable.")
+            gate = SecondFactorGate(
+                services, userid_attribute=self.userid_attribute, password_attribute=self.password_attribute
+            )
+            try:
+                result = await gate.decide(request, user, self._second_factor_issuer(request, response))
+            except FailedAuth as err:
+                status = getattr(err, "status", None) or 401
+                return await self._render_login_error(request, data, "Login failed.", status=status)
+            except MFARefused as err:
+                return await self._render_login_error(
+                    request, data, "Second factor is not available.", status=getattr(err, "status", 403) or 403
+                )
+        if result.session is not None:
+            if result.device:
+                response.set_cookie(
+                    TRUSTED_COOKIE, result.device["token"], **trusted_cookie_kwargs(result.device["max_age"])
+                )
+            return response
+        return await self._render_mfa_page(request, data, result.challenge)
+
+    async def _render_login_error(
+        self, request: web.Request, data: dict, error: str, *, status: int = 401
+    ) -> web.Response:
+        """Render ``oauth/login.html`` with an error (no session, no-store)."""
+        params = {key: data.get(key) or "" for key in self._MFA_FORM_KEYS}
+        params["error"] = error
+        params["action_url"] = str(request.app.router["nav_oauth2_login"].url_for())
+        params["upstream_providers"] = self._upstream_providers()
+        page = await self._parser.view(filename="oauth/login.html", params=params, status=status)
+        page.headers["Cache-Control"] = "no-store"
+        return page
+
+    _MFA_FORM_KEYS = (
+        "client_id",
+        "redirect_uri",
+        "response_type",
+        "state",
+        "scope",
+        "code_challenge",
+        "code_challenge_method",
+        "nonce",
+        "prompt",
+        "device_user_code",
+    )
+
+    async def _render_mfa_page(
+        self,
+        request: web.Request,
+        data: dict,
+        challenge: Any,
+        *,
+        error: Optional[str] = None,
+        attempts_remaining: Optional[int] = None,
+        status: int = 200,
+    ) -> web.Response:
+        """Render ``oauth/mfa.html`` (no-store) carrying the challenge and the authorize request."""
+        params = {key: data.get(key) or "" for key in self._MFA_FORM_KEYS}
+        if challenge is not None:
+            providers = list(challenge.providers)
+            preferred = challenge.preferred
+            expires_in = challenge.expires_in
+            token = challenge.token
+        else:
+            raw = str(data.get("providers") or "")
+            providers = [p for p in raw.split(",") if p]
+            preferred = data.get("provider")
+            expires_in = None
+            token = str(data.get("challenge") or "")
+        params.update(
+            action_url=str(request.app.router["nav_oauth2_login_mfa"].url_for()),
+            challenge=token,
+            providers=providers,
+            preferred=preferred,
+            expires_in=expires_in,
+            error=error,
+            attempts_remaining=attempts_remaining,
+        )
+        page = await self._parser.view(filename="oauth/mfa.html", params=params, status=status)
+        page.headers["Cache-Control"] = "no-store"
+        return page
+
+    async def auth_login_mfa(self, request: web.Request) -> web.StreamResponse:
+        """POST {login_uri}/mfa — complete an OAuth2 password login's second factor (spec M6)."""
+        if not auth_conf.AUTH_BASIC_2FA_ENABLED:
+            raise web.HTTPNotFound()  # no new surface with 2FA off (AC5)
+        data = await self.get_payload(request)
+        response = self._authorize_redirect(request, data)
+        async with mfa_services_lease(request.app) as services:
+            if services is None or not services.available:
+                raise web.HTTPServiceUnavailable(reason="Auth: second factor temporarily unavailable.")
+            gate = SecondFactorGate(
+                services, userid_attribute=self.userid_attribute, password_attribute=self.password_attribute
+            )
+            try:
+                result = await gate.verify(
+                    request,
+                    str(data.get("challenge") or ""),
+                    str(data.get("provider") or ""),
+                    str(data.get("code") or ""),
+                    self._second_factor_issuer(request, response),
+                    remember_device=bool(data.get("remember_device")),
+                    device_label=str(data.get("device_label") or "")[:128],
+                )
+            except VerifyRefused as err:
+                code = err.code
+                if code == "invalid_code":
+                    return await self._render_mfa_page(
+                        request,
+                        data,
+                        None,
+                        error="Invalid code.",
+                        attempts_remaining=err.extra.get("attempts_remaining"),
+                        status=401,
+                    )
+                if code == "rate_limited":
+                    return await self._render_mfa_page(
+                        request, data, None, error="Too many attempts, try again later.", status=429
+                    )
+                if code == "mfa_unavailable":
+                    return await self._render_mfa_page(
+                        request, data, None, error="Second factor is temporarily unavailable.", status=503
+                    )
+                if code == "invalid_request":
+                    return await self._render_mfa_page(request, data, None, error="Invalid request.", status=400)
+                message = (
+                    "Your login expired, please sign in again."
+                    if code in ("invalid_challenge", "stale_challenge")
+                    else "Login failed."
+                )
+                return await self._render_login_error(request, data, message, status=err.status or 401)
+        if result.device:
+            response.set_cookie(
+                TRUSTED_COOKIE, result.device["token"], **trusted_cookie_kwargs(result.device["max_age"])
+            )
+        return response
+
     async def auth_login(self, request: web.Request):
         """Login page for OAuth2 resource owner authentication.
 
@@ -1626,12 +2089,16 @@ class Oauth2Provider(BaseAuthBackend):
             data = {key: val for (key, val) in request.query.items()}
             # Provider selected: park the authorize request and detour.
             provider = data.pop("provider", None)
-            if provider:
+            if provider and not data.get("device_user_code"):
                 return await self._start_upstream_login(request, provider, data)
             data["upstream_providers"] = self._upstream_providers()
             return await self._parser.view(filename="oauth/login.html", params=data)
         elif request.method == "POST":
             username, password, data = await self.get_login_form(request)
+            # FEAT-108: refuse a malformed device code before any credential check.
+            device_user_code = data.get("device_user_code")
+            if device_user_code and not _DEVICE_USER_CODE_RE.fullmatch(str(device_user_code)):
+                raise web.HTTPBadRequest(reason="Invalid device code.")
             try:
                 user = await self._idp.authenticate_credentials(login=username, password=password)
             except (FailedAuth, UserNotFound) as exc:
@@ -1645,30 +2112,9 @@ class Oauth2Provider(BaseAuthBackend):
                 self.logger.warning("Oauth2: rejected login for a disabled user")
                 raise web.HTTPForbidden(reason="Auth: User account is disabled.")
 
-            location = request.app.router["nav_oauth2_authorize"].url_for()
-            payload = {
-                "client_id": data.get("client_id"),
-                "redirect_uri": data.get("redirect_uri"),
-                "response_type": data.get("response_type", "code") or "code",
-            }
-            # Carry the rest of the authorization request across the login hop.
-            # PKCE in particular MUST survive it: dropping code_challenge here
-            # makes every public-client exchange fail later with
-            # "PKCE required for public clients".
-            for key in (
-                "state",
-                "scope",
-                "code_challenge",
-                "code_challenge_method",
-                "nonce",
-                "prompt",
-            ):
-                value = data.get(key)
-                if value:
-                    payload[key] = value
-            payload = {k: v for k, v in payload.items() if v is not None}
-            url = location.with_query(**payload)
-            response = web.HTTPFound(url)
+            response = self._authorize_redirect(request, data)
+            if auth_conf.AUTH_BASIC_2FA_ENABLED:
+                return await self._oauth2_second_factor(request, user, data, response)
 
             # Establish the browser session for the resource owner: the
             # session cookie is written on this redirect, and /oauth2/authorize
@@ -1808,91 +2254,166 @@ class Oauth2Provider(BaseAuthBackend):
             # Public client must have used PKCE — reject if no challenge stored.
             return self._error_response("invalid_grant", "PKCE required for public clients.")
 
-        # B5: mark code as used + delete from storage.
-        await self.code_storage.mark_used(code)
-        await self.code_storage.delete_code(code)
-
         # TASK-024: user_id comes from the auth code, never from client.user.
         user_id = auth_code.user_id
-        scope = auth_code.scope
+        try:
+            async with self._user_generation(request, user_id) as (conn, generation):
+                if auth_code.generation != generation:
+                    await self.code_storage.delete_code(code)
+                    return self._error_response("invalid_grant", "Authorization code is no longer valid.")
+                # FEAT-108: resolve the owner before consuming the code.  A
+                # transient identity-store outage therefore leaves it retryable.
+                # ``claim_code``/``release_claim`` are optional storage
+                # capabilities: a storage without them (e.g. the in-memory one)
+                # skips the claim and relies on ``mark_used`` alone.
+                claim = getattr(self.code_storage, "claim_code", None)
+                if claim is not None and not await claim(code):
+                    # A held claim does not mean the code was consumed: only a
+                    # consumed (or vanished) code is fatal for the client.
+                    current = await self.code_storage.get_code(code)
+                    if current is None or current.used:
+                        return self._error_response("invalid_grant", "Authorization code already used.")
+                    # Another redemption of this still-unconsumed code is in
+                    # flight (e.g. waiting out an outage): ask the client to retry.
+                    return self._error_response(
+                        "server_error",
+                        "The authorization code is being redeemed; retry shortly.",
+                        status=503,
+                    )
+                release = getattr(self.code_storage, "release_claim", None)
+                try:
+                    owner = await self._resolve_resource_owner(user_id)
+                except (UserNotFound, FailedAuth):
+                    await self.code_storage.mark_used(code)
+                    await self.code_storage.delete_code(code)
+                    return self._error_response("invalid_grant", "The resource owner of this grant cannot be resolved.")
+                except IdentityStoreUnavailable:
+                    if release is not None:
+                        await release(code)
+                    return self._owner_store_unavailable()
+                except BaseException:
+                    # Any other failure before the code is consumed must not
+                    # leave the claim held (it would block a retry for its TTL).
+                    if release is not None:
+                        await release(code)
+                    raise
+                # B5: mark code as used + delete from storage.
+                if not await self.code_storage.mark_used(code):
+                    # A concurrent exchange already consumed this code (RFC 6749 §4.1.2: single use).
+                    return self._error_response("invalid_grant", "Authorization code already used.")
+                await self.code_storage.delete_code(code)
+                # Bind the session only once this request owns the code: the
+                # session is shared per identity, so a redeemer that lost
+                # mark_used must not have rewritten it (issue:42d67472eccd).
+                try:
+                    session_claims = await self._token_session_claims(request, user_id, conn=conn, user=owner)
+                except Exception as exc:  # pylint: disable=W0703
+                    # The code is already consumed, so a session-store failure
+                    # must not cost the client its grant: issue the token
+                    # unbound, as when no session can be created; the next
+                    # refresh binds one. Class name only (DSN fragments).
+                    self.logger.error(f"Oauth2: cannot bind a session for user_id={user_id}: {type(exc).__name__}")
+                    session_claims = {}
 
-        # TASK-027: mint jti.
-        jti = str(uuid4())
-
-        token_data = {
-            "user_id": user_id,
-            "client_id": client.client_id,  # public uid in JWT claim
-            "scope": scope,
-            "jti": jti,
-            # Bind the token to a session so the auth middleware,
-            # @is_authenticated() and @user_session() can resolve the user.
-            **await self._token_session_claims(request, user_id),
-        }
-
-        # FEAT-095 TASK-044 (RFC 8707): a `resource` on the token request must
-        # match the one the code was issued for; otherwise fall back to the
-        # code's own value.  Downgrading silently would let a client swap the
-        # audience after consent.
-        requested_resource = payload.get("resource")
-        if requested_resource:
-            if not validate_resource_uri(requested_resource):
-                return self._error_response(
-                    "invalid_target",
-                    "The 'resource' parameter must be an absolute URI " "without a fragment.",
+                scope = auth_code.scope
+                # TASK-027: mint jti.
+                jti = str(uuid4())
+                token_data = stamp_generation(
+                    {
+                        "user_id": user_id,
+                        "client_id": client.client_id,  # public uid in JWT claim
+                        "scope": scope,
+                        "jti": jti,
+                        # Bind the token to a session so the auth middleware,
+                        # @is_authenticated() and @user_session() can resolve the user.
+                        **session_claims,
+                    },
+                    auth_code.generation,
                 )
-            code_resource = getattr(auth_code, "resource", None)
-            if code_resource and requested_resource != code_resource:
-                return self._error_response(
-                    "invalid_target",
-                    "The 'resource' does not match the authorization request.",
+                if auth_code.mfa and auth_code.amr:
+                    token_data["mfa"] = True
+                    token_data["amr"] = list(auth_code.amr)
+
+                # FEAT-095 TASK-044 (RFC 8707): a `resource` on the token request must
+                # match the one the code was issued for; otherwise fall back to the
+                # code's own value.  Downgrading silently would let a client swap the
+                # audience after consent.
+                requested_resource = payload.get("resource")
+                if requested_resource:
+                    if not validate_resource_uri(requested_resource):
+                        return self._error_response(
+                            "invalid_target",
+                            "The 'resource' parameter must be an absolute URI " "without a fragment.",
+                        )
+                    code_resource = getattr(auth_code, "resource", None)
+                    if code_resource and requested_resource != code_resource:
+                        return self._error_response(
+                            "invalid_target",
+                            "The 'resource' does not match the authorization request.",
+                        )
+                    resource = requested_resource
+                else:
+                    resource = getattr(auth_code, "resource", None)
+
+                # TASK-029: audience = 'user' for 3LO tokens; TASK-044 appends the
+                # canonical resource when one was requested (list-valued aud).
+                access_token, _, exp_abs, scheme = self._idp.create_token(
+                    token_data,
+                    expiration=OAUTH_ACCESS_TOKEN_TTL,
+                    audience=self._resource_audience("user", resource),
                 )
-            resource = requested_resource
-        else:
-            resource = getattr(auth_code, "resource", None)
+                try:
+                    encoded_payload = access_token.split(".")[1]
+                    access_payload = json.loads(
+                        base64.urlsafe_b64decode(encoded_payload + "=" * (-len(encoded_payload) % 4))
+                    )
+                    jti = access_payload.get("jti", jti)
+                except (IndexError, TypeError, ValueError):
+                    pass
 
-        # TASK-029: audience = 'user' for 3LO tokens; TASK-044 appends the
-        # canonical resource when one was requested (list-valued aud).
-        access_token, _, exp_abs, scheme = self._idp.create_token(
-            token_data,
-            expiration=OAUTH_ACCESS_TOKEN_TTL,
-            audience=self._resource_audience("user", resource),
-        )
+                # B1: expires_in is seconds (not an absolute timestamp).
+                now_utc = _now_utc()
+                expires_in = int(exp_abs - now_utc.timestamp())
 
-        # B1: expires_in is seconds (not an absolute timestamp).
-        now_utc = _now_utc()
-        expires_in = int(exp_abs - now_utc.timestamp())
+                # Save refresh token (only when offline_access granted).
+                refresh_token_str = None
+                scopes_list = scope.split()
+                if "offline_access" in scopes_list:
+                    refresh_token_str = secrets.token_urlsafe(48)
+                    now = _now()
+                    sliding_ttl = timedelta(seconds=OAUTH_REFRESH_TOKEN_TTL)
+                    absolute_ttl = timedelta(seconds=OAUTH_REFRESH_ABSOLUTE_TTL)
+                    rt = OauthRefreshToken(
+                        client=client,
+                        user_id=user_id,
+                        refresh_token=refresh_token_str,
+                        scope=scope,
+                        issued_at=now,
+                        expires_at=now + sliding_ttl,
+                        absolute_expires_at=now + absolute_ttl,
+                        mfa=bool(auth_code.mfa and auth_code.amr),
+                        amr=list(auth_code.amr) if auth_code.mfa and auth_code.amr else None,
+                        generation=auth_code.generation,
+                    )
+                    await self.refresh_token_storage.save_token(rt)
 
-        # Save refresh token (only when offline_access granted).
-        refresh_token_str = None
-        scopes_list = scope.split()
-        if "offline_access" in scopes_list:
-            refresh_token_str = secrets.token_urlsafe(48)
-            now = _now()
-            sliding_ttl = timedelta(seconds=OAUTH_REFRESH_TOKEN_TTL)
-            absolute_ttl = timedelta(seconds=OAUTH_REFRESH_ABSOLUTE_TTL)
-            rt = OauthRefreshToken(
-                client=client,
-                user_id=user_id,
-                refresh_token=refresh_token_str,
-                scope=scope,
-                issued_at=now,
-                expires_at=now + sliding_ttl,
-                absolute_expires_at=now + absolute_ttl,
+                # TASK-027: persist access token jti.
+                if self.access_token_storage:
+                    rec = OauthAccessTokenRecord(
+                        jti=jti,
+                        user_id=user_id,
+                        client_id=client.client_id,
+                        client_pk=client.client_pk,
+                        scope=scope,
+                        issued_at=_now(),
+                        expires_at=_now() + timedelta(seconds=OAUTH_ACCESS_TOKEN_TTL),
+                    )
+                    await self.access_token_storage.save(rec)
+        except (SecurityStateError, MfaStorageError) as err:
+            self.logger.error(f"Oauth2: token issuance unavailable: {type(err).__name__}")
+            return self._error_response(
+                "temporarily_unavailable", "Token issuance temporarily unavailable.", status=503
             )
-            await self.refresh_token_storage.save_token(rt)
-
-        # TASK-027: persist access token jti.
-        if self.access_token_storage:
-            rec = OauthAccessTokenRecord(
-                jti=jti,
-                user_id=user_id,
-                client_id=client.client_id,
-                client_pk=client.client_pk,
-                scope=scope,
-                issued_at=_now(),
-                expires_at=_now() + timedelta(seconds=OAUTH_ACCESS_TOKEN_TTL),
-            )
-            await self.access_token_storage.save(rec)
 
         response = {
             "access_token": access_token,
@@ -2031,70 +2552,114 @@ class Oauth2Provider(BaseAuthBackend):
 
         # TASK-024: user_id always from the refresh token.
         user_id = rt.user_id
-        scope = payload.get("scope", rt.scope)
-        # Scope narrowing only.
-        if set(scope.split()) - set(rt.scope.split()):
-            return self._error_response("invalid_scope", "Cannot widen scope during refresh.")
+        try:
+            async with self._user_generation(request, user_id) as (conn, generation):
+                if rt.generation != generation:
+                    await self.refresh_token_storage.revoke_chain(refresh_token)
+                    return self._error_response("invalid_grant", "Refresh token is no longer valid.")
+                # Re-read under the user lock: a concurrent refresh of the same token may have rotated it
+                # after the pre-lock read above (rotation race / reuse detection).
+                current = await self.refresh_token_storage.get_token(refresh_token)
+                if not current:
+                    return self._error_response("invalid_grant", "Invalid refresh token.")
+                if current.revoked:
+                    if current.revoked_reason == "rotated" and OAUTH_REFRESH_ROTATION:
+                        await self.refresh_token_storage.revoke_chain(refresh_token)
+                    return self._error_response("invalid_grant", "Refresh token has been revoked.")
+                scope = payload.get("scope", rt.scope)
+                # Scope narrowing only.
+                if set(scope.split()) - set(rt.scope.split()):
+                    return self._error_response("invalid_scope", "Cannot widen scope during refresh.")
 
-        jti = str(uuid4())
-        token_data = {
-            "user_id": user_id,
-            "client_id": client.client_id,
-            "scope": scope,
-            "jti": jti,
-            # Same session binding as the authorization_code grant.
-            **await self._token_session_claims(request, user_id),
-        }
+                # FEAT-108 (D6): check the owner before rotation. A confirmed
+                # missing or disabled owner revokes its chain; an outage does not.
+                try:
+                    session_claims = await self._token_session_claims(request, user_id, conn=conn)
+                except (UserNotFound, FailedAuth):
+                    await self.refresh_token_storage.revoke_chain(refresh_token)
+                    return self._error_response("invalid_grant", "The resource owner of this grant cannot be resolved.")
+                except IdentityStoreUnavailable:
+                    return self._owner_store_unavailable()
 
-        # TASK-029: audience = 'user'.
-        access_token, _, exp_abs, scheme = self._idp.create_token(
-            token_data,
-            expiration=OAUTH_ACCESS_TOKEN_TTL,
-            audience="user",
-        )
-        now_utc = _now_utc()
-        expires_in = int(exp_abs - now_utc.timestamp())
+                jti = str(uuid4())
+                token_data = stamp_generation(
+                    {
+                        "user_id": user_id,
+                        "client_id": client.client_id,
+                        "scope": scope,
+                        "jti": jti,
+                        # Same session binding as the authorization_code grant.
+                        **session_claims,
+                    },
+                    rt.generation,
+                )
+                if rt.mfa and rt.amr:
+                    token_data["mfa"] = True
+                    token_data["amr"] = list(rt.amr)
 
-        # TASK-027: persist new jti.
-        if self.access_token_storage:
-            rec = OauthAccessTokenRecord(
-                jti=jti,
-                user_id=user_id,
-                client_id=client.client_id,
-                client_pk=client.client_pk,
-                scope=scope,
-                issued_at=now,
-                expires_at=now + timedelta(seconds=OAUTH_ACCESS_TOKEN_TTL),
-            )
-            await self.access_token_storage.save(rec)
+                # TASK-029: audience = 'user'.
+                access_token, _, exp_abs, scheme = self._idp.create_token(
+                    token_data,
+                    expiration=OAUTH_ACCESS_TOKEN_TTL,
+                    audience="user",
+                )
+                try:
+                    encoded_payload = access_token.split(".")[1]
+                    access_payload = json.loads(
+                        base64.urlsafe_b64decode(encoded_payload + "=" * (-len(encoded_payload) % 4))
+                    )
+                    jti = access_payload.get("jti", jti)
+                except (IndexError, TypeError, ValueError):
+                    pass
+                now_utc = _now_utc()
+                expires_in = int(exp_abs - now_utc.timestamp())
 
-        response = {
-            "access_token": access_token,
-            "token_type": scheme,
-            "expires_in": expires_in,
-            "scope": scope,
-        }
+                # TASK-027: persist new jti.
+                if self.access_token_storage:
+                    rec = OauthAccessTokenRecord(
+                        jti=jti,
+                        user_id=user_id,
+                        client_id=client.client_id,
+                        client_pk=client.client_pk,
+                        scope=scope,
+                        issued_at=now,
+                        expires_at=now + timedelta(seconds=OAUTH_ACCESS_TOKEN_TTL),
+                    )
+                    await self.access_token_storage.save(rec)
 
-        # TASK-026: rotation.
-        if OAUTH_REFRESH_ROTATION:
-            new_refresh_token = secrets.token_urlsafe(48)
-            sliding_ttl = timedelta(seconds=OAUTH_REFRESH_TOKEN_TTL)
-            new_rt = OauthRefreshToken(
-                client=client,
-                user_id=user_id,
-                refresh_token=new_refresh_token,
-                scope=scope,
-                parent_token=refresh_token,
-                issued_at=now,
-                expires_at=now + sliding_ttl,
-                absolute_expires_at=rt.absolute_expires_at,  # copy from chain root
-            )
-            await self.refresh_token_storage.save_token(new_rt)
-            # Mark old token as rotated.
-            await self.refresh_token_storage.revoke_token(refresh_token, "rotated")
-            response["refresh_token"] = new_refresh_token
-        else:
-            response["refresh_token"] = refresh_token
+                response = {
+                    "access_token": access_token,
+                    "token_type": scheme,
+                    "expires_in": expires_in,
+                    "scope": scope,
+                }
+
+                # TASK-026: rotation.
+                if OAUTH_REFRESH_ROTATION:
+                    new_refresh_token = secrets.token_urlsafe(48)
+                    sliding_ttl = timedelta(seconds=OAUTH_REFRESH_TOKEN_TTL)
+                    new_rt = OauthRefreshToken(
+                        client=client,
+                        user_id=user_id,
+                        refresh_token=new_refresh_token,
+                        scope=scope,
+                        parent_token=refresh_token,
+                        issued_at=now,
+                        expires_at=now + sliding_ttl,
+                        absolute_expires_at=rt.absolute_expires_at,  # copy from chain root
+                        mfa=rt.mfa,
+                        amr=list(rt.amr) if rt.amr else None,
+                        generation=rt.generation,
+                    )
+                    await self.refresh_token_storage.save_token(new_rt)
+                    # Mark old token as rotated.
+                    await self.refresh_token_storage.revoke_token(refresh_token, "rotated")
+                    response["refresh_token"] = new_refresh_token
+                else:
+                    response["refresh_token"] = refresh_token
+        except (SecurityStateError, MfaStorageError) as err:
+            self.logger.error(f"Oauth2: token refresh unavailable: {type(err).__name__}")
+            return self._error_response("temporarily_unavailable", "Token refresh temporarily unavailable.", status=503)
 
         return JSONResponse(response, status=200)
 
@@ -2216,6 +2781,13 @@ class Oauth2Provider(BaseAuthBackend):
             if await self.access_token_storage.is_revoked(jti):
                 return self._error_response("invalid_token", "Token has been revoked.", status=401)
 
+        if is_oauth_user_token(payload):
+            try:
+                if not await self._generation_ok(request, int(payload["user_id"]), generation_of(payload)):
+                    return self._error_response("invalid_token", "Token is no longer valid.", status=401)
+            except (SecurityStateError, ValueError, TypeError):
+                return self._error_response("temporarily_unavailable", "Userinfo temporarily unavailable.", status=503)
+
         scope = payload.get("scope", "")
         scopes = scope.split()
         user_id = payload.get("user_id", "")
@@ -2225,7 +2797,16 @@ class Oauth2Provider(BaseAuthBackend):
         # Profile attributes (name, email) are not embedded in the access token,
         # so we resolve them from the user storage backend.
         user = None
-        if user_id and ("profile" in scopes or "email" in scopes):
+        if is_oauth_user_token(payload):
+            # FEAT-108 (issue:3ae0de8a2704): a bearer minted before its owner was
+            # deleted or disabled must stop answering here, not only at mint time.
+            try:
+                user = await self._resolve_resource_owner(user_id)
+            except (UserNotFound, FailedAuth):
+                return self._error_response("invalid_token", "Token is no longer valid.", status=401)
+            except IdentityStoreUnavailable:
+                return self._error_response("temporarily_unavailable", "Userinfo temporarily unavailable.", status=503)
+        elif user_id and ("profile" in scopes or "email" in scopes):
             try:
                 user = await self._idp.user_from_id(user_id)
             except Exception as e:  # noqa: BLE001
@@ -2241,13 +2822,22 @@ class Oauth2Provider(BaseAuthBackend):
                     return val
             return default
 
+        # FEAT-106 review fixes (M9): authentication methods are not scope-gated.
+        if payload.get("amr"):
+            claims["amr"] = list(payload["amr"])
+
+        def _set(name: str, value: Any) -> None:
+            # FEAT-108 G7: never answer an empty-string claim — omit what we cannot supply.
+            if value not in (None, ""):
+                claims[name] = str(value)
+
         # Scope-gated claims.
         if "profile" in scopes:
-            claims["username"] = str(_claim("username"))
-            claims["given_name"] = str(_claim("given_name") or _claim("first_name"))
-            claims["family_name"] = str(_claim("family_name") or _claim("last_name"))
+            _set("username", _claim("username"))
+            _set("given_name", _claim("given_name") or _claim("first_name"))
+            _set("family_name", _claim("family_name") or _claim("last_name"))
         if "email" in scopes:
-            claims["email"] = str(_claim("email"))
+            _set("email", _claim("email"))
 
         return JSONResponse(claims, status=200)
 
@@ -2442,6 +3032,17 @@ class Oauth2Provider(BaseAuthBackend):
                 if rt.expires_at > _now():
                     active = True
 
+        if active:
+            try:
+                if is_access and token_payload and is_oauth_user_token(token_payload):
+                    active = await self._generation_ok(
+                        request, int(token_payload["user_id"]), generation_of(token_payload)
+                    )
+                elif not is_access and rt is not None:
+                    active = await self._generation_ok(request, int(rt.user_id), rt.generation)
+            except (SecurityStateError, ValueError, TypeError):
+                active = False
+
         if not active:
             return JSONResponse({"active": False}, status=200)
 
@@ -2450,11 +3051,30 @@ class Oauth2Provider(BaseAuthBackend):
         if token_payload:
             token_client_id = token_payload.get("client_id", "")
         elif rt:
-            token_client_id = str(rt.client_id) if hasattr(rt, "client_id") else ""
+            token_client_id = str(rt.client.client_id) if getattr(rt, "client", None) else ""
         else:
             token_client_id = ""
         if not hmac.compare_digest(str(caller.client_id), str(token_client_id)):
             return JSONResponse({"active": False}, status=200)
+
+        # --- Owner re-check (FEAT-108, issue:3ae0de8a2704) ---
+        # Only after the same-client check, so a foreign caller never triggers a
+        # lookup. A missing or disabled owner — or an outage, which RFC 7662 has
+        # no error for — makes the token inactive (fail closed).
+        owner = None
+        owner_checked = False
+        if is_access and token_payload and is_oauth_user_token(token_payload):
+            owner_id = token_payload["user_id"]
+        elif not is_access and rt is not None and getattr(rt, "user_id", None) is not None:
+            owner_id = rt.user_id
+        else:
+            owner_id = None
+        if owner_id is not None:
+            try:
+                owner = await self._resolve_resource_owner(owner_id)
+            except (UserNotFound, FailedAuth, IdentityStoreUnavailable):
+                return JSONResponse({"active": False}, status=200)
+            owner_checked = True
 
         # --- Build active response (RFC 7662 §2.2 claims) ---
         exp = token_payload.get("exp") if token_payload else None
@@ -2480,11 +3100,15 @@ class Oauth2Provider(BaseAuthBackend):
             claims["aud"] = aud
         if jti_claim:
             claims["jti"] = jti_claim
+        presented_amr = token_payload.get("amr") if token_payload else (rt.amr if rt is not None and rt.mfa else None)
+        if presented_amr:
+            claims["amr"] = list(presented_amr)
+            claims["mfa"] = True
 
-        # Resolve username for 3LO tokens.
+        # Resolve username for 3LO tokens (reusing the owner checked above).
         if user_id:
             try:
-                user = await self._idp.user_from_id(user_id)
+                user = owner if owner_checked else await self._idp.user_from_id(user_id)
                 if user:
                     username = getattr(user, "username", None) or getattr(user, "email", "")
                     claims["username"] = str(username)
@@ -2610,7 +3234,7 @@ class Oauth2Provider(BaseAuthBackend):
         Owner-binding invariant: user_id always comes from the authenticated
         session, never from client.user.
         """
-        from .models import OauthGrant, DeviceCodeStatus, OauthDeviceCode
+        from .models import DeviceCodeStatus
 
         if request.method == "GET":
             data = {key: val for (key, val) in request.query.items()}
@@ -2685,16 +3309,24 @@ class Oauth2Provider(BaseAuthBackend):
         session_user = await self.check_session(request)
         if not session_user:
             # Redirect to login, with return URL.
-            location = request.app.router["nav_oauth2_login"].url_for()
-            redirect_url = location.with_query(
-                action_url=str(location),
-                device_user_code=raw_user_code,
-            )
-            raise web.HTTPFound(redirect_url)
+            self._redirect_to_login(request, {"device_user_code": raw_user_code})
 
         user_obj = self._decode_session_user(session_user)
         if not user_obj:
             return self._error_response("access_denied", "Cannot resolve session user.", status=401)
+        try:
+            await self._resolve_resource_owner(user_obj.user_id)
+        except (UserNotFound, FailedAuth):
+            # FEAT-108 D5: re-authenticate; the device code stays pending.
+            self._redirect_to_login(request, {"device_user_code": raw_user_code})
+        except IdentityStoreUnavailable:
+            return self._owner_store_unavailable()
+
+        try:
+            await self._session_auth_context(request)
+        except InvalidAuth:
+            location = request.app.router["nav_oauth2_login"].url_for()
+            raise web.HTTPFound(location.with_query(action_url=str(location), device_user_code=raw_user_code))
 
         if action == "deny":
             dc.status = DeviceCodeStatus.DENIED
@@ -2772,19 +3404,29 @@ class Oauth2Provider(BaseAuthBackend):
         # accept it without requiring a matching redirect_uri).
         auth_code_str = secrets.token_urlsafe(32)
         now = _now()
-        carrier = OauthAuthorizationCode(
-            client=client,
-            user_id=user_obj.user_id,  # owner-binding: from session
-            code=auth_code_str,
-            redirect_uri="",  # no redirect_uri for device flow
-            scope=" ".join(scopes),
-            state="",
-            response_type="device_code",  # marker so exchange allows it
-            code_challenge=dc.code_challenge,
-            code_challenge_method=dc.code_challenge_method,
-            expires_at=now + timedelta(seconds=OAUTH_DEVICE_CODE_TTL),
-        )
-        await self.code_storage.save_code(carrier)
+        try:
+            async with self._user_generation(request, user_obj.user_id) as (_conn, generation):
+                carrier = OauthAuthorizationCode(
+                    client=client,
+                    user_id=user_obj.user_id,  # owner-binding: from session
+                    code=auth_code_str,
+                    redirect_uri="",  # no redirect_uri for device flow
+                    scope=" ".join(scopes),
+                    state="",
+                    response_type="device_code",  # marker so exchange allows it
+                    code_challenge=dc.code_challenge,
+                    code_challenge_method=dc.code_challenge_method,
+                    expires_at=now + timedelta(seconds=OAUTH_DEVICE_CODE_TTL),
+                    # FEAT-106 review fixes (M9): the approving event's assurance.
+                    **await self._session_auth_context(request),
+                    generation=generation,
+                )
+                await self.code_storage.save_code(carrier)
+        except (SecurityStateError, MfaStorageError) as err:
+            self.logger.error(f"Oauth2: cannot read the credential generation: {type(err).__name__}")
+            return self._error_response(
+                "temporarily_unavailable", "Device approval temporarily unavailable.", status=503
+            )
 
         # Stamp device record.
         dc.status = DeviceCodeStatus.APPROVED
@@ -2861,7 +3503,17 @@ class Oauth2Provider(BaseAuthBackend):
             except InvalidAuth:
                 raise
             except Exception as exc:  # pylint: disable=W0703
-                self.logger.warning(f"Oauth2: cannot check jti revocation: {exc}")
+                self.logger.error(f"Oauth2: revocation check failed: {type(exc).__name__}")
+                raise InvalidAuth("Oauth2: authentication temporarily unavailable.", status=503) from exc
+
+        if is_oauth_user_token(payload):
+            try:
+                current = await self._generation_ok(request, int(payload["user_id"]), generation_of(payload))
+            except (SecurityStateError, ValueError, TypeError) as err:
+                self.logger.error(f"Oauth2: credential generation check failed: {type(err).__name__}")
+                raise InvalidAuth("Oauth2: authentication temporarily unavailable.", status=503) from err
+            if not current:
+                raise InvalidAuth("Oauth2: access token is no longer valid.", status=401)
 
         try:
             session = await get_session(request, payload, new=False)
@@ -2877,6 +3529,11 @@ class Oauth2Provider(BaseAuthBackend):
         if not user:
             raise InvalidAuth("Oauth2: cannot resolve the user of this access token.", status=401)
         request["userdata"] = payload
+        from ...abac.context import (
+            bearer_context_from_claims,
+        )  # noqa: PLC0415 — lazy: oauth2 must not import abac at load
+
+        request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
         request["authenticated"] = True
         self._set_user_request(request, user, mechanism=AUTH_MECHANISM_BEARER)
         return payload

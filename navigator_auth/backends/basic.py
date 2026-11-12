@@ -3,16 +3,16 @@
 Navigator Authentication using JSON Web Tokens.
 """
 
-import logging
 import time
 from datetime import datetime
 from typing import Optional
 from aiohttp import web
 from navigator_session import AUTH_SESSION_OBJECT
-from navigator_session import SESSION_KEY, SESSION_ID, SessionHandler, get_session
+from navigator_session import SESSION_ID
 from datamodel.exceptions import ValidationError
 
 # Authenticated Entity
+from .. import conf as auth_conf
 from ..conf import AUTH_EXCLUDE_LIST_KEY, BASIC_USER_MAPPING
 from .abstract import BaseAuthBackend, user_is_active
 from .oauth2.code_backend import AccessTokenStorage
@@ -22,10 +22,15 @@ from ..exceptions import (
     FailedAuth,
     UserNotFound,
     InvalidAuth,
+    MFARequired,
+    MFARefused,
 )
 from ..responses import JSONResponse
 from ..libs.expiry import expiry_fields
 from ..identities import AuthUser
+from ..mfa.login import SecondFactorGate
+from ..mfa.services import MFA_APP_KEY, MfaServicesSlot, build_mfa_services, mfa_services_lease
+from ..mfa.types import MFA_DEVICE_TOKEN_KEY
 
 # FEAT-098 — per-user index of live jti's, so a password reset (or any
 # future admin action) can find and revoke every outstanding JWT for a
@@ -60,6 +65,9 @@ class BasicAuth(BaseAuthBackend):
             name=f"{self._service_name}_check_credentials",
         )
         app[AUTH_EXCLUDE_LIST_KEY].append(check_credentials)
+        # FEAT-106 (D12): register the MFA slot while the app is still mutable.
+        if self._owns_mfa() and MFA_APP_KEY not in app:
+            app[MFA_APP_KEY] = MfaServicesSlot()
         super().configure(app)
 
     async def on_startup(self, app: web.Application):
@@ -73,6 +81,10 @@ class BasicAuth(BaseAuthBackend):
             # self._user_model = self.get_authmodel(AUTH_USER_MODEL)
             self._user_model = self._idp.user_model
             self.get_successful_callbacks()
+        slot = app.get(MFA_APP_KEY)
+        if self._owns_mfa() and isinstance(slot, MfaServicesSlot) and slot.services is None:
+            slot.services = await build_mfa_services(app, self)
+            self._mfa_slot = slot
 
     async def on_cleanup(self, app: web.Application):
         """Used to cleanup and shutdown any db connection."""
@@ -82,6 +94,16 @@ class BasicAuth(BaseAuthBackend):
                 await storage.redis.aclose()
             except Exception as ex:  # pylint: disable=W0703
                 self.logger.warning(f"BasicAuth: error closing access_token_storage Redis: {ex}")
+        slot = getattr(self, "_mfa_slot", None)
+        if slot is not None:
+            try:
+                await slot.close()
+            except Exception as ex:  # pylint: disable=W0703
+                self.logger.warning(f"BasicAuth: error closing MFA services: {type(ex).__name__}")
+
+    def _owns_mfa(self) -> bool:
+        """Return whether this backend executes the BasicAuth login path."""
+        return bool(auth_conf.AUTH_BASIC_2FA_ENABLED) and type(self).authenticate is BasicAuth.authenticate
 
     async def validate_user(self, login: str = None, password: str = None):
         # get the user based on Model
@@ -311,6 +333,10 @@ class BasicAuth(BaseAuthBackend):
                 raise InvalidAuth(str(err), status=401) from err
             except Exception as err:
                 raise AuthException(str(err), status=500) from err
+            if auth_conf.AUTH_BASIC_2FA_ENABLED:
+                session = await self._second_factor(request, user)
+                if session is not None:
+                    return session
             try:
                 return await self.open_session(request, user)
             except (FailedAuth, InvalidAuth):
@@ -318,6 +344,37 @@ class BasicAuth(BaseAuthBackend):
             except Exception as err:  # pylint: disable=W0703
                 self.logger.exception(f"BasicAuth: Authentication Error: {err}")
                 return False
+
+    async def _second_factor(self, request: web.Request, user) -> Optional[dict]:
+        """Run the shared second-factor gate for this password login (spec §3 M5)."""
+        if not user_is_active(user):
+            raise FailedAuth("User account is disabled", status=403)
+        async with mfa_services_lease(request.app) as services:
+            if services is None or not services.available:
+                raise MFARefused("mfa_unavailable", "Second factor is temporarily unavailable", status=503)
+            gate = SecondFactorGate(
+                services,
+                userid_attribute=self.userid_attribute,
+                password_attribute=self.pwd_atrribute,
+            )
+
+            async def _issue(fresh, extra: dict) -> dict:
+                """Open the Basic session inside the gate's user lock."""
+                session_extra = {"auth_method": "basic", **extra} if extra else None
+                return await self.open_session(request, fresh, extra=session_extra)
+
+            result = await gate.decide(request, user, _issue)
+        if result.challenge is not None:
+            raise MFARequired(
+                challenge=result.challenge.token,
+                providers=list(result.challenge.providers),
+                preferred=result.challenge.preferred,
+                expires_in=result.challenge.expires_in,
+            )
+        session = result.session
+        if result.device is not None:
+            session[MFA_DEVICE_TOKEN_KEY] = result.device
+        return session
 
     async def check_credentials(self, request):
         """Using for check the user credentials to the backend."""

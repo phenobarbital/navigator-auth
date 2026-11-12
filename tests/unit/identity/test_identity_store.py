@@ -213,9 +213,20 @@ class TestDuplicateRowOrdering:
 class TestUpdateTokens:
     """issue:d73106586c38 — a refreshed id_token must reach the vault."""
 
+    IDENTITY_ID = "3c4265e1-d10a-4a72-8225-c894c96d31b4"
+
+    @staticmethod
+    def _store_and_conn(returned=None):
+        pool, conn = _make_pool()
+        conn.fetch_one = AsyncMock(
+            return_value=returned if returned is not None else {"identity_id": TestUpdateTokens.IDENTITY_ID}
+        )
+        return IdentityStore(pool, cipher=IdentityCipher(master_keys=MASTER_KEYS)), conn
+
     @staticmethod
     def _identity(store):
         identity = MagicMock()
+        identity.identity_id = TestUpdateTokens.IDENTITY_ID
         identity.user_id = 1
         identity.auth_provider = "github"
         identity.provider_user_id = "99"
@@ -227,7 +238,7 @@ class TestUpdateTokens:
 
     @pytest.mark.asyncio
     async def test_refreshed_id_token_is_resealed(self):
-        store = _store()
+        store, conn = self._store_and_conn()
         identity = self._identity(store)
         await store.update_tokens(
             identity,
@@ -241,17 +252,58 @@ class TestUpdateTokens:
         assert store._open(identity, "access_token") == "AT.new"
         assert store._open(identity, "refresh_token") == "RT.new"
         assert store._open(identity, "id_token") == "ID.new"
-        identity.update.assert_awaited_once()
+        conn.fetch_one.assert_awaited_once()
+        sql, *params = conn.fetch_one.await_args.args
+        assert "refresh_token = $" in sql and "id_token = $" in sql
+        assert identity.refresh_token in params and identity.id_token in params
 
     @pytest.mark.asyncio
     async def test_stored_id_token_survives_a_refresh_without_one(self):
-        store = _store()
+        store, conn = self._store_and_conn()
         identity = self._identity(store)
         await store.update_tokens(identity, TokenResponse(access_token="AT.new", expires_in=3600))
         assert store._open(identity, "access_token") == "AT.new"
         # neither secret the refresh omitted was erased
         assert store._open(identity, "refresh_token") == "RT.old"
         assert store._open(identity, "id_token") == "ID.old"
+        # ...and neither column is part of the write at all
+        sql = conn.fetch_one.await_args.args[0]
+        assert "refresh_token" not in sql and "id_token" not in sql
+
+    @pytest.mark.asyncio
+    async def test_write_is_keyed_by_row_and_account_not_model_update(self):
+        """Not asyncdb's Model.update(): no 2 s client timeout, no shared old-value WHERE."""
+        store, conn = self._store_and_conn()
+        identity = self._identity(store)
+        await store.update_tokens(identity, TokenResponse(access_token="AT.new", scopes=["read:user"]))
+        identity.update.assert_not_awaited()
+        sql, *params = conn.fetch_one.await_args.args
+        assert sql.startswith("UPDATE auth.user_identities SET ")
+        assert "WHERE identity_id = $" in sql
+        assert "provider_user_id IS NOT DISTINCT FROM $" in sql
+        assert sql.rstrip().endswith("RETURNING identity_id")
+        assert params[-2:] == [self.IDENTITY_ID, "99"]
+        assert '["read:user"]' in params  # scopes bound as JSON text, cast to jsonb in SQL
+
+    @pytest.mark.asyncio
+    async def test_missing_row_raises(self):
+        """Unlinked (or re-bound) meanwhile: the refresh is reported, not silently lost."""
+        from asyncdb.exceptions import NoDataFound
+
+        store, conn = self._store_and_conn()
+        conn.fetch_one = AsyncMock(return_value=None)
+        with pytest.raises(NoDataFound):
+            await store.update_tokens(self._identity(store), TokenResponse(access_token="AT.new"))
+
+    @pytest.mark.asyncio
+    async def test_row_without_identity_id_is_refused(self):
+        """An unkeyed UPDATE would rewrite every row of the table."""
+        store, conn = self._store_and_conn()
+        identity = self._identity(store)
+        identity.identity_id = None
+        with pytest.raises(ValueError):
+            await store.update_tokens(identity, TokenResponse(access_token="AT.new"))
+        conn.fetch_one.assert_not_awaited()
 
 
 class TestSaveLinkedIdentityNullTokens:
@@ -285,8 +337,11 @@ class TestSaveLinkedIdentityNullTokens:
         from navigator_auth.identity.types import TokenResponse
         from navigator_auth.models import UserIdentity
 
-        store = _store()
+        pool, conn = _make_pool()
+        conn.fetch_one = AsyncMock(return_value={"identity_id": "row-1"})
+        store = IdentityStore(pool, cipher=IdentityCipher(master_keys=MASTER_KEYS))
         existing = MagicMock()
+        existing.identity_id = "row-1"
         existing.provider_user_id = "99"
         existing.refresh_token = _enc(store, "old-rt", "refresh_token")
         existing.id_token = _enc(store, "old-id", "id_token")
@@ -298,7 +353,30 @@ class TestSaveLinkedIdentityNullTokens:
             await store.save_linked_identity(1, "github", token)
         assert existing.refresh_token == sealed_rt
         assert existing.id_token == sealed_id
-        existing.update.assert_awaited_once()
+        # written with a keyed UPDATE, not asyncdb's Model.update(), and the
+        # kept tokens are not part of it
+        existing.update.assert_not_awaited()
+        sql, *params = conn.fetch_one.await_args.args
+        assert "refresh_token" not in sql and "id_token" not in sql
+        assert params[-2:] == ["row-1", "99"]
+
+    @pytest.mark.asyncio
+    async def test_relink_of_a_vanished_row_raises(self):
+        """The row went away between read and write: report it, don't claim success."""
+        from asyncdb.exceptions import NoDataFound
+        from navigator_auth.identity.types import TokenResponse
+        from navigator_auth.models import UserIdentity
+
+        pool, conn = _make_pool()
+        conn.fetch_one = AsyncMock(return_value=None)
+        store = IdentityStore(pool, cipher=IdentityCipher(master_keys=MASTER_KEYS))
+        existing = MagicMock()
+        existing.identity_id = "row-1"
+        existing.provider_user_id = "99"
+        token = TokenResponse(access_token="new-at", refresh_token="rt", provider_user_id="99")
+        with patch.object(UserIdentity, "get", new=AsyncMock(return_value=existing)):
+            with pytest.raises(NoDataFound):
+                await store.save_linked_identity(1, "github", token)
 
 
 class TestFilterIdentitiesProjection:
@@ -374,3 +452,103 @@ class TestFilterIdentitiesProjection:
         identities = await store.list_for_user("35")
         assert len(identities) == 1
         assert conn.fetch_all.await_args.args[1] == 35
+
+
+class TestRefreshLock:
+    """IdentityStore.refresh_lock: cross-process (advisory) lock around a refresh."""
+
+    KEY = "navigator_auth.identity_refresh:azure:35:acct"
+
+    @staticmethod
+    def _store(fetchval):
+        pool, conn = _make_pool()
+        conn.fetchval = AsyncMock(side_effect=fetchval)
+        conn.fetch_one = AsyncMock(return_value={"identity_id": "row-1"})
+        conn.is_connected = MagicMock(return_value=True)
+        return IdentityStore(pool, cipher=IdentityCipher(master_keys=MASTER_KEYS)), pool, conn
+
+    @pytest.mark.asyncio
+    async def test_takes_and_releases_the_advisory_lock(self):
+        store, _, conn = self._store([True, True])
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            pass
+        (lock_sql, lock_key), (unlock_sql, unlock_key) = (c.args for c in conn.fetchval.await_args_list)
+        assert lock_sql == "SELECT pg_try_advisory_lock(hashtextextended($1, 0))"
+        assert unlock_sql == "SELECT pg_advisory_unlock(hashtextextended($1, 0))"
+        assert lock_key == unlock_key == self.KEY
+
+    @pytest.mark.asyncio
+    async def test_waits_while_another_worker_holds_it(self):
+        store, _, conn = self._store([False, False, True, True])
+        async with store.refresh_lock("azure", "35", "acct", timeout=5):
+            pass
+        assert conn.fetchval.await_count == 4  # two misses, the lock, the unlock
+
+    @pytest.mark.asyncio
+    async def test_gives_up_after_the_timeout(self):
+        from navigator_auth.identity.store import IdentityRefreshBusy
+
+        store, _, conn = self._store(lambda *_: False)
+        with pytest.raises(IdentityRefreshBusy) as err:
+            async with store.refresh_lock("azure", "35", "acct", timeout=0.15):
+                pytest.fail("must not enter the lock")
+        assert err.value.status == 503
+        assert all("pg_try_advisory_lock" in c.args[0] for c in conn.fetchval.await_args_list)
+
+    @pytest.mark.asyncio
+    async def test_store_calls_inside_reuse_the_lock_connection(self):
+        """One connection per refresh: a burst of refreshes cannot starve the pool."""
+        store, pool, conn = self._store([True, True])
+        identity = TestUpdateTokens._identity(store)
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            await store.update_tokens(identity, TokenResponse(access_token="AT.new"))
+        assert pool.acquire.call_count == 1
+        conn.fetch_one.assert_awaited_once()
+        # ...and outside the lock the store takes pooled connections again
+        await store.update_tokens(identity, TokenResponse(access_token="AT.newer"))
+        assert pool.acquire.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_a_store_on_another_pool_does_not_borrow_it(self):
+        store, pool, _ = self._store([True, True])
+        other_pool, other_conn = _make_pool()
+        other_conn.fetch_one = AsyncMock(return_value={"identity_id": "row-1"})
+        other = IdentityStore(other_pool, cipher=IdentityCipher(master_keys=MASTER_KEYS))
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            await other.update_tokens(TestUpdateTokens._identity(other), TokenResponse(access_token="AT"))
+        assert other_pool.acquire.call_count == 1 and pool.acquire.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_unlock_does_not_mask_the_result(self):
+        def fetchval(sql, *_):
+            if "unlock" in sql:
+                raise ConnectionError("connection lost")
+            return True
+
+        store, _, _ = self._store(fetchval)
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            result = "refreshed"
+        assert result == "refreshed"
+
+    @pytest.mark.asyncio
+    async def test_dead_lock_connection_falls_back_and_skips_unlock(self):
+        """The lock connection died mid-refresh: the rotated token is still
+        written (fresh connection), and the dead connection is not queried."""
+        store, pool, conn = self._store([True])
+        identity = TestUpdateTokens._identity(store)
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            conn.is_connected.return_value = False  # killed while calling the provider
+            await store.update_tokens(identity, TokenResponse(access_token="AT.rotated"))
+        assert pool.acquire.call_count == 2  # the lock + a fresh one for the write
+        assert conn.fetchval.await_count == 1  # the lock only: no unlock on a dead connection
+
+    @pytest.mark.asyncio
+    async def test_failed_release_of_the_lock_connection_does_not_fail_the_refresh(self):
+        """asyncdb raises when it releases a connection that died while checked out."""
+        store, pool, _ = self._store([True, True])
+        ctx = await pool.acquire()
+        ctx.__aexit__ = AsyncMock(side_effect=RuntimeError("connection has been released back to the pool"))
+        async with store.refresh_lock("azure", "35", "acct", timeout=1):
+            result = "refreshed"
+        assert result == "refreshed"
+        ctx.__aexit__.assert_awaited_once()

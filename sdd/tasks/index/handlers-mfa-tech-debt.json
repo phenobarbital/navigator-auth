@@ -1,0 +1,188 @@
+{
+  "feature": "handlers-mfa-tech-debt",
+  "feature_id": "FEAT-116",
+  "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
+  "type": "feature",
+  "base_branch": "dev",
+  "created_at": "2026-11-11T22:41:18.049418+00:00",
+  "completed_at": "2026-11-11T23:51:13+00:00",
+  "parallel_semantics": "exclusive",
+  "validation_contract": "required",
+  "test_contract": {
+    "schema": 2,
+    "runners": [
+      {
+        "kind": "pytest",
+        "targets": [
+          "tests/test_mfa_policy_state.py",
+          "tests/test_mfa_review_fixes_services.py",
+          "tests/test_mfa_review_fixes_management.py",
+          "tests/test_mfa_enrollment_security.py",
+          "tests/test_mfa_challenge_store.py",
+          "tests/test_mfa_email_provider.py",
+          "tests/test_mfa_migrations.py",
+          "tests/test_mfa_review_fixes_gate.py",
+          "tests/test_mfa_review_fixes_docs.py",
+          "tests/test_mfa_verify.py",
+          "tests/test_mfa_basic_auth_hook.py"
+        ],
+        "settings": {
+          "markers": ""
+        },
+        "tiers": [
+          "task",
+          "merge",
+          "feature"
+        ]
+      }
+    ],
+    "digest": "sha256:b4be61e9e978fd68288aae3d14f66819a624124357e57c66466e2eaaba1a1107"
+  },
+  "tasks": [
+    {
+      "id": "TASK-217",
+      "slug": "factor-query-snapshot",
+      "title": "Read MFA factor facts once per evaluation",
+      "feature_id": "FEAT-116",
+      "feature": "handlers-mfa-tech-debt",
+      "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
+      "status": "done",
+      "priority": "high",
+      "effort": "M",
+      "depends_on": [],
+      "parallel": true,
+      "parallelism_notes": "Independent initial evaluation snapshot task.",
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T22:43:05.971086+00:00",
+      "completed_at": "2026-11-11T23:01:13+00:00",
+      "file": "sdd/tasks/completed/TASK-217-factor-query-snapshot.md",
+      "verification": "verified"
+    },
+    {
+      "id": "TASK-218",
+      "slug": "shared-management-context",
+      "title": "Use shared MFA evaluation for management context",
+      "feature_id": "FEAT-116",
+      "feature": "handlers-mfa-tech-debt",
+      "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
+      "status": "done",
+      "priority": "high",
+      "effort": "M",
+      "depends_on": [
+        "TASK-217"
+      ],
+      "parallel": true,
+      "parallelism_notes": "TASK-217 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:02:28+00:00",
+      "completed_at": "2026-11-11T23:05:01+00:00",
+      "file": "sdd/tasks/completed/TASK-218-shared-management-context.md",
+      "verification": "verified"
+    },
+    {
+      "id": "TASK-219",
+      "slug": "enrollment-budget-context",
+      "title": "Return accurate TOTP attempt budgets and bind enrollment context",
+      "feature_id": "FEAT-116",
+      "feature": "handlers-mfa-tech-debt",
+      "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
+      "status": "done",
+      "priority": "high",
+      "effort": "M",
+      "depends_on": [
+        "TASK-218"
+      ],
+      "parallel": true,
+      "parallelism_notes": "TASK-218 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:05:29+00:00",
+      "completed_at": "2026-11-11T23:10:29+00:00",
+      "file": "sdd/tasks/completed/TASK-219-enrollment-budget-context.md",
+      "verification": "verified"
+    },
+    {
+      "id": "TASK-220",
+      "slug": "management-attempt-limits",
+      "title": "Rate-limit session-authenticated MFA management proofs",
+      "feature_id": "FEAT-116",
+      "feature": "handlers-mfa-tech-debt",
+      "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
+      "status": "done",
+      "priority": "high",
+      "effort": "M",
+      "depends_on": [
+        "TASK-219"
+      ],
+      "parallel": true,
+      "parallelism_notes": "TASK-219 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:10:43+00:00",
+      "completed_at": "2026-11-11T23:31:44+00:00",
+      "file": "sdd/tasks/completed/TASK-220-management-attempt-limits.md",
+      "verification": "verified"
+    },
+    {
+      "id": "TASK-221",
+      "slug": "management-storage-errors",
+      "title": "Return 503 for MFA management storage outages",
+      "feature_id": "FEAT-116",
+      "feature": "handlers-mfa-tech-debt",
+      "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
+      "status": "done",
+      "priority": "high",
+      "effort": "M",
+      "depends_on": [
+        "TASK-220"
+      ],
+      "parallel": true,
+      "parallelism_notes": "TASK-220 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:32:25.767177+00:00",
+      "completed_at": "2026-11-11T23:33:58+00:00",
+      "file": "sdd/tasks/completed/TASK-221-management-storage-errors.md",
+      "verification": "verified"
+    },
+    {
+      "id": "TASK-222",
+      "slug": "mfa-callback-operational-followups",
+      "title": "Finish MFA callback and operational review followups",
+      "feature_id": "FEAT-116",
+      "feature": "handlers-mfa-tech-debt",
+      "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
+      "status": "done",
+      "priority": "high",
+      "effort": "M",
+      "depends_on": [
+        "TASK-221"
+      ],
+      "parallel": true,
+      "parallelism_notes": "TASK-221 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:33:58.814409+00:00",
+      "completed_at": "2026-11-11T23:48:21+00:00",
+      "file": "sdd/tasks/completed/TASK-222-mfa-callback-operational-followups.md",
+      "verification": "verified"
+    },
+    {
+      "id": "TASK-223",
+      "slug": "enrollment-security-evidence",
+      "title": "Complete enrollment security regression evidence",
+      "feature_id": "FEAT-116",
+      "feature": "handlers-mfa-tech-debt",
+      "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
+      "status": "done",
+      "priority": "high",
+      "effort": "M",
+      "depends_on": [
+        "TASK-222"
+      ],
+      "parallel": true,
+      "parallelism_notes": "TASK-222 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:48:21.964890+00:00",
+      "completed_at": "2026-11-11T23:51:13+00:00",
+      "file": "sdd/tasks/completed/TASK-223-enrollment-security-evidence.md",
+      "verification": "verified"
+    }
+  ]
+}

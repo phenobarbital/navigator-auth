@@ -1,4 +1,5 @@
 """Unit tests for navigator_auth.identity.migrations."""
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,6 +24,7 @@ def _make_pool_async_cm():
 
 def _make_failing_pool(marker: str, error: Exception):
     """Pool whose connection raises ``error`` for the SQL containing ``marker``."""
+
     async def _execute(sql):
         if marker in sql:
             raise error
@@ -77,14 +79,18 @@ class TestSQLFile:
         sql = (SQL_DIR / "004_identity_base_columns.sql").read_text()
         assert "ADD COLUMN IF NOT EXISTS" in sql
         for column in (
-            "identity_id", "display_name", "title", "nickname",
-            "email", "phone", "short_bio", "avatar",
+            "identity_id",
+            "display_name",
+            "title",
+            "nickname",
+            "email",
+            "phone",
+            "short_bio",
+            "avatar",
         ):
             assert column in sql
         # The legacy (user_id, uid) PK and the uid column stay put.
-        code = "\n".join(
-            ln for ln in sql.splitlines() if not ln.lstrip().startswith("--")
-        ).upper()
+        code = "\n".join(ln for ln in sql.splitlines() if not ln.lstrip().startswith("--")).upper()
         assert "DROP" not in code
         assert "ADD PRIMARY KEY" not in code
         # Guards: table-absent, and only when identity_id is not already PK.
@@ -102,9 +108,7 @@ class TestSQLFile:
         path = SQL_DIR / "005_identity_legacy_uid_default.sql"
         assert path.is_file()
         sql = path.read_text()
-        code = "\n".join(
-            ln for ln in sql.splitlines() if not ln.lstrip().startswith("--")
-        )
+        code = "\n".join(ln for ln in sql.splitlines() if not ln.lstrip().startswith("--"))
         # The one and only effect: a DEFAULT on the legacy uid column.
         assert "ALTER COLUMN uid SET DEFAULT gen_random_uuid()::varchar" in code
         # Nothing is dropped, no NOT NULL is touched, no PK is rewritten.
@@ -132,10 +136,7 @@ class TestSQLFile:
         sql = path.read_text()
         # Drops comments and the continuation lines of the RAISE messages, so
         # the CASCADE assertion below sees statements only.
-        code = "\n".join(
-            ln for ln in sql.splitlines()
-            if not ln.lstrip().startswith(("--", "'"))
-        )
+        code = "\n".join(ln for ln in sql.splitlines() if not ln.lstrip().startswith(("--", "'")))
         # The effects: identity_id becomes the key, uid goes.
         assert "ALTER COLUMN identity_id SET NOT NULL" in code
         assert "DROP COLUMN uid" in code
@@ -162,9 +163,7 @@ class TestEnsureIdentityColumns:
         assert conn.execute.await_count == 6
         # FEAT-103 TASK-102: 004 (base columns), 005 (legacy uid default).
         # FEAT-104: 006 (drop the legacy uid column).
-        first, second, third, fourth, fifth, sixth = (
-            c.args[0] for c in conn.execute.await_args_list
-        )
+        first, second, third, fourth, fifth, sixth = (c.args[0] for c in conn.execute.await_args_list)
         assert "auth.user_identities" in first
         assert "id_token" in second
         assert "key_version TYPE INTEGER" in third
@@ -195,9 +194,7 @@ class TestEnsureIdentityColumns:
         failures are reported together instead of the first one aborting the
         loop and leaving the schema half-migrated.
         """
-        pool, conn = _make_failing_pool(
-            "key_version TYPE INTEGER", RuntimeError("lock timeout")
-        )
+        pool, conn = _make_failing_pool("key_version TYPE INTEGER", RuntimeError("lock timeout"))
         with pytest.raises(RuntimeError) as excinfo:
             await ensure_identity_columns(pool)
 
@@ -215,9 +212,7 @@ class TestEnsureIdentityColumns:
 
     @pytest.mark.asyncio
     async def test_reports_every_failing_file(self):
-        pool, conn = _make_failing_pool(
-            "auth.user_identities", RuntimeError("db exploded")
-        )
+        pool, conn = _make_failing_pool("auth.user_identities", RuntimeError("db exploded"))
         with pytest.raises(RuntimeError) as excinfo:
             await ensure_identity_columns(pool)
         message = str(excinfo.value)
@@ -246,9 +241,18 @@ class TestSetupIdentityColumns:
     @pytest.mark.asyncio
     async def test_applies_the_rest_when_one_migration_fails(self):
         """issue:b9f6225031e0 — startup applies what it can, then logs."""
-        pool, conn = _make_failing_pool(
-            "key_version TYPE INTEGER", RuntimeError("lock timeout")
-        )
+        pool, conn = _make_failing_pool("key_version TYPE INTEGER", RuntimeError("lock timeout"))
         # must not raise, and must still have run 004/005/006
         await setup_identity_columns(pool)
+        assert conn.execute.await_count == 6
+
+
+class TestEnsureIdentityColumnsAsyncdbErrorPair:
+    @pytest.mark.asyncio
+    async def test_asyncdb_error_pair_raises(self):
+        """conn.execute returning [None, error] is a failure, not a silent success."""
+        pool, conn = _make_pool_async_cm()
+        conn.execute = AsyncMock(return_value=[None, RuntimeError("x")])
+        with pytest.raises(RuntimeError, match="6 of 6"):
+            await ensure_identity_columns(pool)
         assert conn.execute.await_count == 6

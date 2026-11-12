@@ -85,7 +85,8 @@ class TestParkPendingRequest:
             _get_request({}), "google", dict(AUTHORIZE_PARAMS)
         )
 
-        assert isinstance(response, web.HTTPFound)
+        assert response.status == 302
+        assert not isinstance(response, web.HTTPException)
         assert response.headers["Location"] == "/auth/google/login"
 
         (key,) = provider._flow_store.data.keys()
@@ -248,7 +249,7 @@ class TestResumePendingRequest:
         response = await provider.authorize(request)
 
         assert response.status == 400
-        assert not isinstance(response, web.HTTPFound)
+        assert "Location" not in response.headers
         assert b"invalid_request" in response.body
 
 

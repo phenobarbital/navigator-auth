@@ -1,5 +1,6 @@
 from typing import Any, Optional
-from collections.abc import MutableMapping, Iterator
+from collections.abc import Mapping, MutableMapping, Iterator
+from types import MappingProxyType
 from aiohttp import web
 from datamodel import BaseModel
 
@@ -79,6 +80,84 @@ def _resolve_tenant(
     return 1, 1
 
 
+ASSURANCE_KEYS = ("mfa", "amr", "auth_method")
+
+
+def bearer_context_from_claims(payload: Mapping[str, Any]) -> MappingProxyType:
+    """Return the immutable request-local assurance of a VALIDATED bearer token.
+
+    Args:
+        payload: Decoded claims of a token that already passed signature, expiry,
+            revocation and generation checks.
+
+    Returns:
+        A read-only mapping with ``user_id``, ``mfa`` (bool), ``amr`` (tuple or None)
+        and ``auth_method`` (str or None). Missing claims mean "no fresh factor".
+    """
+    amr = payload.get("amr")
+    return MappingProxyType(
+        {
+            "user_id": payload.get("user_id"),
+            "mfa": bool(payload.get("mfa", False)),
+            "amr": tuple(str(value) for value in amr) if isinstance(amr, (list, tuple)) and amr else None,
+            "auth_method": payload.get("auth_method"),
+        }
+    )
+
+
+def _userinfo_to_dict(userinfo: Any) -> dict:
+    """Copy userinfo (Mapping, object or None) into a new dict."""
+    if userinfo is None:
+        return {}
+    if isinstance(userinfo, Mapping):
+        return dict(userinfo)
+    if isinstance(userinfo, BaseModel):
+        try:
+            return dict(userinfo.to_dict())
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        return {k: v for k, v in vars(userinfo).items() if not k.startswith("_")}
+    except TypeError:
+        return {}
+
+
+def effective_userinfo(request: Any, userinfo: Any) -> Any:
+    """Return the userinfo ABAC must evaluate for this request.
+
+    Cookie-only and non-bearer requests: ``userinfo`` unchanged. Bearer requests: a NEW
+    dict holding the session userinfo minus ``ASSURANCE_KEYS``, plus the token's own
+    ``mfa``/``amr``/``auth_method`` from ``request[AUTH_BEARER_CONTEXT_KEY]``; a bearer
+    request without a published context gets no assurance. Never mutates the session.
+    """
+    from navigator_auth.conf import (  # noqa: PLC0415 — lazy, like _load_tenant_conf
+        AUTH_BEARER_CONTEXT_KEY,
+        AUTH_MECHANISM_BEARER,
+        AUTH_MECHANISM_KEY,
+    )
+
+    getter = getattr(request, "get", None)
+    if getter is None:
+        return userinfo
+    context = getter(AUTH_BEARER_CONTEXT_KEY)
+    if context is None and getter(AUTH_MECHANISM_KEY) != AUTH_MECHANISM_BEARER:
+        return userinfo
+    base: dict = {k: v for k, v in _userinfo_to_dict(userinfo).items() if k not in ASSURANCE_KEYS}
+    if context is None:
+        return base
+    token_uid = context.get("user_id")
+    session_uid = base.get("user_id")
+    if token_uid is not None and session_uid is not None and str(token_uid) != str(session_uid):
+        return base
+    if context["mfa"]:
+        base["mfa"] = True
+    if context["amr"] is not None:
+        base["amr"] = list(context["amr"])
+    if context["auth_method"]:
+        base["auth_method"] = context["auth_method"]
+    return base
+
+
 class EvalContext(dict, MutableMapping):
     """EvalContext.
 
@@ -99,6 +178,12 @@ class EvalContext(dict, MutableMapping):
     ):
         ## initialize the mutable mapping:
         self.store = {}
+        # FEAT-106 review fixes (M9, D9): bearer requests evaluate the validated token's
+        # assurance, never the identity-shared session's.
+        effective = effective_userinfo(request, userinfo)
+        if user is userinfo and effective is not userinfo:
+            user = effective  # PDP fallback passes userinfo as the user (pdp.py:405)
+        userinfo = effective
         self.store["request"] = request
         self.store["ip_addr"] = request.remote
         self.store["method"] = request.method

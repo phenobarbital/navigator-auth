@@ -10,7 +10,7 @@ tags: [2fa, otp, totp, email-otp, multi-tenant, security]
 
 **Date**: 2026-11-06
 **Author**: Jesus Lara
-**Status**: exploration
+**Status**: accepted
 **Recommended Option**: Option A
 
 ---
@@ -352,9 +352,17 @@ state. From then on, the second step asks for the app's code, and the email path
 is **closed** for them — if they lose the device, backup codes are the way in,
 not the mailbox.
 
-**A user with backup codes**: a one-time list shown at enrolment, each usable
-once. They can also be regenerated from a live session, which invalidates the
-previous set.
+**A user with backup codes**: ten 8-character alphanumeric codes, shown exactly
+once at enrolment and never retrievable afterwards — only their hashes are
+stored. Each works once. They can be regenerated from a live session, which
+invalidates the previous set and requires the password again.
+
+**A privileged user**: an `is_superuser` account in an `enforced` tenant may
+**not** stay on the e-mail floor — it must hold TOTP or a passkey. This is the
+one place where sharing a mailbox with the password-recovery channel stops being
+an acceptable trade. Operationally this is enforced *before* the fact, not at
+login: the pre-flight refuses to enforce a tenant whose administrators have no
+strong factor, so enforcement can never lock out the people who run it.
 
 **A user who ticked "remember me for N days"** (available only in the `totp`
 state, or with a registered passkey): subsequent logins still require the
@@ -370,9 +378,12 @@ passkey sign-ins.
 else. No password reset, no account edit. The user then recovers through the
 existing self-service password-recovery flow on their own.
 
-**An operator enabling enforcement for a tenant**: a pre-flight script reports
-users who cannot be enforced (no e-mail address, therefore no factor) and exits
-non-zero, blocking the activation until the data is fixed.
+**An operator enabling enforcement for a tenant**: a pre-flight script exits
+non-zero and blocks the activation on either of two findings — users with no
+e-mail address (therefore no factor at all) and `is_superuser` accounts with no
+strong factor (they may not sit on the floor). It reports both lists so the
+operator knows exactly what to fix. It cannot report addresses that are merely
+*wrong*; see the e-mail-verification decision in Open Questions.
 
 ### Internal Behavior
 
@@ -414,6 +425,20 @@ disenrolment is the same transition under a *separate permission* from user CRUD
 and must additionally revoke every trusted device — otherwise it does nothing
 against an attacker who already holds a remember-me cookie.
 
+That separate permission is a new ABAC action, `mfa:disenroll`, shipped as a
+named policy in `navigator_auth/abac/default_policies/` following the FEAT-105
+pack pattern and granted to a group that is deliberately **not** `superuser`.
+The separation is structural rather than aspirational: the stock
+`admin_full_access` policy wildcards its *resources* (`uri:*`) but **enumerates
+its actions**, so a new action string falls outside it, and `policy_allows()`
+fails closed when no policy matches — a deployment that never ships the policy
+has nobody who can disenrol at all.
+
+A privileged account (`is_superuser`) is additionally barred from the `email`
+state in an `enforced` tenant. That rule is enforced at *activation* by the
+pre-flight rather than at login, so hardening a tenant can never lock out its
+own administrators.
+
 **Remember-me.** A rotating, `sha256`-stored token in an `HttpOnly` / `Secure` /
 `SameSite` cookie, bound to the user and rotated on every use. Re-presenting an
 already-rotated token means the chain was stolen, which revokes the whole family.
@@ -440,7 +465,11 @@ already identified the user by the time the policy is read.
 | User has TOTP but lost the device | Backup codes. Exhausted ⇒ administrative OTP disenrolment ⇒ falls back to the email floor ⇒ self-service recovery. |
 | Trusted-device cookie stolen | Rotation detection revokes the entire family on first replay of a rotated token. |
 | Trusted-device cookie survives a password change or recovery | It must not: both invalidate every trusted device for that user. |
-| Tenant switched to `enforced` while sessions are live | Existing sessions are untouched; the policy applies at next login. Trusted devices are revoked, so the next login does present a challenge. |
+| Tenant switched to `enforced` while sessions are live | Existing sessions are untouched; the policy applies at next login. Trusted devices **are** revoked, so the next login does present a challenge. |
+| Tenant policy *relaxed* (enforced → optional, or `remember_days` raised) | Trusted devices are **not** revoked: relaxing creates no new risk. Hardening revokes, relaxing does not. |
+| `is_superuser` with no strong factor in a tenant being enforced | The pre-flight blocks the activation and names the account. There is no grace session and no "from the second login" window: the account enrols TOTP first, then the tenant is enforced. |
+| A user's e-mail address is valid but *wrong* (typo, stale, ex-employee) | **Not detected.** No `email_verified` state exists, so the second factor is delivered to whatever address the record holds. Accepted bound in v1; the pre-flight catches missing addresses only. |
+| Backup codes regenerated | The previous set stops working immediately; the new set is shown once. Requires password re-authentication. |
 | `TokenExchangeAuth` / machine-to-machine login | No challenge, by construction: the hook is in `BasicAuth.authenticate()`, which `TokenExchangeAuth` overrides. |
 | Passkey sign-in in an `enforced` tenant | No challenge. Caveat: this rests on `PASSKEY_USER_VERIFICATION` defaulting to `required`; a deployment that lowers it to `discouraged` makes its passkeys single-factor and silently weakens this guarantee. |
 | User belongs to one `enforced` and one `optional` organization | Strictest wins: enforced. |
@@ -456,8 +485,9 @@ already identified the user by the time the policy is read.
 - `mfa-tenant-policy`: per-organization 2FA mode and remember-me window, with a
   strictest-wins resolution across a user's organizations and a blocking
   pre-flight check before activation.
-- `mfa-backup-codes`: single-use recovery codes, and bounded administrative
-  disenrolment as the last resort.
+- `mfa-backup-codes`: ten single-use recovery codes (8 chars, hashed, shown once),
+  and bounded administrative disenrolment as the last resort — gated by a new
+  `mfa:disenroll` ABAC action held by a group other than `superuser`.
 - `mfa-trusted-devices`: opt-in, rotating, revocable "remember me for N days"
   that skips only the OTP step and only for strong-factor users.
 
@@ -487,6 +517,7 @@ already identified the user by the time the policy is read.
 | `auth.user_vault_secrets` | depends on | Holds the sealed TOTP seed under a new key. No schema change. |
 | `navigator_auth/conf.py` | modifies | `AUTH_BASIC_2FA_ENABLED` kill switch plus `AUTH_OTP_*` knobs (TTL, attempts, rates, code length, issuer, delivery callback, HMAC secret). |
 | `navigator_auth/abac/context.py` | **unaffected** | `mfa` / `auth_method` keys already exist; only the `amr` *values* are new. |
+| `navigator_auth/abac/default_policies/` | **new file** | A named policy declaring the `mfa:disenroll` action for a non-`superuser` group, following the FEAT-105 pack pattern. Configuration, not code: absent ⇒ nobody can disenrol (`policy_allows()` fails closed), so it can only ever remove access. |
 | `scripts/` | **new** | Pre-flight enforcement-readiness check (non-zero exit on blockers). |
 | `docs/` + `CHANGELOG.md` | modifies | Operator guide for the callback contract, the state machine, and the shared-mailbox risk. |
 | `navigator_auth/handlers/users/user.py` | **out of scope, risk accepted** | See Open Questions: a pre-existing takeover path this feature exposes but must not fix. |
@@ -685,6 +716,39 @@ from navigator_session.vault import KeyRing, VaultContext, open_value, seal_valu
   — exactly the shape Google Authenticator expects.
 - `TOTP.verify(totp: bytes, time: int) -> None` raises `InvalidToken` and validates
   **a single time step**; the ±1 step skew window must be walked by the caller.
+- **The ABAC policy pack is the separation-of-duties mechanism, and it works
+  because of an exact property of the stock pack.** `navigator_auth/abac/default_policies/admin_full_access.yaml`
+  grants `superuser` + `admin` the resources `tool:* kb:* vector:* agent:* mcp:* uri:*`
+  at `priority: 100` — but its `actions:` list is **enumerated**
+  (`tool:execute`, `tool:list`, `tool:configure`, `kb:query`, `kb:write`,
+  `kb:admin`, `vector:search`, `vector:insert`, `vector:delete`, `agent:chat`,
+  `agent:query`, `agent:configure`) and contains **no wildcard**. A new action
+  string such as `mfa:disenroll` therefore falls outside it, which is what makes
+  a dedicated policy genuinely exclusive rather than shadowed by the admin grant.
+- The pack shape to copy, verified in
+  `navigator_auth/abac/default_policies/auth_model_admin_access.yaml` (FEAT-105,
+  TASK-120) — three policies at `priority: 90`, each scoping a URI surface to an
+  action list and a group:
+
+```yaml
+version: "1.0"
+defaults:
+  effect: deny
+policies:
+  - name: user_identities_admin_access
+    effect: allow
+    resources: ["uri:/api/v1/user_identity*"]
+    actions: ["identity:read", "identity:revoke", "identity:delete"]
+    subjects:
+      groups: ["superuser"]
+    priority: 90
+    enforcing: true
+```
+
+- `policy_allows()` **fails closed**: the guard denies when a named policy is
+  absent (FEAT-105 TASK-119). A missing or malformed pack can therefore only
+  *remove* admin access, never grant it — which is why shipping the
+  `mfa:disenroll` policy is an explicit operator action rather than a default.
 
 ### Does NOT Exist (Anti-Hallucination)
 
@@ -715,6 +779,14 @@ from navigator_session.vault import KeyRing, VaultContext, open_value, seal_valu
 - ~~A pre-authentication tenant resolver~~ — does not exist (F015). Not needed here,
   because the password step identifies the user before the policy is read.
 - ~~SMS/`AUTH_OTP_SMS_*`~~ — explicitly out of scope; no provider in the environment.
+- ~~the `mfa:disenroll` ABAC action, and any policy file declaring it~~ — neither
+  exists. `default_policies/` holds exactly seven files today
+  (`admin_full_access`, `auth_model_admin_access`, `business_hours_only`,
+  `deny_after_hours`, `engineering_tools`, `mcp_services`, `readonly_agents`);
+  this feature adds an eighth.
+- ~~a `security_admin` group~~ — not defined anywhere. The group name that holds
+  `mfa:disenroll` is a deployment decision; the spec should name a default but
+  must not assume the group already exists.
 
 ---
 
@@ -763,9 +835,10 @@ from navigator_session.vault import KeyRing, VaultContext, open_value, seal_valu
 - [x] Is "remember me for N days" in scope, and for whom? — *Owner: Jesus Lara*: In scope, strong-factor users only (`totp` or passkey). An `email`-state user types a code every time, which is also the incentive to upgrade. Window per tenant; `0` disables.
 - [x] Are backup codes in v1? — *Owner: Jesus Lara*: Yes.
 - [x] SMS? — *Owner: Jesus Lara*: Out of scope — it needs an external provider the environment does not have.
-- [ ] **`UserManager` is a generic `ModelView` over `User`, which makes bounded administrative disenrolment weaker than it reads.** It allows editing `email` (in `required_by_put`) and setting a password (`_set_password` / `_calculate_password`), and does not use `OwnerOrSuperuserGuard`. That enables: switch a user's OTP off → they drop to the e-mail floor → change their `email` → trigger password recovery → account taken, without ever "resetting a password". **Decided: a separate follow-up spec**, because it is a pre-existing gap this feature merely exposes, and migrating `UserManager` off `ModelView` has its own blast radius. This feature documents the risk and does not fix it. Reusable machinery for that follow-up: `handlers/guards.py:31` `OwnerOrSuperuserGuard`, `handlers/redaction.py:36` `safe_fields()` allowlist, and FEAT-105's write envelope (which already blocks a superuser from editing another user's columns on `user_identities`). — *Owner: Jesus Lara*
-- [ ] **E-mail verification — the weakest premise in the design.** E-mail-as-floor assumes the address is trustworthy, but `User` has no `email_verified` column and there is no verification flow, so a stale or mistyped address delivers the second factor to the wrong mailbox. Two findings sharpen this: (a) the *concept* already exists for IdP logins — `TokenExchangeAuth._verified_email()` enforces the provider's `email_verified` claim (`backends/exchange.py:99-111`) but **persists nothing**, so the signal is available and discarded; (b) `BasicAuth` users, who are precisely this feature's population, never had their address verified by anyone at any point. Options: persist the IdP claim when it exists and treat `BasicAuth`-provisioned addresses as unverified; require verification before a tenant can be enforced; or accept unverified addresses and document it. Likely out of v1, but it should be decided explicitly rather than inherited. — *Owner: Jesus Lara*
-- [ ] **Shared-mailbox coupling.** E-mail OTP and `AUTH_RECOVERY_CALLBACK` use the same channel, so a compromised mailbox yields both factors *and* the reset path. Should the spec hard-block `email`-only state for privileged accounts (e.g. `is_superuser`), or only document it? — *Owner: Jesus Lara*
-- [ ] Backup-code parameters: how many, what length, shown once or re-displayable, and does regeneration require password re-authentication? — *Owner: unassigned*
-- [ ] Which permission gates administrative OTP disenrolment, concretely — a new ABAC action, or an existing group? This is what makes the separation of duties real rather than nominal. — *Owner: unassigned*
-- [ ] Should a `mode` change on a tenant revoke that tenant's trusted devices wholesale (the Feature Description assumes yes for `→ enforced`), and should relaxing the mode leave them alone? — *Owner: unassigned*
+- [x] **`UserManager` is a generic `ModelView` over `User`, which makes bounded administrative disenrolment weaker than it reads.** It allows editing `email` (in `required_by_put`) and setting a password (`_set_password` / `_calculate_password`), and does not use `OwnerOrSuperuserGuard`. That enables: switch a user's OTP off → they drop to the e-mail floor → change their `email` → trigger password recovery → account taken, without ever "resetting a password". **Decided: a separate follow-up spec**, because it is a pre-existing gap this feature merely exposes, and migrating `UserManager` off `ModelView` has its own blast radius. This feature documents the risk and does not fix it. Reusable machinery for that follow-up: `handlers/guards.py:31` `OwnerOrSuperuserGuard`, `handlers/redaction.py:36` `safe_fields()` allowlist, and FEAT-105's write envelope (which already blocks a superuser from editing another user's columns on `user_identities`). — *Owner: Jesus Lara*
+- [x] **E-mail verification — the weakest premise in the design.** — *Owner: Jesus Lara*: **Accepted unverified in v1, documented as a known bound.** E-mail-as-floor assumes the address is trustworthy, but `User` has no `email_verified` column and there is no verification flow. Two findings sharpen it: (a) the *concept* already exists for IdP logins — `TokenExchangeAuth._verified_email()` enforces the provider's `email_verified` claim (`backends/exchange.py:99-111`) but **persists nothing**, so the signal is available and discarded; (b) `BasicAuth` users, precisely this feature's population, never had their address verified by anyone. Rejected for v1: persisting the IdP claim (adds schema without closing the gap for the population that matters) and gating enforcement on verification (pulls an entire send/token/resend feature inside this one). The operator-facing consequence is explicit: **the e-mail floor is worth exactly what the tenant's address hygiene is worth.** The pre-flight reports missing addresses; it cannot report wrong ones. A verification flow is the natural follow-up feature.
+- [x] **Shared-mailbox coupling.** — *Owner: Jesus Lara*: **A privileged account may not remain on the e-mail floor.** An `is_superuser` account in an `enforced` tenant must hold a strong factor (TOTP or passkey); the `email` state is not sufficient for it. This is where the shared-mailbox risk stops being acceptable, and it costs little friction because the population is tiny. Consequence, resolved below: the pre-flight must block on it, or enforcing a tenant would lock out its own administrators.
+- [x] Backup-code parameters — *Owner: Jesus Lara*: **10 codes, 8 alphanumeric characters, shown exactly once**, stored only as hashes and never recoverable. Regeneration invalidates the previous set and requires password re-authentication. Deliberately the de-facto standard (GitHub, Google) rather than anything novel.
+- [x] Which permission gates administrative OTP disenrolment? — *Owner: Jesus Lara*: **A new ABAC action `mfa:disenroll` in its own named policy, granted to a group that is *not* `superuser`** (e.g. `security_admin`), following the FEAT-105 pack pattern. This is verifiably real separation of duties, not nominal: `admin_full_access.yaml` grants `uri:*` to `superuser`/`admin` at `priority: 100`, but its `actions` list is **enumerated, not wildcarded**, so a new action string is not covered by it. And `policy_allows()` fails closed when nothing matches, so a deployment that never ships the policy has *nobody* able to disenrol — a safe default that makes the escape hatch an explicit operator decision. Caveat for the spec: an operator who adds `mfa:*` or `"*"` to `admin_full_access` collapses the separation; that must be called out in the operator docs.
+- [x] Does a `mode` change revoke the tenant's trusted devices? — *Owner: Jesus Lara*: **Hardening revokes, relaxing does not.** Moving to `enforced`, or lowering `remember_days`, revokes that tenant's trusted devices — otherwise the policy change has no effect on anyone already holding a cookie. Relaxing the policy revokes nothing, because it creates no new risk to mitigate.
+- [x] How does a superuser with no strong factor get into a tenant being enforced? — *Owner: Jesus Lara*: **The pre-flight blocks on it too.** Activation fails, listing every `is_superuser` in the tenant that holds no strong factor; the administrator enrols TOTP first, then enforces. Rejected: a grace session that may only reach the enrolment endpoints (it reintroduces exactly the partial-session mode the two-tier model was designed to remove) and a "strong factor required from the second login" window (it leaves the highest-impact account on the weakest factor precisely when the policy is newest).

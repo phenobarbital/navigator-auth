@@ -3,12 +3,14 @@ Various kinds of Application Responses.
 
 TODO: add FileResponse or JSONResponse or SSEResponse (server-side).
 """
-from typing import Any, NoReturn, Optional
+from http import HTTPStatus
+from typing import Any, NoReturn, Optional, Union
 from aiohttp import web
 from aiohttp import web_exceptions
 from aiohttp.web_exceptions import (
     HTTPNoContent,
 )
+from yarl import URL
 from .libs.json import json_encoder, json_decoder
 
 DEFAULT_JSON_ENCODER = json_encoder
@@ -48,6 +50,43 @@ def NoContent(
         response["headers"] = headers
     response = HTTPNoContent(content_type=content_type)
     response.headers["Pragma"] = "no-cache"
+    return response
+
+
+def RedirectResponse(
+    location: Union[str, URL],
+    *,
+    headers: Optional[dict] = None,
+    status: int = 302,
+) -> web.Response:
+    """Build a redirect that handlers *return*.
+
+    Same wire output as ``web.HTTPFound`` — the status, a ``Location`` header
+    normalised through ``yarl.URL`` and a ``"302: Found"`` text body — but a
+    plain ``web.Response`` rather than an ``HTTPException``: aiohttp deprecates
+    returning an ``HTTPException`` (#2415), and raising one would skip the
+    navigator_session middleware, which only writes the session cookie onto a
+    returned response.
+
+    Args:
+        location: Redirect target.
+        headers: Extra response headers (e.g. ``x-authenticated``).
+        status: A 3xx status code; 302 by default.
+
+    Returns:
+        web.Response: The redirect; callers may still set cookies on it.
+
+    Raises:
+        ValueError: ``location`` is empty.
+    """
+    if not location:
+        raise ValueError("HTTP redirects need a location to redirect to.")
+    response = web.Response(
+        status=status,
+        text=f"{status}: {HTTPStatus(status).phrase}",
+        headers=headers,
+    )
+    response.headers["Location"] = str(URL(location))
     return response
 
 

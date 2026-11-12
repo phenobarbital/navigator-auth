@@ -50,7 +50,7 @@ class TestFailedRedirectHeaderSafety:
     def test_headers_and_query_agree(self):
         """The sanitized value appears in both the header and the URL."""
         resp = _redirect(error="E\nX", message="line one\nline two")
-        query = parse_qs(urlparse(str(resp.location)).query)
+        query = parse_qs(urlparse(resp.headers["Location"]).query)
         assert query["message"] == [resp.headers["x-message"]]
         assert query["error"] == [resp.headers["x-error"]]
 

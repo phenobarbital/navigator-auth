@@ -12,9 +12,11 @@ here: the uniform step-1 response (no account enumeration, D9), latency
 padding, and keeping the raw token out of every HTTP response and log
 line.
 """
+
 import asyncio
 import importlib
 import logging
+import secrets
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -40,30 +42,46 @@ from navigator_auth.models import User
 from navigator_auth.handlers.users.passwd import set_basic_password
 from navigator_auth.handlers.recovery.limiter import RateLimiter
 from navigator_auth.handlers.recovery.policy import PasswordPolicy
-from navigator_auth.handlers.recovery.revoke import SessionRevoker
+from navigator_auth.handlers.recovery.revoke import RevocationError, SessionRevoker
 from navigator_auth.handlers.recovery.store import RecoveryTokenStore, _hash_token
 from navigator_auth.handlers.recovery.types import NotificationPayload
+from navigator_auth.conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE
+from navigator_auth.mfa.events import TransitionAborted, security_transition
+from navigator_auth.mfa.exceptions import MfaStorageError, MfaUnavailable
+from navigator_auth.mfa.security import advisory_user_lock
+from navigator_auth.security_state.store import SecurityStateError, increment_generation, record_confirmation
 
 logger = logging.getLogger("navigator.recovery")
+
+_USERS = f"{AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE}"
+# Consumption markers outlive the signed confirmation by this clock-skew margin (spec M4 durable contract).
+_MARKER_SKEW_SECONDS = 300
+
+
+def _field(record, name: str):
+    """Read ``name`` from a user record that may be a mapping or a datamodel object."""
+    if isinstance(record, dict):
+        return record.get(name)
+    return getattr(record, name, None)
+
 
 # Registered route names (handlers/__init__.py) that mean "step 3, confirm"
 # rather than "step 1, request" when a POST lands on post(). Route names,
 # not path strings, so the dispatch doesn't need to know the literal path
 # of every alias.
-_CONFIRM_ROUTE_NAMES = frozenset({
-    "api_password_recovery_confirm",
-    "api_reset_password",
-})
+_CONFIRM_ROUTE_NAMES = frozenset(
+    {
+        "api_password_recovery_confirm",
+        "api_reset_password",
+    }
+)
 
 # Minimum wall-clock time step 1 takes to respond, regardless of whether the
 # address is known. A real lookup hits Postgres; a miss may not — without
 # this floor the latency delta alone reveals account existence (D9).
 _STEP1_LATENCY_FLOOR = 0.25  # seconds
 
-_GENERIC_STEP1_BODY = {
-    "message": "If that email address is registered, recovery instructions "
-    "have been sent."
-}
+_GENERIC_STEP1_BODY = {"message": "If that email address is registered, recovery instructions " "have been sent."}
 
 
 async def _find_user_by_email(request, email: str) -> Optional[User]:
@@ -138,9 +156,7 @@ class PasswordRecoveryHandler(BaseView):
     def _ensure_resources(cls) -> None:
         if cls._pool is not None:
             return
-        cls._pool = aioredis.ConnectionPool.from_url(
-            REDIS_AUTH_URL, decode_responses=True, encoding="utf-8"
-        )
+        cls._pool = aioredis.ConnectionPool.from_url(REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
         cls._store = RecoveryTokenStore(cls._pool, secret=AUTH_RECOVERY_SECRET)
         cls._policy = PasswordPolicy(
             min_length=AUTH_RECOVERY_PWD_MIN_LENGTH,
@@ -150,6 +166,16 @@ class PasswordRecoveryHandler(BaseView):
         cls._email_limiter = RateLimiter(cls._pool, AUTH_RECOVERY_RATE_EMAIL, "email")
         cls._ip_limiter = RateLimiter(cls._pool, AUTH_RECOVERY_RATE_IP, "ip")
         cls._revoker = SessionRevoker(cls._pool)
+
+    @classmethod
+    def session_revoker(cls) -> SessionRevoker:
+        """Return the single process-wide ``SessionRevoker`` (FEAT-106 review fixes, spec M4 / G9).
+
+        ``password_reset`` (``handlers/users/session.py``) revokes the target user's sessions and tokens
+        with the same instance recovery completion uses, so both share one Redis pool.
+        """
+        cls._ensure_resources()
+        return cls._revoker
 
     def __init__(self, request, *args, **kwargs):
         super().__init__(request, *args, **kwargs)
@@ -187,9 +213,7 @@ class PasswordRecoveryHandler(BaseView):
                 # distinct 429 would itself tell an attacker the address is
                 # being tracked (D9 outweighs the RFC-flavoured 429 hint in
                 # the spec's Component Diagram; see Completion Note).
-                logger.warning(
-                    "PasswordRecovery: rate limit exceeded for step1 request"
-                )
+                logger.warning("PasswordRecovery: rate limit exceeded for step1 request")
         # else: no email in the body -> treated exactly like "not found",
         # no DB/Redis work, so its latency profile matches a real miss.
 
@@ -237,9 +261,15 @@ class PasswordRecoveryHandler(BaseView):
             # distinguish them for the caller.
             return self.error(reason="Invalid or expired recovery link", status=400)
         try:
-            confirm_token, _confirmation = await self._store.issue_confirmation(token)
+            # Rotation serializes with step-3 completion for the same user: take the per-user advisory
+            # lock BEFORE changing Redis, so a rotation cannot land between step 3's recheck and commit.
+            async with advisory_user_lock(self.request.app["authdb"], int(recovery_payload.user_id)):
+                confirm_token, _confirmation = await self._store.issue_confirmation(token)
         except LookupError:
             return self.error(reason="Invalid or expired recovery link", status=400)
+        except MfaStorageError:
+            logger.warning("PasswordRecovery: rotation lock unavailable for user_id=%s", recovery_payload.user_id)
+            return self.json_response(response={"error": "temporarily_unavailable"}, status=503)
         return self.json_response(
             response={
                 "token": confirm_token,
@@ -271,55 +301,77 @@ class PasswordRecoveryHandler(BaseView):
         if confirmation is None:
             return self.error(reason="Invalid or expired confirmation token", status=400)
 
-        # Lookup, policy check and password write all share ONE acquired
-        # connection (matching handlers/users/session.py's
-        # password_change/password_reset) — releasing the connection
-        # between the lookup and the later .update() left a stale
-        # Model.Meta.connection reference and, under load, starved the
-        # pool badly enough to hang the whole process.
+        # Phase 1 (pooled, released): user lookup + policy check. Nothing is
+        # consumed here, so a policy failure leaves BOTH tokens usable.
         db = self.request.app["authdb"]
         async with await db.acquire() as conn:
             User.Meta.connection = conn
             try:
                 user = await User.get(user_id=confirmation.user_id)
             except NoDataFound:
-                return self.error(
-                    reason="Invalid or expired confirmation token", status=400
+                return self.error(reason="Invalid or expired confirmation token", status=400)
+            captured_hash = _field(user, "password")
+        user_id = _field(user, "user_id")
+        violations = self._policy.validate(password, current_hash=captured_hash)
+        if violations:
+            return self.json_response(
+                response={"violations": [{"rule": v.rule, "message": v.message} for v in violations]},
+                status=422,
+            )
+        new_hash = set_basic_password(password)
+        digest = _hash_token(token)
+        revoker = self.session_revoker()
+
+        # Phase 2: ONE connection, ONE transaction, per-user advisory lock (MFA on or off).
+        try:
+            async with security_transition(
+                self.request.app, user_id, "recovery_completion", actor_user_id=user_id
+            ) as conn:
+                # COALESCE: a federated user may have a NULL hash; None must mean "row vanished" only.
+                current = await conn.fetchval(
+                    f"SELECT COALESCE(password, '') FROM {_USERS} WHERE user_id = $1 FOR UPDATE", user_id
                 )
-
-            current_hash = getattr(user, "password", None)
-            violations = self._policy.validate(password, current_hash=current_hash)
-            if violations:
-                return self.json_response(
-                    response={
-                        "violations": [
-                            {"rule": v.rule, "message": v.message} for v in violations
-                        ]
-                    },
-                    status=422,
+                if current is None or not secrets.compare_digest(str(current), str(captured_hash or "")):
+                    raise TransitionAborted("credentials_changed")
+                live = await self._store.current_confirmation(token)
+                if live is None or int(live.user_id) != int(user_id):
+                    raise TransitionAborted("invalid_confirmation")
+                expires_at = datetime.fromtimestamp(
+                    float(live.issued_at) + AUTH_RECOVERY_CONFIRM_TTL + _MARKER_SKEW_SECONDS, tz=timezone.utc
                 )
-
-            # Policy passed: now consume (single-use GETDEL). If this races
-            # with a concurrent step-3 call, the second one lands here.
-            consumed = await self._store.consume_confirmation(token)
-            if consumed is None:
-                return self.error(
-                    reason="Invalid or expired confirmation token", status=400
+                if not await record_confirmation(conn, digest, int(user_id), expires_at):
+                    raise TransitionAborted("invalid_confirmation")  # committed marker: replay -> 400
+                # D17 — self-service reset is NOT a superuser password_reset (is_new=True). Do not "harmonise".
+                updated = await conn.fetchval(
+                    f"UPDATE {_USERS} SET password = $2, is_new = false WHERE user_id = $1 RETURNING user_id",
+                    user_id,
+                    new_hash,
                 )
+                if updated is None:
+                    raise TransitionAborted("credentials_changed")
+                await increment_generation(conn, int(user_id))
+                revoked = await revoker.revoke_user(self.request, user, strict=True)
+        except TransitionAborted as aborted:
+            if aborted.reason == "credentials_changed":
+                return self.json_response(response={"error": "credentials_changed"}, status=409)
+            return self.error(reason="Invalid or expired confirmation token", status=400)
+        except MfaUnavailable:
+            return self.json_response(response={"error": "mfa_unavailable"}, status=503)
+        except (MfaStorageError, RevocationError, SecurityStateError) as err:
+            logger.error("PasswordRecovery: completion rolled back for user_id=%s: %s", user_id, type(err).__name__)
+            return self.json_response(response={"error": "temporarily_unavailable"}, status=503)
 
-            user.password = set_basic_password(password)
-            # D17 — self-service reset is NOT the same as a superuser-driven
-            # password_reset (which sets is_new=True). Do not "harmonise"
-            # them.
-            user.is_new = False
-            await user.update()
-
-        await self._store.drop_pair(consumed.recovery_key, _hash_token(token))
-
-        revoked = await self._revoker.revoke_user(self.request, user)
+        # After commit: Redis cleanup is best effort — the committed digest is authoritative (AC32).
+        try:
+            await self._store.drop_pair(live.recovery_key, digest)
+        except Exception as err:  # pylint: disable=W0703
+            logger.warning(
+                "PasswordRecovery: post-commit cleanup failed for user_id=%s: %s", user_id, type(err).__name__
+            )
         logger.info(
             "PasswordRecovery: revoked %d session/jti record(s) for user_id=%s",
-            revoked, user.user_id,
+            revoked,
+            user.user_id,
         )
 
         # D15 — no auto-login: no token/refresh_token in the response.
@@ -340,16 +392,12 @@ class PasswordRecoveryHandler(BaseView):
 
     def _build_url(self, token: str) -> str:
         if not AUTH_RECOVERY_URL_TEMPLATE:
-            logger.error(
-                "PasswordRecovery: AUTH_RECOVERY_URL_TEMPLATE is not configured"
-            )
+            logger.error("PasswordRecovery: AUTH_RECOVERY_URL_TEMPLATE is not configured")
             return ""
         try:
             return AUTH_RECOVERY_URL_TEMPLATE.format(token=token)
         except (KeyError, IndexError, ValueError) as ex:
-            logger.error(
-                "PasswordRecovery: invalid AUTH_RECOVERY_URL_TEMPLATE: %s", ex
-            )
+            logger.error("PasswordRecovery: invalid AUTH_RECOVERY_URL_TEMPLATE: %s", ex)
             return ""
 
     def _recovery_expiry(self, issued_at: float) -> datetime:
@@ -364,10 +412,7 @@ class PasswordRecoveryHandler(BaseView):
         """Hand off to AUTH_RECOVERY_CALLBACK. Never raises, never logs the
         raw token — only the NotificationPayload's own (redacting) repr."""
         if not AUTH_RECOVERY_CALLBACK:
-            logger.warning(
-                "PasswordRecovery: no AUTH_RECOVERY_CALLBACK configured; "
-                "dropping notification"
-            )
+            logger.warning("PasswordRecovery: no AUTH_RECOVERY_CALLBACK configured; " "dropping notification")
             return
         try:
             pkg, name = AUTH_RECOVERY_CALLBACK.rsplit(".", 1)

@@ -44,6 +44,12 @@ DBPORT = config.get("DBPORT", fallback=5432)
 
 default_dsn = f"postgres://{DBUSER}:{DBPWD}@{DBHOST}:{DBPORT}/{DBNAME}"
 
+## Admin credentials for `navauth self upgrade` (FEAT-110). Schema changes run with
+## these, never with the runtime DBUSER unless nothing else is configured.
+AUTH_ADMIN_DSN = config.get("AUTH_ADMIN_DSN", fallback=None)
+AUTH_ADMIN_USER = config.get("AUTH_ADMIN_USER", fallback=None)
+AUTH_ADMIN_PWD = config.get("AUTH_ADMIN_PWD", fallback=None)
+
 ### Exclude List:
 AUTH_EXCLUDE_LIST_KEY = "auth_exclude_list"
 
@@ -110,6 +116,10 @@ AUTH_MECHANISM_APIKEY = "apikey"
 AUTH_MECHANISM_PARTNER = "partner"
 AUTH_MECHANISM_TOKEN = "token"
 AUTH_MECHANISM_DJANGO = "django"
+# FEAT-106 review fixes (M9, D9): request key holding the immutable, request-local
+# assurance (mfa/amr/auth_method) and identity of the VALIDATED bearer token. ABAC
+# uses it instead of the identity-shared session for bearer requests.
+AUTH_BEARER_CONTEXT_KEY = "auth_bearer_context"
 
 # Version / Deployment Headers:
 import platform  # noqa: E402
@@ -235,6 +245,31 @@ USERAGENT_SECURITY = config.getboolean("USERAGENT_SECURITY", fallback=False)
 # authz_useragent) is logged explicitly with the requesting client's
 # User-Agent and IP/host information. Default: False.
 AUTHZ_DEBUG = config.getboolean("AUTHZ_DEBUG", fallback=False)
+
+### Repeated unauthenticated probes (protected_paths_middleware):
+# When one client IP gets AUTH_PROBE_THRESHOLD unauthenticated requests
+# answered with a 4xx (blocked system path, failed authentication, unknown
+# route, refused by a handler) within AUTH_PROBE_WINDOW seconds, a single
+# security warning is logged on the "navigator_auth.security" logger. The same
+# host is not reported again until AUTH_PROBE_COOLDOWN seconds have passed. At
+# most AUTH_PROBE_MAX_HOSTS hosts are tracked in memory (per worker process).
+# The client IP honours ALLOWED_IP_TRUSTED_PROXIES. Threshold 0 disables it.
+AUTH_PROBE_THRESHOLD = config.getint("AUTH_PROBE_THRESHOLD", fallback=20)
+AUTH_PROBE_WINDOW = config.getint("AUTH_PROBE_WINDOW", fallback=60)
+AUTH_PROBE_COOLDOWN = config.getint("AUTH_PROBE_COOLDOWN", fallback=300)
+AUTH_PROBE_MAX_HOSTS = config.getint("AUTH_PROBE_MAX_HOSTS", fallback=10000)
+# Client IPs or CIDR ranges (comma-separated) that are never counted, e.g. the
+# subnets of an AWS load balancer whose health checks hit the server all the
+# time. Matched against the resolved client IP, not the direct peer.
+AUTH_PROBE_IGNORE_IPS = [e.strip() for e in config.get("AUTH_PROBE_IGNORE_IPS", fallback="").split(",") if e.strip()]
+
+### Protected system paths (protected_paths_middleware):
+# Hidden files (/.env, /.git/...), the env/, etc/ and logs/ top-level
+# directories and config/key/log/backup/source files are always answered with
+# 404 before authentication or any ABAC/PBAC policy runs. That built-in list
+# cannot be turned off; AUTH_DENY_PATHS only ADDS fnmatch patterns
+# (comma-separated, case-insensitive), e.g. "/private/*,*.yaml".
+AUTH_DENY_PATHS = [e.strip().lower() for e in config.get("AUTH_DENY_PATHS", fallback="").split(",") if e.strip()]
 
 ### ISO-3166 country codes allowed when USERAGENT_SECURITY is on:
 USERAGENT_ALLOWED_COUNTRIES = [
@@ -562,6 +597,9 @@ ODOO_SCOPES = [s.strip() for s in config.get("ODOO_SCOPES", fallback="profile,em
 IDENTITY_LINK_TTL = config.getint("IDENTITY_LINK_TTL", fallback=600)
 IDENTITY_CACHE_TTL = config.getint("IDENTITY_CACHE_TTL", fallback=3600)
 IDENTITY_REFRESH_LEEWAY = config.getint("IDENTITY_REFRESH_LEEWAY", fallback=120)
+# Seconds a credential refresh waits while another worker refreshes the same
+# credential (Postgres advisory lock, IdentityStore.refresh_lock).
+IDENTITY_REFRESH_LOCK_TIMEOUT = config.getint("IDENTITY_REFRESH_LOCK_TIMEOUT", fallback=30)
 # Scopes requested when linking an identity (offline/refresh access included
 # where the provider needs it explicitly):
 AZURE_IDENTITY_SCOPES = [s.strip() for s in config.get("AZURE_IDENTITY_SCOPES", fallback="User.Read").split(",")]
@@ -654,6 +692,31 @@ if FORGOT_PASSWORD_CALLBACK and not AUTH_RECOVERY_CALLBACK:
     )
     AUTH_RECOVERY_CALLBACK = FORGOT_PASSWORD_CALLBACK
 
+## Two-factor authentication for BasicAuth (FEAT-106).
+# Global kill switch. The per-tenant policy is data, not configuration.
+AUTH_BASIC_2FA_ENABLED = config.getboolean("AUTH_BASIC_2FA_ENABLED", fallback=False)
+# REQUIRED when enabled; deliberately no fallback to SECRET_KEY.
+AUTH_OTP_SECRET = config.get("AUTH_OTP_SECRET")
+if isinstance(AUTH_OTP_SECRET, str):
+    AUTH_OTP_SECRET = AUTH_OTP_SECRET.encode("utf-8")
+if not AUTH_OTP_SECRET:
+    AUTH_OTP_SECRET = None
+AUTH_OTP_CHALLENGE_TTL = config.getint("AUTH_OTP_CHALLENGE_TTL", fallback=300)
+AUTH_OTP_MAX_ATTEMPTS = config.getint("AUTH_OTP_MAX_ATTEMPTS", fallback=5)
+AUTH_OTP_CODE_LENGTH = config.getint("AUTH_OTP_CODE_LENGTH", fallback=6)
+AUTH_OTP_RATE_USER = config.get("AUTH_OTP_RATE_USER", fallback="10/hour")
+AUTH_OTP_RATE_IP = config.get("AUTH_OTP_RATE_IP", fallback="30/hour")
+AUTH_OTP_EMAIL_CALLBACK = config.get("AUTH_OTP_EMAIL_CALLBACK")
+# Bound (seconds) on the MFA per-user lock: pool acquire AND advisory-lock wait (FEAT-106 review fixes, M2).
+# navconfig has no getfloat(): parse explicitly.
+AUTH_MFA_LOCK_TIMEOUT = float(config.get("AUTH_MFA_LOCK_TIMEOUT", fallback=5.0))
+# Minimum seconds between two rebuild attempts of transiently unavailable MFA services (FEAT-106 review fixes, M1).
+AUTH_MFA_RETRY_INTERVAL = config.getint("AUTH_MFA_RETRY_INTERVAL", fallback=15)
+AUTH_TOTP_ISSUER = config.get("AUTH_TOTP_ISSUER", fallback="Navigator")
+AUTH_MFA_BACKUP_CODE_COUNT = config.getint("AUTH_MFA_BACKUP_CODE_COUNT", fallback=10)
+AUTH_MFA_BACKUP_CODE_LENGTH = config.getint("AUTH_MFA_BACKUP_CODE_LENGTH", fallback=8)
+AUTH_MFA_NOTIFY_CALLBACK = config.get("AUTH_MFA_NOTIFY_CALLBACK")
+
 ## Audit Backend
 # this is the backend for saving Authentication information
 ENABLE_AUDIT_LOG = config.getboolean("ENABLE_AUDIT_LOG", fallback=True)
@@ -709,6 +772,14 @@ POLICY_STORAGE_DIR = config.get(
 # Default effect when no policies match a request ("deny" or "allow").
 ABAC_DEFAULT_EFFECT = config.get("ABAC_DEFAULT_EFFECT", fallback="deny")
 
+# Protected groups (FEAT-107). Membership or definition of these groups can
+# only be changed by an actor holding the ``users:grant_role`` ABAC action who
+# belongs to the group; nobody can add themselves. ``superuser`` is always
+# protected, whatever this says.
+AUTH_PROTECTED_GROUPS = [
+    e.strip() for e in config.get("AUTH_PROTECTED_GROUPS", fallback="superuser,security_admin").split(",") if e.strip()
+]
+
 # ABAC Hot-Reload Interval (seconds). Default: 0 (disabled).
 ABAC_RELOAD_INTERVAL = config.getint("ABAC_RELOAD_INTERVAL", fallback=0)
 
@@ -743,6 +814,11 @@ OAUTH_ACCESS_TOKEN_TTL = config.getint("OAUTH_ACCESS_TOKEN_TTL", fallback=3600)
 
 # Authorization code TTL in seconds (default: 10 minutes).
 OAUTH_CODE_TTL = config.getint("OAUTH_CODE_TTL", fallback=600)
+
+# Seconds an in-flight authorization-code redemption holds its claim (FEAT-108).
+# Must exceed the slowest owner lookup + session creation, or a retry is told 503
+# only after the claim lapses; single use itself never depends on it.
+OAUTH_CODE_CLAIM_TTL = config.getint("OAUTH_CODE_CLAIM_TTL", fallback=30)
 
 # Refresh token sliding TTL in seconds (default: 30 days).
 OAUTH_REFRESH_TOKEN_TTL = config.getint("OAUTH_REFRESH_TOKEN_TTL", fallback=2592000)

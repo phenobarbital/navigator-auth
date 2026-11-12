@@ -76,9 +76,7 @@ class APIKeyAuth(BaseAuthBackend):
             else:
                 return [None, None]
         except Exception as err:  # pylint: disable=W0703
-            self.logger.exception(
-                f"API Key Auth: Error getting payload: {err}"
-            )
+            self.logger.exception(f"API Key Auth: Error getting payload: {err}")
             self.logger.exception(f"API Key Auth: Error getting payload: {err}")
             # Return the (mech, token) pair shape even on error: callers do
             # `mech, token = await self.get_payload(request)`, so returning a
@@ -150,6 +148,10 @@ class APIKeyAuth(BaseAuthBackend):
             return None
         else:
             data = await self.get_token_info(request, mech, token)
+            if not data:
+                # Not an API key (e.g. an OAuth2 JWT without device_id): decline so the
+                # next backend can try it, exactly as check_credentials does.
+                return None
             try:
                 device_id = str(data["device_id"])
                 user_id = data["user_id"]
@@ -183,6 +185,9 @@ class APIKeyAuth(BaseAuthBackend):
                 return False
 
     async def check_token_info(self, request, payload):
+        if not payload:
+            # An empty/absent payload is "no API key", not a malformed one.
+            return False
         try:
             user_id = payload["user_id"]
             device_id = payload["device_id"]
@@ -276,17 +281,9 @@ class APIKeyAuth(BaseAuthBackend):
         except AuthExpired as err:
             raise self.Unauthorized(reason=f"API Key Expired: {err.message!s}", exception=err) from err
         except AuthException as err:
-            self.logger.error(
-                f"Invalid authorization token: {err!r}"
-            )
-            raise self.Unauthorized(
-                reason=f"API Key: Invalid authorization Key: {err!r}",
-                exception=err
-            ) from err
+            self.logger.error(f"Invalid authorization token: {err!r}")
+            raise self.Unauthorized(reason=f"API Key: Invalid authorization Key: {err!r}", exception=err) from err
         except Exception as err:
             self.logger.exception(f"Error on API Key Middleware: {err}")
-            raise self.auth_error(
-                reason="API Auth Error",
-                exception=err
-            ) from err
+            raise self.auth_error(reason="API Auth Error", exception=err) from err
         return await handler(self.sanitize(request))

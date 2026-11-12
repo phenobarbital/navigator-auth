@@ -28,9 +28,7 @@ import os
 # Set Environment Variables BEFORE importing navigator_auth or navconfig
 # navconfig reads these names verbatim -- the old "NAV_" prefix was never
 # looked up, so the app started with zero authentication backends.
-os.environ.setdefault(
-    "AUTHENTICATION_BACKENDS", "navigator_auth.backends.oauth2.Oauth2Provider"
-)
+os.environ.setdefault("AUTHENTICATION_BACKENDS", "navigator_auth.backends.oauth2.Oauth2Provider")
 os.environ.setdefault("OAUTH2_CLIENT_STORAGE", "memory")
 os.environ.setdefault("API_HOST", "localhost")
 
@@ -42,26 +40,29 @@ from navconfig import BASE_DIR
 
 
 async def home(request):
-    path = BASE_DIR / 'examples' / 'static' / 'oauth2_index.html'
+    path = BASE_DIR / "examples" / "static" / "oauth2_index.html"
     return web.FileResponse(path)
 
 
 app = web.Application()
 
 # Static files
-app.router.add_static('/static/', path=BASE_DIR / 'examples' / 'static', name='static')
+app.router.add_static("/static/", path=BASE_DIR / "examples" / "static", name="static")
 
 # Auth System
-auth = AuthHandler()
+# ``backends`` pins the provider this example demonstrates (navigator_auth.conf
+# star-imports settings.settings last, so local dev settings would otherwise decide the
+# list), and ``authz_backends=[]`` stops an inherited allow_hosts from letting requests
+# through without a session.
+auth = AuthHandler(backends=["navigator_auth.backends.oauth2.Oauth2Provider"], authz_backends=[])
 auth.setup(app)
 
-app.add_routes([
-    web.get('/login', home)
-])
-app[AUTH_EXCLUDE_LIST_KEY].append('/login')
+app.add_routes([web.get("/login", home)])
+app[AUTH_EXCLUDE_LIST_KEY].append("/login")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+
     async def populate_clients(app):
         """Register test OAuth2 clients on startup.
 
@@ -73,9 +74,9 @@ if __name__ == '__main__':
         client_pk is None for in-memory clients (no DB PK needed).
         """
         try:
-            auth_handler = app.get('auth')
-            if auth_handler and 'Oauth2Provider' in auth_handler.backends:
-                provider = auth_handler.backends['Oauth2Provider']
+            auth_handler = app.get("auth")
+            if auth_handler and "Oauth2Provider" in auth_handler.backends:
+                provider = auth_handler.backends["Oauth2Provider"]
                 from navigator_auth.backends.oauth2.models import OauthUser, OAuthClient
 
                 # Resource-owner placeholder — only used as metadata for the client,
@@ -89,10 +90,10 @@ if __name__ == '__main__':
 
                 # --- Public client (S256 PKCE required) ---
                 public_client = OAuthClient(
-                    client_id="nav_public_client",       # opaque uid — appears on wire
-                    client_pk=None,                      # no int PK for in-memory store
+                    client_id="nav_public_client",  # opaque uid — appears on wire
+                    client_pk=None,  # no int PK for in-memory store
                     client_name="Navigator Web App",
-                    client_secret=None,                  # public: no secret
+                    client_secret=None,  # public: no secret
                     client_type="public",
                     redirect_uris=["http://localhost:5000/static/callback.html"],
                     policy_uri="",
@@ -126,9 +127,9 @@ if __name__ == '__main__':
                     client_id="nav_device_client",
                     client_pk=None,
                     client_name="Navigator Device App",
-                    client_secret=None,        # public: no secret
+                    client_secret=None,  # public: no secret
                     client_type="public",
-                    redirect_uris=[],           # device grant: no redirect_uri
+                    redirect_uris=[],  # device grant: no redirect_uri
                     policy_uri="",
                     client_logo_uri="",
                     user=resource_owner,
@@ -151,14 +152,13 @@ if __name__ == '__main__':
                     allowed_grant_types=["client_credentials"],
                 )
 
-                db = app.get('authdb')
-                all_clients = (
-                    public_client, confidential_client, device_client, resource_server
-                )
+                db = app.get("authdb")
+                all_clients = (public_client, confidential_client, device_client, resource_server)
                 for client in all_clients:
                     if db:
                         async with await db.acquire() as conn:
                             from navigator_auth.models import Client as ClientModel
+
                             ClientModel.Meta.connection = conn
                             await provider.client_storage.save_client(client)
                     else:
@@ -172,13 +172,15 @@ if __name__ == '__main__':
                 print()
                 print("3LO flow (public client + PKCE S256):")
                 print(
-                    "  GET http://localhost:5000/oauth2/authorize"
-                    "?response_type=code"
+                    "  Open http://localhost:5000/login and press Authorize — the page"
+                    " generates the PKCE pair (S256) and a random state."
+                )
+                print(
+                    "  Raw form: GET /oauth2/authorize?response_type=code"
                     "&client_id=nav_public_client"
                     "&redirect_uri=http://localhost:5000/static/callback.html"
-                    "&scope=default+profile+email+offline_access"
-                    "&state=test_state"
-                    "&code_challenge=<S256_hash>&code_challenge_method=S256"
+                    "&scope=default+profile+email+offline_access&state=<random>"
+                    "&code_challenge=BASE64URL(SHA256(code_verifier))&code_challenge_method=S256"
                 )
                 print()
                 print("Device Grant flow (RFC 8628, S256 PKCE required):")
@@ -210,4 +212,4 @@ if __name__ == '__main__':
             logging.exception("populate_clients failed")
 
     app.on_startup.append(populate_clients)
-    web.run_app(app, host='localhost', port=5000)
+    web.run_app(app, host="localhost", port=5000)

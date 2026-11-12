@@ -11,6 +11,7 @@ Tests:
 """
 
 import secrets
+from contextlib import asynccontextmanager
 import time
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
@@ -25,15 +26,14 @@ from navigator_auth.backends.oauth2.models import (
     OauthGrant,
     OauthAccessTokenRecord,
     DeviceCodeStatus,
-    OauthDeviceCode,
 )
 from navigator_auth.backends.oauth2.code_backend import MemoryDeviceCodeStorage
 from navigator_auth.backends.oauth2.pkce import generate_challenge
 
-
 # ---------------------------------------------------------------------------
 # Shared memory storages (also available via conftest fixtures)
 # ---------------------------------------------------------------------------
+
 
 class _MemCodeStorage:
     def __init__(self):
@@ -139,6 +139,7 @@ class _MemAccessStorage:
 # Provider builder
 # ---------------------------------------------------------------------------
 
+
 def _public_device_client(client_id: str = "device_public_client") -> OAuthClient:
     return OAuthClient(
         client_id=client_id,
@@ -152,9 +153,7 @@ def _public_device_client(client_id: str = "device_public_client") -> OAuthClien
     )
 
 
-def _confidential_introspect_client(
-    client_id: str = "introspect_rs", secret: str = "rs_secret"
-) -> OAuthClient:
+def _confidential_introspect_client(client_id: str = "introspect_rs", secret: str = "rs_secret") -> OAuthClient:
     return OAuthClient(
         client_id=client_id,
         client_pk=11,
@@ -165,6 +164,11 @@ def _confidential_introspect_client(
         default_scopes=["default"],
         allowed_grant_types=["client_credentials"],
     )
+
+
+def _owner(user_id: int):
+    """Return the active owner needed by FEAT-108 token owner resolution."""
+    return {"user_id": user_id, "username": "device-owner", "is_active": True}
 
 
 def _make_provider(
@@ -199,16 +203,25 @@ def _make_provider(
     provider.access_token_storage = access_store or _MemAccessStorage()
     provider.grant_storage = grant_store
 
+    # FEAT-106 review fixes TASK-185: this memory harness has no authdb.
+    @asynccontextmanager
+    async def _no_generation(request, user_id):
+        yield None, 0
+
+    provider._user_generation = _no_generation
+    provider._generation_ok = AsyncMock(return_value=True)
+
     # IDP: create_token returns (token, user_id, exp_ts, "Bearer")
     # decode_token is set per test.
     provider._idp = MagicMock()
-    provider._idp.create_token = MagicMock(
-        return_value=("generated_access_token", 0, time.time() + 3600, "Bearer")
-    )
+    provider._idp.user_from_id = AsyncMock(return_value=_owner(42))
+    provider._create_user_session = AsyncMock(return_value=None)
+    provider._idp.create_token = MagicMock(return_value=("generated_access_token", 0, time.time() + 3600, "Bearer"))
     provider._parser = MagicMock()
 
     async def _view(filename, params=None):
         from aiohttp import web
+
         return web.Response(status=200, text=f"TEMPLATE:{filename}")
 
     provider._parser.view = _view
@@ -235,6 +248,7 @@ def _make_post_request(form_data: dict) -> MagicMock:
 # ---------------------------------------------------------------------------
 # test_full_device_flow
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_full_device_flow():
@@ -277,12 +291,16 @@ async def test_full_device_flow():
     )
 
     # Step 1: POST /oauth2/device_authorization
-    resp1 = await provider.device_authorization(_make_post_request({
-        "client_id": client.client_id,
-        "scope": "default offline_access",
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-    }))
+    resp1 = await provider.device_authorization(
+        _make_post_request(
+            {
+                "client_id": client.client_id,
+                "scope": "default offline_access",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+            }
+        )
+    )
     assert resp1.status == 200
     body1 = json.loads(resp1.body)
     device_code = body1["device_code"]
@@ -291,10 +309,14 @@ async def test_full_device_flow():
     assert user_code in body1["verification_uri_complete"]
 
     # Step 2: POST /oauth2/device (user verifies + approves)
-    resp2 = await provider.device_verification(_make_post_request({
-        "action": "approve",
-        "user_code": user_code,
-    }))
+    resp2 = await provider.device_verification(
+        _make_post_request(
+            {
+                "action": "approve",
+                "user_code": user_code,
+            }
+        )
+    )
     assert resp2.status == 200
 
     # Verify device code status.
@@ -326,6 +348,7 @@ async def test_full_device_flow():
 # ---------------------------------------------------------------------------
 # test_device_user_id_survives
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_device_user_id_survives():
@@ -374,22 +397,30 @@ async def test_device_user_id_survives():
     )
 
     # Issue a device code.
-    resp1 = await provider.device_authorization(_make_post_request({
-        "client_id": client.client_id,
-        "scope": "default offline_access",
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-    }))
+    resp1 = await provider.device_authorization(
+        _make_post_request(
+            {
+                "client_id": client.client_id,
+                "scope": "default offline_access",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+            }
+        )
+    )
     assert resp1.status == 200
     body1 = json.loads(resp1.body)
     device_code = body1["device_code"]
     user_code = body1["user_code"]
 
     # User approves.
-    resp2 = await provider.device_verification(_make_post_request({
-        "action": "approve",
-        "user_code": user_code,
-    }))
+    resp2 = await provider.device_verification(
+        _make_post_request(
+            {
+                "action": "approve",
+                "user_code": user_code,
+            }
+        )
+    )
     assert resp2.status == 200
 
     dc = await device_store.get_by_device_code(device_code)
@@ -405,6 +436,7 @@ async def test_device_user_id_survives():
 # ---------------------------------------------------------------------------
 # test_introspect_reflects_revocation
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_introspect_reflects_revocation():
@@ -443,11 +475,15 @@ async def test_introspect_reflects_revocation():
     )
 
     # Before revocation: active = True.
-    resp1 = await provider.introspect(_make_post_request({
-        "client_id": rs_client.client_id,
-        "client_secret": "rs_secret",
-        "token": "dummy_access_token",
-    }))
+    resp1 = await provider.introspect(
+        _make_post_request(
+            {
+                "client_id": rs_client.client_id,
+                "client_secret": "rs_secret",
+                "token": "dummy_access_token",
+            }
+        )
+    )
     assert resp1.status == 200
     assert json.loads(resp1.body)["active"] is True
 
@@ -455,11 +491,15 @@ async def test_introspect_reflects_revocation():
     await access_store.revoke(jti)
 
     # After revocation: active = False (real-time — no cache).
-    resp2 = await provider.introspect(_make_post_request({
-        "client_id": rs_client.client_id,
-        "client_secret": "rs_secret",
-        "token": "dummy_access_token",
-    }))
+    resp2 = await provider.introspect(
+        _make_post_request(
+            {
+                "client_id": rs_client.client_id,
+                "client_secret": "rs_secret",
+                "token": "dummy_access_token",
+            }
+        )
+    )
     assert resp2.status == 200
     assert json.loads(resp2.body) == {"active": False}
 
@@ -467,6 +507,7 @@ async def test_introspect_reflects_revocation():
 # ---------------------------------------------------------------------------
 # test_device_then_revoke_grant_cascade
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_device_then_revoke_grant_cascade():
@@ -559,11 +600,15 @@ async def test_device_then_revoke_grant_cascade():
     )
 
     # Confirm active before revocation.
-    resp1 = await rs_provider.introspect(_make_post_request({
-        "client_id": rs_client.client_id,
-        "client_secret": "rs_secret",
-        "token": "dummy",
-    }))
+    resp1 = await rs_provider.introspect(
+        _make_post_request(
+            {
+                "client_id": rs_client.client_id,
+                "client_secret": "rs_secret",
+                "token": "dummy",
+            }
+        )
+    )
     assert resp1.status == 200
     assert json.loads(resp1.body)["active"] is True
 
@@ -572,10 +617,14 @@ async def test_device_then_revoke_grant_cascade():
     await access_store.revoke(jti2)
 
     # Introspect after cascade: active = False.
-    resp2 = await rs_provider.introspect(_make_post_request({
-        "client_id": rs_client.client_id,
-        "client_secret": "rs_secret",
-        "token": "dummy",
-    }))
+    resp2 = await rs_provider.introspect(
+        _make_post_request(
+            {
+                "client_id": rs_client.client_id,
+                "client_secret": "rs_secret",
+                "token": "dummy",
+            }
+        )
+    )
     assert resp2.status == 200
     assert json.loads(resp2.body) == {"active": False}

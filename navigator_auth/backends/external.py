@@ -16,6 +16,7 @@ from requests.models import PreparedRequest
 import aiohttp
 import jwt
 from aiohttp import web, hdrs
+from ..responses import RedirectResponse
 from aiohttp.client import ClientTimeout, ClientSession
 import redis.asyncio as aioredis
 from datamodel.exceptions import ValidationError
@@ -286,7 +287,7 @@ class ExternalAuth(BaseAuthBackend):
         Making the redirection to External Auth Page.
         """
         logging.debug(f"{self.__class__.__name__} URI: {uri}")
-        return web.HTTPFound(uri)
+        return RedirectResponse(uri)
 
     def prepare_url(self, url: str, params: dict = None):
         """Construct a URL with query parameters.
@@ -343,7 +344,7 @@ class ExternalAuth(BaseAuthBackend):
             redirect_url = self.finish_redirect_url
         self.logger.notice(f"Redirect URL: {redirect_url}, Params: {params}, Headers: {headers}")
         url = self.prepare_url(redirect_url, params)
-        return web.HTTPFound(url, headers=headers)
+        return RedirectResponse(url, headers=headers)
 
     def get_failed_redirect_url(self, request: web.Request) -> str:
         domain_url = self.get_domain(request)
@@ -367,7 +368,7 @@ class ExternalAuth(BaseAuthBackend):
         headers = {"x-message": safe_message, "x-error": safe_error}
         params = {"error": safe_error, "message": safe_message}
         url = self.prepare_url(url, params)
-        return web.HTTPFound(url, headers=headers)
+        return RedirectResponse(url, headers=headers)
 
     @abstractmethod
     async def authenticate(self, request: web.Request):
@@ -752,7 +753,7 @@ class ExternalAuth(BaseAuthBackend):
         return await self.refresh_identity_tokens(token.refresh_token)
 
     @asynccontextmanager
-    async def _refresh_guard(self, user_id: Any, provider_user_id: str):
+    async def _refresh_guard(self, user_id: Any, provider_user_id: str, store: Any = None):
         """Serialize the refresh of ONE (user, external account) credential.
 
         Two coroutines that find the same credential expiring must not both
@@ -760,18 +761,29 @@ class ExternalAuth(BaseAuthBackend):
         old one single-use, so the second call fails and — worse — can
         invalidate the rotation the first one just stored.
 
-        The guard is created on first use and dropped once nobody holds or
-        awaits it, so the map never outgrows the accounts being refreshed.
+        Two locks, taken in this order:
+
+        1. an in-process ``asyncio.Lock``, created on first use and dropped
+           once nobody holds or awaits it, so the map never outgrows the
+           accounts being refreshed;
+        2. with ``store``, that store's cross-process ``refresh_lock`` (a
+           Postgres advisory lock), so other workers sharing the database
+           take turns too. Taking it second means coroutines of one worker
+           queue on the cheap lock instead of each holding a connection.
+
+        The caller still re-reads the credential INSIDE the guard: the one
+        that waited sees the winner's rotated credential and returns it
+        instead of refreshing a token the provider has already retired.
 
         Args:
             user_id: Local Navigator user id.
             provider_user_id: Verified external account id.
+            store: ``IdentityStore`` the refresh reads and writes through.
+                Without it the guard is in-process only.
 
-        Note:
-            In-process only: a second worker still races. What makes that
-            race safe is the re-read INSIDE the guard — the loser sees the
-            winner's rotated credential and returns it instead of refreshing
-            a token the provider has already retired.
+        Raises:
+            IdentityRefreshBusy: Another worker kept the credential locked
+                past ``IDENTITY_REFRESH_LOCK_TIMEOUT``.
         """
         # Lazily initialized: a subclass that does not call super().__init__
         # must still be serialized, not silently left racing.
@@ -785,11 +797,20 @@ class ExternalAuth(BaseAuthBackend):
         guard.users += 1
         try:
             async with guard.lock:
-                yield
+                if store is None:
+                    yield
+                else:
+                    async with store.refresh_lock(self._service_name, *key):
+                        yield
         finally:
             guard.users -= 1
             if guard.users <= 0:
                 guards.pop(key, None)
+
+    # Public name for refreshes started outside the backend
+    # (identity.refresh.refresh_linked_identity): every refresh of one
+    # account's stored credential must take this same guard.
+    refresh_guard = _refresh_guard
 
     async def _live_token_binding(self, request: web.Request, user_id: Any) -> Optional[tuple]:
         """Resolve the session a live provider token may be served to.
@@ -897,7 +918,7 @@ class ExternalAuth(BaseAuthBackend):
             token = store.decrypt_credential(identity)
             if not token.is_expiring(leeway):
                 return token
-            async with self._refresh_guard(session_user, provider_user_id):
+            async with self._refresh_guard(session_user, provider_user_id, store=store):
                 # Re-read under the guard. A concurrent caller may have
                 # rotated this very credential while we waited, and a rotated
                 # refresh token is single-use — spending the stale copy fails
@@ -994,7 +1015,7 @@ class ExternalAuth(BaseAuthBackend):
             fallback="/",
             domain_url=self.get_domain(request),
         )
-        return web.HTTPFound(redirect_to)
+        return RedirectResponse(redirect_to)
 
     @abstractmethod
     async def logout(self, request: web.Request):

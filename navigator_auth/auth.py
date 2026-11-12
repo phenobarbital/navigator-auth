@@ -10,7 +10,7 @@ Supporting:
 """
 
 import contextlib
-from typing import Union
+from typing import Any, Optional, Union
 from collections.abc import Awaitable, Callable, Iterable
 import fnmatch
 import importlib
@@ -31,17 +31,21 @@ from .authorizations._client_ip import get_client_ip
 from .vault.integration import (
     load_vault_for_session,
     setup_vault_keyring,
-    setup_vault_tables,
     VAULT_KEYRING_APP_KEY,
     VAULT_SESSION_KEY,
 )
-from .identity.migrations import setup_identity_columns
+from .migrations.startup import warn_pending_migrations
+from .security_state import setup_security_state_tables
 from .backends.idp import IdentityProvider
+from .backends.oauth2.models import is_oauth_user_token
+from .security_state.store import SecurityStateError, generation_matches, generation_of
 from .libs.expiry import expiry_fields
+from .libs.hmac_keys import warn_short_hmac_keys
 from .identities import AuthUser
 from .conf import (
     AUTH_MECHANISM_KEY,
     AUTH_MECHANISM_BEARER,
+    AUTH_BEARER_CONTEXT_KEY,
     AUTH_MECHANISM_COOKIE,
     AUTH_EXCLUDE_LIST_KEY,
     AUTHORIZED_KEY,
@@ -66,19 +70,23 @@ from .exceptions import (
     Forbidden,
     InvalidAuth,
     UserNotFound,
+    MfaSignal,
 )
 from .handlers import setup_handlers
 
 ## Responses
 from .libs.json import JSONContent
 from .responses import JSONResponse
+from .mfa.types import MFA_DEVICE_TOKEN_KEY, TRUSTED_COOKIE, trusted_cookie_kwargs
 from .storages.postgres import PostgresStorage
 from .storages.redis import RedisStorage
 from .templates import TemplateParser
 from .middlewares.security import security_middleware
 from .middlewares.csrf import csrf_middleware
 from .middlewares.version import version_middleware
+from .middlewares.protected_paths import install_protected_paths
 from .abac.middleware import abac_middleware
+from .abac.context import bearer_context_from_claims
 
 url = logging.getLogger("urllib3.connectionpool")
 url.setLevel(logging.WARNING)
@@ -184,11 +192,14 @@ class AuthHandler:
             except Exception as err:
                 logging.exception(f"Error on Startup Auth Backend {name} init: {err.message}")
                 raise AuthException(f"Error on Startup Auth Backend {name} init: {err.message}") from err
-        # Create vault tables if they don't exist (non-blocking)
+        # Load the vault keyring (non-blocking).
         setup_vault_keyring(app)
+        # Schema changes are applied by `navauth self upgrade` (FEAT-110); startup only checks.
         if "authdb" in app:
-            await setup_vault_tables(app["authdb"])
-            await setup_identity_columns(app["authdb"])
+            await warn_pending_migrations(app["authdb"], self._backend_list)
+            # security_state (FEAT-106 review fixes) is not in the migration
+            # catalog yet, so its DDL still runs here until it joins it.
+            await setup_security_state_tables(app["authdb"])
         # Re-hydrate exclude-provider paths after each startup (FEAT-241 M2):
         for provider in self._exclude_providers:
             try:
@@ -370,6 +381,10 @@ class AuthHandler:
                 if not userdata:
                     raise self.ForbiddenAccess(reason="User was not authenticated")
                 return userdata
+            except MfaSignal:
+                # FEAT-106 R2: a second-factor outcome is terminal. Re-raise
+                # untouched — api_login alone turns it into a response.
+                raise
             except UserNotFound as err:
                 raise self.Unauthorized(reason="Invalid credentials", exception=err)
             except Exception as err:
@@ -381,6 +396,10 @@ class AuthHandler:
             if not userdata:
                 raise self.ForbiddenAccess(reason="User was not Authenticated")
             return userdata
+        except MfaSignal:
+            # FEAT-106 R2: MUST precede `except AuthException` below, which would
+            # turn the challenge into a 403 with no envelope (AC32).
+            raise
         except UserNotFound as err:
             raise self.Unauthorized(reason="Invalid Credentials", exception=err)
         except (InvalidAuth, Forbidden, FailedAuth) as err:
@@ -475,67 +494,100 @@ class AuthHandler:
         # first: getting header for an existing backend
         userdata = None
         qs = {key: val for (key, val) in request.query.items()}
-        if backend := self.get_auth_backend(request):
-            userdata = await self._backend_auth(request, backend)
-        elif "auth" in qs:
-            userdata = await self._login_token(request)
-        else:
-            # second: if no backend declared, will iterate over all backends
-            for _, backend in self.backends.items():
-                try:
-                    # check credentials for all backends
-                    userdata = await backend.authenticate(request)
-                    if userdata:
-                        break
-                except (AuthException, UserNotFound, InvalidAuth, FailedAuth):
-                    continue
-                except Exception as err:
-                    raise self.auth_error(reason=f"Auth Exception: {err}", exception=err)
+        try:
+            if backend := self.get_auth_backend(request):
+                userdata = await self._backend_auth(request, backend)
+            elif "auth" in qs:
+                userdata = await self._login_token(request)
+            else:
+                # second: if no backend declared, will iterate over all backends
+                for _, backend in self.backends.items():
+                    try:
+                        # check credentials for all backends
+                        userdata = await backend.authenticate(request)
+                        if userdata:
+                            break
+                    except MfaSignal:
+                        # FEAT-106 R2: BEFORE the tuple below, which would
+                        # `continue` and let the NEXT backend mint a session
+                        # with no second factor.
+                        raise
+                    except (AuthException, UserNotFound, InvalidAuth, FailedAuth):
+                        continue
+                    except Exception as err:
+                        raise self.auth_error(reason=f"Auth Exception: {err}", exception=err)
+        except MfaSignal as err:
+            # The ONLY place a second-factor outcome becomes HTTP (AC32): before
+            # any userdata serialization, load_session() or vault loading.
+            # no-store: the body carries a bearer challenge token.
+            return JSONResponse(err.payload(), status=err.status, headers={"Cache-Control": "no-store"})
         # if not userdata, then raise an not Authorized
         if not userdata:
             raise self.ForbiddenAccess(reason="Access Denied")
-        else:
-            if isinstance(userdata, web.HTTPFound):
-                return userdata
-            # at now: create the user-session
-            try:
-                response = JSONResponse(userdata, status=200)
-                await self._session.storage.load_session(request, userdata, response=response)
-            except Exception as err:
-                raise self.Unauthorized(reason=f"Error Creating User Session: {err.message}", exception=err) from err
-            # Load vault for the authenticated session (non-blocking)
-            try:
-                session = await get_session(request, new=False)
-                user_id = userdata.get("user_id") if isinstance(userdata, dict) else getattr(userdata, "user_id", None)
-                if session and user_id:
-                    db_pool = request.app.get("authdb")
-                    redis = request.app.get("redis")
+        if isinstance(userdata, web.StreamResponse):
+            # A backend answered with a response (e.g. the TROC redirect).
+            return userdata
+        return await self.finalize_login(request, userdata)
 
-                    refresh_token = (
-                        userdata.get("refresh_token")
-                        if isinstance(userdata, dict)
-                        else getattr(userdata, "refresh_token", None)
+    async def finalize_login(self, request: web.Request, userdata: Any) -> web.Response:
+        """Turn an authenticated login result into the HTTP response.
+
+        Extracted unchanged from ``api_login`` (FEAT-106) so a second-factor
+        login (``MfaHandler.verify``) completes through the same session,
+        refresh-token and vault code. Additionally pops the transient
+        trusted-device token (contract D14) BEFORE anything serializes or
+        persists ``userdata``, and sets it as a Secure/HttpOnly cookie.
+
+        Args:
+            request: The login request.
+            userdata: The dict returned by a backend's ``authenticate()`` /
+                ``open_session()``.
+
+        Returns:
+            The JSON login response with the session loaded.
+        """
+        device = userdata.pop(MFA_DEVICE_TOKEN_KEY, None) if isinstance(userdata, dict) else None
+        # at now: create the user-session
+        try:
+            response = JSONResponse(userdata, status=200)
+            await self._session.storage.load_session(request, userdata, response=response)
+        except Exception as err:
+            raise self.Unauthorized(reason=f"Error Creating User Session: {err.message}", exception=err) from err
+        if device:
+            response.set_cookie(TRUSTED_COOKIE, device["token"], **trusted_cookie_kwargs(device["max_age"]))
+        # Load vault for the authenticated session (non-blocking)
+        try:
+            session = await get_session(request, new=False)
+            user_id = userdata.get("user_id") if isinstance(userdata, dict) else getattr(userdata, "user_id", None)
+            if session and user_id:
+                db_pool = request.app.get("authdb")
+                redis = request.app.get("redis")
+
+                refresh_token = (
+                    userdata.get("refresh_token")
+                    if isinstance(userdata, dict)
+                    else getattr(userdata, "refresh_token", None)
+                )
+                if refresh_token and redis:
+                    try:
+                        # 3 months = 90 days = 7776000 seconds
+                        await redis.setex(f"auth:refresh_token:{refresh_token}", 7776000, str(user_id))
+                    except Exception as e:
+                        self.logger.error(f"Failed to save refresh token to redis: {e}")
+
+                if db_pool:
+                    vault = await load_vault_for_session(
+                        session,
+                        user_id=user_id,
+                        db_pool=db_pool,
+                        redis=redis,
+                        keyring=request.app.get(VAULT_KEYRING_APP_KEY),
                     )
-                    if refresh_token and redis:
-                        try:
-                            # 3 months = 90 days = 7776000 seconds
-                            await redis.setex(f"auth:refresh_token:{refresh_token}", 7776000, str(user_id))
-                        except Exception as e:
-                            self.logger.error(f"Failed to save refresh token to redis: {e}")
-
-                    if db_pool:
-                        vault = await load_vault_for_session(
-                            session,
-                            user_id=user_id,
-                            db_pool=db_pool,
-                            redis=redis,
-                            keyring=request.app.get(VAULT_KEYRING_APP_KEY),
-                        )
-                        if vault:
-                            session[VAULT_SESSION_KEY] = vault
-            except Exception:
-                pass  # Vault failure must not block login
-            return response
+                    if vault:
+                        session[VAULT_SESSION_KEY] = vault
+        except Exception:
+            pass  # Vault failure must not block login
+        return response
 
     ### Auth Methods:
     async def auth_methods(self, request: web.Request) -> web.Response:
@@ -667,6 +719,8 @@ class AuthHandler:
         logging.debug(":::: Auth Handler Loaded ::::")
         # Seed the per-app exclude list from defaults (avoids global mutation)
         self.app[AUTH_EXCLUDE_LIST_KEY] = list(exclude_list)
+        # FEAT-109: one security WARNING per configured HMAC key under 32 bytes.
+        warn_short_hmac_keys()
         # register the Auth extension into the app
         self.app[self.name] = self
         ## Configure Routes
@@ -739,6 +793,9 @@ class AuthHandler:
         if abac_middleware in mdl:
             mdl.remove(abac_middleware)
             mdl.append(abac_middleware)
+        # Hard deny for system paths (/.env, /etc/, /logs/...): outermost, so
+        # no exclude list, authz backend or ABAC policy can open them.
+        install_protected_paths(self.app)
         return self.app
 
     async def get_session_user(self, session: Iterable, name: str = "user") -> Iterable:
@@ -780,13 +837,14 @@ class AuthHandler:
         if exception:
             response_obj["error"] = str(exception)
         args = {"content_type": content_type, "headers": headers, **kwargs}
+        # ``text=``, not ``body=``: aiohttp deprecates ``body`` for HTTP exceptions.
         if isinstance(reason, dict):
             response_obj = {**response_obj, **reason}
             # args["content_type"] = "application/json"
-            args["body"] = self._json.dumps(response_obj)
+            args["text"] = self._json.dumps(response_obj)
         else:
             response_obj["reason"] = reason
-            args["body"] = self._json.dumps(response_obj)
+            args["text"] = self._json.dumps(response_obj)
         # defining the error
         if status == 400:  # bad request
             obj = web.HTTPBadRequest(**args)
@@ -1005,8 +1063,8 @@ class AuthHandler:
         OAuth2 access tokens are self-contained JWTs, so revoking one only
         marks its ``jti`` in the provider's access-token storage. Without this
         check a revoked token would keep passing ``auth_middleware`` until it
-        expires. Only tokens that actually carry a ``jti`` (i.e. OAuth2 ones)
-        cost a storage lookup.
+        expires. Only tokens that carry a ``jti`` cost a storage lookup.
+        Storage errors abort authentication with 503, including for Basic JWTs.
         """
         jti = payload.get("jti") if payload else None
         if not jti:
@@ -1019,8 +1077,18 @@ class AuthHandler:
                 if await storage.is_revoked(jti):
                     return True
             except Exception as exc:  # pylint: disable=W0703
-                self.logger.warning(f"Auth Middleware: unable to check revocation of jti={jti}: {exc}")
+                self.logger.error(f"Auth Middleware: revocation check failed: {type(exc).__name__}")
+                raise web.HTTPServiceUnavailable(reason="Authentication temporarily unavailable") from exc
         return False
+
+    async def _oauth_generation_ok(self, request: web.Request, payload: Optional[dict]) -> bool:
+        """Return whether an OAuth user token carries the current credential generation."""
+        if not payload or not is_oauth_user_token(payload):
+            return True
+        pool = request.app.get("authdb") if request.app is not None else None
+        if pool is None:
+            raise SecurityStateError("authdb is not configured")
+        return await generation_matches(pool, int(payload["user_id"]), generation_of(payload))
 
     @web.middleware
     async def auth_middleware(
@@ -1060,14 +1128,20 @@ class AuthHandler:
                 try:
                     token = await self._idp.get_payload(request)
                     _, payload = self._idp.decode_token(code=token)
-                    if payload and not await self._token_is_revoked(payload):
+                    if (
+                        payload
+                        and not await self._token_is_revoked(payload)
+                        and await self._oauth_generation_ok(request, payload)
+                    ):
                         session = await get_session(request, payload, new=False)
                         if session:
                             user = await self.get_session_user(session)
                             if user:
                                 request.user = user
+                                request["userdata"] = payload
                                 request["authenticated"] = True
                                 request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
+                                request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
                 except Exception:
                     pass  # Best-effort: if token is invalid, proceed unauthenticated
             return await handler(request)
@@ -1089,6 +1163,14 @@ class AuthHandler:
             raise self.Unauthorized(reason=err.message, exception=err) from err
         if payload and await self._token_is_revoked(payload):
             raise self.Unauthorized(reason="Token has been revoked")
+        if payload:
+            try:
+                generation_ok = await self._oauth_generation_ok(request, payload)
+            except (SecurityStateError, ValueError, TypeError) as err:
+                self.logger.error(f"Auth Middleware: credential generation check failed: {type(err).__name__}")
+                raise web.HTTPServiceUnavailable(reason="Authentication temporarily unavailable") from err
+            if not generation_ok:
+                raise self.Unauthorized(reason="Token has been revoked")
         try:
             if payload:
                 ## check if user has a session:
@@ -1136,6 +1218,7 @@ class AuthHandler:
                         request["userdata"] = payload
                         request["authenticated"] = True
                         request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
+                        request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
 
                     except web.HTTPException:
                         raise
@@ -1168,6 +1251,7 @@ class AuthHandler:
                         request["userdata"] = payload
                         request["authenticated"] = True
                         request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
+                        request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)
                     except web.HTTPException:
                         raise
                     except Exception as ex:  # pylint: disable=W0703

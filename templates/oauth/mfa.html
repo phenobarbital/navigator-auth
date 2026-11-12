@@ -1,0 +1,34 @@
+{% autoescape true %}
+<!DOCTYPE html>
+<html>
+<head><title>Second factor</title></head>
+<body>
+  <div><h1><span>Verify it's you</span></h1></div>
+  {% if error %}<div role="alert" id="mfa-error">{{ error }}{% if attempts_remaining is not none %} ({{ attempts_remaining }} attempts remaining){% endif %}</div>{% endif %}
+  <form name="mfaForm" action="{{ action_url }}" method="post" autocomplete="off">
+    {% for provider in providers %}
+    <label><input type="radio" name="provider" value="{{ provider }}"{% if provider == preferred or (not preferred and loop.first) %} checked{% endif %}> {{ provider }}</label>
+    {% endfor %}
+    <br>
+    Code:<br>
+    <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" required>
+    <br>
+    <label><input type="checkbox" name="remember_device" value="1"> Remember this device</label>
+    <input type="text" name="device_label" maxlength="128" placeholder="Device name (optional)">
+    <input type="hidden" name="challenge" value="{{ challenge }}">
+    <input type="hidden" name="providers" value="{{ providers|join(',') }}">
+    <input type="hidden" name="response_type" value="{{ response_type }}">
+    <input type="hidden" name="client_id" value="{{ client_id }}">
+    <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
+    <input type="hidden" name="scope" value="{{ scope }}">
+    <input type="hidden" name="state" value="{{ state }}">
+    <input type="hidden" name="code_challenge" value="{{ code_challenge }}">
+    <input type="hidden" name="code_challenge_method" value="{{ code_challenge_method }}">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+    <input type="hidden" name="prompt" value="{{ prompt }}">
+    <input type="hidden" name="device_user_code" value="{{ device_user_code }}">
+    <input type="submit" value="Verify">
+  </form>
+</body>
+</html>
+{% endautoescape %}

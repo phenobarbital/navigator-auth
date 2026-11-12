@@ -20,6 +20,7 @@ from urllib.parse import quote
 
 import redis.asyncio as aioredis
 from aiohttp import web
+from ...responses import RedirectResponse
 
 from ...conf import (
     AUTH_EXCLUDE_LIST_KEY,
@@ -408,7 +409,7 @@ class AbstractSAMLIdentityProvider(BaseAuthBackend, ABC):
             )
             resume_url = f"{domain_url}/auth/{self._service_name}/sso?flow={quote(flow_id)}"
             login_url = f"{domain_url}{AUTH_LOGIN_FAILED_URI}?redirect_uri={quote(resume_url)}"
-            return web.HTTPFound(login_url)
+            return RedirectResponse(login_url)
 
         if not await self.authorize_sp_access(request, user, sp):
             self._audit_sp_forbidden(request, sp, user)
@@ -488,7 +489,7 @@ class AbstractSAMLIdentityProvider(BaseAuthBackend, ABC):
 
         headers = dict(resp_info.get("headers") or [])
         if "Location" in headers:
-            return web.HTTPFound(headers["Location"])
+            return RedirectResponse(headers["Location"])
         data = resp_info.get("data")
         html = data if isinstance(data, str) else "".join(data or [])
         return web.Response(text=html, content_type="text/html")

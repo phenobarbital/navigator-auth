@@ -31,7 +31,7 @@ class TestAuthorizeIdentity:
         ):
             request = make_mocked_request("GET", "/api/v1/user/identities/link/github")
             response = await backend.authorize_identity(request, user_id=42, finish_redirect="/manage")
-        url = response.location
+        url = response.headers["Location"]
         assert url.startswith("https://github.com/login/oauth/authorize")
         assert "client_id=cid" in url
         assert "cs" not in url.replace("scope", "")  # no client_secret
@@ -132,7 +132,7 @@ class TestFinishIdentityLink:
         ):
             response = await backend.finish_identity_link(request, self._flow())
         assert response.status == 302
-        assert response.location.endswith("/manage")
+        assert response.headers["Location"].endswith("/manage")
         args = store.save_linked_identity.await_args.args
         assert args[0] == 42
         assert args[1] == "github"
@@ -212,7 +212,7 @@ class TestAzureIdentityLink:
         backend.get_msal_app = MagicMock(return_value=msal_app)
         request = make_mocked_request("GET", "/link/azure")
         response = await backend.authorize_identity(request, 7, "/manage")
-        assert response.location.startswith("https://login.microsoftonline.com")
+        assert response.headers["Location"].startswith("https://login.microsoftonline.com")
         payload = flow_store.storage["idlink:msal-state"]
         assert payload["user_id"] == 7
         assert payload["extra"]["msal_flow"]["state"] == "msal-state"

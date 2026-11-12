@@ -17,12 +17,11 @@ Everything runs against in-memory storages: no Redis, no Postgres, no network,
 no aiohttp server.  The provider methods under test are the real ones.
 """
 
-import asyncio
-import base64
+from contextlib import asynccontextmanager
 import json
 import secrets
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import jwt
@@ -44,9 +43,7 @@ from navigator_auth.backends.oauth2.pkce import generate_challenge
 #: key in a local .env makes PyJWT emit InsecureKeyLengthWarning, which this
 #: project's ``filterwarnings = error`` turns into a failure.  That is a
 #: property of the environment's secret, not of the flow under test.
-pytestmark = pytest.mark.filterwarnings(
-    "ignore::jwt.warnings.InsecureKeyLengthWarning"
-)
+pytestmark = pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning")
 
 ISSUER = "https://auth.example.com"
 CLAUDE_CALLBACK = "https://claude.ai/api/mcp/auth_callback"
@@ -60,6 +57,7 @@ REFRESH_BUDGET_S = 30.0
 # ---------------------------------------------------------------------------
 # In-memory storages
 # ---------------------------------------------------------------------------
+
 
 class _MemoryCodeStorage:
     def __init__(self):
@@ -192,11 +190,11 @@ class _MemoryGrantStorage:
 # Request doubles
 # ---------------------------------------------------------------------------
 
+
 class _Request:
     """Minimal aiohttp-request stand-in for the provider's access patterns."""
 
-    def __init__(self, method="GET", query=None, form=None, json_body=None,
-                 headers=None, content_type=None, app=None):
+    def __init__(self, method="GET", query=None, form=None, json_body=None, headers=None, content_type=None, app=None):
         self.method = method
         self.query = query or {}
         self._form = form or {}
@@ -262,22 +260,15 @@ def _restore_real_payload_parsing(provider):
 # Provider harness
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def provider(monkeypatch):
     """A fully wired Oauth2Provider backed entirely by memory storages."""
-    monkeypatch.setattr(
-        "navigator_auth.backends.oauth2.backend.AUTH_ISSUER_URL", ISSUER
-    )
+    monkeypatch.setattr("navigator_auth.backends.oauth2.backend.AUTH_ISSUER_URL", ISSUER)
     # Registration is open (D1) and DCR clients are born gated.
-    monkeypatch.setattr(
-        "navigator_auth.backends.oauth2.backend.OAUTH_DCR_POLICY", "open"
-    )
-    monkeypatch.setattr(
-        "navigator_auth.backends.oauth2.backend.OAUTH_DCR_GATE_NEW_CLIENTS", True
-    )
-    monkeypatch.setattr(
-        "navigator_auth.backends.oauth2.backend.OAUTH_SCOPES", []
-    )
+    monkeypatch.setattr("navigator_auth.backends.oauth2.backend.OAUTH_DCR_POLICY", "open")
+    monkeypatch.setattr("navigator_auth.backends.oauth2.backend.OAUTH_DCR_GATE_NEW_CLIENTS", True)
+    monkeypatch.setattr("navigator_auth.backends.oauth2.backend.OAUTH_SCOPES", [])
 
     prov = Oauth2Provider(user_model=MagicMock(), identity=MagicMock())
     prov.client_storage = MemoryClientStorage()
@@ -293,6 +284,14 @@ def provider(monkeypatch):
     # No auth.users table in this suite: skip session binding (the provider
     # already degrades gracefully, this just keeps the logs clean).
     prov._token_session_claims = AsyncMock(return_value={})
+
+    # FEAT-106 review fixes TASK-185: this memory harness has no authdb.
+    @asynccontextmanager
+    async def _no_generation(request, user_id):
+        yield None, 0
+
+    prov._user_generation = _no_generation
+    prov._generation_ok = AsyncMock(return_value=True)
     return prov
 
 
@@ -323,8 +322,7 @@ class _Timer:
     def __exit__(self, *exc):
         self.elapsed = time.perf_counter() - self.start
         assert self.elapsed < self.budget, (
-            f"{self.label} took {self.elapsed:.3f}s, "
-            f"over Claude's {self.budget}s budget"
+            f"{self.label} took {self.elapsed:.3f}s, " f"over Claude's {self.budget}s budget"
         )
         return False
 
@@ -332,6 +330,7 @@ class _Timer:
 # ---------------------------------------------------------------------------
 # Flow legs (shared by both replay variants)
 # ---------------------------------------------------------------------------
+
 
 async def _leg_discovery(provider):
     """GET /.well-known/oauth-authorization-server."""
@@ -360,9 +359,7 @@ async def _leg_register(provider):
         "response_types": ["code"],
     }
     with _Timer("registration"):
-        response = await provider.register(
-            _Request(method="POST", json_body=body)
-        )
+        response = await provider.register(_Request(method="POST", json_body=body))
     registration = json.loads(response.body)
 
     assert response.status == 201
@@ -403,9 +400,7 @@ async def _leg_authorize(provider, client_uid, verifier, state, scope="default")
         "access_denied" in str(getattr(outcome, "headers", {}).get("Location", ""))
         or getattr(outcome, "status", None) == 403
     )
-    if denied or provider.client_access_storage and not await _gate_allows(
-        provider, client_uid
-    ):
+    if denied or provider.client_access_storage and not await _gate_allows(provider, client_uid):
         return outcome
 
     # The user presses "Approve" on the consent page.
@@ -486,6 +481,7 @@ async def _leg_refresh(provider, client_uid, refresh_token):
 # S1: the Claude-replay conformance tests
 # ---------------------------------------------------------------------------
 
+
 class TestClaudeReplay:
     @pytest.mark.asyncio
     async def test_claude_replay_dcr(self, provider):
@@ -513,9 +509,7 @@ class TestClaudeReplay:
         tokens = await _leg_token(provider, client_uid, code, verifier)
 
         # The access token is a real, decodable JWT bound to the user.
-        claims = jwt.decode(
-            tokens["access_token"], options={"verify_signature": False}
-        )
+        claims = jwt.decode(tokens["access_token"], options={"verify_signature": False})
         assert claims["user_id"] == USER_ID
         assert claims["client_id"] == client_uid
         assert claims["jti"]
@@ -533,9 +527,7 @@ class TestClaudeReplay:
         _authenticate(provider)
 
         verifier = secrets.token_urlsafe(48)
-        await _leg_authorize(
-            provider, client_uid, verifier, "st", scope="offline_access"
-        )
+        await _leg_authorize(provider, client_uid, verifier, "st", scope="offline_access")
         code = _extract_code(provider)
         tokens = await _leg_token(provider, client_uid, code, verifier)
 
@@ -575,9 +567,7 @@ class TestClaudeReplay:
         code = _extract_code(provider)
         tokens = await _leg_token(provider, "static_mcp_client", code, verifier)
 
-        claims = jwt.decode(
-            tokens["access_token"], options={"verify_signature": False}
-        )
+        claims = jwt.decode(tokens["access_token"], options={"verify_signature": False})
         assert claims["client_id"] == "static_mcp_client"
         assert claims["user_id"] == USER_ID
 
@@ -602,13 +592,12 @@ class TestClaudeReplay:
 # Conformance details Claude depends on
 # ---------------------------------------------------------------------------
 
+
 class TestClaudeConformanceDetails:
     @pytest.mark.asyncio
     async def test_json_token_request_is_refused(self, provider):
         """Claude sends form; JSON must be refused with 415."""
-        response = await provider.token_request(
-            _Request(method="POST", json_body={"grant_type": "authorization_code"})
-        )
+        response = await provider.token_request(_Request(method="POST", json_body={"grant_type": "authorization_code"}))
         assert response.status == 415
 
     @pytest.mark.asyncio
@@ -697,8 +686,11 @@ class TestClaudeConformanceDetails:
 
     def test_metadata_omits_registration_endpoint_when_dcr_disabled(self):
         document = build_as_metadata(
-            ISSUER, dcr_enabled=False, jwks=False,
-            grant_types=["authorization_code"], scopes=[],
+            ISSUER,
+            dcr_enabled=False,
+            jwks=False,
+            grant_types=["authorization_code"],
+            scopes=[],
         )
         assert "registration_endpoint" not in document
 
@@ -706,6 +698,7 @@ class TestClaudeConformanceDetails:
 # ---------------------------------------------------------------------------
 # Gate lifecycle, end to end through the real flow
 # ---------------------------------------------------------------------------
+
 
 class TestGateLifecycleEndToEnd:
     @pytest.mark.asyncio
@@ -726,14 +719,10 @@ class TestGateLifecycleEndToEnd:
         assert approved.status == "active"
 
         # 3. The full flow now succeeds.
-        await _leg_authorize(
-            provider, client_uid, verifier, "st", scope="offline_access"
-        )
+        await _leg_authorize(provider, client_uid, verifier, "st", scope="offline_access")
         code = _extract_code(provider)
         tokens = await _leg_token(provider, client_uid, code, verifier)
-        claims = jwt.decode(
-            tokens["access_token"], options={"verify_signature": False}
-        )
+        claims = jwt.decode(tokens["access_token"], options={"verify_signature": False})
         assert claims["user_id"] == USER_ID
         assert await provider.access_token_storage.is_revoked(claims["jti"]) is False
 
@@ -768,6 +757,7 @@ class TestGateLifecycleEndToEnd:
 # Upstream IdP end-to-end
 # ---------------------------------------------------------------------------
 
+
 class TestUpstreamGoogleEndToEnd:
     @pytest.mark.asyncio
     async def test_upstream_google_end_to_end(self, provider, monkeypatch):
@@ -779,8 +769,7 @@ class TestUpstreamGoogleEndToEnd:
         )
 
         monkeypatch.setattr(
-            "navigator_auth.backends.oauth2.backend."
-            "OAUTH_UPSTREAM_IDP_BACKENDS",
+            "navigator_auth.backends.oauth2.backend." "OAUTH_UPSTREAM_IDP_BACKENDS",
             ["google", "azure"],
         )
 
@@ -818,15 +807,10 @@ class TestUpstreamGoogleEndToEnd:
             "code_challenge": challenge,
             "code_challenge_method": "S256",
         }
-        redirect = await provider._start_upstream_login(
-            _Request(), "google", dict(authorize_params)
-        )
+        redirect = await provider._start_upstream_login(_Request(), "google", dict(authorize_params))
         assert redirect.headers["Location"] == "/auth/google/login"
         flow_id = redirect.cookies[OAUTH2_RESUME_COOKIE].value
-        assert (
-            OAUTH2_PENDING_FLOW_KEY.format(flow_id=flow_id)
-            in provider._flow_store.data
-        )
+        assert OAUTH2_PENDING_FLOW_KEY.format(flow_id=flow_id) in provider._flow_store.data
 
         # 2. Google calls back; the backend authenticates the user and the
         #    resume hook sends the browser to /oauth2/authorize?flow=...
@@ -840,15 +824,9 @@ class TestUpstreamGoogleEndToEnd:
         backend.get_domain = MagicMock(return_value=ISSUER)
         backend.auth_callback = AsyncMock(return_value=web.HTTPFound("/home"))
         vaulted = []
-        backend._vault_upstream_token = AsyncMock(
-            side_effect=lambda r: vaulted.append(r)
-        )
-        backend._pending_oauth2_flow = ExternalAuth._pending_oauth2_flow.__get__(
-            backend
-        )
-        backend._resume_oauth2_authorize = (
-            ExternalAuth._resume_oauth2_authorize.__get__(backend)
-        )
+        backend._vault_upstream_token = AsyncMock(side_effect=lambda r: vaulted.append(r))
+        backend._pending_oauth2_flow = ExternalAuth._pending_oauth2_flow.__get__(backend)
+        backend._resume_oauth2_authorize = ExternalAuth._resume_oauth2_authorize.__get__(backend)
         dispatch = ExternalAuth._auth_callback_dispatch.__get__(backend)
 
         callback_request = MagicMock()
@@ -858,9 +836,7 @@ class TestUpstreamGoogleEndToEnd:
 
         resumed = await dispatch(callback_request)
 
-        assert resumed.headers["Location"] == (
-            f"{ISSUER}/oauth2/authorize?flow={flow_id}"
-        )
+        assert resumed.headers["Location"] == (f"{ISSUER}/oauth2/authorize?flow={flow_id}")
         # Upstream tokens were vaulted (auth.user_identities).
         assert vaulted == [callback_request]
 
@@ -871,15 +847,11 @@ class TestUpstreamGoogleEndToEnd:
 
         # 4. Consent → code → owner-bound token.
         _authenticate(provider)
-        await _leg_authorize(
-            provider, "upstream_client", verifier, "originalSTATE"
-        )
+        await _leg_authorize(provider, "upstream_client", verifier, "originalSTATE")
         code = _extract_code(provider)
         tokens = await _leg_token(provider, "upstream_client", code, verifier)
 
-        claims = jwt.decode(
-            tokens["access_token"], options={"verify_signature": False}
-        )
+        claims = jwt.decode(tokens["access_token"], options={"verify_signature": False})
         assert claims["user_id"] == USER_ID
         assert claims["client_id"] == "upstream_client"
 
@@ -901,6 +873,7 @@ class TestUpstreamGoogleEndToEnd:
 # ---------------------------------------------------------------------------
 # Asymmetric end-to-end
 # ---------------------------------------------------------------------------
+
 
 class TestAsymmetricEndToEnd:
     @pytest.mark.asyncio
@@ -936,9 +909,7 @@ class TestAsymmetricEndToEnd:
             ]
         )
         type(provider._idp)._key_registry = registry
-        monkeypatch.setattr(
-            "navigator_auth.backends.idp.OAUTH_JWT_SIGNING_ALG", "RS256"
-        )
+        monkeypatch.setattr("navigator_auth.backends.idp.OAUTH_JWT_SIGNING_ALG", "RS256")
         # Discovery advertises jwks_uri only when keys are configured.
         monkeypatch.setattr(
             "navigator_auth.backends.oauth2.backend.OAUTH_JWT_KEYS",
@@ -947,9 +918,7 @@ class TestAsymmetricEndToEnd:
 
         try:
             # 1. Metadata advertises the JWK Set.
-            document = json.loads(
-                (await provider.as_metadata(_Request())).body
-            )
+            document = json.loads((await provider.as_metadata(_Request())).body)
             assert document["jwks_uri"] == f"{ISSUER}/oauth2/jwks"
 
             # 2. The endpoint serves public material only.
@@ -972,7 +941,9 @@ class TestAsymmetricEndToEnd:
             # A third party, holding only the JWK Set:
             public_key = jwt.algorithms.RSAAlgorithm.from_jwk(jwks["keys"][0])
             claims = jwt.decode(
-                access_token, public_key, algorithms=["RS256"],
+                access_token,
+                public_key,
+                algorithms=["RS256"],
                 options={"verify_aud": False},
             )
             assert claims["user_id"] == USER_ID

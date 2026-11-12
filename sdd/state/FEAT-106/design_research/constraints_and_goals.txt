@@ -1,0 +1,30 @@
+- **No new runtime dependency.** `cryptography` (already a hard dependency) ships
+  RFC 6238 TOTP *and* the `otpauth://` provisioning URI. `pyotp`, `qrcode`,
+  `aiosmtplib` and `twilio` are absent from the environment and must stay absent.
+  SMS is therefore out of scope — it needs an external provider the environment
+  does not have.
+- **navigator-auth never sends e-mail** (`docs/password_recovery.rst:9`). Code
+  delivery hands a payload to a configured callback, exactly as
+  `AUTH_RECOVERY_CALLBACK` does.
+- **A second factor must never be able to open a session on its own.** This rules
+  out modelling the providers as `BaseAuthBackend` subclasses: `authenticate()`'s
+  contract *is* "mint a session", so a registered OTP backend would turn the
+  second factor into a sufficient factor.
+- **The first factor is never skipped.** Nothing in this feature — remember-me
+  included — may let a caller past the password step.
+- **`BasicAuth` has two subclasses that must not inherit the challenge**:
+  `TokenExchangeAuth` (`backends/exchange.py:31`) and `PasskeyAuth`
+  (`backends/passkey.py:63`). Both call `open_session()` directly, so the hook
+  belongs in `BasicAuth.authenticate()`, never in `open_session()`.
+- **Enrolment must not be a precondition for enforcement.** Turning 2FA on for a
+  tenant cannot lock its users out while they enrol.
+- **Fail-closed.** A Redis or storage outage during challenge verification must
+  refuse the login. (Note: FEAT-098's `RateLimiter` is deliberately *fail-open*;
+  it cannot be reused unmodified for this.)
+- **Backwards compatible.** Tenants that do not opt in see no behavioural change,
+  and the existing single-step `POST /api/v1/login` response shape is unchanged
+  for users with no second factor.
+- Every security-relevant transition (enrol, disenrol, admin disenrol, policy
+  change, trusted-device revocation) must be auditable.
+
+---

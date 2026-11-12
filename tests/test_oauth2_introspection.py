@@ -8,26 +8,25 @@ Tests:
   test_introspect_requires_client_auth     — unauthenticated/bad secret → 401; missing token → 400
 """
 
-import asyncio
-import hmac
+from contextlib import asynccontextmanager
 import secrets
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
 from navigator_auth.backends.oauth2.models import (
     OAuthClient,
-    OauthUser,
     OauthAccessTokenRecord,
     OauthRefreshToken,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _confidential_client(client_id: str = "rs_client", secret: str = "s3cr3t") -> OAuthClient:
     return OAuthClient(
@@ -74,14 +73,22 @@ def _make_provider(
     provider.refresh_token_storage = refresh_token_storage or MagicMock()
     provider.device_code_storage = MagicMock()
     provider.grant_storage = MagicMock()
+
+    # FEAT-106 review fixes TASK-185: this memory harness has no authdb.
+    @asynccontextmanager
+    async def _no_generation(request, user_id):
+        yield None, 0
+
+    provider._user_generation = _no_generation
+    provider._generation_ok = AsyncMock(return_value=True)
     provider.code_storage = MagicMock()
 
-    # IDP mock
+    # IDP mock — introspection re-checks the owner of user tokens (FEAT-108,
+    # TASK-226), so the default owner is an existing, active user.
     provider._idp = MagicMock()
-    if user:
-        provider._idp.user_from_id = AsyncMock(return_value=user)
-    else:
-        provider._idp.user_from_id = AsyncMock(return_value=None)
+    if user is None:
+        user = SimpleNamespace(user_id=42, username="owner", is_active=True)
+    provider._idp.user_from_id = AsyncMock(return_value=user)
 
     return provider
 
@@ -107,6 +114,7 @@ def _now() -> datetime:
 # ---------------------------------------------------------------------------
 # In-memory storage stubs
 # ---------------------------------------------------------------------------
+
 
 class _MemAccessStorage:
     def __init__(self):
@@ -152,6 +160,7 @@ class _MemRefreshStorage:
 # Fixtures for RFC 7662 claims (payload builder helper)
 # ---------------------------------------------------------------------------
 
+
 def _jwt_payload(
     jti: str,
     client_id: str,
@@ -180,6 +189,7 @@ def _jwt_payload(
 # test_introspect_requires_client_auth
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_introspect_missing_token_returns_400():
     """Missing token parameter → 400 invalid_request."""
@@ -190,6 +200,7 @@ async def test_introspect_missing_token_returns_400():
     resp = await provider.introspect(request)
     assert resp.status == 400
     import json
+
     body = json.loads(resp.body)
     assert body["error"] == "invalid_request"
 
@@ -199,11 +210,13 @@ async def test_introspect_bad_secret_returns_401():
     """Bad client_secret → 401 invalid_client with WWW-Authenticate."""
     client = _confidential_client(secret="correct")
     provider = _make_provider(client)
-    request = _make_request({
-        "client_id": "rs_client",
-        "client_secret": "wrong",
-        "token": "sometoken",
-    })
+    request = _make_request(
+        {
+            "client_id": "rs_client",
+            "client_secret": "wrong",
+            "token": "sometoken",
+        }
+    )
     resp = await provider.introspect(request)
     assert resp.status == 401
     assert "WWW-Authenticate" in resp.headers
@@ -214,11 +227,13 @@ async def test_introspect_public_client_returns_401():
     """Public client (no secret) as caller → 401 invalid_client."""
     pub = _public_client()
     provider = _make_provider(pub)
-    request = _make_request({
-        "client_id": "app_client",
-        "client_secret": "",
-        "token": "sometoken",
-    })
+    request = _make_request(
+        {
+            "client_id": "app_client",
+            "client_secret": "",
+            "token": "sometoken",
+        }
+    )
     resp = await provider.introspect(request)
     assert resp.status == 401
 
@@ -226,6 +241,7 @@ async def test_introspect_public_client_returns_401():
 # ---------------------------------------------------------------------------
 # test_introspect_active_access_token
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_introspect_active_access_token():
@@ -247,14 +263,17 @@ async def test_introspect_active_access_token():
     provider = _make_provider(client, access_token_storage=access_store)
     provider._idp.decode_token = MagicMock(return_value=(None, jwt_payload))
 
-    request = _make_request({
-        "client_id": client.client_id,
-        "client_secret": "s3cr3t",
-        "token": "dummy_access_token",
-    })
+    request = _make_request(
+        {
+            "client_id": client.client_id,
+            "client_secret": "s3cr3t",
+            "token": "dummy_access_token",
+        }
+    )
     resp = await provider.introspect(request)
     assert resp.status == 200
     import json
+
     body = json.loads(resp.body)
     assert body["active"] is True
     assert body["client_id"] == client.client_id
@@ -266,6 +285,7 @@ async def test_introspect_active_access_token():
 # ---------------------------------------------------------------------------
 # test_introspect_revoked_jti_inactive
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_introspect_revoked_jti_inactive():
@@ -289,14 +309,17 @@ async def test_introspect_revoked_jti_inactive():
     provider = _make_provider(client, access_token_storage=access_store)
     provider._idp.decode_token = MagicMock(return_value=(None, jwt_payload))
 
-    request = _make_request({
-        "client_id": client.client_id,
-        "client_secret": "s3cr3t",
-        "token": "dummy_access_token",
-    })
+    request = _make_request(
+        {
+            "client_id": client.client_id,
+            "client_secret": "s3cr3t",
+            "token": "dummy_access_token",
+        }
+    )
     resp = await provider.introspect(request)
     assert resp.status == 200
     import json
+
     body = json.loads(resp.body)
     assert body == {"active": False}
 
@@ -304,6 +327,7 @@ async def test_introspect_revoked_jti_inactive():
 # ---------------------------------------------------------------------------
 # test_introspect_refresh_token
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_introspect_active_refresh_token():
@@ -327,15 +351,18 @@ async def test_introspect_active_refresh_token():
     provider = _make_provider(client, refresh_token_storage=refresh_store)
     provider._idp.decode_token = MagicMock(return_value=(None, jwt_payload))
 
-    request = _make_request({
-        "client_id": client.client_id,
-        "client_secret": "s3cr3t",
-        "token": rt_value,
-        "token_type_hint": "refresh_token",
-    })
+    request = _make_request(
+        {
+            "client_id": client.client_id,
+            "client_secret": "s3cr3t",
+            "token": rt_value,
+            "token_type_hint": "refresh_token",
+        }
+    )
     resp = await provider.introspect(request)
     assert resp.status == 200
     import json
+
     body = json.loads(resp.body)
     assert body["active"] is True
 
@@ -362,15 +389,18 @@ async def test_introspect_revoked_refresh_token_inactive():
     provider = _make_provider(client, refresh_token_storage=refresh_store)
     provider._idp.decode_token = MagicMock(return_value=(None, jwt_payload))
 
-    request = _make_request({
-        "client_id": client.client_id,
-        "client_secret": "s3cr3t",
-        "token": rt_value,
-        "token_type_hint": "refresh_token",
-    })
+    request = _make_request(
+        {
+            "client_id": client.client_id,
+            "client_secret": "s3cr3t",
+            "token": rt_value,
+            "token_type_hint": "refresh_token",
+        }
+    )
     resp = await provider.introspect(request)
     assert resp.status == 200
     import json
+
     body = json.loads(resp.body)
     assert body == {"active": False}
 
@@ -378,6 +408,7 @@ async def test_introspect_revoked_refresh_token_inactive():
 # ---------------------------------------------------------------------------
 # test_introspect_foreign_client_inactive
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_introspect_foreign_client_inactive():
@@ -388,7 +419,7 @@ async def test_introspect_foreign_client_inactive():
     rec = OauthAccessTokenRecord(
         jti=jti,
         user_id=42,
-        client_id="client_b",     # token belongs to client_b
+        client_id="client_b",  # token belongs to client_b
         scope="default",
         issued_at=_now(),
         expires_at=_now() + timedelta(hours=1),
@@ -400,14 +431,17 @@ async def test_introspect_foreign_client_inactive():
     provider = _make_provider(client_a, access_token_storage=access_store)
     provider._idp.decode_token = MagicMock(return_value=(None, jwt_payload))
 
-    request = _make_request({
-        "client_id": "client_a",
-        "client_secret": "secret_a",
-        "token": "dummy_token",
-    })
+    request = _make_request(
+        {
+            "client_id": "client_a",
+            "client_secret": "secret_a",
+            "token": "dummy_token",
+        }
+    )
     resp = await provider.introspect(request)
     assert resp.status == 200
     import json
+
     body = json.loads(resp.body)
     assert body == {"active": False}
 
@@ -415,6 +449,7 @@ async def test_introspect_foreign_client_inactive():
 # ---------------------------------------------------------------------------
 # test_introspect_expired_token_inactive
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_introspect_expired_token_inactive():
@@ -437,14 +472,17 @@ async def test_introspect_expired_token_inactive():
     provider = _make_provider(client, access_token_storage=access_store)
     provider._idp.decode_token = MagicMock(return_value=(None, jwt_payload))
 
-    request = _make_request({
-        "client_id": client.client_id,
-        "client_secret": "s3cr3t",
-        "token": "expired_token",
-    })
+    request = _make_request(
+        {
+            "client_id": client.client_id,
+            "client_secret": "s3cr3t",
+            "token": "expired_token",
+        }
+    )
     resp = await provider.introspect(request)
     assert resp.status == 200
     import json
+
     body = json.loads(resp.body)
     assert body == {"active": False}
 
@@ -452,6 +490,7 @@ async def test_introspect_expired_token_inactive():
 # ---------------------------------------------------------------------------
 # test_introspect_unknown_token_inactive
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_introspect_unknown_token_inactive():
@@ -461,13 +500,16 @@ async def test_introspect_unknown_token_inactive():
     # decode_token raises (bad JWT signature etc.)
     provider._idp.decode_token = MagicMock(side_effect=Exception("bad token"))
 
-    request = _make_request({
-        "client_id": client.client_id,
-        "client_secret": "s3cr3t",
-        "token": "garbage",
-    })
+    request = _make_request(
+        {
+            "client_id": client.client_id,
+            "client_secret": "s3cr3t",
+            "token": "garbage",
+        }
+    )
     resp = await provider.introspect(request)
     assert resp.status == 200
     import json
+
     body = json.loads(resp.body)
     assert body == {"active": False}

@@ -1,0 +1,26 @@
+`BasicAuth` is single-factor: a valid `user` + `password` pair goes straight from
+`validate_user()` to `open_session()` (`navigator_auth/backends/basic.py:307-315`),
+so a leaked or guessed password is a complete account takeover. Every stronger
+option navigator-auth offers today requires leaving username/password behind
+entirely — `PasskeyAuth` (passwordless WebAuthn) or an external IdP (Azure, Okta,
+Google, SAML) that enforces MFA on its own.
+
+Deployments that must keep username/password — because their users are not in an
+IdP, or because the tenant is not ready to roll out passkeys — have no way to add
+a second factor. There is no OTP, TOTP or MFA machinery anywhere in the package:
+`AbstractOTPProvider`, `tenant_mfa_policy` and `user_trusted_devices` do not
+exist, and `conf.py` has no `AUTH_OTP_*` settings.
+
+**Who is affected**: end users of `BasicAuth` deployments (a second step at
+login), operators of multi-tenant installs (they need to require 2FA for one
+tenant without touching others), and integrators (a new `mfa_required` branch in
+the login response).
+
+**Why now**: the surrounding machinery landed over the last three features and
+is sitting unused for this purpose. `open_session()` already mirrors `mfa` and
+`amr` into the JWT (`basic.py:153`, FEAT-101), ABAC already exposes `auth_method`
+and `mfa` as first-class evaluation keys (`abac/context.py:137-141`, TASK-92), and
+FEAT-098 built a complete HMAC-signed, `sha256`-keyed, TTL'd Redis token store
+with a rate limiter and a notification-callback hand-off that an OTP challenge
+can reuse almost verbatim. The expensive half of this feature is already built
+and tested; what is missing is the factor itself.

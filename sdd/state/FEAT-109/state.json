@@ -1,0 +1,157 @@
+{
+  "schema_version": "1.0",
+  "feat_id": "FEAT-109",
+  "started_at": "2026-11-11T14:40:00Z",
+  "updated_at": "2026-11-11T15:04:00Z",
+  "source": {
+    "kind": "inline",
+    "jira_key": null,
+    "jira_url": null,
+    "file_path": null,
+    "raw_path": "sdd/state/FEAT-109/source.md",
+    "fetched_at": "2026-11-11T14:40:00Z",
+    "summary_oneline": "PBAC example (policy_server.py): unauth-path warnings, short HMAC key warning, vault integrity error, 428 deny on /dashboard/"
+  },
+  "mode": "investigation",
+  "wiki_available": true,
+  "phase": "committed",
+  "budget": {
+    "profile": "default",
+    "files_read": 40,
+    "grep_calls": 25,
+    "git_calls": 10,
+    "depth": 2,
+    "wall_seconds": 300
+  },
+  "consumed": {
+    "files_read": 19,
+    "grep_calls": 24,
+    "git_calls": 10,
+    "depth_reached": 1,
+    "wall_seconds": 240
+  },
+  "truncated": false,
+  "phases": {
+    "plan": {
+      "approved_by_user": false,
+      "note": "auto mode; plan executed directly"
+    },
+    "research": {
+      "status": "completed",
+      "started_at": "2026-11-11T14:43:00Z",
+      "parallel": {
+        "enabled": true,
+        "lanes": {
+          "codebase": {
+            "status": "completed",
+            "started_at": "2026-11-11T14:43:00Z",
+            "completed_at": "2026-11-11T14:47:00Z",
+            "queries_executed": 10,
+            "queries_skipped": 0,
+            "files_read": 14,
+            "grep_calls": 20,
+            "git_calls": 0,
+            "findings": [
+              "FC-001",
+              "FC-002",
+              "FC-003",
+              "FC-004",
+              "FC-005",
+              "FC-006",
+              "FC-007"
+            ]
+          },
+          "git": {
+            "status": "completed",
+            "started_at": "2026-11-11T14:43:00Z",
+            "completed_at": "2026-11-11T14:45:10Z",
+            "queries_executed": 3,
+            "queries_skipped": 0,
+            "files_read": 2,
+            "grep_calls": 0,
+            "git_calls": 10,
+            "findings": [
+              "FG-001",
+              "FG-002",
+              "FG-003",
+              "FG-004"
+            ]
+          },
+          "wiki": {
+            "status": "completed",
+            "started_at": "2026-11-11T14:43:00Z",
+            "completed_at": "2026-11-11T14:46:35Z",
+            "queries_executed": 3,
+            "queries_skipped": 0,
+            "files_read": 1,
+            "grep_calls": 1,
+            "git_calls": 0,
+            "findings": [
+              "FW-001",
+              "FW-002",
+              "FW-003",
+              "FW-004",
+              "FW-005",
+              "FW-006",
+              "FW-007",
+              "FW-008"
+            ]
+          }
+        },
+        "merge": {
+          "started_at": "2026-11-11T14:48:00Z",
+          "completed_at": "2026-11-11T14:49:00Z",
+          "input_count": 18,
+          "output_count": 13,
+          "merged_count": 5,
+          "audit_dir": "findings/.audit"
+        }
+      },
+      "completed_at": "2026-11-11T14:47:00Z",
+      "duration_seconds": 240,
+      "files_read": 17,
+      "grep_calls": 21,
+      "git_calls": 10,
+      "queries_executed": 16,
+      "queries_skipped": 0,
+      "citation_probe": {
+        "checks": 78,
+        "verified": 78,
+        "stale": 0,
+        "missing": 0,
+        "head": "c25272a",
+        "probes": 2,
+        "stale_items": [
+          "F010 navigator_auth/auth.py:737-746 -> 744-755"
+        ],
+        "manual_stale": 1
+      }
+    },
+    "synthesis": {
+      "status": "completed",
+      "completed_at": "2026-11-11T14:56:00Z",
+      "overall_confidence": "medium",
+      "claims": {
+        "high": 12,
+        "medium": 5,
+        "low": 4
+      },
+      "unknowns": 4,
+      "lint": "pass",
+      "recommended_next_command": "sdd-spec"
+    },
+    "qa": {
+      "status": "completed",
+      "questions_total": 4,
+      "questions_answered": 4
+    },
+    "output": {
+      "proposal_path": "sdd/proposals/policy-issues.proposal.md",
+      "commit_sha": "67279dc"
+    }
+  },
+  "resume_hint": {
+    "next_phase": "done",
+    "next_action": "/sdd-spec sdd/proposals/policy-issues.proposal.md"
+  }
+}

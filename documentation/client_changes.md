@@ -1,3 +1,7 @@
+> **Superseded (FEAT-110).** This patch is now the managed migration
+> `navigator_auth/migrations/sql/oauth2/001_oauth2_schema.sql`, applied by
+> `navauth self upgrade`. Do not run the SQL below by hand.
+
   # ALTER TABLE para auth.clients (OAuth2 public clients)
 
 ```sql
