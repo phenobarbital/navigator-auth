@@ -105,16 +105,16 @@ async def test_gate_refusal_leaves_lock_scope_normally():
 
 @pytest.mark.asyncio
 async def test_mfa_target_transaction_supports_asyncdb_style_connections():
-    """asyncdb drivers return an already-started awaitable from transaction(); commit/rollback exist."""
+    """On an asyncdb pool the transaction runs on the driver's native asyncpg connection (FEAT-115).
+
+    The asyncdb driver's own ``transaction()`` (an already-started awaitable) and ``commit``/``rollback``
+    are never used: its ``execute()`` swallows errors, so writes through it would fail open.
+    """
     events = []
 
-    class _Driver:
-        def transaction(self):
-            async def _start():
-                events.append("start")
-                return self
-
-            return _start()
+    class _Tx:
+        async def start(self):
+            events.append("start")
 
         async def commit(self):
             events.append("commit")
@@ -122,21 +122,35 @@ async def test_mfa_target_transaction_supports_asyncdb_style_connections():
         async def rollback(self):
             events.append("rollback")
 
-        async def close(self):
-            events.append("close")
+    class _RawConn:
+        def transaction(self):
+            return _Tx()
 
-        async def release(self, *args, **kwargs):
-            events.append("release")
+    class _Driver:
+        def __init__(self):
+            self.raw = _RawConn()
 
-        async def __aenter__(self):
-            return self
+        def engine(self):
+            return self.raw
 
-        async def __aexit__(self, *exc):
-            return False
+        def transaction(self):
+            events.append("driver-transaction")
+
+        async def commit(self):
+            events.append("driver-commit")
+
+        async def rollback(self):
+            events.append("driver-rollback")
+
+        async def fetch_all(self, *args):
+            return []
 
     class _Pool:
         async def acquire(self):
             return _Driver()
+
+        async def release(self, conn):
+            events.append("release")
 
     target = MfaSecretTarget(_Pool())
     async with target.transaction():
@@ -144,5 +158,4 @@ async def test_mfa_target_transaction_supports_asyncdb_style_connections():
     with pytest.raises(RuntimeError):
         async with target.transaction():
             raise RuntimeError("boom")
-    started = [event for event in events if event in ("start", "commit", "rollback")]
-    assert started == ["start", "commit", "start", "rollback"]
+    assert events == ["start", "commit", "release", "start", "rollback", "release"]

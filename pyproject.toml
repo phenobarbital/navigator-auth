@@ -71,6 +71,9 @@ Funding = "https://paypal.me/phenobarbital"
 Tracker = "https://github.com/phenobarbital/navigator-auth/issues"
 Documentation = "https://github.com/phenobarbital/navigator-auth"
 
+[project.scripts]
+navauth = "navigator_auth.migrations.cli:console_entry"
+
 # Protected stores for navigator-session vault rotation / migration
 # (navigator-vault CLI). See navigator_session/vault/registry.py.
 [project.entry-points."navigator_session.vault_targets"]

@@ -44,6 +44,12 @@ DBPORT = config.get("DBPORT", fallback=5432)
 
 default_dsn = f"postgres://{DBUSER}:{DBPWD}@{DBHOST}:{DBPORT}/{DBNAME}"
 
+## Admin credentials for `navauth self upgrade` (FEAT-110). Schema changes run with
+## these, never with the runtime DBUSER unless nothing else is configured.
+AUTH_ADMIN_DSN = config.get("AUTH_ADMIN_DSN", fallback=None)
+AUTH_ADMIN_USER = config.get("AUTH_ADMIN_USER", fallback=None)
+AUTH_ADMIN_PWD = config.get("AUTH_ADMIN_PWD", fallback=None)
+
 ### Exclude List:
 AUTH_EXCLUDE_LIST_KEY = "auth_exclude_list"
 

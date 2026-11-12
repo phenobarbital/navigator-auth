@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-110 â€” navauth self upgrade database migration command
 **Spec**: `sdd/specs/new-command-migration.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: medium
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-165, TASK-167
@@ -60,6 +60,7 @@ example's bootstrap must apply them itself through `navigator_auth.migrations.up
 | `examples/README.md` | MODIFY | `ddl.sql` mention; startup-migration sentence |
 | `examples/oauth2_mcp_server.py` | MODIFY | Docstring `ddl.sql` mention |
 | `examples/identity_vault_server.py` | MODIFY | Bootstrap runs `upgrade()`; docstrings |
+| `examples/sql/identity_vault_schema.sql` | MODIFY | Comment-only: drop the moved `identity/sql/` path (acceptance grep covers `examples/`) |
 | `tests/unit/migrations/test_docs_index.py` | CREATE | README index test |
 
 ---
@@ -132,6 +133,7 @@ file's header comment or `git log --follow -- <file>`; never guess one (write "â
     {"path": "examples/README.md", "action": "MODIFY"},
     {"path": "examples/oauth2_mcp_server.py", "action": "MODIFY"},
     {"path": "examples/identity_vault_server.py", "action": "MODIFY"},
+    {"path": "examples/sql/identity_vault_schema.sql", "action": "MODIFY"},
     {"path": "tests/unit/migrations/test_docs_index.py", "action": "CREATE"}
   ],
   "contract_symbols": [
@@ -298,10 +300,8 @@ When you pick up this task:
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: sdd-worker (codex / native seats via engine)
+**Date**: 2026-11-11
+**Notes**: Native sonnet delivery also edited examples/sql/identity_vault_schema.sql (comment only); task file list updated to include it. Delivered and merged; merge-tier validation showed only baseline reds (webauthn not installed in env). Orchestrator review found no defects. Closed via `parrot sdd task close` (durable evidence root read-only in sandbox).
 
-**Completed by**: <session or agent ID>
-**Date**: YYYY-MM-DD
-**Notes**: What was implemented, any deviations from scope, issues encountered.
-
-**Deviations from spec**: none | describe if any
+**Deviations from spec**: examples/sql/identity_vault_schema.sql touched (comment-only)

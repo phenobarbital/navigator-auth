@@ -3503,7 +3503,8 @@ class Oauth2Provider(BaseAuthBackend):
             except InvalidAuth:
                 raise
             except Exception as exc:  # pylint: disable=W0703
-                self.logger.warning(f"Oauth2: cannot check jti revocation: {exc}")
+                self.logger.error(f"Oauth2: revocation check failed: {type(exc).__name__}")
+                raise InvalidAuth("Oauth2: authentication temporarily unavailable.", status=503) from exc
 
         if is_oauth_user_token(payload):
             try:

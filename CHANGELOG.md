@@ -1,5 +1,26 @@
 # Unreleased
 
+- **Behaviour change — database migrations are now an explicit command
+  (FEAT-110).** New `navauth self upgrade` console script applies the
+  idempotent SQL catalog (vault, identity, passkey, oauth2) under a ledger
+  (`<AUTH_DB_SCHEMA>.schema_migrations`), grants the runtime role (`DBUSER` or
+  `--runtime-role`) its table/sequence privileges, and supports `--check` for
+  CI. Application startup **no longer applies DDL**: it logs a warning while
+  migrations are pending, and `PasskeyAuth` refuses to start without its
+  tables. The admin connection is configured with `AUTH_ADMIN_DSN` or
+  `AUTH_ADMIN_USER` / `AUTH_ADMIN_PWD`. The hand-applied OAuth2 `ddl.sql` was
+  replaced by a managed migration without seed data (rows with NULL
+  `client` / `client_name` must be repaired). Run `navauth self upgrade`
+  after upgrading; see `docs/migrations/README.md`.
+
+- **Vault targets on the asyncdb `authdb` pool (FEAT-115).** `MfaSecretTarget`
+  and `IdentityTarget` now run on native asyncpg connections even when they are
+  given the application's asyncdb pool, so in-process master-key rotation no
+  longer crashes (`'coroutine' object has no attribute 'start'`) and no longer
+  counts a failed or row-less write as rotated. The new
+  `navigator_auth.vault.asyncpg_pool()` does the same for navigator-session's
+  `UserVaultTarget`. See `docs/vault.rst`.
+
 - **FEAT-106 review fixes (0.30.0).** Fixes every high-severity finding from the
   PR #633 review. The OAuth2 login form now enforces the second factor
   (`POST /oauth2/login/mfa`; `503` when 2FA is on and the MFA services are

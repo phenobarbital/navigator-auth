@@ -5,7 +5,7 @@
   "type": "feature",
   "base_branch": "dev",
   "created_at": "2026-11-11T15:34:10Z",
-  "completed_at": null,
+  "completed_at": "2026-11-11T22:57:29+00:00",
   "parallel_semantics": "exclusive",
   "validation_contract": "required",
   "test_contract": {
@@ -47,16 +47,17 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
       "parallel": false,
       "parallelism_notes": "Exclusive: graph root — git-mv's the nine released SQL files every other task reads, and creates tests/unit/migrations/conftest.py (tmp_catalog) that every migration test loads.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-159-migration-catalog.md"
+      "started_at": "2026-11-11T21:35:00+00:00",
+      "completed_at": "2026-11-11T21:40:53+00:00",
+      "file": "sdd/tasks/completed/TASK-159-migration-catalog.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-160",
@@ -65,7 +66,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -74,9 +75,10 @@
       "parallel": false,
       "parallelism_notes": "Imports MigrationFile/discover from TASK-159 (navigator_auth/migrations/catalog.py) and extends navigator_auth/migrations/__init__.py created there. Exclusive: adds FakeConnection to tests/unit/migrations/conftest.py, loaded by every later migration test.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-160-migration-runner-foundation.md"
+      "started_at": "2026-11-11T21:35:00+00:00",
+      "completed_at": "2026-11-11T21:48:00+00:00",
+      "file": "sdd/tasks/completed/TASK-160-migration-runner-foundation.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-161",
@@ -85,7 +87,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -94,9 +96,10 @@
       "parallel": true,
       "parallelism_notes": "Imports MigrationError and quote_ident from TASK-160 (navigator_auth/migrations/runner.py); its tests drive FakeConnection from TASK-160 (tests/unit/migrations/conftest.py).",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-161-migration-completion-checks.md"
+      "started_at": "2026-11-11T21:35:00+00:00",
+      "completed_at": "2026-11-11T21:53:22+00:00",
+      "file": "sdd/tasks/completed/TASK-161-migration-completion-checks.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-162",
@@ -105,7 +108,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -114,9 +117,10 @@
       "parallel": true,
       "parallelism_notes": "Imports MigrationError, execute_checked and quote_ident from TASK-160 (navigator_auth/migrations/runner.py); new module access.py, no file shared with TASK-161.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-162-migration-runtime-access.md"
+      "started_at": "2026-11-11T21:35:00+00:00",
+      "completed_at": "2026-11-11T21:53:22+00:00",
+      "file": "sdd/tasks/completed/TASK-162-migration-runtime-access.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-163",
@@ -125,7 +129,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -135,9 +139,10 @@
       "parallel": true,
       "parallelism_notes": "Calls check_prerequisites/check_postconditions from TASK-161 (navigator_auth/migrations/checks.py) and validate_runtime_role/grant_runtime_access/verify_runtime_access from TASK-162 (navigator_auth/migrations/access.py); modifies runner.py and test_runner.py created by TASK-160 (ordered through TASK-161/162).",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-163-migration-upgrade.md"
+      "started_at": "2026-11-11T21:35:00+00:00",
+      "completed_at": "2026-11-11T21:57:51+00:00",
+      "file": "sdd/tasks/completed/TASK-163-migration-upgrade.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-164",
@@ -146,7 +151,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "S",
       "depends_on": [
@@ -155,9 +160,10 @@
       "parallel": true,
       "parallelism_notes": "Uses acquire_pooled and execute_checked from TASK-160 (navigator_auth/migrations/runner.py) and set_filenames from TASK-159; modifies the three legacy migrations.py files TASK-159 repointed (ordered through TASK-160).",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-164-legacy-migration-shims.md"
+      "started_at": "2026-11-11T21:35:00+00:00",
+      "completed_at": "2026-11-11T21:53:23+00:00",
+      "file": "sdd/tasks/completed/TASK-164-legacy-migration-shims.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-165",
@@ -166,7 +172,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -176,9 +182,10 @@
       "parallel": false,
       "parallelism_notes": "Calls upgrade() from TASK-163 (navigator_auth/migrations/runner.py) and validate_runtime_role/missing_runtime_access from TASK-162 (navigator_auth/migrations/access.py). Exclusive: edits pyproject.toml (shared manifest, first [project.scripts]).",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-165-navauth-cli.md"
+      "started_at": "2026-11-11T21:35:00+00:00",
+      "completed_at": "2026-11-11T22:04:44+00:00",
+      "file": "sdd/tasks/completed/TASK-165-navauth-cli.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-166",
@@ -187,7 +194,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "S",
       "depends_on": [
@@ -196,9 +203,10 @@
       "parallel": true,
       "parallelism_notes": "Uses acquire_raw and get_status from TASK-160 (navigator_auth/migrations/runner.py); only task touching navigator_auth/auth.py and navigator_auth/backends/passkey.py.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-166-startup-migration-check.md"
+      "started_at": "2026-11-11T21:35:00+00:00",
+      "completed_at": "2026-11-11T22:11:17+00:00",
+      "file": "sdd/tasks/completed/TASK-166-startup-migration-check.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-167",
@@ -207,7 +215,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "L",
       "depends_on": [
@@ -216,9 +224,10 @@
       "parallel": true,
       "parallelism_notes": "Creates the oauth2 set file under TASK-159's catalog (navigator_auth/migrations/sql/oauth2/) and tests it with set_dir/render_sql from TASK-159 (navigator_auth/migrations/catalog.py). Thinking-model task (spec M4 not delegation-eligible).",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-167-oauth2-migration-set.md"
+      "started_at": "2026-11-11T21:35:00+00:00",
+      "completed_at": "2026-11-11T21:57:51+00:00",
+      "file": "sdd/tasks/completed/TASK-167-oauth2-migration-set.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-168",
@@ -227,7 +236,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "L",
       "depends_on": [
@@ -237,9 +246,10 @@
       "parallel": true,
       "parallelism_notes": "Drives upgrade() from TASK-163 and appends to tests/unit/migrations/test_runner.py (TASK-160/163); appends to tests/unit/migrations/test_oauth2_sql.py and applies 001_oauth2_schema.sql, both created by TASK-167.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-168-migration-live-tests.md"
+      "started_at": "2026-11-11T21:35:00+00:00",
+      "completed_at": "2026-11-11T22:11:17+00:00",
+      "file": "sdd/tasks/completed/TASK-168-migration-live-tests.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-169",
@@ -248,7 +258,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -258,9 +268,10 @@
       "parallel": true,
       "parallelism_notes": "Documents the navauth flags/exit codes defined by TASK-165 (navigator_auth/migrations/cli.py) and indexes 001_oauth2_schema.sql from TASK-167; prose edits to documentation/oauth.md etc. follow TASK-167's removal of backends/oauth2/ddl.sql.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-169-migration-docs.md"
+      "started_at": "2026-11-11T21:35:00+00:00",
+      "completed_at": "2026-11-11T22:11:17+00:00",
+      "file": "sdd/tasks/completed/TASK-169-migration-docs.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-170",
@@ -269,7 +280,7 @@
       "feature_id": "FEAT-110",
       "feature": "new-command-migration",
       "spec": "sdd/specs/new-command-migration.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "medium",
       "effort": "M",
       "depends_on": [
@@ -280,9 +291,10 @@
       "parallel": true,
       "parallelism_notes": "Extends prerequisite_tables/check_postconditions from TASK-161 (checks.py) and RUNTIME_TABLES from TASK-162 (access.py); adds MFA rows to docs/migrations/README.md created by TASK-169. GATED: FEAT-106 (+ its review fixes) must be on dev first — see the task file.",
       "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-170-mfa-migration-set.md"
+      "started_at": "2026-11-11T22:48:51+00:00",
+      "completed_at": "2026-11-11T22:57:29+00:00",
+      "file": "sdd/tasks/completed/TASK-170-mfa-migration-set.md",
+      "verification": "verified"
     }
   ]
 }

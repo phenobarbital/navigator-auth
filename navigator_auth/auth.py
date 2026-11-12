@@ -31,11 +31,10 @@ from .authorizations._client_ip import get_client_ip
 from .vault.integration import (
     load_vault_for_session,
     setup_vault_keyring,
-    setup_vault_tables,
     VAULT_KEYRING_APP_KEY,
     VAULT_SESSION_KEY,
 )
-from .identity.migrations import setup_identity_columns
+from .migrations.startup import warn_pending_migrations
 from .security_state import setup_security_state_tables
 from .backends.idp import IdentityProvider
 from .backends.oauth2.models import is_oauth_user_token
@@ -193,11 +192,13 @@ class AuthHandler:
             except Exception as err:
                 logging.exception(f"Error on Startup Auth Backend {name} init: {err.message}")
                 raise AuthException(f"Error on Startup Auth Backend {name} init: {err.message}") from err
-        # Create vault tables if they don't exist (non-blocking)
+        # Load the vault keyring (non-blocking).
         setup_vault_keyring(app)
+        # Schema changes are applied by `navauth self upgrade` (FEAT-110); startup only checks.
         if "authdb" in app:
-            await setup_vault_tables(app["authdb"])
-            await setup_identity_columns(app["authdb"])
+            await warn_pending_migrations(app["authdb"], self._backend_list)
+            # security_state (FEAT-106 review fixes) is not in the migration
+            # catalog yet, so its DDL still runs here until it joins it.
             await setup_security_state_tables(app["authdb"])
         # Re-hydrate exclude-provider paths after each startup (FEAT-241 M2):
         for provider in self._exclude_providers:
@@ -1060,8 +1061,8 @@ class AuthHandler:
         OAuth2 access tokens are self-contained JWTs, so revoking one only
         marks its ``jti`` in the provider's access-token storage. Without this
         check a revoked token would keep passing ``auth_middleware`` until it
-        expires. Only tokens that actually carry a ``jti`` (i.e. OAuth2 ones)
-        cost a storage lookup.
+        expires. Only tokens that carry a ``jti`` cost a storage lookup.
+        Storage errors abort authentication with 503, including for Basic JWTs.
         """
         jti = payload.get("jti") if payload else None
         if not jti:
@@ -1074,7 +1075,8 @@ class AuthHandler:
                 if await storage.is_revoked(jti):
                     return True
             except Exception as exc:  # pylint: disable=W0703
-                self.logger.warning(f"Auth Middleware: unable to check revocation of jti={jti}: {exc}")
+                self.logger.error(f"Auth Middleware: revocation check failed: {type(exc).__name__}")
+                raise web.HTTPServiceUnavailable(reason="Authentication temporarily unavailable") from exc
         return False
 
     async def _oauth_generation_ok(self, request: web.Request, payload: Optional[dict]) -> bool:

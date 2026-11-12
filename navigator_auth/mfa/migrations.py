@@ -1,16 +1,16 @@
-"""MFA tables — idempotent startup migration with a usability flag (FEAT-106, spec M8)."""
+"""MFA tables applied by ``navauth self upgrade``; kept for programmatic use and tests."""
 
 import logging
-from pathlib import Path
 from typing import Any
 
-from ..conf import AUTH_DB_SCHEMA, AUTH_USERS_TABLE
+from ..conf import AUTH_DB_SCHEMA
+from ..migrations.catalog import render_sql, set_dir, set_filenames
 from .exceptions import MfaStorageError
 
 logger = logging.getLogger("navigator.mfa")
 
-SQL_DIR = Path(__file__).parent / "sql"
-_MIGRATION_FILES = ("001_mfa_tables.sql", "002_mfa_secrets.sql")
+SQL_DIR = set_dir("mfa")
+_MIGRATION_FILES = set_filenames("mfa")
 MFA_TABLES = (
     "tenant_mfa_policy",
     "user_mfa",
@@ -20,18 +20,6 @@ MFA_TABLES = (
     "user_mfa_security",
     "user_mfa_secrets",
 )
-
-
-def render_sql(sql: str) -> str:
-    """Substitute migration schema and users-table placeholders.
-
-    Args:
-        sql: Migration SQL containing placeholder names.
-
-    Returns:
-        Rendered migration SQL.
-    """
-    return sql.replace("{schema}", AUTH_DB_SCHEMA).replace("{users_table}", AUTH_USERS_TABLE)
 
 
 async def _with_conn(db_pool: Any, fn: Any) -> Any:
@@ -76,7 +64,7 @@ def _raise_on_execute_error(result: Any, filename: str) -> None:
 
 
 async def ensure_mfa_tables(db_pool: Any) -> None:
-    """Create the MFA tables if missing and move MFA seeds out of the user vault.
+    """Apply MFA migrations; kept for programmatic use and tests.
 
     Args:
         db_pool: Database pool used to execute migrations.

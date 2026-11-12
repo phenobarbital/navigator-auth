@@ -14,7 +14,7 @@ from navigator_auth.mfa.abstract import AbstractOTPProvider
 from navigator_auth.mfa.backup_codes import BackupCodeProvider, BackupCodeStore
 from navigator_auth.mfa.email_otp import EmailOTPProvider
 from navigator_auth.mfa.limiter import StrictRateLimiter
-from navigator_auth.mfa.migrations import setup_mfa_tables
+from navigator_auth.mfa.migrations import mfa_tables_present
 from navigator_auth.mfa.policy import MfaPolicyResolver
 from navigator_auth.mfa.security import MfaSecurity
 from navigator_auth.mfa.state import MfaStateMachine, _user_id
@@ -243,7 +243,11 @@ async def build_mfa_services(app: Any, backend: Any) -> MfaServices:
         logger.critical("MFA: no 'authdb' pool; BasicAuth logins will be refused")
         return MfaServices(backend=backend, available=False, permanent=True)
     try:
-        available = await setup_mfa_tables(db_pool)
+        try:
+            available = await mfa_tables_present(db_pool)
+        except Exception as err:  # pylint: disable=W0703
+            logger.error("MFA tables could not be verified (%s); run `navauth self upgrade`", type(err).__name__)
+            available = False
         redis_pool = aioredis.ConnectionPool.from_url(auth_conf.REDIS_AUTH_URL, decode_responses=True, encoding="utf-8")
         store = MfaChallengeStore(redis_pool, secret)
         backup_codes = BackupCodeStore(db_pool, secret)
@@ -262,7 +266,7 @@ async def build_mfa_services(app: Any, backend: Any) -> MfaServices:
         logger.critical("MFA: could not build services (%s); BasicAuth logins will be refused", type(err).__name__)
         return MfaServices(backend=backend, available=False)
     if not available:
-        logger.critical("MFA: tables unavailable; BasicAuth logins will be refused until they exist")
+        logger.critical("MFA tables are missing; run `navauth self upgrade`. BasicAuth logins will be refused")
     return MfaServices(
         backend=backend,
         available=available,

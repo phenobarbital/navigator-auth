@@ -105,7 +105,11 @@ class UserSession(BaseHandler):
             return self.critical(reason=f"Error getting User: {err}", exception=err)
 
     async def password_change(self, request: web.Request):
-        """Reset User Password."""
+        """Change the password while preserving existing sessions and tokens.
+
+        The security transition still invalidates trusted devices and updates
+        MFA bookkeeping. Session revocation is reserved for reset and recovery.
+        """
         session = await self.session(request)
         params = self.match_parameters(request)
         try:
@@ -200,8 +204,11 @@ class UserSession(BaseHandler):
             async with security_transition(
                 request.app, user.user_id, "password_reset", actor_user_id=userinfo.get("user_id")
             ) as conn:
+                # coalesce: a never-set (NULL) password is a valid captured state — users
+                # created by PUT /api/v1/users have none until this reset — while a missing
+                # row still reads as None and aborts.
                 current = await conn.fetchval(
-                    f"SELECT password FROM {_USERS} WHERE user_id = $1 FOR UPDATE", user.user_id
+                    f"SELECT coalesce(password, '') FROM {_USERS} WHERE user_id = $1 FOR UPDATE", user.user_id
                 )
                 if current is None or not secrets.compare_digest(str(current), str(captured or "")):
                     raise TransitionAborted("credentials_changed")
