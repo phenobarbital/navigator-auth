@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 import json
+from ipaddress import ip_address
 
 import pytest
 import jsonpickle
@@ -110,6 +111,7 @@ def _make_provider(
     provider = Oauth2Provider.__new__(Oauth2Provider)
     provider.logger = MagicMock()
     provider.device_uri = "/oauth2/device"
+    provider._trusted_proxies = set()
 
     provider.client_storage = MagicMock()
     provider.client_storage.get_client = AsyncMock(return_value=client)
@@ -557,3 +559,54 @@ def test_device_login_hides_passkey_and_upstream():
     normal = tpl.render(upstream_providers=["google"], action_url="/oauth2/login")
     assert "passkey-signin" in normal
     assert "Continue with" in normal
+
+
+class _RecordingRedis:
+    def __init__(self):
+        self.incr_keys = []
+
+    async def exists(self, key):
+        return 0
+
+    async def incr(self, key):
+        self.incr_keys.append(key)
+        return 1
+
+    async def expire(self, key, ttl):
+        return True
+
+    async def set(self, key, value, ex=None):
+        return True
+
+    async def delete(self, key):
+        return 1
+
+
+async def _bad_user_code_attempt(remote, forwarded_for, trusted=None):
+    store = MemoryDeviceCodeStorage()
+    store.redis = _RecordingRedis()
+    provider = _make_provider(client=None, device_store=store)
+    if trusted is not None:
+        provider._trusted_proxies = trusted
+    request = _make_post_request(
+        {"action": "approve", "user_code": "XXXXXXXX"}, remote=remote
+    )
+    request.headers = {"X-Forwarded-For": forwarded_for}
+    await provider.device_verification(request)
+    return store.redis.incr_keys
+
+
+@pytest.mark.asyncio
+async def test_device_lockout_ignores_spoofed_forwarded_for():
+    """An untrusted peer cannot rotate X-Forwarded-For to dodge the lockout."""
+    keys = await _bad_user_code_attempt("127.0.0.1", "198.51.100.23")
+    assert keys == ["oauth2:device:attempts:127.0.0.1"]
+
+
+@pytest.mark.asyncio
+async def test_device_lockout_honours_trusted_proxy():
+    """Behind a configured proxy the lockout keys on the forwarded client."""
+    keys = await _bad_user_code_attempt(
+        "10.0.0.1", "203.0.113.7", trusted={ip_address("10.0.0.1")}
+    )
+    assert keys == ["oauth2:device:attempts:203.0.113.7"]
