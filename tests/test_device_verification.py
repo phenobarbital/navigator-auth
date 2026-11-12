@@ -481,8 +481,8 @@ async def test_device_login_resumes_verification():
     request = _routed_request({}, method="POST")
     with patch.object(backend_mod.auth_conf, "AUTH_BASIC_2FA_ENABLED", False):
         response = await login_provider.auth_login(request)
-    assert isinstance(response, web.HTTPFound)
-    target = str(response.location)
+    assert response.status == 302
+    target = response.headers["Location"]
     assert target.startswith("/oauth2/device")
     assert f"user_code={dc.user_code}" in target
     assert "/oauth2/authorize" not in target
@@ -523,8 +523,9 @@ def test_device_authorize_redirect_shared_by_mfa_hop():
     provider = Oauth2Provider.__new__(Oauth2Provider)
     request = _routed_request({})
     response = provider._authorize_redirect(request, {"device_user_code": "BCDF-BCDF"})
-    assert isinstance(response, web.HTTPFound)
-    assert str(response.location).startswith("/oauth2/device?user_code=BCDF-BCDF")
+    assert response.status == 302
+    assert not isinstance(response, web.HTTPException)
+    assert response.headers["Location"].startswith("/oauth2/device?user_code=BCDF-BCDF")
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional, Union
 
 from aiohttp import web
+from ...responses import RedirectResponse
 
 from ...conf import (
     AUTH_EXCLUDE_LIST_KEY,
@@ -167,7 +168,7 @@ class AbstractSAMLBackend(ExternalAuth, ABC):
     def _render_binding_response(self, info: dict) -> web.Response:
         headers = dict(info.get("headers") or [])
         if "Location" in headers:
-            return web.HTTPFound(headers["Location"])
+            return RedirectResponse(headers["Location"])
         data = info.get("data")
         if data:
             html = data if isinstance(data, str) else "".join(data)

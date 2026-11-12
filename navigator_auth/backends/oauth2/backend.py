@@ -109,7 +109,7 @@ from ...exceptions import (
     InvalidAuth,
     IdentityStoreUnavailable,
 )
-from ...responses import JSONResponse
+from ...responses import JSONResponse, RedirectResponse
 from ..abstract import BaseAuthBackend, user_is_active
 from ... import conf as auth_conf
 from ...exceptions import MFARefused
@@ -1234,7 +1234,7 @@ class Oauth2Provider(BaseAuthBackend):
         }
         if state:
             params["state"] = state
-        return web.HTTPFound(self.prepare_url(redirect_uri, params))
+        return RedirectResponse(self.prepare_url(redirect_uri, params))
 
     async def cascade_access_revocation(self, user_id: int, client_uid: str, request: web.Request = None) -> dict:
         """Revoke everything a (user, client) pair currently holds.
@@ -1380,7 +1380,7 @@ class Oauth2Provider(BaseAuthBackend):
                 status=500,
             )
 
-        response = web.HTTPFound(f"/auth/{provider}/login")
+        response = RedirectResponse(f"/auth/{provider}/login")
         # Only the opaque handle rides in the browser.
         response.set_cookie(
             OAUTH2_RESUME_COOKIE,
@@ -1879,7 +1879,7 @@ class Oauth2Provider(BaseAuthBackend):
         else:
             raise self.auth_error(reason=f"Invalid HTTP Form Data: {request.method}", status=400)
 
-    def _authorize_redirect(self, request: web.Request, data: dict) -> web.HTTPFound:
+    def _authorize_redirect(self, request: web.Request, data: dict) -> web.Response:
         """Build the redirect back to ``/oauth2/authorize`` carrying the authorize request.
 
         Extracted verbatim from ``auth_login``; the key list is fixed.
@@ -1890,7 +1890,7 @@ class Oauth2Provider(BaseAuthBackend):
             if not _DEVICE_USER_CODE_RE.fullmatch(str(device_user_code)):
                 raise web.HTTPBadRequest(reason="Invalid device code.")
             device_location = request.app.router["nav_oauth2_device"].url_for()
-            return web.HTTPFound(device_location.with_query(user_code=str(device_user_code)))
+            return RedirectResponse(device_location.with_query(user_code=str(device_user_code)))
         location = request.app.router["nav_oauth2_authorize"].url_for()
         payload = {
             "client_id": data.get("client_id"),
@@ -1914,12 +1914,12 @@ class Oauth2Provider(BaseAuthBackend):
                 payload[key] = value
         payload = {k: v for k, v in payload.items() if v is not None}
         url = location.with_query(**payload)
-        return web.HTTPFound(url)
+        return RedirectResponse(url)
 
-    def _second_factor_issuer(self, request: web.Request, response: web.HTTPFound):
+    def _second_factor_issuer(self, request: web.Request, response: web.Response):
         """Return the gate issuer that creates the session on ``response``."""
 
-        async def _issue(fresh: Any, extra: dict) -> web.HTTPFound:
+        async def _issue(fresh: Any, extra: dict) -> web.Response:
             try:
                 session = await self._create_user_session(
                     request, fresh, response=response, extra={**extra, "auth_method": "oauth2"}
@@ -1935,7 +1935,7 @@ class Oauth2Provider(BaseAuthBackend):
 
         return _issue
 
-    async def _oauth2_second_factor(self, request: web.Request, user: Any, data: dict, response: web.HTTPFound):
+    async def _oauth2_second_factor(self, request: web.Request, user: Any, data: dict, response: web.Response):
         """2FA-on tail of the password POST: decide through the shared gate (spec M6, D4)."""
         async with mfa_services_lease(request.app) as services:
             if services is None or not services.available:

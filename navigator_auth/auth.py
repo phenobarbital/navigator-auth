@@ -524,7 +524,8 @@ class AuthHandler:
         # if not userdata, then raise an not Authorized
         if not userdata:
             raise self.ForbiddenAccess(reason="Access Denied")
-        if isinstance(userdata, web.HTTPFound):
+        if isinstance(userdata, web.StreamResponse):
+            # A backend answered with a response (e.g. the TROC redirect).
             return userdata
         return await self.finalize_login(request, userdata)
 

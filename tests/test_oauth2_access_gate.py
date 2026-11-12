@@ -211,7 +211,9 @@ class TestGateEnforcement:
         response = await provider._enforce_access_gate(_request(), _client(gated=True), USER_ID, REDIRECT_URI, STATE)
 
         assert response is not None
-        assert isinstance(response, web.HTTPFound)
+        # A returned redirect (RedirectResponse), never a returned HTTPException.
+        assert response.status == 302
+        assert not isinstance(response, web.HTTPException)
         location = response.headers["Location"]
         assert location.startswith(REDIRECT_URI)
         assert "error=access_denied" in location
@@ -275,7 +277,7 @@ class TestGateEnforcement:
         """No validated redirect_uri ⇒ render, never emit a bare redirect."""
         response = await provider._enforce_access_gate(_request(), _client(gated=True), USER_ID, None, "")
         assert response.status == 403
-        assert not isinstance(response, web.HTTPFound)
+        assert "Location" not in response.headers
         assert b"access_denied" in response.body
 
     @pytest.mark.asyncio

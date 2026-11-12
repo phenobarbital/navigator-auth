@@ -9,6 +9,7 @@ import importlib
 from urllib.parse import urlparse
 from requests.models import PreparedRequest
 from aiohttp import web, hdrs
+from ..responses import RedirectResponse
 from aiohttp.web_urldispatcher import SystemRoute, StaticResource
 from navconfig.logging import logging
 from asyncdb.models import Model
@@ -524,4 +525,4 @@ class BaseAuthBackend(ABC):
         else:
             redirect_url = self.finish_redirect_url
         url = self.prepare_url(redirect_url, params)
-        return web.HTTPFound(url, headers=headers)
+        return RedirectResponse(url, headers=headers)
