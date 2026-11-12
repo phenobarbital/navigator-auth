@@ -837,13 +837,14 @@ class AuthHandler:
         if exception:
             response_obj["error"] = str(exception)
         args = {"content_type": content_type, "headers": headers, **kwargs}
+        # ``text=``, not ``body=``: aiohttp deprecates ``body`` for HTTP exceptions.
         if isinstance(reason, dict):
             response_obj = {**response_obj, **reason}
             # args["content_type"] = "application/json"
-            args["body"] = self._json.dumps(response_obj)
+            args["text"] = self._json.dumps(response_obj)
         else:
             response_obj["reason"] = reason
-            args["body"] = self._json.dumps(response_obj)
+            args["text"] = self._json.dumps(response_obj)
         # defining the error
         if status == 400:  # bad request
             obj = web.HTTPBadRequest(**args)

@@ -239,16 +239,17 @@ class BaseAuthBackend(ABC):
         if exception:
             response_obj["error"] = str(exception)
         args = {"content_type": content_type, "headers": headers, **kwargs}
+        # ``text=``, not ``body=``: aiohttp deprecates ``body`` for HTTP exceptions.
         if isinstance(reason, dict):
             response_obj = {**response_obj, **reason}
             args["content_type"] = "application/json"
-            args["body"] = json_encoder(response_obj)
+            args["text"] = json_encoder(response_obj)
         else:
             response_obj["reason"] = reason
             args["reason"] = json_encoder(response_obj)
         # defining the error
         if args["content_type"] == "application/json":
-            args["body"] = args["reason"]
+            args["text"] = args["reason"]
             del args["reason"]
         if status == 400:  # bad request
             obj = web.HTTPBadRequest(**args)
