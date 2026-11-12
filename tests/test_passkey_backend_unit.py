@@ -209,3 +209,40 @@ async def test_rate_limit_disabled_and_enforced(backend, monkeypatch):
     with pytest.raises(AuthException) as exc:
         await backend._rate_limit(req)
     assert exc.value.status == 429
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_keys_on_trusted_forwarded_client(backend, monkeypatch):
+    from ipaddress import ip_address
+
+    import navigator_auth.conf as conf
+
+    keys = []
+
+    class _Redis:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def incr(self, key):
+            keys.append(key)
+            return 1
+
+        async def expire(self, key, ttl):
+            return True
+
+    monkeypatch.setattr(conf, "PASSKEY_LOGIN_OPTIONS_RATE", 5, raising=False)
+    monkeypatch.setattr("navigator_auth.backends.passkey.aioredis.Redis", lambda **kw: _Redis())
+    backend._pool = object()
+    req = make_mocked_request("POST", "/", headers={"X-Forwarded-For": "203.0.113.7"})
+    monkeypatch.setattr(type(req), "remote", property(lambda self: "10.0.0.1"), raising=False)
+
+    monkeypatch.setattr("navigator_auth.backends.passkey._TRUSTED_PROXIES", {ip_address("10.0.0.1")})
+    await backend._rate_limit(req)
+    assert keys[-1] == "passkey_rl_203.0.113.7"
+
+    monkeypatch.setattr("navigator_auth.backends.passkey._TRUSTED_PROXIES", set())
+    await backend._rate_limit(req)
+    assert keys[-1] == "passkey_rl_10.0.0.1"

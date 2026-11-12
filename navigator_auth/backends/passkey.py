@@ -17,6 +17,7 @@ import redis.asyncio as aioredis
 from aiohttp import web
 
 from .. import conf as auth_conf
+from ..authorizations._client_ip import limiter_client_ip, parse_proxies
 from ..conf import AUTH_EXCLUDE_LIST_KEY
 from ..exceptions import AuthException, ConfigError, FailedAuth, InvalidAuth, UserNotFound
 from ..identities import AuthUser
@@ -61,6 +62,9 @@ def _json_errors(handler):
             return JSONResponse({"reason": message}, status=status)
 
     return wrapper
+
+
+_TRUSTED_PROXIES = parse_proxies(auth_conf.ALLOWED_IP_TRUSTED_PROXIES)
 
 
 class PasskeyUser(AuthUser):
@@ -180,15 +184,16 @@ class PasskeyAuth(BasicAuth):
         return ids
 
     async def _rate_limit(self, request: web.Request) -> None:
-        """Per-remote-address cap on ``login/options`` (``PASSKEY_LOGIN_OPTIONS_RATE`` per minute).
+        """Per-client cap on ``login/options`` (``PASSKEY_LOGIN_OPTIONS_RATE`` per minute).
 
-        Disabled when the setting is 0. Uses ``request.remote`` only: behind a proxy
-        enforce the limit there (``X-Forwarded-*`` is never trusted).
+        Disabled when the setting is 0. The client is resolved by
+        ``limiter_client_ip``: ``X-Forwarded-For`` / ``CF-Connecting-IP`` count
+        only when the direct peer is listed in ``ALLOWED_IP_TRUSTED_PROXIES``.
         """
         limit = auth_conf.PASSKEY_LOGIN_OPTIONS_RATE
         if not limit:
             return
-        key = f"passkey_rl_{request.remote}"
+        key = f"passkey_rl_{limiter_client_ip(request, _TRUSTED_PROXIES)}"
         try:
             async with aioredis.Redis(connection_pool=self._pool) as redis:
                 count = await redis.incr(key)
