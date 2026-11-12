@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Optional
 
 from aiohttp import web
+from asyncdb.exceptions import NoDataFound
 
 from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY, AUTH_OTP_CHALLENGE_TTL
 from navigator_auth.decorators import policy_allows
@@ -153,7 +154,11 @@ class MfaHandler:
             raise web.HTTPUnauthorized(text='{"error": "session_required"}', content_type="application/json")
         try:
             record = await services.backend._idp.user_from_id(int(user_id))
-        except UserNotFound:
+        except UserNotFound as err:
+            # The production IdP wraps both missing rows and dependency errors
+            # in UserNotFound. Only its missing-row forms invalidate a session.
+            if err.__cause__ is not None and not isinstance(err.__cause__, NoDataFound):
+                raise MfaStorageError("MFA account lookup unavailable") from err
             raise web.HTTPUnauthorized(text='{"error": "session_required"}', content_type="application/json")
         return services, session, record
 

@@ -8,7 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from aiohttp import web
+from asyncdb.exceptions import DriverError, NoDataFound, ProviderError
 
+from navigator_auth.backends.idp import IdentityProvider
 from navigator_auth.conf import AUTH_DB_SCHEMA
 from navigator_auth.handlers.mfa import MfaHandler
 from navigator_auth.mfa.exceptions import MfaStorageError
@@ -279,3 +282,54 @@ async def test_self_disenrollment_invalidates_all_backup_codes(env) -> None:  # 
     assert await env.services.backup_codes.remaining(uid) == 0
     for code in codes:
         assert not await env.services.backup_codes.consume(uid, code)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["disenroll_totp", "backup_codes"])
+@pytest.mark.parametrize("lookup", ["pool_failure", "query_failure", "missing", "empty"])
+async def test_management_real_idp_distinguishes_outage_from_missing_user(
+    env, monkeypatch, method: str, lookup: str  # noqa: F811
+) -> None:
+    """Errors below the production IdP lookup retain unavailable versus missing-user semantics."""
+    user, session, secret, _ = await env.enrolled_user()
+    uid = user["user_id"]
+    seed = await env.active_seed_row(uid)
+    sql = f"SELECT * FROM {AUTH_DB_SCHEMA}.user_mfa_backup_codes WHERE user_id=$1 ORDER BY id"
+    backups = await env.rows(sql, uid)
+    connection = AsyncMock()
+    connection.__aenter__.return_value = connection
+    pool = SimpleNamespace(acquire=AsyncMock(return_value=connection))
+    query = AsyncMock(return_value=None)
+    if lookup == "pool_failure":
+        pool.acquire.side_effect = ProviderError("database unavailable")
+    elif lookup == "query_failure":
+        query.side_effect = DriverError("query unavailable")
+    elif lookup == "missing":
+        query.side_effect = NoDataFound("no user row")
+
+    idp = IdentityProvider.__new__(IdentityProvider)
+    idp.app = {"authdb": pool}
+    idp.user_search = SimpleNamespace(Meta=SimpleNamespace(connection=None), get=query)
+    idp.check_password = Mock()
+    monkeypatch.setattr(env.services.backend, "_idp", idp)
+    proof = AsyncMock()
+    monkeypatch.setattr(env.services.providers["totp"], "verify", proof)
+    body = {"password": user["password_plain"], "code": env.code(secret)[0]}
+    if lookup in ("missing", "empty"):
+        with pytest.raises(web.HTTPUnauthorized) as error:
+            await env.call(method, uid, body, session)
+        assert error.value.status == 401
+        assert error.value.text == '{"error": "session_required"}'
+    else:
+        response, payload = await env.call(method, uid, body, session)
+        assert (response.status, payload) == (503, {"error": "mfa_unavailable"})
+        assert response.headers["Cache-Control"] == "no-store"
+    pool.acquire.assert_awaited_once()
+    if lookup == "pool_failure":
+        query.assert_not_awaited()
+    else:
+        query.assert_awaited_once_with(**{idp.userid_attribute: uid})
+    idp.check_password.assert_not_called()
+    proof.assert_not_awaited()
+    assert await env.active_seed_row(uid) == seed
+    assert await env.rows(sql, uid) == backups
