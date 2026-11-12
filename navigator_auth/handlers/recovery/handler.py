@@ -25,7 +25,9 @@ import redis.asyncio as aioredis
 from asyncdb.exceptions import NoDataFound
 from navigator.views import BaseView
 
+from navigator_auth.authorizations._client_ip import limiter_client_ip, parse_proxies
 from navigator_auth.conf import (
+    ALLOWED_IP_TRUSTED_PROXIES,
     AUTH_RECOVERY_SECRET,
     AUTH_RECOVERY_TTL,
     AUTH_RECOVERY_CONFIRM_TTL,
@@ -52,6 +54,8 @@ from navigator_auth.mfa.security import advisory_user_lock
 from navigator_auth.security_state.store import SecurityStateError, increment_generation, record_confirmation
 
 logger = logging.getLogger("navigator.recovery")
+
+_TRUSTED_PROXIES = parse_proxies(ALLOWED_IP_TRUSTED_PROXIES)
 
 _USERS = f"{AUTH_DB_SCHEMA}.{AUTH_USERS_TABLE}"
 # Consumption markers outlive the signed confirmation by this clock-skew margin (spec M4 durable contract).
@@ -202,7 +206,7 @@ class PasswordRecoveryHandler(BaseView):
 
         if email:
             email_norm = str(email).strip().lower()
-            client_ip = self.request.remote or "unknown"
+            client_ip = limiter_client_ip(self.request, _TRUSTED_PROXIES)
             allowed = await self._email_limiter.check(email_norm)
             if allowed:
                 allowed = await self._ip_limiter.check(client_ip)
