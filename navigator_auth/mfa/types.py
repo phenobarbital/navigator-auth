@@ -103,9 +103,17 @@ class PendingEnrollment(MfaModel):
     user_id: int
     session_hash: str
     security_version: int
+    context_digest: str = Field(min_length=1)
     sealed_seed: str = Field(repr=False)
     issued_at: float
     signature: str
+
+
+class EnrollmentConfirmation(MfaModel):
+    """Outcome of confirmation; -1 distinguishes absent or stale enrollment from a code failure."""
+
+    confirmed: bool
+    attempts_remaining: int = -1
 
 
 class MfaAuditEntry(MfaModel):

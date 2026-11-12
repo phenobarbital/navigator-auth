@@ -1,13 +1,13 @@
-# TASK-221: Return 503 for MFA management storage outages
+# TASK-223: Complete enrollment security regression evidence
 
 **Feature**: FEAT-116 — MFA management and evaluation review fixes
 **Spec**: `sdd/specs/handlers-mfa-tech-debt.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
-**Depends-on**: TASK-220
+**Depends-on**: TASK-222
 **Assigned-to**: unassigned
-**Discovered-from**: `issue:6537c3016b67`
+**Discovered-from**: `issue:64aa9130a1e1`
 
 ## Context
 
@@ -15,14 +15,13 @@ User requested observations #13–#15. This task belongs to the seven-issue grou
 
 ## Scope
 
-Inspect current catches first: some paths already catch MfaStorageError. Ensure disenroll_totp and backup_codes consistently return 503 mfa_unavailable for dependency failures, including pre-proof reads, proof consumption, transaction body and commit. Preserve explicit HTTP refusals. Add fault-injection regressions proving no successful envelope or partial committed credential state. Do not hide programmer errors with an indiscriminate success fallback.
+The current file already has the previously missing named tests. Verify their behavior against real Postgres/Redis and extend meaningful gaps revealed by the preceding tasks. Cover fresh password and existing strong-factor proof, isolated pending seed, single-use confirmation, stale email challenge after confirmation and durable audit. Add explicit context-drift and accurate-budget assertions if preceding tasks do not fully cover them. Do not replace live integration tests with tautologies or mark skipped service-dependent runs as passed.
 
 ## Files to Create / Modify
 
 | File | Action | Description |
 |---|---|---|
-| `navigator_auth/handlers/mfa.py` | MODIFY | Scoped implementation or regression evidence |
-| `tests/test_mfa_review_fixes_management.py` | MODIFY | Scoped implementation or regression evidence |
+| `tests/test_mfa_enrollment_security.py` | MODIFY | Scoped implementation or regression evidence |
 
 ## Codebase Contract (Anti-Hallucination)
 
@@ -40,17 +39,12 @@ Verified files and anchors are reproduced below from the current checkout. Use i
   "schema_version": 1,
   "targets": [
     {
-      "path": "navigator_auth/handlers/mfa.py",
-      "action": "MODIFY"
-    },
-    {
-      "path": "tests/test_mfa_review_fixes_management.py",
+      "path": "tests/test_mfa_enrollment_security.py",
       "action": "MODIFY"
     }
   ],
   "contract_symbols": [
-    "sym:navigator_auth/handlers/mfa.py#_error",
-    "sym:tests/test_mfa_review_fixes_management.py#test_backup_regeneration_requires_proof"
+    "sym:tests/test_mfa_enrollment_security.py#Record"
   ]
 }
 ```
@@ -63,19 +57,11 @@ Verified files and anchors are reproduced below from the current checkout. Use i
 4. Extend the listed tests to exercise real behavior and failure paths, then run the validation commands. Record service prerequisites and actual results.
 5. Commit implementation and finalize this task with exact-HEAD evidence using parrot sdd task finalize; never mark it complete with untested or partially resolved scope.
 
-### `navigator_auth/handlers/mfa.py` (MODIFY)
+### `tests/test_mfa_enrollment_security.py` (MODIFY)
 
 Verified anchor (1 exact-line occurrence):
 ```text
-def _error(code: str, status: int, **extra: Any) -> web.Response:
-```
-Inspect the complete surrounding implementation before editing; apply only the scope above. Preserve unrelated behavior.
-
-### `tests/test_mfa_review_fixes_management.py` (MODIFY)
-
-Verified anchor (1 exact-line occurrence):
-```text
-async def test_backup_regeneration_requires_proof(env):
+class Record(dict):
 ```
 Inspect the complete surrounding implementation before editing; apply only the scope above. Preserve unrelated behavior.
 
@@ -93,4 +79,19 @@ Inspect the complete surrounding implementation before editing; apply only the s
 
 ## Validation Commands
 
-- `pytest tests/test_mfa_review_fixes_management.py -q`
+- `pytest tests/test_mfa_enrollment_security.py -q`
+
+## Completion Note
+
+- Task: TASK-223
+- Feature: handlers-mfa-tech-debt
+- Implementation SHA: aa75d49619533dc57565e2753e7206982aef398e
+- Closed at (UTC): 2026-11-11T23:51:13+00:00
+- Fix commits: none
+
+| Metric | Value |
+|---|---|
+| validation_refs | 1 |
+| fix_commits | 0 |
+| review | TASK-223-review.md |
+| validation | Host executed tests; inspect TASK-223-host.log |

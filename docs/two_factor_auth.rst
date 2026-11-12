@@ -323,6 +323,41 @@ a seed without a session, but any vault error refuses the login.
 Accepted bounds
 ---------------
 
+Redis and database readiness
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+MFA requires Redis 6.2 or newer: the atomic consumption Lua script calls
+``GETDEL``, and email-code replacement uses ``SET KEEPTTL``. Startup reads
+``INFO server`` to validate the version without creating keys. Unreadable server
+information, an older Redis, or missing database relations, columns or usable
+indexes leaves MFA unavailable. Operators must permit this read-only readiness
+check. Database readiness checks index ownership, validity and required uniqueness.
+
+Callback and transaction behavior
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Synchronous delivery callbacks run in a worker thread so SMTP or other blocking
+I/O does not block the event loop. Async callbacks and returned awaitables run on
+the event loop. Cancelling or timing out a synchronous callback cannot interrupt
+the thread: the delivery may finish later. Callbacks should set their own I/O
+timeouts and tolerate abandoned requests. Async cancellation is propagated.
+
+The gate commits database changes before issuing a session, including trusted
+device rotation or creation. A matching session advisory lock retains per-user
+serialization until issuance finishes. If explicit unlock fails, the underlying
+database connection is terminated before it returns to the pool. Commit failure
+therefore prevents session issuance; an already-consumed challenge stays consumed.
+Self-disenrollment invalidates unused backup codes in the same transaction.
+
+The per-user budget deliberately combines attempts across challenges. An attacker
+who knows a password can exhaust the victim's verification allowance and temporarily
+deny access; per-IP limiting reduces distributed pressure but does not eliminate
+that tradeoff. Management routes share ``mgmt:<user_id>`` across password and factor
+proofs, while enrollment confirmation retains its separate attempt budget.
+
+Authentication bounds
+~~~~~~~~~~~~~~~~~~~~~
+
 * A shared mailbox weakens both the e-mail factor and password recovery. This is
   why a superuser cannot remain on the e-mail floor.
 * E-mail addresses are not verified. Whether the e-mail floor is adequate depends

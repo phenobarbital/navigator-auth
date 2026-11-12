@@ -5,7 +5,7 @@
   "type": "feature",
   "base_branch": "dev",
   "created_at": "2026-11-11T22:41:18.049418+00:00",
-  "completed_at": null,
+  "completed_at": "2026-11-11T23:51:13+00:00",
   "parallel_semantics": "exclusive",
   "validation_contract": "required",
   "test_contract": {
@@ -22,7 +22,9 @@
           "tests/test_mfa_email_provider.py",
           "tests/test_mfa_migrations.py",
           "tests/test_mfa_review_fixes_gate.py",
-          "tests/test_mfa_review_fixes_docs.py"
+          "tests/test_mfa_review_fixes_docs.py",
+          "tests/test_mfa_verify.py",
+          "tests/test_mfa_basic_auth_hook.py"
         ],
         "settings": {
           "markers": ""
@@ -34,7 +36,7 @@
         ]
       }
     ],
-    "digest": "sha256:11882d2bf6a28ba1d516e758d3350cec564c4e75192ddbb7aaf1fbb0450a7671"
+    "digest": "sha256:b4be61e9e978fd68288aae3d14f66819a624124357e57c66466e2eaaba1a1107"
   },
   "tasks": [
     {
@@ -44,16 +46,17 @@
       "feature_id": "FEAT-116",
       "feature": "handlers-mfa-tech-debt",
       "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [],
       "parallel": true,
       "parallelism_notes": "Independent initial evaluation snapshot task.",
-      "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-217-factor-query-snapshot.md"
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T22:43:05.971086+00:00",
+      "completed_at": "2026-11-11T23:01:13+00:00",
+      "file": "sdd/tasks/completed/TASK-217-factor-query-snapshot.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-218",
@@ -62,7 +65,7 @@
       "feature_id": "FEAT-116",
       "feature": "handlers-mfa-tech-debt",
       "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -70,10 +73,11 @@
       ],
       "parallel": true,
       "parallelism_notes": "TASK-217 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
-      "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-218-shared-management-context.md"
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:02:28+00:00",
+      "completed_at": "2026-11-11T23:05:01+00:00",
+      "file": "sdd/tasks/completed/TASK-218-shared-management-context.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-219",
@@ -82,7 +86,7 @@
       "feature_id": "FEAT-116",
       "feature": "handlers-mfa-tech-debt",
       "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -90,10 +94,11 @@
       ],
       "parallel": true,
       "parallelism_notes": "TASK-218 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
-      "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-219-enrollment-budget-context.md"
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:05:29+00:00",
+      "completed_at": "2026-11-11T23:10:29+00:00",
+      "file": "sdd/tasks/completed/TASK-219-enrollment-budget-context.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-220",
@@ -102,7 +107,7 @@
       "feature_id": "FEAT-116",
       "feature": "handlers-mfa-tech-debt",
       "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -110,10 +115,11 @@
       ],
       "parallel": true,
       "parallelism_notes": "TASK-219 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
-      "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-220-management-attempt-limits.md"
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:10:43+00:00",
+      "completed_at": "2026-11-11T23:31:44+00:00",
+      "file": "sdd/tasks/completed/TASK-220-management-attempt-limits.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-221",
@@ -122,7 +128,7 @@
       "feature_id": "FEAT-116",
       "feature": "handlers-mfa-tech-debt",
       "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -130,10 +136,11 @@
       ],
       "parallel": true,
       "parallelism_notes": "TASK-220 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
-      "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-221-management-storage-errors.md"
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:32:25.767177+00:00",
+      "completed_at": "2026-11-11T23:33:58+00:00",
+      "file": "sdd/tasks/completed/TASK-221-management-storage-errors.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-222",
@@ -142,7 +149,7 @@
       "feature_id": "FEAT-116",
       "feature": "handlers-mfa-tech-debt",
       "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -150,10 +157,11 @@
       ],
       "parallel": true,
       "parallelism_notes": "TASK-221 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
-      "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-222-mfa-callback-operational-followups.md"
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:33:58.814409+00:00",
+      "completed_at": "2026-11-11T23:48:21+00:00",
+      "file": "sdd/tasks/completed/TASK-222-mfa-callback-operational-followups.md",
+      "verification": "verified"
     },
     {
       "id": "TASK-223",
@@ -162,7 +170,7 @@
       "feature_id": "FEAT-116",
       "feature": "handlers-mfa-tech-debt",
       "spec": "sdd/specs/handlers-mfa-tech-debt.spec.md",
-      "status": "pending",
+      "status": "done",
       "priority": "high",
       "effort": "M",
       "depends_on": [
@@ -170,10 +178,11 @@
       ],
       "parallel": true,
       "parallelism_notes": "TASK-222 provides the preceding MFA contracts and overlapping handler/services/test changes consumed by this task; serialize writers.",
-      "assigned_to": null,
-      "started_at": null,
-      "completed_at": null,
-      "file": "sdd/tasks/active/TASK-223-enrollment-security-evidence.md"
+      "assigned_to": "agent:sdd-worker:mfa_116_implementation",
+      "started_at": "2026-11-11T23:48:21.964890+00:00",
+      "completed_at": "2026-11-11T23:51:13+00:00",
+      "file": "sdd/tasks/completed/TASK-223-enrollment-security-evidence.md",
+      "verification": "verified"
     }
   ]
 }

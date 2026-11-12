@@ -3,6 +3,7 @@
 import base64
 import logging
 import os
+import secrets
 import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -19,8 +20,9 @@ from navigator_auth.vault.integration import VAULT_KEYRING_APP_KEY
 
 from .abstract import AbstractOTPProvider
 from .exceptions import MfaStorageError
+from .state import _field
 from .store import ENROLLMENT_TTL, MfaChallengeStore, _hash_token, new_opaque_token
-from .types import PROVIDER_TOTP, EnrollmentAuthorization, MfaChallenge, PendingEnrollment
+from .types import PROVIDER_TOTP, EnrollmentAuthorization, EnrollmentConfirmation, MfaChallenge, PendingEnrollment
 
 logger = logging.getLogger("navigator.mfa")
 TOTP_VAULT_KEY = "mfa:totp"
@@ -54,17 +56,6 @@ def pending_seed_context(
             ("enrollment", enrollment_hash),
         ),
     )
-
-
-def _field(user: Any, name: str, default: Any = None) -> Any:
-    """Read a field from a mapping or model-like object."""
-    try:
-        return user[name]
-    except (KeyError, TypeError, AttributeError):
-        try:
-            return user.get(name, default)
-        except (AttributeError, TypeError):
-            return getattr(user, name, default)
 
 
 class TOTPProvider(AbstractOTPProvider):
@@ -166,6 +157,7 @@ class TOTPProvider(AbstractOTPProvider):
             user_id=user_id,
             session_id=authorization.session_id,
             security_version=authorization.security_version,
+            context_digest=authorization.context_digest,
             sealed_seed=sealed,
         )
         account = str(_field(user, "username") or user_id)
@@ -181,31 +173,58 @@ class TOTPProvider(AbstractOTPProvider):
         return {}
 
     async def confirm_enrollment(
-        self, user: Mapping, code: str, enrollment_token: str, session_id: str, *, conn: Any = None
+        self,
+        user: Mapping,
+        code: str,
+        enrollment_token: str,
+        session_id: str,
+        *,
+        conn: Any = None,
+        context_digest: Optional[str] = None,
     ) -> bool:
-        """Confirm and install a pending seed on the caller's connection."""
+        """Return a boolean confirmation; callers must supply the current security context."""
+        result = await self.confirm_enrollment_result(
+            user, code, enrollment_token, session_id, conn=conn, context_digest=context_digest
+        )
+        return result.confirmed
+
+    async def confirm_enrollment_result(
+        self,
+        user: Mapping,
+        code: str,
+        enrollment_token: str,
+        session_id: str,
+        *,
+        conn: Any = None,
+        context_digest: Optional[str] = None,
+    ) -> EnrollmentConfirmation:
+        """Confirm and install a seed, preserving the atomic failure budget for the caller."""
         if conn is None:
             raise ValueError("confirm_enrollment requires conn")
+        if not context_digest:
+            return EnrollmentConfirmation(confirmed=False)
         user_id = int(_field(user, "user_id"))
         pending = await self._store.peek_enrollment(enrollment_token)
         if pending is None:
-            return False
+            return EnrollmentConfirmation(confirmed=False)
         if pending.user_id != user_id or pending.session_hash != _hash_token(session_id):
-            await self._store.register_enrollment_failure(enrollment_token)
-            return False
-        if await self._current_version(conn, user_id) != pending.security_version:
+            remaining = await self._store.register_enrollment_failure(enrollment_token)
+            return EnrollmentConfirmation(confirmed=False, attempts_remaining=remaining)
+        if not secrets.compare_digest(context_digest, pending.context_digest) or (
+            await self._current_version(conn, user_id) != pending.security_version
+        ):
             await self._store.consume_enrollment(enrollment_token)
-            return False
+            return EnrollmentConfirmation(confirmed=False)
         seed = self._open_pending(pending, enrollment_token)
         step = self.match_step(seed, code, self._clock())
         if step is None or not await self._store.mark_totp_step(user_id, step, REPLAY_TTL):
-            await self._store.register_enrollment_failure(enrollment_token)
-            return False
+            remaining = await self._store.register_enrollment_failure(enrollment_token)
+            return EnrollmentConfirmation(confirmed=False, attempts_remaining=remaining)
         consumed = await self._store.consume_enrollment(enrollment_token)
         if consumed is None or consumed != pending:
-            return False
+            return EnrollmentConfirmation(confirmed=False)
         await self._install_seed(conn, user_id, seed)
-        return True
+        return EnrollmentConfirmation(confirmed=True)
 
     async def verify(
         self,

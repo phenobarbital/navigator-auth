@@ -1,13 +1,13 @@
-# TASK-218: Use shared MFA evaluation for management context
+# TASK-220: Rate-limit session-authenticated MFA management proofs
 
 **Feature**: FEAT-116 — MFA management and evaluation review fixes
 **Spec**: `sdd/specs/handlers-mfa-tech-debt.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
-**Depends-on**: TASK-217
+**Depends-on**: TASK-219
 **Assigned-to**: unassigned
-**Discovered-from**: `issue:f46f232584fd`
+**Discovered-from**: `issue:ad8553389bda`
 
 ## Context
 
@@ -15,7 +15,7 @@ User requested observations #13–#15. This task belongs to the seven-issue grou
 
 ## Scope
 
-Replace duplicated _security_context logic with services.evaluate(record, conn=conn), adapting its return to the existing tuple. Map MFARefused to its existing fail-closed HTTP status/error shape. Preserve session-authenticated enrollment access for users entitled to enroll; test enforced-superuser without strong factor explicitly against the approved shared evaluation contract. Avoid nested connection acquisition.
+Apply existing user_limiter using mgmt:<uid> and ip_limiter before every password or factor proof in enroll_totp, disenroll_totp and backup_codes. Share the management namespace across these routes. Refusal returns 429 rate_limited and performs no password check, proof consumption or state mutation. Retain confirm enrollment's separate limiter. Test user and IP refusal, wrong password/proof consuming budget, and allowed paths. Do not change limiter parsing (separate unclaimed issue).
 
 ## Files to Create / Modify
 
@@ -23,6 +23,7 @@ Replace duplicated _security_context logic with services.evaluate(record, conn=c
 |---|---|---|
 | `navigator_auth/handlers/mfa.py` | MODIFY | Scoped implementation or regression evidence |
 | `tests/test_mfa_review_fixes_management.py` | MODIFY | Scoped implementation or regression evidence |
+| `tests/test_mfa_enrollment_security.py` | MODIFY | Scoped implementation or regression evidence |
 
 ## Codebase Contract (Anti-Hallucination)
 
@@ -46,11 +47,16 @@ Verified files and anchors are reproduced below from the current checkout. Use i
     {
       "path": "tests/test_mfa_review_fixes_management.py",
       "action": "MODIFY"
+    },
+    {
+      "path": "tests/test_mfa_enrollment_security.py",
+      "action": "MODIFY"
     }
   ],
   "contract_symbols": [
     "sym:navigator_auth/handlers/mfa.py#_error",
-    "sym:tests/test_mfa_review_fixes_management.py#test_backup_regeneration_requires_proof"
+    "sym:tests/test_mfa_review_fixes_management.py#test_backup_regeneration_requires_proof",
+    "sym:tests/test_mfa_enrollment_security.py#Record"
   ]
 }
 ```
@@ -79,6 +85,14 @@ async def test_backup_regeneration_requires_proof(env):
 ```
 Inspect the complete surrounding implementation before editing; apply only the scope above. Preserve unrelated behavior.
 
+### `tests/test_mfa_enrollment_security.py` (MODIFY)
+
+Verified anchor (1 exact-line occurrence):
+```text
+class Record(dict):
+```
+Inspect the complete surrounding implementation before editing; apply only the scope above. Preserve unrelated behavior.
+
 ### Completion checklist
 
 - [ ] Scoped behavior implemented and no unfinished code placeholders remain.
@@ -94,3 +108,19 @@ Inspect the complete surrounding implementation before editing; apply only the s
 ## Validation Commands
 
 - `pytest tests/test_mfa_review_fixes_management.py -q`
+- `pytest tests/test_mfa_enrollment_security.py -q`
+
+## Completion Note
+
+- Task: TASK-220
+- Feature: handlers-mfa-tech-debt
+- Implementation SHA: 9f2e1d3bde7415bf6af682b3ef6780fe5b37d982
+- Closed at (UTC): 2026-11-11T23:31:44+00:00
+- Fix commits: none
+
+| Metric | Value |
+|---|---|
+| validation_refs | 1 |
+| fix_commits | 0 |
+| review | TASK-220-review.md |
+| validation | Host executed tests; inspect TASK-220-host.log |

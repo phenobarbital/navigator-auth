@@ -382,6 +382,9 @@ async def test_enrollment_authorization_is_server_side(env):
     assert pending.user_id == uid
     assert pending.session_hash == hashlib.sha256(session.session_id.encode()).hexdigest()
     assert pending.security_version == await env.version(uid)
+    evaluation = await env.services.evaluate(user)
+    assert pending.context_digest == evaluation.context_digest
+    assert pending.context_digest != forged["context_digest"]
     assert started["expires_in"] == ENROLLMENT_TTL
 
 
@@ -407,8 +410,15 @@ async def test_totp_pending_seed_isolated(env):
 
     # The right code from a different session of the same user fails.
     code, _ = env.code(new_secret)
-    response, _ = await env.confirm(user, FakeSession(uid), token, code)
-    assert response.status == 400
+    response, body = await env.confirm(user, FakeSession(uid), token, code)
+    assert (response.status, body) == (400, {"error": "invalid_code", "attempts_remaining": 3})
+    assert await env.active_seed_row(uid) == active
+
+    # A different authenticated user cannot install the pending owner's seed.
+    other = await env.new_user()
+    response, body = await env.confirm(other, FakeSession(other["user_id"]), token, code)
+    assert (response.status, body) == (400, {"error": "invalid_code", "attempts_remaining": 2})
+    assert not await env.services.state.totp_confirmed(other["user_id"])
     assert await env.active_seed_row(uid) == active
 
     # Expiry: the pending record is gone, the right code from the right session fails.
@@ -457,6 +467,9 @@ async def test_totp_confirmation_single_use(env):
     assert statuses == [200, 400]
     confirmed = next(body for response, body in results if response.status == 200)
     assert confirmed["status"] == "confirmed"
+    refused = next(body for response, body in results if response.status == 400)
+    assert refused == {"error": "invalid_enrollment"}
+    assert await env.services.store.peek_enrollment(started["enrollment_token"]) is None
 
     assert len(await env.audit(uid, "totp_confirm")) == 1
     assert await env.version(uid) == version_before + 1
@@ -615,22 +628,86 @@ async def test_confirm_budget_survives_failures(env):
     budget = env.services.store._max_attempts  # AUTH_OTP_MAX_ATTEMPTS, spec default 5
     ttl = await env.pending_ttl_ms(token)
 
-    for _ in range(budget - 1):
+    for attempt in range(1, budget):
         response, body = await env.confirm(user, session, token, WRONG_CODE)
         assert (response.status, body["error"]) == (400, "invalid_code")
+        assert body["attempts_remaining"] == budget - attempt
         assert await env.services.store.peek_enrollment(token) is not None
         current = await env.pending_ttl_ms(token)
         assert 0 < current <= ttl
         ttl = current
 
     response, body = await env.confirm(user, session, token, WRONG_CODE)
-    assert response.status == 400
+    assert (response.status, body) == (400, {"error": "invalid_code", "attempts_remaining": 0})
     assert await env.services.store.peek_enrollment(token) is None
 
     code, _ = env.code(started["secret_b32"])
     response, body = await env.confirm(user, session, token, code)
     assert (response.status, body) == (400, {"error": "invalid_enrollment"})
     assert not await env.services.state.totp_confirmed(user["user_id"])
+
+
+@pytest.mark.asyncio
+async def test_confirmation_rejects_policy_context_drift(env) -> None:
+    """A policy change invalidates a pending seed even without changing its security version."""
+    user = await env.new_user()
+    uid = user["user_id"]
+    session = FakeSession(uid)
+    response, started = await env.enroll(user, session)
+    assert response.status == 201
+    pending = await env.services.store.peek_enrollment(started["enrollment_token"])
+    await env.enforced_org(uid)
+    async with env.services.security.user_lock(uid) as conn:
+        # Isolate context binding from the independently tested security-version guard.
+        await conn.execute(
+            f"UPDATE {AUTH_DB_SCHEMA}.user_mfa_security SET version=$1 WHERE user_id=$2",
+            pending.security_version,
+            uid,
+        )
+    response, body = await env.confirm(user, session, started["enrollment_token"], env.code(started["secret_b32"])[0])
+    assert (response.status, body) == (400, {"error": "invalid_enrollment"})
+    assert not await env.services.state.totp_confirmed(uid)
+
+
+@pytest.mark.asyncio
+async def test_confirmation_boolean_wrapper_fails_closed_without_context(env) -> None:
+    """Legacy boolean callers cannot accidentally interpret a failed detailed outcome as success."""
+    user = await env.new_user()
+    session = FakeSession(user["user_id"])
+    _, started = await env.enroll(user, session)
+    code = env.code(started["secret_b32"])[0]
+    async with env.services.security.user_lock(user["user_id"]) as conn:
+        provider = env.services.providers["totp"]
+        args = (user, code, started["enrollment_token"], session.session_id)
+        assert await provider.confirm_enrollment(*args, conn=conn) is False
+        evaluation = await env.services.evaluate(user, conn=conn)
+        assert await provider.confirm_enrollment(*args, conn=conn, context_digest=evaluation.context_digest) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed_field", ["password", "is_active"])
+async def test_confirmation_rejects_account_context_drift(env, changed_field: str) -> None:
+    """Fresh account changes invalidate a pending seed independently of security-version bumps."""
+    user = await env.new_user()
+    uid = user["user_id"]
+    session = FakeSession(uid)
+    response, started = await env.enroll(user, session)
+    assert response.status == 201
+    version = await env.version(uid)
+    if changed_field == "password":
+        await env.one(f"UPDATE {USERS} SET password=$1 WHERE user_id=$2 RETURNING 1", "changed-password-hash", uid)
+    else:
+        await env.one(f"UPDATE {USERS} SET is_active=false WHERE user_id=$1 RETURNING 1", uid)
+    assert await env.version(uid) == version
+
+    response, body = await env.confirm(user, session, started["enrollment_token"], env.code(started["secret_b32"])[0])
+    assert (response.status, body) == (400, {"error": "invalid_enrollment"})
+    assert await env.services.store.peek_enrollment(started["enrollment_token"]) is None
+    assert await env.active_seed_row(uid) is None
+    assert not await env.services.state.totp_confirmed(uid)
+    assert await env.services.backup_codes.remaining(uid) == 0
+    assert await env.audit(uid, "totp_confirm") == []
+    assert await env.version(uid) == version
 
 
 @pytest.mark.asyncio

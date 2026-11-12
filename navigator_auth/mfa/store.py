@@ -9,7 +9,7 @@ import secrets
 import time
 from collections.abc import Mapping
 from math import ceil
-from typing import Optional
+from typing import Optional, TypeVar
 
 import redis.asyncio as aioredis
 from redis.exceptions import RedisError
@@ -24,6 +24,7 @@ from navigator_auth.mfa.exceptions import MfaStorageError
 from navigator_auth.mfa.types import MfaChallenge, PendingEnrollment
 
 logger = logging.getLogger("navigator.mfa")
+RecordT = TypeVar("RecordT", MfaChallenge, PendingEnrollment)
 
 CHALLENGE_KEY_PREFIX = "auth:mfa:challenge:"
 ATTEMPTS_KEY_PREFIX = "auth:mfa:attempts:"
@@ -88,19 +89,34 @@ class MfaChallengeStore:
         secret: bytes,
         ttl: int = AUTH_OTP_CHALLENGE_TTL,
         max_attempts: int = AUTH_OTP_MAX_ATTEMPTS,
-    ):
+    ) -> None:
+        """Bind the shared Redis pool, signing secret, lifetime and attempt budget."""
         if not secret:
             raise ValueError("MfaChallengeStore requires a non-empty secret")
         self._pool, self._secret = pool, secret
         self._ttl, self._max_attempts = int(ttl), int(max_attempts)
 
     def _redis(self) -> aioredis.Redis:
+        """Return a client backed by the shared pool."""
         return aioredis.Redis(connection_pool=self._pool)
 
+    async def check_capabilities(self) -> None:
+        """Require Redis 6.2+ for GETDEL inside Lua and SET KEEPTTL, without writing keys."""
+        try:
+            async with self._redis() as redis:
+                info = await redis.info("server")
+            version = tuple(int(part) for part in info["redis_version"].split(".")[:2])
+            if len(version) != 2 or version < (6, 2):
+                raise ValueError("unsupported Redis version")
+        except (RedisError, KeyError, TypeError, ValueError) as err:
+            raise MfaStorageError("MFA requires Redis 6.2 or newer with readable server information") from err
+
     def _sign(self, fields: dict) -> str:
+        """Authenticate the canonical representation of record fields."""
         return hmac.new(self._secret, canonical_json(fields), hashlib.sha256).hexdigest()
 
-    def _decode(self, raw, model):
+    def _decode(self, raw: str | bytes, model: type[RecordT]) -> Optional[RecordT]:
+        """Verify a stored record's signature and validate its immutable schema."""
         try:
             data = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
             signature = data.pop("signature")
@@ -122,6 +138,7 @@ class MfaChallengeStore:
         context_digest: str,
         email_code_hash: Optional[str] = None,
     ) -> tuple[str, MfaChallenge]:
+        """Create a signed challenge without overwriting any existing token."""
         token = new_opaque_token()
         fields = {
             "user_id": int(_user_field(user, AUTH_USERID_ATTRIBUTE)),
@@ -149,6 +166,7 @@ class MfaChallengeStore:
         return token, record
 
     async def peek(self, token: str) -> Optional[MfaChallenge]:
+        """Read and authenticate a live challenge without consuming it."""
         try:
             async with self._redis() as redis:
                 raw = await redis.get(f"{CHALLENGE_KEY_PREFIX}{_hash_token(token)}")
@@ -157,9 +175,13 @@ class MfaChallengeStore:
             raise MfaStorageError("MFA challenge storage unavailable") from exc
 
     async def consume(self, token: str) -> Optional[MfaChallenge]:
+        """Atomically consume a challenge and remove its failure counter."""
         return await self._consume(token, CHALLENGE_KEY_PREFIX, ATTEMPTS_KEY_PREFIX, MfaChallenge)
 
-    async def _consume(self, token: str, record_prefix: str, counter_prefix: str, model):
+    async def _consume(
+        self, token: str, record_prefix: str, counter_prefix: str, model: type[RecordT]
+    ) -> Optional[RecordT]:
+        """Consume and authenticate one record using its configured key namespaces."""
         h = _hash_token(token)
         try:
             async with self._redis() as redis:
@@ -169,6 +191,7 @@ class MfaChallengeStore:
             raise MfaStorageError("MFA storage unavailable") from exc
 
     async def discard(self, token: str) -> None:
+        """Delete a challenge and its attempt counter."""
         h = _hash_token(token)
         try:
             async with self._redis() as redis:
@@ -177,6 +200,7 @@ class MfaChallengeStore:
             raise MfaStorageError("MFA storage unavailable") from exc
 
     async def remaining_ttl(self, token: str) -> int:
+        """Return the challenge's remaining lifetime in whole seconds."""
         try:
             async with self._redis() as redis:
                 pttl = await redis.pttl(f"{CHALLENGE_KEY_PREFIX}{_hash_token(token)}")
@@ -185,6 +209,7 @@ class MfaChallengeStore:
             raise MfaStorageError("MFA storage unavailable") from exc
 
     async def _register_failure(self, token: str, record_prefix: str, counter_prefix: str) -> int:
+        """Atomically decrement retries, preserving expiry; return -1 for an absent record."""
         h = _hash_token(token)
         try:
             async with self._redis() as redis:
@@ -196,9 +221,11 @@ class MfaChallengeStore:
             raise MfaStorageError("MFA storage unavailable") from exc
 
     async def register_failure(self, token: str) -> int:
+        """Record a challenge failure and return the exact remaining attempts."""
         return await self._register_failure(token, CHALLENGE_KEY_PREFIX, ATTEMPTS_KEY_PREFIX)
 
     async def replace_email_code(self, token: str, new_code_hash: str) -> Optional[MfaChallenge]:
+        """Replace the signed email-code hash while preserving challenge expiry."""
         key = f"{CHALLENGE_KEY_PREFIX}{_hash_token(token)}"
         try:
             async with self._redis() as redis:
@@ -219,6 +246,7 @@ class MfaChallengeStore:
             raise MfaStorageError("MFA storage unavailable") from exc
 
     async def mark_totp_step(self, user_id: int, step: int, ttl: int) -> bool:
+        """Claim a TOTP time step once across all requests for this user."""
         try:
             async with self._redis() as redis:
                 return bool(await redis.set(f"{TOTP_REPLAY_PREFIX}{int(user_id)}:{int(step)}", "1", nx=True, ex=ttl))
@@ -226,12 +254,21 @@ class MfaChallengeStore:
             raise MfaStorageError("MFA storage unavailable") from exc
 
     async def put_enrollment(
-        self, token: str, *, user_id: int, session_id: str, security_version: int, sealed_seed: bytes
+        self,
+        token: str,
+        *,
+        user_id: int,
+        session_id: str,
+        security_version: int,
+        context_digest: str,
+        sealed_seed: bytes,
     ) -> PendingEnrollment:
+        """Persist a signed, session- and context-bound pending seed with fixed expiry."""
         fields = {
             "user_id": int(user_id),
             "session_hash": hashlib.sha256(session_id.encode()).hexdigest(),
             "security_version": int(security_version),
+            "context_digest": context_digest,
             "sealed_seed": base64.b64encode(sealed_seed).decode("ascii"),
             "issued_at": time.time(),
         }
@@ -251,6 +288,7 @@ class MfaChallengeStore:
             raise MfaStorageError("MFA storage unavailable") from exc
 
     async def peek_enrollment(self, token: str) -> Optional[PendingEnrollment]:
+        """Read and authenticate a pending enrollment without consuming it."""
         try:
             async with self._redis() as redis:
                 raw = await redis.get(f"{ENROLL_KEY_PREFIX}{_hash_token(token)}")
@@ -259,7 +297,9 @@ class MfaChallengeStore:
             raise MfaStorageError("MFA storage unavailable") from exc
 
     async def consume_enrollment(self, token: str) -> Optional[PendingEnrollment]:
+        """Atomically consume a pending enrollment and its attempt counter."""
         return await self._consume(token, ENROLL_KEY_PREFIX, ENROLL_ATTEMPTS_PREFIX, PendingEnrollment)
 
     async def register_enrollment_failure(self, token: str) -> int:
+        """Record an enrollment failure and return the exact remaining attempts."""
         return await self._register_failure(token, ENROLL_KEY_PREFIX, ENROLL_ATTEMPTS_PREFIX)

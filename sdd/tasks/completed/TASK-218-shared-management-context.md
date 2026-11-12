@@ -1,13 +1,13 @@
-# TASK-219: Return accurate TOTP attempt budgets and bind enrollment context
+# TASK-218: Use shared MFA evaluation for management context
 
 **Feature**: FEAT-116 — MFA management and evaluation review fixes
 **Spec**: `sdd/specs/handlers-mfa-tech-debt.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
-**Depends-on**: TASK-218
+**Depends-on**: TASK-217
 **Assigned-to**: unassigned
-**Discovered-from**: `issue:7778420320ec`
+**Discovered-from**: `issue:f46f232584fd`
 
 ## Context
 
@@ -15,18 +15,14 @@ User requested observations #13–#15. This task belongs to the seven-issue grou
 
 ## Scope
 
-Persist EnrollmentAuthorization.context_digest in signed PendingEnrollment fields. Pass current digest from handler confirmation and compare before installing a seed; stale or legacy context-less pending enrollments must be rejected. Preserve bool confirm_enrollment compatibility using a separate detailed-result method or typed exception carrying failure budget; never return a truthy failed result to bool callers. Propagate the exact atomic register_enrollment_failure result to attempts_remaining, including exhausted budget 0 and absent enrollment distinction. Never store outcome on shared provider mutable state. Test first failure 4 of 5, exhaustion, replay, session/user mismatch, context drift and valid confirmation. Update all affected existing test doubles explicitly.
+Replace duplicated _security_context logic with services.evaluate(record, conn=conn), adapting its return to the existing tuple. Map MFARefused to its existing fail-closed HTTP status/error shape. Preserve session-authenticated enrollment access for users entitled to enroll; test enforced-superuser without strong factor explicitly against the approved shared evaluation contract. Avoid nested connection acquisition.
 
 ## Files to Create / Modify
 
 | File | Action | Description |
 |---|---|---|
 | `navigator_auth/handlers/mfa.py` | MODIFY | Scoped implementation or regression evidence |
-| `navigator_auth/mfa/totp.py` | MODIFY | Scoped implementation or regression evidence |
-| `navigator_auth/mfa/store.py` | MODIFY | Scoped implementation or regression evidence |
-| `navigator_auth/mfa/types.py` | MODIFY | Scoped implementation or regression evidence |
-| `tests/test_mfa_enrollment_security.py` | MODIFY | Scoped implementation or regression evidence |
-| `tests/test_mfa_challenge_store.py` | MODIFY | Scoped implementation or regression evidence |
+| `tests/test_mfa_review_fixes_management.py` | MODIFY | Scoped implementation or regression evidence |
 
 ## Codebase Contract (Anti-Hallucination)
 
@@ -48,33 +44,13 @@ Verified files and anchors are reproduced below from the current checkout. Use i
       "action": "MODIFY"
     },
     {
-      "path": "navigator_auth/mfa/totp.py",
-      "action": "MODIFY"
-    },
-    {
-      "path": "navigator_auth/mfa/store.py",
-      "action": "MODIFY"
-    },
-    {
-      "path": "navigator_auth/mfa/types.py",
-      "action": "MODIFY"
-    },
-    {
-      "path": "tests/test_mfa_enrollment_security.py",
-      "action": "MODIFY"
-    },
-    {
-      "path": "tests/test_mfa_challenge_store.py",
+      "path": "tests/test_mfa_review_fixes_management.py",
       "action": "MODIFY"
     }
   ],
   "contract_symbols": [
     "sym:navigator_auth/handlers/mfa.py#_error",
-    "sym:navigator_auth/mfa/totp.py#mfa_seed_context",
-    "sym:navigator_auth/mfa/store.py#_hash_token",
-    "sym:navigator_auth/mfa/types.py#MfaModel",
-    "sym:tests/test_mfa_enrollment_security.py#Record",
-    "sym:tests/test_mfa_challenge_store.py#test_canonical_json_is_stable"
+    "sym:tests/test_mfa_review_fixes_management.py#test_backup_regeneration_requires_proof"
   ]
 }
 ```
@@ -95,43 +71,11 @@ def _error(code: str, status: int, **extra: Any) -> web.Response:
 ```
 Inspect the complete surrounding implementation before editing; apply only the scope above. Preserve unrelated behavior.
 
-### `navigator_auth/mfa/totp.py` (MODIFY)
+### `tests/test_mfa_review_fixes_management.py` (MODIFY)
 
 Verified anchor (1 exact-line occurrence):
 ```text
-def mfa_seed_context(user_id: int, provider: str = PROVIDER_TOTP, key: str = TOTP_VAULT_KEY) -> VaultContext:
-```
-Inspect the complete surrounding implementation before editing; apply only the scope above. Preserve unrelated behavior.
-
-### `navigator_auth/mfa/store.py` (MODIFY)
-
-Verified anchor (1 exact-line occurrence):
-```text
-def _hash_token(token: str) -> str:
-```
-Inspect the complete surrounding implementation before editing; apply only the scope above. Preserve unrelated behavior.
-
-### `navigator_auth/mfa/types.py` (MODIFY)
-
-Verified anchor (1 exact-line occurrence):
-```text
-class MfaModel(BaseModel):
-```
-Inspect the complete surrounding implementation before editing; apply only the scope above. Preserve unrelated behavior.
-
-### `tests/test_mfa_enrollment_security.py` (MODIFY)
-
-Verified anchor (1 exact-line occurrence):
-```text
-class Record(dict):
-```
-Inspect the complete surrounding implementation before editing; apply only the scope above. Preserve unrelated behavior.
-
-### `tests/test_mfa_challenge_store.py` (MODIFY)
-
-Verified anchor (1 exact-line occurrence):
-```text
-def test_canonical_json_is_stable():
+async def test_backup_regeneration_requires_proof(env):
 ```
 Inspect the complete surrounding implementation before editing; apply only the scope above. Preserve unrelated behavior.
 
@@ -149,5 +93,19 @@ Inspect the complete surrounding implementation before editing; apply only the s
 
 ## Validation Commands
 
-- `pytest tests/test_mfa_enrollment_security.py -q`
-- `pytest tests/test_mfa_challenge_store.py -q`
+- `pytest tests/test_mfa_review_fixes_management.py -q`
+
+## Completion Note
+
+- Task: TASK-218
+- Feature: handlers-mfa-tech-debt
+- Implementation SHA: 8c72e6aa381da5e03852d21bb9bd67b561e267d7
+- Closed at (UTC): 2026-11-11T23:05:01+00:00
+- Fix commits: none
+
+| Metric | Value |
+|---|---|
+| validation_refs | 1 |
+| fix_commits | 0 |
+| review | TASK-218-review.md |
+| validation | Host executed tests; inspect TASK-218-host.log |

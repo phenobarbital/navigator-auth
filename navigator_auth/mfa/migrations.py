@@ -20,6 +20,30 @@ MFA_TABLES = (
     "user_mfa_security",
     "user_mfa_secrets",
 )
+MFA_COLUMNS = {
+    "tenant_mfa_policy": "org_id mode remember_days enforced_at enforced_by updated_at",
+    "user_mfa": "user_id provider enabled confirmed_at created_at last_used_at",
+    "user_mfa_backup_codes": "id user_id code_hash used_at created_at",
+    "user_trusted_devices": "id user_id token_hash family_id label created_at expires_at last_used_at rotated_at revoked_at revoke_reason",
+    "user_mfa_audit": "id occurred_at actor_user_id target_user_id org_id action old_state new_state method request_id outcome detail",
+    "user_mfa_security": "user_id version updated_at",
+    "user_mfa_secrets": "id user_id provider key ciphertext_db key_version created_at updated_at deleted_at",
+}
+MFA_INDEXES = {
+    "tenant_mfa_policy_pkey": ("tenant_mfa_policy", True),
+    "user_mfa_pkey": ("user_mfa", True),
+    "user_mfa_backup_codes_pkey": ("user_mfa_backup_codes", True),
+    "user_mfa_backup_codes_user_idx": ("user_mfa_backup_codes", False),
+    "user_trusted_devices_pkey": ("user_trusted_devices", True),
+    "user_trusted_devices_token_hash_key": ("user_trusted_devices", True),
+    "user_trusted_devices_user_idx": ("user_trusted_devices", False),
+    "user_trusted_devices_family_idx": ("user_trusted_devices", False),
+    "user_mfa_audit_pkey": ("user_mfa_audit", True),
+    "user_mfa_audit_target_idx": ("user_mfa_audit", False),
+    "user_mfa_security_pkey": ("user_mfa_security", True),
+    "user_mfa_secrets_pkey": ("user_mfa_secrets", True),
+    "user_mfa_secrets_active_unique": ("user_mfa_secrets", True),
+}
 
 
 async def _with_conn(db_pool: Any, fn: Any) -> Any:
@@ -83,7 +107,7 @@ async def ensure_mfa_tables(db_pool: Any) -> None:
 
 
 async def mfa_tables_present(db_pool: Any) -> bool:
-    """Return whether all required MFA relations exist.
+    """Return whether required relations, columns and usable indexes exist.
 
     Args:
         db_pool: Database pool used for the relation probe.
@@ -98,7 +122,30 @@ async def mfa_tables_present(db_pool: Any) -> bool:
             "SELECT count(*) FROM unnest($1::text[]) AS t(name) " "WHERE to_regclass(t.name) IS NOT NULL",
             names,
         )
-        return count == len(MFA_TABLES)
+        if count != len(MFA_TABLES):
+            return False
+        columns = [
+            (f"{AUTH_DB_SCHEMA}.{table}", column) for table, names in MFA_COLUMNS.items() for column in names.split()
+        ]
+        count = await conn.fetchval(
+            "SELECT count(*) FROM unnest($1::text[], $2::text[]) AS required(relation, name) "
+            "WHERE EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=to_regclass(required.relation) "
+            "AND a.attname=required.name AND a.attnum>0 AND NOT a.attisdropped)",
+            [table for table, _ in columns],
+            [column for _, column in columns],
+        )
+        if count != len(columns):
+            return False
+        count = await conn.fetchval(
+            "SELECT count(*) FROM unnest($1::text[], $2::text[], $3::bool[]) AS required(name, relation, unique_index) "
+            "WHERE EXISTS (SELECT 1 FROM pg_index i WHERE i.indexrelid=to_regclass(required.name) "
+            "AND i.indrelid=to_regclass(required.relation) AND i.indisvalid AND i.indisready "
+            "AND (NOT required.unique_index OR i.indisunique))",
+            [f"{AUTH_DB_SCHEMA}.{name}" for name in MFA_INDEXES],
+            [f"{AUTH_DB_SCHEMA}.{table}" for table, _ in MFA_INDEXES.values()],
+            [unique for _, unique in MFA_INDEXES.values()],
+        )
+        return count == len(MFA_INDEXES)
 
     return await _with_conn(db_pool, _probe)
 

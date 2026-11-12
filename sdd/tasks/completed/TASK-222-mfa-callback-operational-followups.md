@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-116 — MFA management and evaluation review fixes
 **Spec**: `sdd/specs/handlers-mfa-tech-debt.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: M (2-4h)
 **Depends-on**: TASK-221
@@ -15,7 +15,7 @@ User requested observations #13–#15. This task belongs to the seven-issue grou
 
 ## Scope
 
-Audit every subfinding in the claimed issue body against current code, recording already-fixed evidence. Offload synchronous notification callbacks with asyncio.to_thread (I/O only); await returned awaitables on the event loop, preserve exception containment and cancellation. Test event-loop progress and timeout with a blocked callback and release it during cleanup. Keep async callbacks on-loop. Document that timed-out sync work may finish later. Complete MfaChallengeStore docstrings and type hints. Invalidate backup codes in the same transaction on self-disenrollment. Verify Redis command requirements against current store (Lua replaced GETDEL; KEEPTTL still used); document actual minimum and perform non-destructive startup capability/version validation, failing closed with unavailable services. Document per-user budget exhaustion tradeoff. Strengthen schema readiness probes for required columns/indexes, with missing-schema tests. Reconcile stale AC5 docs/test regex. Consolidate duplicated _field helpers only within the listed MFA files using an existing compatible helper after checking None/default semantics. For session issuance under transaction locks, verify present compensation and add fault-injected commit-failure coverage; implement safe cleanup or transactional ordering that prevents usable orphan credentials, preserving policy-race protection and single-use challenges. If safe resolution needs new design decisions or unlisted files, report the exact limitation rather than closing this bundled issue partially.
+Audit every subfinding in the claimed issue body against current code, recording already-fixed evidence. Offload synchronous notification callbacks with asyncio.to_thread (I/O only); await returned awaitables on the event loop, preserve exception containment and cancellation. Test event-loop progress and timeout with a blocked callback and release it during cleanup. Keep async callbacks on-loop. Document that timed-out sync work may finish later. Complete MfaChallengeStore docstrings and type hints. Invalidate backup codes in the same transaction on self-disenrollment. Verify Redis command requirements against current store (Lua still calls GETDEL; KEEPTTL is also used); document actual minimum and perform non-destructive startup capability/version validation, failing closed with unavailable services. Document per-user budget exhaustion tradeoff. Strengthen schema readiness probes for required columns/indexes, with missing-schema tests. Reconcile stale AC5 docs/test regex. Consolidate duplicated _field helpers only within the listed MFA files using an existing compatible helper after checking None/default semantics. For session issuance under transaction locks, verify present compensation and add fault-injected commit-failure coverage; implement safe cleanup or transactional ordering that prevents usable orphan credentials, preserving policy-race protection and single-use challenges. If safe resolution needs new design decisions or unlisted files, report the exact limitation rather than closing this bundled issue partially.
 
 ## Files to Create / Modify
 
@@ -38,6 +38,10 @@ Audit every subfinding in the claimed issue body against current code, recording
 | `tests/test_mfa_review_fixes_docs.py` | MODIFY | Scoped implementation or regression evidence |
 | `tests/test_mfa_review_fixes_management.py` | MODIFY | Scoped implementation or regression evidence |
 | `tests/test_mfa_challenge_store.py` | MODIFY | Scoped implementation or regression evidence |
+
+| `tests/test_mfa_verify.py` | MODIFY | Existing login test doubles or narrow AC5 documentation correction |
+| `tests/test_mfa_basic_auth_hook.py` | MODIFY | Existing login test doubles or narrow AC5 documentation correction |
+| `sdd/specs/basicauth-otp-2fa.spec.md` | MODIFY | Existing login test doubles or narrow AC5 documentation correction |
 
 ## Codebase Contract (Anti-Hallucination)
 
@@ -120,6 +124,18 @@ Verified files and anchors are reproduced below from the current checkout. Use i
     },
     {
       "path": "tests/test_mfa_challenge_store.py",
+      "action": "MODIFY"
+    },
+    {
+      "path": "tests/test_mfa_verify.py",
+      "action": "MODIFY"
+    },
+    {
+      "path": "tests/test_mfa_basic_auth_hook.py",
+      "action": "MODIFY"
+    },
+    {
+      "path": "sdd/specs/basicauth-otp-2fa.spec.md",
       "action": "MODIFY"
     }
   ],
@@ -308,3 +324,24 @@ Inspect the complete surrounding implementation before editing; apply only the s
 - `pytest tests/test_mfa_review_fixes_docs.py -q`
 - `pytest tests/test_mfa_review_fixes_management.py -q`
 - `pytest tests/test_mfa_challenge_store.py -q`
+
+### Contract amendment during implementation
+
+The commit-before-session boundary requires updating existing security doubles in test_mfa_verify.py and test_mfa_basic_auth_hook.py. Run both files as regressions. Correct only the stale AC5 session-call grep in the original FEAT-106 spec, as explicitly covered by issue:607e5356c449.
+
+- `pytest tests/test_mfa_verify.py tests/test_mfa_basic_auth_hook.py -q`
+
+## Completion Note
+
+- Task: TASK-222
+- Feature: handlers-mfa-tech-debt
+- Implementation SHA: 66f5ae85fd9d16243f584d2b9bbf1c4c1ca6123b
+- Closed at (UTC): 2026-11-11T23:48:21+00:00
+- Fix commits: none
+
+| Metric | Value |
+|---|---|
+| validation_refs | 1 |
+| fix_commits | 0 |
+| review | TASK-222-review.md |
+| validation | Host executed tests; inspect TASK-222-host.log |

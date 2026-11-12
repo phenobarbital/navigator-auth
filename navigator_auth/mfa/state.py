@@ -17,6 +17,7 @@ from navigator_auth.mfa.backup_codes import BackupCodeStore
 from navigator_auth.mfa.exceptions import MfaStorageError
 from navigator_auth.mfa.types import (
     MfaMode,
+    MfaModel,
     MfaState,
     TenantMfaPolicy,
     PROVIDER_BACKUP,
@@ -37,7 +38,10 @@ def _field(user: Any, name: str, default: Any = None) -> Any:
     try:
         return user[name]
     except (KeyError, TypeError, AttributeError, IndexError):
-        return getattr(user, name, default)
+        try:
+            return user.get(name, default)
+        except (AttributeError, TypeError):
+            return getattr(user, name, default)
 
 
 def _user_id(user: Any) -> int:
@@ -73,6 +77,13 @@ async def _scope(pool: Any, conn: Any = None) -> AsyncIterator[Any]:
         return
     async with await pool.acquire() as own:
         yield own
+
+
+class FactorFacts(MfaModel):
+    """Factor facts read once on an evaluation's connection, never cached."""
+
+    totp_confirmed: bool
+    has_strong_factor: bool
 
 
 class MfaStateMachine:
@@ -111,8 +122,17 @@ class MfaStateMachine:
             raise MfaStorageError(f"passkey count failed: {type(err).__name__}") from err
         return int(count or 0)
 
-    async def has_strong_factor(self, user: Any, *, conn: Any = None) -> bool:
+    async def factor_facts(self, user: Any, *, conn: Any = None) -> FactorFacts:
+        """Read TOTP and, only when needed, passkeys for one evaluation."""
+        uid = _user_id(user)
+        totp = await self.totp_confirmed(uid, conn=conn)
+        strong = totp or await self.passkey_count(uid, conn=conn) > 0
+        return FactorFacts(totp_confirmed=totp, has_strong_factor=strong)
+
+    async def has_strong_factor(self, user: Any, *, conn: Any = None, facts: Optional[FactorFacts] = None) -> bool:
         """Confirmed TOTP OR >= 1 passkey. Evaluated fresh every call (spec M7)."""
+        if facts is not None:
+            return facts.has_strong_factor
         uid = _user_id(user)
         if await self.totp_confirmed(uid, conn=conn):
             return True
@@ -122,7 +142,9 @@ class MfaStateMachine:
         """True for ``is_superuser`` under ENFORCED (D10; models.py:54)."""
         return policy.mode == MfaMode.ENFORCED and bool(_field(user, "is_superuser", False))
 
-    async def state_of(self, user: Any, policy: TenantMfaPolicy, *, conn: Any = None) -> MfaState:
+    async def state_of(
+        self, user: Any, policy: TenantMfaPolicy, *, conn: Any = None, facts: Optional[FactorFacts] = None
+    ) -> MfaState:
         """D10 — in this order:
 
         1. requires_strong and not strong -> raise MFARefused("strong_factor_required", status=403)
@@ -132,9 +154,11 @@ class MfaStateMachine:
         4. ENFORCED                       -> MfaState.EMAIL
         """
         uid = _user_id(user)
-        totp = await self.totp_confirmed(uid, conn=conn)
+        totp = facts.totp_confirmed if facts is not None else await self.totp_confirmed(uid, conn=conn)
         if await self.requires_strong_factor(user, policy):
-            strong = totp or await self.passkey_count(uid, conn=conn) > 0
+            strong = (
+                facts.has_strong_factor if facts is not None else totp or await self.passkey_count(uid, conn=conn) > 0
+            )
             if not strong:
                 raise MFARefused(MFARefused.STRONG_FACTOR_REQUIRED, status=403)
         if totp:
@@ -144,7 +168,7 @@ class MfaStateMachine:
         return MfaState.EMAIL
 
     async def available_providers(
-        self, user: Any, policy: TenantMfaPolicy, *, conn: Any = None
+        self, user: Any, policy: TenantMfaPolicy, *, conn: Any = None, facts: Optional[FactorFacts] = None
     ) -> tuple[list[str], Optional[str]]:
         """``(providers, preferred)`` per D10.
 
@@ -155,8 +179,9 @@ class MfaStateMachine:
         A strong factor CLOSES e-mail: the mailbox stops being the ceiling (AC9).
         """
         uid = _user_id(user)
-        totp = await self.totp_confirmed(uid, conn=conn)
-        strong = totp or await self.passkey_count(uid, conn=conn) > 0
+        if facts is None:
+            facts = await self.factor_facts(user, conn=conn)
+        totp, strong = facts.totp_confirmed, facts.has_strong_factor
         providers: list[str] = []
         if totp:
             providers.append(PROVIDER_TOTP)
