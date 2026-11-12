@@ -5,7 +5,7 @@
   "type": "feature",
   "base_branch": "dev",
   "created_at": "2026-11-11T16:29:35+00:00",
-  "completed_at": "2026-11-11T22:21:49+00:00",
+  "completed_at": "2026-11-12T00:50:56+00:00",
   "parallel_semantics": "exclusive",
   "validation_contract": "required",
   "test_contract": {
@@ -134,7 +134,7 @@
       "effort": "S",
       "depends_on": [],
       "parallel": true,
-      "parallelism_notes": "No dependency: one line in navigator_auth/auth.py's exempt branch (anchor 'pass  # Best-effort…') plus a new mock-based test file; auth.py is touched by no other task.",
+      "parallelism_notes": "No dependency: one line in navigator_auth/auth.py's exempt branch (anchor 'pass  # Best-effort\u2026') plus a new mock-based test file; auth.py is touched by no other task.",
       "assigned_to": null,
       "started_at": "2026-11-11T16:36:18+00:00",
       "completed_at": "2026-11-11T21:49:06+00:00",
@@ -144,7 +144,7 @@
     {
       "id": "TASK-200",
       "slug": "identity-store-unavailable",
-      "title": "IdentityStoreUnavailable — user_from_id separates a missing user from a store outage",
+      "title": "IdentityStoreUnavailable \u2014 user_from_id separates a missing user from a store outage",
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
@@ -291,7 +291,7 @@
     {
       "id": "TASK-207",
       "slug": "docs-changelog-examples-readme",
-      "title": "Documentation — CHANGELOG behaviour changes and examples/README.md",
+      "title": "Documentation \u2014 CHANGELOG behaviour changes and examples/README.md",
       "feature_id": "FEAT-108",
       "feature": "oauth2-3lo-issues",
       "spec": "sdd/specs/oauth2-3lo-issues.spec.md",
