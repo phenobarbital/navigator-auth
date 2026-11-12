@@ -229,6 +229,73 @@ the full API, provider notes and the encryption/rotation model.
 
 ---
 
+## `passkey_server.py` — Passkey (WebAuthn) enrollment and sign-in
+
+A one-page walk-through of the passkey life cycle against `BasicAuth` + `PasskeyAuth`:
+sign in with a password, enroll a passkey, sign out, sign back in with the passkey alone,
+then list, rename and delete it. Reference: `docs/passkey.rst`.
+
+### Run it
+
+```bash
+pip install "navigator-auth[passkey]"    # py_webauthn
+mkdir -p env/dev && touch env/dev/.env   # navconfig needs this once
+redis-server --daemonize yes             # sessions and challenges (Redis 6.2+)
+python examples/passkey_server.py        # from the repository root
+```
+
+Open <http://localhost:5000/> and sign in with `demo` / `demo123` (or `alice` / `alice123`).
+
+> Use `localhost`, not `127.0.0.1`. The relying party is the exact origin
+> `http://localhost:5000`, and browsers only allow WebAuthn over plain http on `localhost`.
+> `EXAMPLE_HOST` / `EXAMPLE_PORT` change both the listener and the relying party.
+
+No hardware key is needed: the platform authenticator (Touch ID, Windows Hello, a phone or a
+password manager) works, and so does a virtual authenticator from Chrome DevTools
+(*More tools → WebAuthn*).
+
+### What the page walks you through
+
+| Step | Request |
+|---|---|
+| Password sign-in | `POST /api/v1/login` with `X-Auth-Method: BasicAuth` |
+| Enroll | `POST /api/v1/auth/passkey/register/options` → `navigator.credentials.create()` → `POST …/register/verify` |
+| Manage | `GET` / `PATCH` / `DELETE /api/v1/auth/passkey/credentials[/{id}]` |
+| Passkey sign-in | `POST /api/v1/auth/passkey/login/options` → `navigator.credentials.get()` → `POST /api/v1/login` with `X-Auth-Method: PasskeyAuth` |
+| Protected call | `GET /api/v1/me` — reports `auth_method`, `mfa` and `amr` from the token |
+
+*Sign in with passkey* sends the username, so the server lists that user's credentials.
+*Passkey, no username* sends none: `allowCredentials` is empty and the authenticator offers
+the passkeys it holds for the site.
+
+The page authenticates with the bearer token from the login response, which is why it sends
+no `X-CSRF-Token`. A cookie-session client must send it on the enrollment and management
+calls (see "Enrollment (CSRF)" in `docs/passkey.rst`). *Sign out* calls `/api/v1/logout`
+and discards the token in the browser.
+
+### Example-only shortcuts
+
+The example runs with nothing but Redis. **Drop all of these in a real deployment.**
+
+* `enable_authdb=False` and `DemoIdentityProvider` — no PostgreSQL; users come from memory.
+* `MemoryPasskeyStore` replaces `PasskeyStore` (the `user_credentials` and
+  `user_passkey_handles` tables, created by `navauth self upgrade`). Enrolled passkeys are
+  forgotten when the server stops but stay on your authenticator: delete them from the page
+  first, or remove the `localhost` entries from the authenticator afterwards.
+* `_memory_transition` replaces `security_transition`, the `authdb` transaction that commits a
+  credential change together with the MFA bookkeeping.
+* `secure_cookies=False` — no session cookie; the bearer token is the only credential.
+
+Like `oauth2_3lo_server.py`, the example pins what a local `settings/settings.py` could
+otherwise change: the backend list (`backends=_BACKENDS`), the authorization backends
+(`authz_backends=[]`) and the login callbacks (`AUTH_SUCCESSFUL_CALLBACKS` are switched off,
+since they usually query the auth database).
+
+Option generation, challenge storage and single use, attestation and assertion verification,
+the origin / relying-party checks, the session and the JWT are the real implementation.
+
+---
+
 ## `oauth2_server.py` — OAuth2 client registrations reference
 
 Registers the four demo clients (public, confidential, device, resource-server)

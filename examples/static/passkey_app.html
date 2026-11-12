@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Navigator Auth — Passkey example</title>
+<style>
+  :root { color-scheme: light dark; --line: #8884; --accent: #2563eb; --ok: #15803d; --bad: #b91c1c; }
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 8px; }
+  p { margin: 0 0 10px; }
+  .muted { opacity: .7; }
+  section { border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-top: 16px; }
+  section[hidden] { display: none; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  input { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; min-width: 0; flex: 1 1 140px; }
+  button { font: inherit; padding: 6px 14px; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  button.plain { background: transparent; color: inherit; border-color: var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  code { font-size: .9em; }
+  ul { list-style: none; margin: 8px 0 0; padding: 0; }
+  li { border-top: 1px solid var(--line); padding: 8px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  li span { flex: 1 1 200px; overflow-wrap: anywhere; }
+  #status { margin-top: 16px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); }
+  #status.ok { border-color: var(--ok); }
+  #status.bad { border-color: var(--bad); }
+  pre { margin: 8px 0 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; font-size: 12.5px; max-height: 320px; }
+</style>
+</head>
+<body>
+<h1>Passkey example</h1>
+<p class="muted">navigator-auth · <code>BasicAuth</code> + <code>PasskeyAuth</code> · relying party <code id="origin"></code></p>
+
+<div id="status" role="status">Loading…</div>
+
+<section id="signed-out">
+  <h2>1 · Sign in</h2>
+  <p>First time: sign in with the password (<code>demo</code> / <code>demo123</code>), then enroll a passkey below.
+     Afterwards you can sign in with the passkey alone.</p>
+  <div class="row">
+    <input id="username" autocomplete="username" placeholder="username" value="demo">
+    <input id="password" type="password" autocomplete="current-password" placeholder="password">
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="btn-password">Sign in with password</button>
+    <button id="btn-passkey">Sign in with passkey</button>
+    <button id="btn-discover" class="plain" title="No username: the authenticator offers the passkeys it holds for this site">Passkey, no username</button>
+  </div>
+</section>
+
+<section id="signed-in" hidden>
+  <h2>2 · Signed in as <span id="who"></span></h2>
+  <p>Signed in with <code id="method"></code> · <code>mfa</code> = <code id="mfa"></code> · <code>amr</code> = <code id="amr"></code></p>
+  <div class="row">
+    <button id="btn-me" class="plain">Call GET /api/v1/me</button>
+    <button id="btn-signout" class="plain">Sign out</button>
+  </div>
+</section>
+
+<section id="passkeys" hidden>
+  <h2>3 · Your passkeys</h2>
+  <div class="row">
+    <input id="label" placeholder="label, e.g. My laptop" maxlength="128">
+    <button id="btn-enroll">Enroll a passkey</button>
+  </div>
+  <ul id="list"></ul>
+</section>
+
+<section>
+  <h2>Last response</h2>
+  <pre id="log">—</pre>
+</section>
+
+<script>
+"use strict";
+const PASSKEY = "/api/v1/auth/passkey";
+const $ = (id) => document.getElementById(id);
+// The bearer token from the login response. Kept in sessionStorage so a reload keeps
+// you signed in; a real application decides its own token storage.
+let token = sessionStorage.getItem("passkey_example_token");
+
+function setStatus(text, kind) {
+  const el = $("status");
+  el.textContent = text;
+  el.className = kind || "";
+}
+
+function show(title, data) {
+  $("log").textContent = title + "\n" + (typeof data === "string" ? data : JSON.stringify(data, null, 2));
+}
+
+/** fetch() returning {ok, status, data}; adds the bearer token and a JSON body. */
+async function api(method, path, body, headers) {
+  const init = { method, headers: { ...(headers || {}) } };
+  if (token) init.headers["Authorization"] = "Bearer " + token;
+  if (body !== undefined) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, init);
+  const text = await res.text();
+  let data = text;
+  try { data = text ? JSON.parse(text) : null; } catch (_) { /* not JSON */ }
+  show(`${method} ${path} → ${res.status}`, data);
+  return { ok: res.ok, status: res.status, data };
+}
+
+function reason(result) {
+  const d = result.data;
+  return (d && (d.reason || d.message || d.error)) || (typeof d === "string" && d) || `HTTP ${result.status}`;
+}
+
+function signedIn(session) {
+  token = session.token;
+  sessionStorage.setItem("passkey_example_token", token);
+  return refresh();
+}
+
+function signedOut() {
+  token = null;
+  sessionStorage.removeItem("passkey_example_token");
+  $("signed-out").hidden = false;
+  $("signed-in").hidden = true;
+  $("passkeys").hidden = true;
+}
+
+/** Ask the server who the token belongs to, then redraw. */
+async function refresh() {
+  if (!token) { signedOut(); return false; }
+  const me = await api("GET", "/api/v1/me");
+  if (!me.ok) { signedOut(); return false; }
+  $("who").textContent = me.data.username;
+  $("method").textContent = me.data.auth_method || "basic";
+  $("mfa").textContent = String(me.data.mfa ?? false);
+  $("amr").textContent = JSON.stringify(me.data.amr ?? []);
+  $("signed-out").hidden = true;
+  $("signed-in").hidden = false;
+  $("passkeys").hidden = false;
+  await loadPasskeys();
+  return true;
+}
+
+async function loadPasskeys() {
+  const res = await api("GET", `${PASSKEY}/credentials`);
+  const list = $("list");
+  list.replaceChildren();
+  if (!res.ok) return;
+  if (!res.data.length) {
+    const li = document.createElement("li");
+    li.textContent = "No passkeys yet — enroll one.";
+    list.append(li);
+    return;
+  }
+  for (const cred of res.data) {
+    const li = document.createElement("li");
+    const text = document.createElement("span");
+    const used = cred.last_used_at ? new Date(cred.last_used_at).toLocaleString() : "never";
+    text.textContent = `${cred.label || "(no label)"} · ${cred.device_type || "?"}${cred.backed_up ? " · synced" : ""} · last used ${used}`;
+    const rename = document.createElement("button");
+    rename.className = "plain";
+    rename.textContent = "Rename";
+    rename.onclick = () => renamePasskey(cred);
+    const remove = document.createElement("button");
+    remove.className = "plain";
+    remove.textContent = "Delete";
+    remove.onclick = () => deletePasskey(cred);
+    li.append(text, rename, remove);
+    list.append(li);
+  }
+}
+
+// ---- password sign-in (BasicAuth) -------------------------------------------------
+async function passwordSignIn() {
+  const res = await api("POST", "/api/v1/login",
+    { username: $("username").value.trim(), password: $("password").value },
+    { "X-Auth-Method": "BasicAuth" });
+  if (!res.ok) return setStatus("Password sign-in failed: " + reason(res), "bad");
+  $("password").value = "";
+  await signedIn(res.data);
+  setStatus("Signed in with the password. Enroll a passkey next.", "ok");
+}
+
+// ---- passkey enrollment (needs a session) -----------------------------------------
+async function enroll() {
+  const opts = await api("POST", `${PASSKEY}/register/options`, {});
+  if (!opts.ok) return setStatus("Could not start enrollment: " + reason(opts), "bad");
+  let credential;
+  try {
+    credential = await navigator.credentials.create({
+      publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(opts.data),
+    });
+  } catch (err) {
+    // InvalidStateError: this authenticator already holds a passkey for the account.
+    return setStatus(`Enrollment cancelled or refused by the authenticator (${err.name}).`, "bad");
+  }
+  const label = $("label").value.trim() || undefined;
+  const done = await api("POST", `${PASSKEY}/register/verify`, { credential: credential.toJSON(), label });
+  if (!done.ok) return setStatus("Enrollment failed: " + reason(done), "bad");
+  $("label").value = "";
+  await loadPasskeys();
+  setStatus("Passkey enrolled. Sign out and sign back in with it.", "ok");
+}
+
+async function renamePasskey(cred) {
+  const label = prompt("New label", cred.label || "");
+  if (!label) return;
+  const res = await api("PATCH", `${PASSKEY}/credentials/${cred.id}`, { label });
+  if (!res.ok) return setStatus("Rename failed: " + reason(res), "bad");
+  await loadPasskeys();
+  setStatus("Passkey renamed.", "ok");
+}
+
+async function deletePasskey(cred) {
+  if (!confirm("Delete this passkey from the server? Remove it from your authenticator too.")) return;
+  const res = await api("DELETE", `${PASSKEY}/credentials/${cred.id}`);
+  if (!res.ok) return setStatus("Delete failed: " + reason(res), "bad");
+  await loadPasskeys();
+  setStatus("Passkey deleted on the server.", "ok");
+}
+
+// ---- passkey sign-in --------------------------------------------------------------
+// username given → the server lists that user's credentials (username-first);
+// no username    → empty allowCredentials: the authenticator offers what it holds.
+async function passkeySignIn(username) {
+  const started = await api("POST", `${PASSKEY}/login/options`, username ? { username } : {});
+  if (!started.ok) return setStatus("Could not start the passkey sign-in: " + reason(started), "bad");
+  let credential;
+  try {
+    credential = await navigator.credentials.get({
+      publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(started.data.publicKey),
+    });
+  } catch (err) {
+    return setStatus(`Passkey sign-in cancelled, or no passkey for this account (${err.name}).`, "bad");
+  }
+  const res = await api("POST", "/api/v1/login",
+    { challenge_id: started.data.challenge_id, credential: credential.toJSON() },
+    { "X-Auth-Method": "PasskeyAuth" });
+  // Every failure is the same 401 on purpose: the server never says which check failed.
+  if (!res.ok) return setStatus("Passkey sign-in rejected: " + reason(res), "bad");
+  await signedIn(res.data);
+  setStatus("Signed in with a passkey — no password sent.", "ok");
+}
+
+async function signOut() {
+  await api("GET", "/api/v1/logout");
+  signedOut();
+  setStatus("Signed out. Now try “Sign in with passkey”.", "ok");
+}
+
+/** Disable every button while one action runs, and report unexpected errors. */
+function guarded(action) {
+  return async () => {
+    const buttons = [...document.querySelectorAll("button")];
+    buttons.forEach((b) => { b.disabled = true; });
+    try {
+      await action();
+    } catch (err) {
+      setStatus("Unexpected error: " + err.message, "bad");
+    } finally {
+      buttons.forEach((b) => { b.disabled = false; });
+    }
+  };
+}
+
+$("origin").textContent = location.origin;
+$("btn-password").onclick = guarded(passwordSignIn);
+$("btn-passkey").onclick = guarded(() => passkeySignIn($("username").value.trim()));
+$("btn-discover").onclick = guarded(() => passkeySignIn(""));
+$("btn-enroll").onclick = guarded(enroll);
+$("btn-me").onclick = guarded(() => api("GET", "/api/v1/me"));
+$("btn-signout").onclick = guarded(signOut);
+$("password").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-password").click(); });
+
+(async () => {
+  const supported = window.PublicKeyCredential
+    && PublicKeyCredential.parseCreationOptionsFromJSON
+    && PublicKeyCredential.parseRequestOptionsFromJSON;
+  if (!supported) {
+    ["btn-passkey", "btn-discover", "btn-enroll"].forEach((id) => { $(id).hidden = true; });
+    signedOut();
+    return setStatus(window.isSecureContext
+      ? "This browser lacks the WebAuthn JSON helpers (parseCreationOptionsFromJSON); use a current Chrome, Firefox or Safari."
+      : "WebAuthn needs a secure context: open this page as http://localhost:<port>/, not through an IP address.", "bad");
+  }
+  const restored = await refresh();
+  setStatus(restored ? "Session restored." : "Sign in with the password to start.", "");
+})();
+</script>
+</body>
+</html>
