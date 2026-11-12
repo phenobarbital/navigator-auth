@@ -74,6 +74,9 @@ async def example_client(monkeypatch):
     app = example.make_app()
     auth = app["auth"]
     storage = auth.session.storage
+    # The test client speaks plain http, so a Secure session cookie would never be
+    # sent back (navigator_session defaults SESSION_COOKIE_SECURE to True).
+    monkeypatch.setattr(storage, "_secure", False, raising=False)
 
     async def create_foreign_session(request):
         """Create a session whose owner does not exist in the demo IdP."""
