@@ -124,7 +124,7 @@ class TestOdooIdentity:
             response = await backend.authorize_identity(
                 request, user_id=5, finish_redirect="/manage"
             )
-        assert response.location.startswith(
+        assert response.headers["Location"].startswith(
             "https://erp.example.com/oauth2/auth"
         )
         key = next(iter(flow_store.storage))

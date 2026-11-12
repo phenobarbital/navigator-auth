@@ -9,6 +9,7 @@ import importlib
 from urllib.parse import urlparse
 from requests.models import PreparedRequest
 from aiohttp import web, hdrs
+from ..responses import RedirectResponse
 from aiohttp.web_urldispatcher import SystemRoute, StaticResource
 from navconfig.logging import logging
 from asyncdb.models import Model
@@ -77,6 +78,9 @@ class BaseAuthBackend(ABC):
     _description: str = "Abstract Backend"
     _service_name: str = "abstract"
     _external_auth: bool = False
+    #: True for backends that authenticate *anyone* (a guest). @is_authenticated never
+    #: calls them; anonymous access goes through the exclude list / allow_anonymous.
+    _anonymous_auth: bool = False
     _success_callbacks: Optional[list[str]] = AUTH_SUCCESSFUL_CALLBACKS
     _callbacks: Optional[list[Callable]] = None
     # Auth query params this backend owns and may strip before reaching the
@@ -235,16 +239,17 @@ class BaseAuthBackend(ABC):
         if exception:
             response_obj["error"] = str(exception)
         args = {"content_type": content_type, "headers": headers, **kwargs}
+        # ``text=``, not ``body=``: aiohttp deprecates ``body`` for HTTP exceptions.
         if isinstance(reason, dict):
             response_obj = {**response_obj, **reason}
             args["content_type"] = "application/json"
-            args["body"] = json_encoder(response_obj)
+            args["text"] = json_encoder(response_obj)
         else:
             response_obj["reason"] = reason
             args["reason"] = json_encoder(response_obj)
         # defining the error
         if args["content_type"] == "application/json":
-            args["body"] = args["reason"]
+            args["text"] = args["reason"]
             del args["reason"]
         if status == 400:  # bad request
             obj = web.HTTPBadRequest(**args)
@@ -521,4 +526,4 @@ class BaseAuthBackend(ABC):
         else:
             redirect_url = self.finish_redirect_url
         url = self.prepare_url(redirect_url, params)
-        return web.HTTPFound(url, headers=headers)
+        return RedirectResponse(url, headers=headers)

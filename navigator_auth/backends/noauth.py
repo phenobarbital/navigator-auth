@@ -26,6 +26,7 @@ class NoAuth(BaseAuthBackend):
     _ident: AuthUser = AnonymousUser
     _description: str = "Anonymous authentication"
     _service_name: str = "anonymous"
+    _anonymous_auth: bool = True
 
     async def check_credentials(self, request):
         """Authentication and create a session."""

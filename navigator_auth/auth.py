@@ -524,7 +524,8 @@ class AuthHandler:
         # if not userdata, then raise an not Authorized
         if not userdata:
             raise self.ForbiddenAccess(reason="Access Denied")
-        if isinstance(userdata, web.HTTPFound):
+        if isinstance(userdata, web.StreamResponse):
+            # A backend answered with a response (e.g. the TROC redirect).
             return userdata
         return await self.finalize_login(request, userdata)
 
@@ -836,13 +837,14 @@ class AuthHandler:
         if exception:
             response_obj["error"] = str(exception)
         args = {"content_type": content_type, "headers": headers, **kwargs}
+        # ``text=``, not ``body=``: aiohttp deprecates ``body`` for HTTP exceptions.
         if isinstance(reason, dict):
             response_obj = {**response_obj, **reason}
             # args["content_type"] = "application/json"
-            args["body"] = self._json.dumps(response_obj)
+            args["text"] = self._json.dumps(response_obj)
         else:
             response_obj["reason"] = reason
-            args["body"] = self._json.dumps(response_obj)
+            args["text"] = self._json.dumps(response_obj)
         # defining the error
         if status == 400:  # bad request
             obj = web.HTTPBadRequest(**args)
@@ -1136,6 +1138,7 @@ class AuthHandler:
                             user = await self.get_session_user(session)
                             if user:
                                 request.user = user
+                                request["userdata"] = payload
                                 request["authenticated"] = True
                                 request[AUTH_MECHANISM_KEY] = AUTH_MECHANISM_BEARER
                                 request[AUTH_BEARER_CONTEXT_KEY] = bearer_context_from_claims(payload)

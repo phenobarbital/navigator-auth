@@ -46,12 +46,47 @@
         <p><strong>Client ID:</strong> <code>nav_public_client</code> (public — PKCE S256 required)</p>
         <p><strong>Redirect URI:</strong> <code>http://localhost:5000/static/callback.html</code></p>
         <p>
-            This page starts the flow <em>without</em> PKCE, so the exchange will be rejected with
-            <code>invalid_grant: PKCE required for public clients</code>. That is the correct behaviour for a
-            public client — see <code>examples/oauth2_3lo_server.py</code> for the complete flow with PKCE.
+            The button generates a PKCE pair (S256) and a random <code>state</code>, keeps them in
+            <code>sessionStorage</code>, and starts <code>/oauth2/authorize</code>. The callback page checks
+            the <code>state</code> and sends the <code>code_verifier</code> to <code>/oauth2/token</code>.
         </p>
-        <a
-            href="/oauth2/authorize?client_id=nav_public_client&redirect_uri=http://localhost:5000/static/callback.html&response_type=code&state=xyz123&scope=default+profile"><button>Authorize</button></a>
+        <button type="button" onclick="startAuthorize()">Authorize</button>
+        <script>
+            const STORE = 'nav_oauth2_index_pkce';
+            const CLIENT_ID = 'nav_public_client';
+            const REDIRECT_URI = 'http://localhost:5000/static/callback.html';
+            const SCOPE = 'default profile email offline_access';
+
+            function b64url(bytes) {
+                return btoa(String.fromCharCode(...new Uint8Array(bytes)))
+                    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            }
+
+            function randomString(size = 32) {
+                return b64url(crypto.getRandomValues(new Uint8Array(size)));
+            }
+
+            async function s256(verifier) {
+                const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+                return b64url(digest);
+            }
+
+            async function startAuthorize() {
+                const verifier = randomString(32);
+                const state = randomString(12);
+                sessionStorage.setItem(STORE, JSON.stringify({ verifier, state }));
+                const params = new URLSearchParams({
+                    response_type: 'code',
+                    client_id: CLIENT_ID,
+                    redirect_uri: REDIRECT_URI,
+                    scope: SCOPE,
+                    state,
+                    code_challenge: await s256(verifier),
+                    code_challenge_method: 'S256',
+                });
+                window.location.href = `/oauth2/authorize?${params}`;
+            }
+        </script>
     </div>
 
     <div class="section">

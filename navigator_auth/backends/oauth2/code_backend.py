@@ -16,17 +16,17 @@ from datetime import datetime, timezone
 import asyncio
 import json
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from ...conf import REDIS_URL
+from ...conf import REDIS_URL, OAUTH_CODE_TTL, OAUTH_CODE_CLAIM_TTL
 
 try:
     import redis.asyncio as redis
 except ImportError:
     raise ImportError(
-        "redis>=4.2.0 with asyncio support is required. "
-        "Install it with: pip install 'redis[asyncio]>=4.2'"
+        "redis>=4.2.0 with asyncio support is required. " "Install it with: pip install 'redis[asyncio]>=4.2'"
     )
 
 
@@ -41,6 +41,7 @@ def _now_utc() -> datetime:
 # ---------------------------------------------------------------------------
 # Authorization Code Storage (Redis)
 # ---------------------------------------------------------------------------
+
 
 class AuthorizationCodeStorage:
     """Redis-backed authorization code store.
@@ -86,19 +87,34 @@ class AuthorizationCodeStorage:
         return None
 
     async def mark_used(self, code: str) -> bool:
-        """Mark a code as used (B5 single-use enforcement).
+        """Consume a code atomically (B5 single-use enforcement).
 
-        Updates the ``used`` flag and ``used_at`` timestamp in place.
-        The caller must call delete_code() to purge from Redis after marking.
+        A ``SET NX`` marker decides the winner, so exactly one caller per code
+        gets ``True`` however many redeem it concurrently (FEAT-108). The marker
+        lives at least as long as the code, and the record update only rewrites
+        a key that still exists, so a late writer can never resurrect a code for
+        a second consumer. The record gets its ``used`` flag and ``used_at``
+        timestamp in place; the caller must call delete_code() afterwards.
+
+        Returns:
+            bool: ``True`` for the single caller that consumed the code;
+            ``False`` when it was already consumed or no longer exists.
         """
         obj = await self.get_code(code)
-        if not obj:
+        if not obj or obj.used:
+            return False
+        remaining = 0
+        if obj.expires_at:
+            remaining = int((obj.expires_at - _now()).total_seconds()) + 1
+        marker_ttl = max(OAUTH_CODE_TTL, remaining)
+        if not await self.redis.set(f"{self.prefix}used:{code}", "1", nx=True, ex=marker_ttl):
             return False
         obj.used = True
         obj.used_at = _now()
-        # Re-save with a very short TTL (5 s) to propagate state before deletion.
+        # Re-save with a very short TTL (5 s) to propagate state before deletion;
+        # ``xx`` writes only over a live key, never re-creating a deleted code.
         key = f"{self.prefix}{code}"
-        await self.redis.set(key, obj.model_dump_json(), ex=5)
+        await self.redis.set(key, obj.model_dump_json(), ex=5, xx=True)
         return True
 
     async def delete_code(self, code: str):
@@ -106,10 +122,28 @@ class AuthorizationCodeStorage:
         key = f"{self.prefix}{code}"
         await self.redis.delete(key)
 
+    async def claim_code(self, code: str, ttl: Optional[int] = None) -> bool:
+        """Atomically claim the right to redeem ``code`` (FEAT-108).
+
+        Args:
+            code: The authorization code being redeemed.
+            ttl: Claim lifetime in seconds; ``None`` uses ``OAUTH_CODE_CLAIM_TTL``.
+
+        Returns:
+            bool: ``True`` when this caller now holds the claim.
+        """
+        ttl = OAUTH_CODE_CLAIM_TTL if ttl is None else int(ttl)
+        return bool(await self.redis.set(f"{self.prefix}claim:{code}", "1", nx=True, ex=ttl))
+
+    async def release_claim(self, code: str) -> None:
+        """Drop the claim so a client can retry after a transient outage (FEAT-108)."""
+        await self.redis.delete(f"{self.prefix}claim:{code}")
+
 
 # ---------------------------------------------------------------------------
 # Refresh Token Storage (Redis) — TASK-026 extended
 # ---------------------------------------------------------------------------
+
 
 class RefreshTokenStorage:
     """Redis-backed refresh token store.
@@ -245,6 +279,7 @@ class RefreshTokenStorage:
 # Grant Storage (durable consent records, TASK-027)
 # ---------------------------------------------------------------------------
 
+
 class GrantStorage:
     """Redis-backed durable consent grant store (TASK-027)."""
 
@@ -313,6 +348,7 @@ class GrantStorage:
 # Access Token Record Storage (jti revocation, TASK-027)
 # ---------------------------------------------------------------------------
 
+
 class AccessTokenStorage:
     """Redis-backed jti record store for access token revocation (TASK-027)."""
 
@@ -367,6 +403,7 @@ class AccessTokenStorage:
 # ---------------------------------------------------------------------------
 # Device Code Storage (FEAT-094 TASK-032)
 # ---------------------------------------------------------------------------
+
 
 class MemoryDeviceCodeStorage:
     """In-memory DeviceCodeStorage for tests and single-process deployments.
@@ -451,6 +488,7 @@ class RedisDeviceCodeStorage:
     async def get_by_device_code(self, device_code: str):
         """Retrieve an OauthDeviceCode by device_code."""
         from .models import OauthDeviceCode  # avoid circular import
+
         key = f"{self.prefix}{device_code}"
         data = await self.redis.get(key)
         if data:
@@ -494,6 +532,7 @@ class RedisDeviceCodeStorage:
 # ---------------------------------------------------------------------------
 # Factory helpers (backend.py uses these)
 # ---------------------------------------------------------------------------
+
 
 def get_refresh_token_storage(storage_type: str = "redis", dsn: str = None) -> RefreshTokenStorage:
     """Return an appropriate RefreshTokenStorage.

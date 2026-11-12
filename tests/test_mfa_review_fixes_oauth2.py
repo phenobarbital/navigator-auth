@@ -175,7 +175,7 @@ async def test_oauth2_login_mfa_success_redirects_with_pkce(provider, gate):
     provider.get_payload = AsyncMock(return_value=form)
     response = await provider.auth_login_mfa(_request(_app(), "/oauth2/login/mfa"))
     assert response.status == 302
-    location = urlparse(str(response.location))
+    location = urlparse(response.headers["Location"])
     assert location.path == "/oauth2/authorize"
     assert {k: v[0] for k, v in parse_qs(location.query).items()} == AUTHORIZE_PARAMS
     extra = provider._create_user_session.await_args.kwargs["extra"]

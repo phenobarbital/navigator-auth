@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-108 — OAuth2 3LO examples work end-to-end — auth paths fail closed on misconfiguration and unknown users
 **Spec**: `sdd/specs/oauth2-3lo-issues.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: L (4-8h)
 **Depends-on**: TASK-204
@@ -313,3 +313,7 @@ When you pick up this task:
 **Notes**:
 
 **Deviations from spec**: none
+
+## Completion Note
+
+Native sonnet delivery merged. Coder ran test_device_verification.py (12 passed) and access_gate + introspection_device_integration (49 passed). Limit: the FEAT-106 second-factor hop is covered only via the shared _authorize_redirect helper, not an end-to-end auth_login_mfa run.

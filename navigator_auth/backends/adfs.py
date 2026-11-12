@@ -6,6 +6,7 @@ Description: Backend Authentication/Authorization using Okta Service.
 import secrets
 from urllib.parse import quote
 from aiohttp import web
+from ..responses import RedirectResponse
 import jwt
 
 # needed by ADFS
@@ -285,14 +286,14 @@ class ADFSAuth(ExternalAuth):
                 f"https://{self.server}/adfs/ls/IdpInitiatedSignOn.aspx" f"?loginToRp={quote(ADFS_SAML_RELAY_RP)}"
             )
             self.logger.info(f"SAML Relay: redirecting to IdP-initiated SSO " f"for RP '{ADFS_SAML_RELAY_RP}'")
-            return web.HTTPFound(idp_sso_url)
+            return RedirectResponse(idp_sso_url)
         return self.home_redirect(request, token=token, token_type=token_type, uri=internal_redirect)
 
     async def logout(self, request):
         # first: removing the existing session
         # second: redirect to SSO logout
         self.logger.debug(f"ADFS LOGOUT URI: {self.end_session_endpoint}")
-        return web.HTTPFound(self.end_session_endpoint)
+        return RedirectResponse(self.end_session_endpoint)
 
     async def finish_logout(self, request):
         pass

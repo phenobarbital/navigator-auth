@@ -60,7 +60,8 @@ and `user` objects into the handler.
 Two things are stubbed so the example runs with nothing but Redis. **Drop both
 in a real deployment.**
 
-* `AuthHandler(enable_authdb=False)` — no PostgreSQL `authdb` pool.
+* `AuthHandler(backends=_BACKENDS, authz_backends=[], enable_authdb=False)` — no PostgreSQL
+  `authdb` pool, and the backends are pinned to `Oauth2Provider` (see below).
 * `DemoIdentityProvider` — an in-memory user directory replacing `auth.users`.
   Only the three database lookups are overridden; password hashing, token
   creation and token decoding are the real `IdentityProvider`.
@@ -71,6 +72,30 @@ production default is `postgres` (apply the schema with `navauth self upgrade --
 Everything else — code issuance and single use, PKCE verification, consent and
 consent-skip, refresh-token rotation with reuse detection, revocation — is the
 real implementation.
+
+### Why it pins its backends
+
+`make_app()` constructs `AuthHandler(backends=_BACKENDS, authz_backends=[], enable_authdb=False)`.
+
+Two settings inherited from a full Navigator deployment could otherwise change
+what this example does, so it pins both:
+
+* **`AUTHENTICATION_BACKENDS` from `settings/settings.py`** — `navigator_auth.conf`
+  ends with `from settings.settings import *`, so a local settings file in the
+  working directory overrides the environment. It can enable `NoAuth`,
+  `APIKeyAuth`, `AzureAuth` and others. `_BACKENDS` pins exactly
+  `navigator_auth.backends.oauth2.Oauth2Provider`, whatever the settings say.
+* **`AUTHORIZATION_BACKENDS` (`allow_hosts`, `allowed_ips`)** — `authz_backends=[]`
+  turns authorization backends off. An inherited `allow_hosts` (`ALLOWED_HOSTS`
+  defaults to `localhost*`) would otherwise let the browser's requests through
+  without a session.
+
+The example also checks the signing key at startup. `AUTH_SECRET_KEY` is read
+through navconfig, and `env/.env` wins over the example's `os.environ.setdefault`.
+If the key is shorter than 32 bytes, the example logs
+`AUTH_SECRET_KEY is N bytes; use at least 32 bytes.` and continues. The key value
+is never logged. To fix it, set `AUTH_SECRET_KEY` to at least 32 bytes in
+`env/dev/.env`.
 
 ---
 
@@ -210,6 +235,31 @@ Registers the four demo clients (public, confidential, device, resource-server)
 and prints the endpoint contracts for the 3LO, Device Grant (RFC 8628) and
 Token Introspection (RFC 7662) flows. Use it as a reference for the raw
 requests; use `oauth2_3lo_server.py` for a flow you can actually click through.
+
+### Browser walk-through (PKCE)
+
+Start from the URL the example prints for the 3LO flow, `http://localhost:5000/login`.
+The app pins `backends=[Oauth2Provider]` and `authz_backends=[]`, as the 3LO example
+does, so every protected request needs a session.
+
+1. **Authorize** — the index page (`examples/static/oauth2_index.html`) generates a
+   random `code_verifier` and its S256 `code_challenge`, plus a random `state`. It
+   keeps them in `sessionStorage` under `nav_oauth2_index_pkce`, then sends the
+   browser to `/oauth2/authorize` with the challenge.
+2. **Login and consent** — the browser goes through `/oauth2/login` and
+   `/oauth2/consent`, as in the 3LO example.
+3. **Callback** — the callback page (`examples/static/callback.html`) reads the
+   stored values from `sessionStorage`, checks that the returned `state` matches the
+   stored one, and removes the stored values.
+4. **Token** — the callback page sends the `code_verifier` to `/oauth2/token` and
+   gets the tokens back. The server checks the verifier against the challenge from
+   step 1.
+
+PKCE needs `crypto.subtle`, which browsers expose only in a secure context.
+`http://localhost` counts as one, so the walk-through works there. A LAN address
+such as `http://192.168.x.x:5000` does not; `crypto.subtle` is then undefined and
+the page cannot generate the challenge. Use `localhost`, or serve the example over
+HTTPS.
 
 ## Other examples
 

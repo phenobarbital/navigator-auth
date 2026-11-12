@@ -23,7 +23,7 @@ import pytest
 
 from navigator_auth.backends.idp import IdentityProvider
 from navigator_auth.backends.oauth2.backend import Oauth2Provider
-
+from navigator_auth.exceptions import UserNotFound
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates" / "oauth"
 
@@ -31,6 +31,7 @@ TEMPLATES = Path(__file__).resolve().parent.parent / "templates" / "oauth"
 # ---------------------------------------------------------------------------
 # 1. decode_token and the `aud` claim
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def idp():
@@ -57,9 +58,7 @@ class TestDecodeTokenAudience:
 
     def test_audience_is_verified_when_requested(self, idp):
         """Opt-in verification still rejects a token minted for another audience."""
-        token, _, _, _ = idp.create_token(
-            {"user_id": 7}, expiration=300, audience="app"
-        )
+        token, _, _, _ = idp.create_token({"user_id": 7}, expiration=300, audience="app")
         assert idp.decode_token(token, audience="app")[1]["user_id"] == 7
         with pytest.raises(Exception):
             idp.decode_token(token, audience="user")
@@ -68,6 +67,7 @@ class TestDecodeTokenAudience:
 # ---------------------------------------------------------------------------
 # 2. Access tokens are bound to a session
 # ---------------------------------------------------------------------------
+
 
 class DummyUser(dict):
     """Minimal stand-in for a navigator-auth User row."""
@@ -107,9 +107,7 @@ class TestTokenSessionBinding:
         storage = MagicMock()
         storage.new_session = AsyncMock(return_value=session)
 
-        provider._idp.user_from_id = AsyncMock(
-            return_value=DummyUser(user_id=11, username="demo")
-        )
+        provider._idp.user_from_id = AsyncMock(return_value=DummyUser(user_id=11, username="demo"))
         request = make_request(storage)
 
         claims = await provider._token_session_claims(request, 11)
@@ -125,15 +123,23 @@ class TestTokenSessionBinding:
         assert session_data[provider.session_key_property] == "demo"
 
     @pytest.mark.asyncio
-    async def test_unknown_user_degrades_without_raising(self, provider):
-        provider._idp.user_from_id = AsyncMock(side_effect=RuntimeError("no such user"))
+    async def test_unknown_user_raises(self, provider):
+        provider._idp.user_from_id = AsyncMock(side_effect=UserNotFound("no such user"))
         request = make_request(MagicMock())
-        assert await provider._token_session_claims(request, 404) == {}
+        with pytest.raises(UserNotFound):
+            await provider._token_session_claims(request, 404)
+
+    @pytest.mark.asyncio
+    async def test_session_storage_unavailable_still_returns_empty(self, provider):
+        provider._idp.user_from_id = AsyncMock(return_value=DummyUser(user_id=11, username="demo"))
+        request = make_request(None)
+        assert await provider._token_session_claims(request, 11) == {}
 
 
 # ---------------------------------------------------------------------------
 # 3. PKCE survives the interactive hops
 # ---------------------------------------------------------------------------
+
 
 class TestPkcePropagation:
     @pytest.mark.parametrize("template", ["login.html", "consent.html"])
@@ -148,6 +154,7 @@ class TestPkcePropagation:
 # ---------------------------------------------------------------------------
 # 4. The grants API can identify the caller
 # ---------------------------------------------------------------------------
+
 
 class TestRequestUserId:
     def test_reads_the_token_claims(self, provider):

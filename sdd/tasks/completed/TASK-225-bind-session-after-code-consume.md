@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-108 — OAuth2 3LO issues
 **Spec**: `sdd/specs/oauth2-3lo-issues.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: low
 **Estimated effort**: S (< 2h)
 **Depends-on**: TASK-224
@@ -166,4 +166,14 @@ blueprint, run the Validation Commands, commit only the listed files, then
 
 ## Completion Note
 
-*(Agent fills this in when done)*
+**Completed by**: /sdd-fix session `agent:sdd-fix:d964ca37` (Claude Opus 5.5)
+**Date**: 2026-11-12
+**Notes**: `_token_session_claims(..., user=None)`; the code grant resolves the owner under the claim,
+consumes the code, then binds the session with the already-resolved owner. A redeemer that loses
+`mark_used` never awaits `_create_user_session`; nothing is deleted (the session is shared per
+identity — `RedisStorage.new_session` reuses `user:{identity}`, so deleting it would log the user
+out). Refresh grant unchanged. Commits: `b995fef`, review fix `0cb58e5`.
+
+**Deviations from spec**: Codex review (CONFIRMED, fixed in `0cb58e5`): after the code is consumed, a
+session-store exception no longer propagates (it would have cost the client its grant, including
+device redemption); the token is issued without session claims, as when no session can be created.

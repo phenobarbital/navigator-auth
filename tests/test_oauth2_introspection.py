@@ -11,6 +11,7 @@ Tests:
 from contextlib import asynccontextmanager
 import secrets
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -82,12 +83,12 @@ def _make_provider(
     provider._generation_ok = AsyncMock(return_value=True)
     provider.code_storage = MagicMock()
 
-    # IDP mock
+    # IDP mock — introspection re-checks the owner of user tokens (FEAT-108,
+    # TASK-226), so the default owner is an existing, active user.
     provider._idp = MagicMock()
-    if user:
-        provider._idp.user_from_id = AsyncMock(return_value=user)
-    else:
-        provider._idp.user_from_id = AsyncMock(return_value=None)
+    if user is None:
+        user = SimpleNamespace(user_id=42, username="owner", is_active=True)
+    provider._idp.user_from_id = AsyncMock(return_value=user)
 
     return provider
 

@@ -2,7 +2,7 @@
 
 **Feature**: FEAT-108 — OAuth2 3LO examples work end-to-end — auth paths fail closed on misconfiguration and unknown users
 **Spec**: `sdd/specs/oauth2-3lo-issues.spec.md`
-**Status**: pending
+**Status**: done
 **Priority**: high
 **Estimated effort**: S (< 2h)
 **Depends-on**: none
@@ -227,3 +227,7 @@ When you pick up this task:
 **Notes**:
 
 **Deviations from spec**: none
+
+## Completion Note
+
+Delivered by the coder pool (execution 8700c4ca), merged into the feature branch; merge-tier validation green (only baseline reds: short AUTH_SECRET_KEY JWT warnings). Closed by sdd-worker; semantic review is the feature-wide code review.

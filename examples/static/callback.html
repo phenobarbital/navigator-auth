@@ -27,12 +27,23 @@
             document.getElementById('exchange').style.display = 'block';
         }
 
+        const STORE = 'nav_oauth2_index_pkce';
+
         async function exchangeToken() {
+            let saved = {};
+            try { saved = JSON.parse(sessionStorage.getItem(STORE)) || {}; } catch { saved = {}; }
+            if (!saved.state || saved.state !== state) {
+                document.getElementById('result').innerText =
+                    'state mismatch - possible CSRF, the exchange was not attempted.';
+                return;
+            }
+
             const formData = new URLSearchParams();
             formData.append('grant_type', 'authorization_code');
             formData.append('code', code);
             formData.append('client_id', 'nav_public_client');
             formData.append('redirect_uri', 'http://localhost:5000/static/callback.html');
+            formData.append('code_verifier', saved.verifier);
 
             try {
                 const response = await fetch('/oauth2/token', {
@@ -42,6 +53,9 @@
                 });
                 const data = await response.json();
                 document.getElementById('result').innerText = JSON.stringify(data, null, 2);
+                if (response.ok) {
+                    sessionStorage.removeItem(STORE);
+                }
             } catch (e) {
                 document.getElementById('result').innerText = 'Error: ' + e;
             }

@@ -16,6 +16,7 @@ from requests.models import PreparedRequest
 import aiohttp
 import jwt
 from aiohttp import web, hdrs
+from ..responses import RedirectResponse
 from aiohttp.client import ClientTimeout, ClientSession
 import redis.asyncio as aioredis
 from datamodel.exceptions import ValidationError
@@ -286,7 +287,7 @@ class ExternalAuth(BaseAuthBackend):
         Making the redirection to External Auth Page.
         """
         logging.debug(f"{self.__class__.__name__} URI: {uri}")
-        return web.HTTPFound(uri)
+        return RedirectResponse(uri)
 
     def prepare_url(self, url: str, params: dict = None):
         """Construct a URL with query parameters.
@@ -343,7 +344,7 @@ class ExternalAuth(BaseAuthBackend):
             redirect_url = self.finish_redirect_url
         self.logger.notice(f"Redirect URL: {redirect_url}, Params: {params}, Headers: {headers}")
         url = self.prepare_url(redirect_url, params)
-        return web.HTTPFound(url, headers=headers)
+        return RedirectResponse(url, headers=headers)
 
     def get_failed_redirect_url(self, request: web.Request) -> str:
         domain_url = self.get_domain(request)
@@ -367,7 +368,7 @@ class ExternalAuth(BaseAuthBackend):
         headers = {"x-message": safe_message, "x-error": safe_error}
         params = {"error": safe_error, "message": safe_message}
         url = self.prepare_url(url, params)
-        return web.HTTPFound(url, headers=headers)
+        return RedirectResponse(url, headers=headers)
 
     @abstractmethod
     async def authenticate(self, request: web.Request):
@@ -1014,7 +1015,7 @@ class ExternalAuth(BaseAuthBackend):
             fallback="/",
             domain_url=self.get_domain(request),
         )
-        return web.HTTPFound(redirect_to)
+        return RedirectResponse(redirect_to)
 
     @abstractmethod
     async def logout(self, request: web.Request):
