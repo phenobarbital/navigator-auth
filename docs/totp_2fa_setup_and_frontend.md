@@ -71,6 +71,7 @@ Las rutas de gestión exigen sesión activa. Solo `challenge` y `verify` son pú
 | `DELETE /auth/mfa/totp`          | Sí     | Da de baja el TOTP propio |
 | `POST /auth/mfa/backup-codes`    | Sí     | Regenera los códigos de respaldo |
 | `DELETE /auth/mfa/{user_id}`     | Sí     | Baja administrativa (requiere `mfa:disenroll`) |
+| `GET /auth/mfa/status`           | Sí     | Estado de 2FA del propio usuario (solo lectura) |
 
 Todas las respuestas llevan `Cache-Control: no-store`. Los errores tienen la forma
 `{"error": "<código>", "message": "..."}`.
@@ -212,16 +213,33 @@ Respuesta `201`: `{"backup_codes": [...], "count": 10}`. Sin la prueba responde
 
 ### 2.5 Estado del usuario en la página de profile
 
-No hay un endpoint `GET` dedicado que diga "TOTP activo". Opciones:
+`GET /auth/mfa/status` (requiere sesión; solo lectura, no gasta intentos ni escribe auditoría)
+devuelve el estado del propio usuario:
 
-- Guardar el estado en su propio endpoint de profile usando la información que ya
-  tenga su aplicación.
-- Añadir un endpoint de estado en el backend (hoy no existe).
-- Usar el resultado del último intento como señal: `enroll` con `code` requerido
-  devuelve `strong_factor_proof_required` cuando ya hay un factor fuerte.
+```json
+{
+  "totp": true,
+  "passkeys": 1,
+  "has_strong_factor": true,
+  "backup_codes_remaining": 8,
+  "trusted_devices": 2,
+  "policy": {"mode": "enforced", "remember_days": 30},
+  "strong_factor_required": false,
+  "login_blocked": false
+}
+```
 
-Dependiendo de su caso, conviene el segundo punto: un `GET /auth/mfa/status` que
-devuelva `{totp: bool, backup_codes_remaining: int}` evita adivinar en el cliente.
+- `totp` / `passkeys`: qué factores fuertes tiene. Úselos para mostrar "Activar" o
+  "Desactivar / Regenerar códigos".
+- `backup_codes_remaining`: códigos de respaldo sin usar. Avise cuando queden pocos.
+- `trusted_devices`: dispositivos recordados vigentes.
+- `policy`: la política efectiva del tenant (la más estricta entre sus organizaciones).
+- `strong_factor_required`: `true` para un superusuario en un tenant `enforced`.
+- `login_blocked`: `true` cuando su login con contraseña se rechazará hasta que registre un
+  TOTP o un passkey. Muestre un aviso destacado y lleve al alta.
+
+Errores: `401 session_required` sin sesión; `503 mfa_unavailable` si no se puede leer el estado.
+No devuelve semillas, códigos, tokens ni identificadores de organización.
 
 ---
 

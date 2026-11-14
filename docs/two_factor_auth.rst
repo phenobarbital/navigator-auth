@@ -172,6 +172,18 @@ unused backup code, or a fresh passkey session); without the proof
 or a passkey-only user without backup codes) receives ``no_factor_available``;
 passkey holders should sign in with their passkey.
 
+Reading the user's own status
+-----------------------------
+
+``GET /auth/mfa/status`` requires a session and is read-only: it takes no lock, consumes no
+limiter budget and writes no audit row. It returns the session user's ``totp`` (bool),
+``passkeys`` (int), ``has_strong_factor``, ``backup_codes_remaining``, ``trusted_devices``,
+the effective ``policy`` (``mode`` and ``remember_days``), ``strong_factor_required`` and
+``login_blocked`` (``true`` when a password login is refused until a TOTP or passkey is
+registered). It still answers for an enforced superuser without a strong factor, the user who
+most needs it to enrol, and it never returns a seed, code, token, organization id or digest.
+``503 mfa_unavailable`` when the stores cannot be read.
+
 Enrolling and replacing TOTP
 ----------------------------
 
