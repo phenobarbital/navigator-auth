@@ -19,13 +19,12 @@ POLICY = "user_identities_admin_access"
 
 
 class FakePDP:
-    """Minimal PDP stub exposing the ``policies`` collection."""
+    """Minimal PDP stub. ``policies`` is a method, as on the real ``PDP``."""
 
     def __init__(self, policies):
         self._evaluator = None
         self._policies = policies
 
-    @property
     def policies(self):
         return self._policies
 
@@ -135,3 +134,59 @@ async def test_policy_allows_accepts_str_and_list_identically():
 async def test_policy_allows_rejects_empty_policy_list():
     with pytest.raises(ValueError):
         await policy_allows([], _make_request())
+
+
+# ---------------------------------------------------------------------------
+# Real PDP: ``PDP.policies`` is a method. A property-shaped stub once hid a
+# TypeError ("'method' object is not iterable") in the linear-scan fallback of
+# ``_find_policy`` — a 500 instead of a fail-closed deny whenever the named
+# policy was not in the evaluator index (0.26.0 – 0.29.2).
+# ---------------------------------------------------------------------------
+
+
+class BrokenPDP:
+    """PDP-like stub whose policy listing raises."""
+
+    _evaluator = None
+
+    def policies(self):
+        raise RuntimeError("policy listing is down")
+
+
+@pytest.mark.asyncio
+async def test_policy_allows_real_pdp_undeclared_policy_denies():
+    from navigator_auth.abac.pdp import PDP
+
+    request = _make_request(pdp=PDP(storage=MagicMock()))
+    with _patch_session(_session(["superuser"])):
+        allowed, reason, response = await policy_allows("groups_admin_access", request, action="group:read")
+    assert allowed is False
+    assert "groups_admin_access" in reason
+    assert response is None
+
+
+class PropertyPDP(FakePDP):
+    """PDP-like object exposing ``policies`` as a property instead."""
+
+    @property
+    def policies(self):
+        return self._policies
+
+
+@pytest.mark.asyncio
+async def test_policy_allows_scans_property_style_policies():
+    request = _make_request(pdp=PropertyPDP([_admin_policy()]))
+    with _patch_session(_session(["superuser"])):
+        allowed, _, response = await policy_allows(POLICY, request, action="identity:read")
+    assert allowed is True
+    assert response is not None
+
+
+@pytest.mark.asyncio
+async def test_policy_allows_denies_when_lookup_raises():
+    request = _make_request(pdp=BrokenPDP())
+    with _patch_session(_session(["superuser"])):
+        allowed, reason, response = await policy_allows(POLICY, request, action="identity:read")
+    assert allowed is False
+    assert POLICY in reason
+    assert response is None

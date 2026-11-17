@@ -17,6 +17,7 @@ from asyncdb.exceptions import NoDataFound
 
 from navigator_auth.authorizations._client_ip import limiter_client_ip, parse_proxies
 from navigator_auth.conf import ALLOWED_IP_TRUSTED_PROXIES, AUTH_EXCLUDE_LIST_KEY, AUTH_OTP_CHALLENGE_TTL
+from navigator_auth.abac.required_policies import require_policy
 from navigator_auth.decorators import policy_allows
 from navigator_auth.exceptions import InvalidAuth, MFARefused, UserNotFound
 from navigator_auth.mfa.login import SecondFactorGate, VerifyRefused
@@ -41,6 +42,8 @@ from navigator_session import AUTH_SESSION_OBJECT, get_session
 logger = logging.getLogger("navigator.auth.mfa")
 
 MFA_PREFIX = "/auth/mfa"
+#: ABAC policy gating the admin disenroll route (``mfa:disenroll``).
+MFA_ADMIN_POLICY = "mfa_admin_access"
 NO_STORE = {"Cache-Control": "no-store"}
 
 
@@ -107,6 +110,7 @@ def setup_mfa_routes(app: web.Application, router: Any) -> None:
     router.add_get(f"{MFA_PREFIX}/status", handler.status, name="mfa_status", allow_head=False)
     # Registered AFTER the literal /totp DELETE; NOT in AUTH_EXCLUDE_LIST_KEY.
     router.add_delete(rf"{MFA_PREFIX}/{{user_id:\d+}}", handler.admin_disenroll, name="mfa_admin_disenroll")
+    require_policy(app, MFA_ADMIN_POLICY, f"DELETE {MFA_PREFIX}/{{user_id}}")
 
 
 class MfaHandler:
@@ -525,7 +529,7 @@ class MfaHandler:
             await self._audit_denied(services, actor_id, target_id, "self_target")
             return _error("self_disenroll_forbidden", 403)
         allowed, reason, _ = await policy_allows(
-            "mfa_admin_access", request, action="mfa:disenroll", resource=request.path
+            MFA_ADMIN_POLICY, request, action="mfa:disenroll", resource=request.path
         )
         if not allowed:
             await self._audit_denied(services, actor_id, target_id, f"abac: {reason}")

@@ -1029,6 +1029,24 @@ def _get_pdp(request: web.Request) -> Any:
     return pdp
 
 
+def _pdp_policies(pdp: Any) -> list:
+    """Return the policies registered on a PDP as a list.
+
+    ``PDP.policies`` is a method on the real PDP, while some PDP-like objects
+    expose it as a plain attribute or property; both shapes are accepted.
+
+    Args:
+        pdp: The ABAC PDP (or a PDP-like object).
+
+    Returns:
+        The registered policies, or an empty list when none are exposed.
+    """
+    policies = getattr(pdp, "policies", None)
+    if callable(policies):
+        policies = policies()
+    return list(policies or [])
+
+
 def _find_policy(pdp: Any, name: str) -> Any:
     """Find a Policy by name on the PDP (indexed lookup, then linear scan)."""
     evaluator = getattr(pdp, "_evaluator", None)
@@ -1037,7 +1055,7 @@ def _find_policy(pdp: Any, name: str) -> Any:
         found = index.get_by_name(name)
         if found is not None:
             return found
-    for policy in getattr(pdp, "policies", None) or []:
+    for policy in _pdp_policies(pdp):
         if getattr(policy, "name", None) == name:
             return policy
     return None
@@ -1166,7 +1184,14 @@ async def _check_policies(
     last_response = None
 
     for name in names:
-        policy = _find_policy(pdp, name)
+        try:
+            policy = _find_policy(pdp, name)
+        except Exception as exc:  # noqa: BLE001 - never leak a 500 from a check
+            logger.error("check_access: Policy '%s' lookup failed: %s", name, exc, exc_info=True)
+            reasons.append(f"Policy '{name}' could not be looked up.")
+            if require_all:
+                return False, "; ".join(reasons), None
+            continue
         if policy is None:
             # Fail closed: a policy that is not declared can never grant access.
             logger.error("check_access: Policy '%s' is not declared on ABAC.", name)

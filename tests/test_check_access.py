@@ -47,13 +47,12 @@ admin_policy = Policy(
 
 
 class FakePDP:
-    """Minimal PDP stub exposing the ``policies`` collection."""
+    """Minimal PDP stub. ``policies`` is a method, as on the real ``PDP``."""
 
     def __init__(self, policies):
         self._evaluator = None
         self._policies = policies
 
-    @property
     def policies(self):
         return self._policies
 

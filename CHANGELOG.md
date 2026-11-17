@@ -1,5 +1,27 @@
 # Unreleased
 
+- **Fix — ABAC admin routes answered 500 when their policy was not loaded
+  (0.26.0 – 0.29.2).** The policy lookup used by `check_access` and
+  `policy_allows` iterated `PDP.policies` without calling it
+  (`TypeError: 'method' object is not iterable`) whenever the named policy was
+  not in the evaluator index, and did so before the fail-closed `except`. It
+  now calls the method and treats any lookup error as a denial, so
+  `/api/v1/groups` and the other admin routes answer 403 instead of 500. The
+  test stubs modelled `policies` as a property, which hid the bug; they now
+  match the real PDP.
+
+- **Startup warning for missing admin policies.** Handlers declare the ABAC
+  policies they evaluate (`navigator_auth.abac.required_policies`), and
+  `PDP.on_startup` logs a WARNING for each one that is not loaded, naming the
+  routes that need it and the pack in `abac/default_policies/` that defines it.
+
+- **Docs: loading the admin policy packs.** `documentation/pdp.md` said to
+  copy the packs into `POLICY_STORAGE_DIR`, but nothing reads that setting
+  unless the application passes `yaml_storage=YAMLStorage(POLICY_STORAGE_DIR)`
+  to the PDP. The new section "Loading the admin policy packs" lists the three
+  packs, the routes that need them, and the pitfalls (pre-loaded evaluator,
+  same-name policies across sources).
+
 - **Behaviour change — database migrations are now an explicit command
   (FEAT-110).** New `navauth self upgrade` console script applies the
   idempotent SQL catalog (vault, identity, passkey, oauth2) under a ledger
