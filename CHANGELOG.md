@@ -1,5 +1,16 @@
 # Unreleased
 
+- **Fix — `password_reset` answered 500 for an unknown user, and 406
+  "Session Missing" for a non-superuser.** The 404 that
+  `POST /api/v2/user/password_reset/{userid}` raises for a user that does not
+  exist was caught by the generic `except Exception` and re-reported as 500
+  "Error getting User: User not found"; the handler now re-raises
+  `web.HTTPException` like `password_change` does. A signed-in caller who is
+  not a superuser got 406 "Access Denied, Session Missing" although the session
+  is present; the refusal is now 403 "Forbidden: only a superuser can reset a
+  password.". **Behaviour change:** clients that matched on 406 for this
+  refusal now get 403.
+
 - **Fix — ABAC admin routes answered 500 when their policy was not loaded
   (0.26.0 – 0.29.2).** The policy lookup used by `check_access` and
   `policy_allows` iterated `PDP.policies` without calling it

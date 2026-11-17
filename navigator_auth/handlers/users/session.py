@@ -186,7 +186,7 @@ class UserSession(BaseHandler):
         ### TODO: check if user is superuser:
         userinfo = session[AUTH_SESSION_OBJECT]
         if userinfo["superuser"] is False:
-            return self.error(reason="Access Denied, Session Missing", status=406)
+            return self.error(reason="Forbidden: only a superuser can reset a password.", status=403)
         db = request.app["authdb"]
         try:
             # Phase 1: existence check only, on a connection released before the lock.

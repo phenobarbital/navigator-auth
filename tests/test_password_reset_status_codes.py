@@ -1,9 +1,11 @@
-"""Status codes of ``UserSession.password_reset`` for its refusal paths.
+"""Status codes of ``UserSession.password_reset`` for the two refusal paths.
 
 * A superuser who resets a user that does not exist gets 404, not 500. The
   handler raises ``HTTPNotFound`` inside a ``try`` whose generic
   ``except Exception`` used to turn it into a 500 "Error getting User: User not
   found" (``password_change`` already re-raises ``web.HTTPException``).
+* A signed-in caller who is not a superuser gets 403 with a permission message,
+  not 406 "Access Denied, Session Missing": the session is present.
 
 In-process: the request is built with ``make_mocked_request``; the database is
 replaced at the ``User.get`` boundary and the security transition is patched so
@@ -24,7 +26,7 @@ from navigator_auth.models import User
 
 pytestmark = pytest.mark.filterwarnings("ignore::aiohttp.web_exceptions.NotAppKeyWarning")
 
-ACTOR_ID, MISSING_ID = 7, 424242
+ACTOR_ID, MISSING_ID, VICTIM_ID = 7, 424242, 99
 MODULE = "navigator_auth.handlers.users.session"
 
 
@@ -94,3 +96,13 @@ async def test_reset_of_unknown_user_is_404(user_get):
     assert isinstance(error, web.HTTPNotFound)
     assert entered == []
 
+
+@pytest.mark.asyncio
+async def test_reset_by_non_superuser_is_403_permission_refusal():
+    user_get = AsyncMock()
+    error, entered = await _reset(_session(superuser=False), VICTIM_ID, user_get)
+    assert error.status == 403, error.text
+    assert "Session Missing" not in (error.text or "")
+    assert "superuser" in (error.text or "").lower()
+    user_get.assert_not_awaited()
+    assert entered == []
