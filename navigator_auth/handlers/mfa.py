@@ -15,7 +15,8 @@ from typing import Any, Awaitable, Callable, Optional
 from aiohttp import web
 from asyncdb.exceptions import NoDataFound
 
-from navigator_auth.conf import AUTH_EXCLUDE_LIST_KEY, AUTH_OTP_CHALLENGE_TTL
+from navigator_auth.authorizations._client_ip import limiter_client_ip, parse_proxies
+from navigator_auth.conf import ALLOWED_IP_TRUSTED_PROXIES, AUTH_EXCLUDE_LIST_KEY, AUTH_OTP_CHALLENGE_TTL
 from navigator_auth.decorators import policy_allows
 from navigator_auth.exceptions import InvalidAuth, MFARefused, UserNotFound
 from navigator_auth.mfa.login import SecondFactorGate, VerifyRefused
@@ -57,9 +58,12 @@ async def _json_body(request: web.Request) -> dict:
     return body if isinstance(body, dict) else {}
 
 
+_TRUSTED_PROXIES = parse_proxies(ALLOWED_IP_TRUSTED_PROXIES)
+
+
 def _remote(request: web.Request) -> str:
-    """Return the request's remote address with a safe fallback."""
-    return request.remote or "unknown"
+    """Return the client IP the MFA limiter keys on, honouring trusted proxies."""
+    return limiter_client_ip(request, _TRUSTED_PROXIES)
 
 
 def _with_mfa_services(

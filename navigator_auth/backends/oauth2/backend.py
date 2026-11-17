@@ -3263,12 +3263,9 @@ class Oauth2Provider(BaseAuthBackend):
             return self._error_response("invalid_request", "user_code required.", status=400)
 
         # --- Anti-brute-force: Redis-backed rate-limit + lockout (D3) ---
-        # Use X-Forwarded-For if available (reverse proxy), else fall back to remote.
+        # Proxy-aware identity: forwarding headers count only from a trusted proxy.
         # NOTE: IP-only lockout is bypassable behind a shared NAT; see issue M-3.
-        client_ip = request.headers.get("X-Forwarded-For", request.remote)
-        if client_ip:
-            client_ip = client_ip.split(",")[0].strip()  # take first (client) IP
-        client_ip = client_ip or "unknown"
+        client_ip = self._client_source_ip(request)
         lockout_key = f"oauth2:device:lockout:{client_ip}"
         attempt_key = f"oauth2:device:attempts:{client_ip}"
 

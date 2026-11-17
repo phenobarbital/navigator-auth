@@ -16,6 +16,7 @@ from typing import Any, Awaitable, Callable, Generic, NoReturn, Optional, TypeVa
 from aiohttp import web
 
 from navigator_auth import conf as auth_conf
+from navigator_auth.authorizations._client_ip import limiter_client_ip, parse_proxies
 from navigator_auth.exceptions import FailedAuth, InvalidAuth, MFARefused, MfaSignal, UserNotFound
 from navigator_auth.mfa.services import MfaServices
 from navigator_auth.mfa.trusted_devices import may_offer_trusted_device
@@ -77,9 +78,12 @@ def _field(user: Any, name: str, default: Any = None) -> Any:
     return default if value is None else value
 
 
+_TRUSTED_PROXIES = parse_proxies(auth_conf.ALLOWED_IP_TRUSTED_PROXIES)
+
+
 def _remote(request: web.Request) -> str:
-    """Return the request's remote address with a safe fallback."""
-    return getattr(request, "remote", None) or "unknown"
+    """Return the client IP the MFA limiter keys on, honouring trusted proxies."""
+    return limiter_client_ip(request, _TRUSTED_PROXIES)
 
 
 class SecondFactorGate:

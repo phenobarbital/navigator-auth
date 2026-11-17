@@ -1,0 +1,69 @@
+{
+  "feature": "limiter-client-ip",
+  "feature_id": "BRIEF-limiter-client-ip",
+  "spec": "sdd/briefs/limiter-client-ip.brief.md",
+  "type": "brief",
+  "base_branch": "main",
+  "created_at": "2026-11-12T21:44:15Z",
+  "completed_at": "2026-11-12T20:54:12+00:00",
+  "parallel_semantics": "exclusive",
+  "validation_contract": "required",
+  "tasks": [
+    {
+      "id": "HOTFIX-limiter-client-ip-1",
+      "slug": "mfa-recovery-limiters",
+      "title": "MFA and recovery limiters key on get_client_ip",
+      "feature_id": "BRIEF-limiter-client-ip",
+      "feature": "limiter-client-ip",
+      "spec": "sdd/briefs/limiter-client-ip.brief.md",
+      "status": "done",
+      "priority": "high",
+      "effort": "S",
+      "depends_on": [],
+      "parallel": true,
+      "parallelism_notes": "Touches _client_ip.py, mfa/login.py, handlers/mfa.py, recovery/handler.py; disjoint from task 2.",
+      "assigned_to": null,
+      "started_at": "2026-11-12T20:52:14+00:00",
+      "completed_at": "2026-11-12T20:54:12+00:00",
+      "file": "sdd/briefs/limiter-client-ip/tasks/HOTFIX-limiter-client-ip-1-mfa-recovery-limiters.md"
+    },
+    {
+      "id": "HOTFIX-limiter-client-ip-2",
+      "slug": "device-code-lockout",
+      "title": "OAuth2 device-code lockout stops trusting raw X-Forwarded-For",
+      "feature_id": "BRIEF-limiter-client-ip",
+      "feature": "limiter-client-ip",
+      "spec": "sdd/briefs/limiter-client-ip.brief.md",
+      "status": "done",
+      "priority": "high",
+      "effort": "S",
+      "depends_on": [],
+      "parallel": true,
+      "parallelism_notes": "Touches only oauth2/backend.py and tests/test_device_verification.py; independent of tasks 1 and 3.",
+      "assigned_to": null,
+      "started_at": "2026-11-12T20:52:14+00:00",
+      "completed_at": "2026-11-12T20:54:12+00:00",
+      "file": "sdd/briefs/limiter-client-ip/tasks/HOTFIX-limiter-client-ip-2-device-code-lockout.md"
+    },
+    {
+      "id": "HOTFIX-limiter-client-ip-3",
+      "slug": "passkey-limiter",
+      "title": "Passkey login/options limiter keys on the real client IP",
+      "feature_id": "BRIEF-limiter-client-ip",
+      "feature": "limiter-client-ip",
+      "spec": "sdd/briefs/limiter-client-ip.brief.md",
+      "status": "done",
+      "priority": "medium",
+      "effort": "S",
+      "depends_on": [
+        "HOTFIX-limiter-client-ip-1"
+      ],
+      "parallel": false,
+      "parallelism_notes": "Needs limiter_client_ip from task 1.",
+      "assigned_to": null,
+      "started_at": "2026-11-12T20:52:14+00:00",
+      "completed_at": "2026-11-12T20:54:12+00:00",
+      "file": "sdd/briefs/limiter-client-ip/tasks/HOTFIX-limiter-client-ip-3-passkey-limiter.md"
+    }
+  ]
+}

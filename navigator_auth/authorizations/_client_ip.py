@@ -4,6 +4,7 @@ Used by both ``authz_allowed_ips`` (CIDR matching) and ``authz_useragent``
 (geo-fencing) so the trusted-proxy / ``X-Forwarded-For`` logic lives in one
 place.
 """
+
 import ipaddress
 import logging
 from aiohttp import web
@@ -51,8 +52,7 @@ def parse_proxies(entries: list[str]) -> set[IPAddress]:
             proxies.add(ipaddress.ip_address(entry))
         except ValueError:
             logging.warning(
-                "authz: ignoring invalid trusted proxy IP at position %d "
-                "of ALLOWED_IP_TRUSTED_PROXIES",
+                "authz: ignoring invalid trusted proxy IP at position %d " "of ALLOWED_IP_TRUSTED_PROXIES",
                 position,
             )
     return proxies
@@ -130,3 +130,28 @@ def get_client_ip(
     # Every hop was a trusted proxy: fall back to Cloudflare's edge header
     # before giving up on client information entirely.
     return _cf_connecting_ip(request)
+
+
+def limiter_client_ip(
+    request: web.Request,
+    proxies: set[IPAddress] | None = None,
+) -> str:
+    """Return the identity an IP rate limiter keys on.
+
+    Resolves the real client through ``get_client_ip`` (forwarding headers
+    are honoured only when the direct peer is a trusted proxy), then falls
+    back to the raw peer and finally to ``"unknown"`` so a limiter always
+    has a key. With no trusted proxies this is exactly ``request.remote``.
+
+    Args:
+        request: The incoming request, or a test double exposing ``remote``.
+        proxies: Trusted proxy addresses, normally
+            ``parse_proxies(ALLOWED_IP_TRUSTED_PROXIES)``.
+
+    Returns:
+        The client IP, the raw peer address, or ``"unknown"``.
+    """
+    remote = getattr(request, "remote", None)
+    if not remote:
+        return "unknown"
+    return get_client_ip(request, proxies) or remote
