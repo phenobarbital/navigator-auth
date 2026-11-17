@@ -1,6 +1,8 @@
 from aiohttp import web
 from ..conf import SECURITY_CONFIG_HANDLER
 from .. import conf as auth_conf
+from ..abac.required_policies import require_policy
+from .guards import _GRANT_ROLE_POLICY
 from .permissions import PermissionHandler
 from .users import UserManager, UserSession
 from .users.role import UserRoleHandler
@@ -60,6 +62,24 @@ def setup_handlers(app: web.Application, router: web.RouteDef) -> None:
         r"/api/v1/user/identities/{identity_id:[0-9a-fA-F-]{36}}", UserIdentitiesHandler, name="api_user_identities_id"
     )
     router.add_view("/api/v1/user/identities", UserIdentitiesHandler, name="api_user_identities")
+    ## ABAC policies the admin paths above evaluate. They fail closed (403)
+    ## when the policy is not loaded; the PDP warns about them at startup.
+    for label, handler in (
+        ("/api/v1/permissions", PermissionHandler),
+        ("/api/v1/groups", GroupManager),
+        ("/api/v1/user_groups", UserGroupManager),
+        ("/api/v1/usergroups", UserGroupManager),
+        ("/api/v1/group_permissions", GroupPermissionManager),
+        ("/api/v1/users", UserManager),
+        ("/api/v1/users/{id}/role", UserRoleHandler),
+        ("/api/v1/user_accounts", UserAccountHandler),
+        ("/api/v1/partner/tokens", PartnerKeyHandler),
+        ("/api/v1/user_identity", UserIdentityHandler),
+    ):
+        require_policy(app, handler.policy_name, label)
+    # Changes touching a protected group (superuser, security_admin, ...).
+    for label in ("/api/v1/groups", "/api/v1/user_groups", "/api/v1/usergroups"):
+        require_policy(app, _GRANT_ROLE_POLICY, f"{label} (protected groups)")
     ### User Session Methods:
     usr = UserSession()
     router.add_get("/api/v2/user/logout", usr.logout, allow_head=True)

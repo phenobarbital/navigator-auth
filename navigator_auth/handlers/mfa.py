@@ -17,6 +17,7 @@ from asyncdb.exceptions import NoDataFound
 
 from navigator_auth.authorizations._client_ip import limiter_client_ip, parse_proxies
 from navigator_auth.conf import ALLOWED_IP_TRUSTED_PROXIES, AUTH_EXCLUDE_LIST_KEY, AUTH_OTP_CHALLENGE_TTL
+from navigator_auth.abac.required_policies import require_policy
 from navigator_auth.decorators import policy_allows
 from navigator_auth.exceptions import InvalidAuth, MFARefused, UserNotFound
 from navigator_auth.mfa.login import SecondFactorGate, VerifyRefused
@@ -41,6 +42,8 @@ from navigator_session import AUTH_SESSION_OBJECT, get_session
 logger = logging.getLogger("navigator.auth.mfa")
 
 MFA_PREFIX = "/auth/mfa"
+#: ABAC policy gating the admin disenroll route (``mfa:disenroll``).
+MFA_ADMIN_POLICY = "mfa_admin_access"
 NO_STORE = {"Cache-Control": "no-store"}
 
 
@@ -103,8 +106,11 @@ def setup_mfa_routes(app: web.Application, router: Any) -> None:
     router.add_post(f"{MFA_PREFIX}/totp/confirm", handler.confirm_totp, name="mfa_totp_confirm")
     router.add_delete(f"{MFA_PREFIX}/totp", handler.disenroll_totp, name="mfa_totp_disenroll")
     router.add_post(f"{MFA_PREFIX}/backup-codes", handler.backup_codes, name="mfa_backup_codes")
+    # Session-only, read-only; NOT in AUTH_EXCLUDE_LIST_KEY.
+    router.add_get(f"{MFA_PREFIX}/status", handler.status, name="mfa_status", allow_head=False)
     # Registered AFTER the literal /totp DELETE; NOT in AUTH_EXCLUDE_LIST_KEY.
     router.add_delete(rf"{MFA_PREFIX}/{{user_id:\d+}}", handler.admin_disenroll, name="mfa_admin_disenroll")
+    require_policy(app, MFA_ADMIN_POLICY, f"DELETE {MFA_PREFIX}/{{user_id}}")
 
 
 class MfaHandler:
@@ -444,6 +450,51 @@ class MfaHandler:
         except MfaStorageError:
             return _error("mfa_unavailable", 503)
 
+    @_with_mfa_services
+    async def status(self, request: web.Request, services: Optional[MfaServices]) -> web.Response:
+        """GET /auth/mfa/status — read-only second-factor summary of the session's own user.
+
+        Lets a client render a "Security" page without guessing from refusals: whether a
+        TOTP is confirmed, how many passkeys and unused backup codes exist, how many
+        trusted devices are live, and the effective tenant policy. Changes nothing, takes
+        no lock, consumes no limiter budget, and never returns a seed, code, token,
+        organization id or context digest.
+
+        Returns:
+            ``200`` with the summary; ``401`` without a session; ``503 mfa_unavailable``
+            when MFA storage cannot be read.
+        """
+        services, _, record = await self._session_user(request, services)
+        uid = int(record["user_id"] if isinstance(record, dict) else getattr(record, "user_id"))
+        try:
+            # Built from the read primitives, NOT services.evaluate(): evaluate() runs the
+            # login state machine, which refuses an enforced superuser without a strong
+            # factor -- exactly the user who most needs this page to enrol one.
+            async with await services.db_pool.acquire() as conn:
+                policy = await services.resolver.effective(record, conn=conn)
+                facts = await services.state.factor_facts(record, conn=conn)
+                passkeys = await services.state.passkey_count(uid, conn=conn)
+                backup_remaining = await services.backup_codes.remaining(uid, conn=conn)
+            trusted = await services.trusted_devices.list_active(uid)
+            required = await services.state.requires_strong_factor(record, policy)
+        except MfaStorageError:
+            return _error("mfa_unavailable", 503)
+        return JSONResponse(
+            {
+                "totp": facts.totp_confirmed,
+                "passkeys": passkeys,
+                "has_strong_factor": facts.has_strong_factor,
+                "backup_codes_remaining": backup_remaining,
+                "trusted_devices": len(trusted),
+                "policy": {"mode": policy.mode.value, "remember_days": policy.remember_days},
+                "strong_factor_required": required,
+                # True when a password login is refused until a TOTP or passkey is registered.
+                "login_blocked": required and not facts.has_strong_factor,
+            },
+            status=200,
+            headers=NO_STORE,
+        )
+
     async def _audit_denied(self, services: Any, actor_id: int, target_id: int, reason: str) -> None:
         """Durable record of a refused admin disenrolment. Best effort: never changes the response."""
         try:
@@ -478,7 +529,7 @@ class MfaHandler:
             await self._audit_denied(services, actor_id, target_id, "self_target")
             return _error("self_disenroll_forbidden", 403)
         allowed, reason, _ = await policy_allows(
-            "mfa_admin_access", request, action="mfa:disenroll", resource=request.path
+            MFA_ADMIN_POLICY, request, action="mfa:disenroll", resource=request.path
         )
         if not allowed:
             await self._audit_denied(services, actor_id, target_id, f"abac: {reason}")
