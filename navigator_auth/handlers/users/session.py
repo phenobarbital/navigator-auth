@@ -186,7 +186,7 @@ class UserSession(BaseHandler):
         ### TODO: check if user is superuser:
         userinfo = session[AUTH_SESSION_OBJECT]
         if userinfo["superuser"] is False:
-            return self.error(reason="Access Denied, Session Missing", status=406)
+            return self.error(reason="Forbidden: only a superuser can reset a password.", status=403)
         db = request.app["authdb"]
         try:
             # Phase 1: existence check only, on a connection released before the lock.
@@ -227,6 +227,10 @@ class UserSession(BaseHandler):
                 "status": "OK",
             }
             return self.json_response(response=response, headers=headers, status=202)
+        except web.HTTPException:
+            # self.error() raises: let the 404 above reach the client instead
+            # of being re-reported as a 500 by the generic handler below.
+            raise
         except TransitionAborted as aborted:
             return self.json_response(response={"error": aborted.reason}, status=409)
         except MfaStorageError:

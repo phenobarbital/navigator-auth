@@ -774,5 +774,6 @@ class TestPasswordPathsUnchanged:
             pytest.raises(web.HTTPException) as caught,
         ):
             await handler.password_reset(request)
-        assert caught.value.status == 406
+        # A permission refusal: 403, not 406 "Session Missing" (the session is present).
+        assert caught.value.status == 403
         update.assert_not_awaited()
