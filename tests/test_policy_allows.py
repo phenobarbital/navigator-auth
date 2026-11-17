@@ -139,7 +139,7 @@ async def test_policy_allows_rejects_empty_policy_list():
 # ---------------------------------------------------------------------------
 # Real PDP: ``PDP.policies`` is a method. A property-shaped stub once hid a
 # TypeError ("'method' object is not iterable") in the linear-scan fallback of
-# ``_find_policy`` — a 500 instead of a fail-closed deny whenever the named
+# the decorators' policy lookup — a 500 instead of a fail-closed deny whenever the named
 # policy was not in the evaluator index (0.26.0 – 0.29.2).
 # ---------------------------------------------------------------------------
 

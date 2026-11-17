@@ -1047,18 +1047,163 @@ def _pdp_policies(pdp: Any) -> list:
     return list(policies or [])
 
 
-def _find_policy(pdp: Any, name: str) -> Any:
-    """Find a Policy by name on the PDP (indexed lookup, then linear scan)."""
+#: Suffix of the DENY policy ``PolicyAdapter`` derives from ``!`` resources.
+_NEGATED_SUFFIX = "_negated"
+
+
+def _find_policies(pdp: Any, name: str) -> tuple:
+    """Find every policy that decides the ABAC name ``name``.
+
+    A name can resolve to several policies: the same name loaded from more
+    than one source (DB and YAML), and the ``<name>_negated`` DENY that
+    ``PolicyAdapter`` derives from the policy's ``!`` resources. All of them
+    must be evaluated, or a DENY is silently skipped.
+
+    The evaluator index is used when it lists every policy per name
+    (``get_all_by_name``) and holds ``name``; otherwise ``pdp.policies`` is
+    scanned. A last-wins ``get_by_name`` is never used: it hides DENYs.
+
+    Args:
+        pdp: The ABAC PDP (or a PDP-like object).
+        name: The policy name the handler asked for.
+
+    Returns:
+        ``(named, negated)``: the policies called exactly ``name``, and the
+        DENY-effect policies called ``<name>_negated``. ``named`` is empty
+        when the name is not declared.
+    """
+    negated_name = f"{name}{_NEGATED_SUFFIX}"
     evaluator = getattr(pdp, "_evaluator", None)
     index = getattr(evaluator, "_index", None) if evaluator is not None else None
-    if index is not None:
-        found = index.get_by_name(name)
-        if found is not None:
-            return found
-    for policy in _pdp_policies(pdp):
-        if getattr(policy, "name", None) == name:
-            return policy
-    return None
+    get_all = getattr(index, "get_all_by_name", None) if index is not None else None
+    if get_all is not None:
+        named = list(get_all(name))
+        if named:
+            return named, [policy for policy in get_all(negated_name) if _is_deny_policy(policy)]
+    scanned = _pdp_policies(pdp)
+    named = [policy for policy in scanned if getattr(policy, "name", None) == name]
+    negated = [
+        policy
+        for policy in scanned
+        if getattr(policy, "name", None) == negated_name and _is_deny_policy(policy)
+    ]
+    return named, negated
+
+
+def _is_deny_policy(policy: Any) -> bool:
+    """Tell whether a policy's own effect is DENY (enum or string)."""
+    from navigator_auth.abac.policies import PolicyEffect
+
+    effect = getattr(policy, "effect", None)
+    if isinstance(effect, PolicyEffect):
+        return effect == PolicyEffect.DENY
+    return isinstance(effect, str) and effect.strip().lower() == "deny"
+
+
+def _decider(policy: Any) -> Any:
+    """Return ``policy.decide`` when it reflects how the policy evaluates.
+
+    ``ResourcePolicy.decide`` reports whether the policy applied. A subclass
+    that overrides ``evaluate`` or ``is_allowed`` is evaluated through those
+    instead (``decide`` would bypass the override), like any legacy policy.
+
+    Args:
+        policy: A policy of any kind.
+
+    Returns:
+        The bound ``decide`` method, or ``None``.
+    """
+    from navigator_auth.abac.policies.resource_policy import ResourcePolicy
+
+    if not isinstance(policy, ResourcePolicy):
+        return None
+    cls = type(policy)
+    if cls.evaluate is not ResourcePolicy.evaluate or cls.is_allowed is not ResourcePolicy.is_allowed:
+        return None
+    return policy.decide
+
+
+def _decide_policies(
+    named: list,
+    negated: list,
+    ctx: Any,
+    env: Any,
+    action: str,
+    resource: str,
+    resource_type: Any,
+    request_path: Optional[str] = None,
+) -> tuple:
+    """Combine the policies of one ABAC name: an applicable DENY wins.
+
+    Access is granted when at least one policy called ``name`` allows the
+    request and no DENY of the group applies to it:
+
+    * a plain ``ResourcePolicy`` answers DENY both when it denies and when it
+      does not apply, so it is evaluated with :meth:`ResourcePolicy.decide`,
+      which tells the two apart; only a DENY policy that applies vetoes;
+    * any other policy (legacy ``Policy``/``ObjectPolicy``, or a
+      ``ResourcePolicy`` subclass overriding ``evaluate``/``is_allowed``)
+      decides through its response, as before; a DENY-effect one that answers
+      DENY vetoes, since "denied" and "not applicable" cannot be told apart
+      (fail closed);
+    * a ``<name>_negated`` policy only ever vetoes, never grants. It is checked
+      against ``resource`` or, when the caller gave none, against the request
+      path as a URI, so ``!`` exclusions hold for name-only checks too.
+
+    With a single policy and no negated companion this is the same decision as
+    evaluating that policy alone.
+
+    Args:
+        named: The policies called exactly ``name`` (never empty).
+        negated: The DENY-effect ``<name>_negated`` policies.
+        ctx: The ``EvalContext`` of the request.
+        env: The ``Environment``.
+        action: Optional action the policies must cover.
+        resource: Optional resource name the policies must cover.
+        resource_type: The ``ResourceType`` of ``resource``.
+        request_path: The request path, used for ``negated`` when ``resource``
+            is not given.
+
+    Returns:
+        ``(allowed, response)`` — the DENY that applied, the first ALLOW, or
+        the last response when nothing allowed.
+
+    Raises:
+        Exception: Whatever a policy raised; the caller fails closed.
+    """
+    allow_response = None
+    last_response = None
+    for policy in named:
+        decide = _decider(policy)
+        if decide is not None:
+            applies, response = decide(ctx, env, resource_type, resource, action)
+            vetoes = applies and _is_deny_policy(policy)
+        else:
+            response = _evaluate_policy(policy, ctx, env, action, resource, resource_type)
+            vetoes = _is_deny_policy(policy) and not _policy_allows(getattr(response, "effect", response))
+        last_response = response
+        if vetoes:
+            return False, response
+        if allow_response is None and _policy_allows(getattr(response, "effect", response)):
+            allow_response = response
+    if allow_response is None:
+        return False, last_response
+    if negated:
+        from navigator_auth.abac.policies.resources import ResourceType
+
+        excluded, excluded_type = (resource, resource_type) if resource else (request_path, ResourceType.URI)
+        for policy in negated:
+            decide = _decider(policy)
+            if decide is not None:
+                applies, response = decide(ctx, env, excluded_type, excluded, action)
+                if applies:
+                    return False, response
+                continue
+            # Applicability unknown: a DENY that cannot be evaluated counts.
+            response = _evaluate_policy(policy, ctx, env, action, excluded, excluded_type)
+            if not _policy_allows(getattr(response, "effect", response)):
+                return False, response
+    return True, allow_response
 
 
 def _coerce_resource_type(value: Any) -> Any:
@@ -1178,21 +1323,27 @@ async def _check_policies(
 
         rtype = ResourceType.URI
 
-    ctx = await _abac_eval_context(request)
-    env = Environment()
+    try:
+        ctx = await _abac_eval_context(request)
+        env = Environment()
+    except Exception as exc:  # noqa: BLE001 - never leak a 500 from a check
+        logger.error(
+            "check_access: could not build the ABAC context for %s: %s", request.path, exc, exc_info=True
+        )
+        return False, "Could not build the ABAC evaluation context.", None
     reasons = []
     last_response = None
 
     for name in names:
         try:
-            policy = _find_policy(pdp, name)
+            named, negated = _find_policies(pdp, name)
         except Exception as exc:  # noqa: BLE001 - never leak a 500 from a check
             logger.error("check_access: Policy '%s' lookup failed: %s", name, exc, exc_info=True)
             reasons.append(f"Policy '{name}' could not be looked up.")
             if require_all:
                 return False, "; ".join(reasons), None
             continue
-        if policy is None:
+        if not named:
             # Fail closed: a policy that is not declared can never grant access.
             logger.error("check_access: Policy '%s' is not declared on ABAC.", name)
             reasons.append(f"Policy '{name}' is not declared on ABAC.")
@@ -1200,7 +1351,10 @@ async def _check_policies(
                 return False, "; ".join(reasons), None
             continue
         try:
-            response = _evaluate_policy(policy, ctx, env, action, resource, rtype)
+            allowed, response = _decide_policies(
+                named, negated, ctx, env, action, resource, rtype, request_path=request.path
+            )
+            reason = str(getattr(response, "response", None) or f"Policy '{name}'")
         except Exception as exc:  # noqa: BLE001 - never leak a 500 from a check
             logger.error("check_access: Policy '%s' failed to evaluate: %s", name, exc, exc_info=True)
             reasons.append(f"Policy '{name}' failed to evaluate.")
@@ -1208,9 +1362,8 @@ async def _check_policies(
                 return False, "; ".join(reasons), None
             continue
         last_response = response
-        reason = getattr(response, "response", None) or f"Policy '{name}'"
         reasons.append(reason)
-        if _policy_allows(getattr(response, "effect", response)):
+        if allowed:
             if not require_all:
                 return True, reason, response
         elif require_all:

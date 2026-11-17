@@ -91,10 +91,25 @@ pdp = PDP(storage=storage, yaml_storage=YAMLStorage(directory=POLICY_STORAGE_DIR
   the PDP already holds policies loaded elsewhere (e.g. through
   `PolicyLoader`), `PDP.on_startup` reads neither the DB nor the YAML storage;
   load the packs through that same path instead.
-- **Policy names must be unique across sources.** The decorators look a policy
-  up by name and get only the last one loaded with that name (YAML loads after
-  the DB). A YAML `allow` sharing its name with a DB `deny` replaces the deny in
-  `policy_allows` / `check_access`.
+- **A name is a group of policies.** `policy_allows(name)` / `check_access(name)`
+  evaluate every policy called exactly `name`, from any source (DB, YAML,
+  registered). Access is granted when one of them allows the request and no
+  DENY of the group applies to it — an applicable DENY wins:
+  - a DENY `ResourcePolicy` vetoes only when it applies (resource, action,
+    subject and conditions all match); one that does not apply is ignored;
+  - `name_negated`, the DENY that `PolicyAdapter` derives from `!` resources,
+    vetoes when the resource is excluded — the `resource=` given to the check
+    or, without one, the request path. It never grants;
+  - legacy policies (`Policy`, `ObjectPolicy`, ...) and `ResourcePolicy`
+    subclasses that override `evaluate` / `is_allowed` decide through their
+    response, as before; in a group, a DENY-effect one that answers DENY
+    vetoes, since "not applicable" cannot be told apart (fail closed).
+
+  With a single policy the decision is unchanged. Before 0.29.3 only the last
+  policy loaded with the name was evaluated, so a YAML `allow` could replace a
+  same-name DB `deny`, and `!` exclusions were ignored by these checks.
+- **Keep names unique anyway.** The PDP logs a WARNING when the same name is
+  loaded more than once (`Policy name '…' is loaded more than once`).
 - **Missing policies are reported at startup.** `setup_handlers()` declares the
   policy each admin route evaluates
   (`navigator_auth.abac.required_policies.require_policy`), and

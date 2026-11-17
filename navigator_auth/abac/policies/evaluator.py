@@ -91,12 +91,16 @@ class PolicyIndex:
     def __init__(self):
         self._by_type: Dict[ResourceType, List[ResourcePolicy]] = defaultdict(list)
         self._by_name: Dict[str, ResourcePolicy] = {}
+        # Every policy per name, in load order: the same name can come from
+        # more than one source (DB and YAML), and _by_name keeps only the last.
+        self._all_by_name: Dict[str, List[ResourcePolicy]] = defaultdict(list)
         self._enforcing: List[ResourcePolicy] = []
         self._all_policies: List[ResourcePolicy] = []
 
     def add(self, policy: ResourcePolicy) -> None:
         """Add policy to index (call finalize() after batch loading)."""
         self._by_name[policy.name] = policy
+        self._all_by_name[policy.name].append(policy)
         self._all_policies.append(policy)
 
         # Index by resource type
@@ -123,8 +127,23 @@ class PolicyIndex:
         return self._enforcing
 
     def get_by_name(self, name: str) -> Optional[ResourcePolicy]:
-        """Get policy by name."""
+        """Get the last policy added with this name.
+
+        Several policies can share a name (one per source); use
+        :meth:`get_all_by_name` for an authorization decision.
+        """
         return self._by_name.get(name)
+
+    def get_all_by_name(self, name: str) -> List[ResourcePolicy]:
+        """Get every policy added with this name, in load order.
+
+        Args:
+            name: The policy name.
+
+        Returns:
+            A new list; empty when no policy has that name.
+        """
+        return list(self._all_by_name.get(name, ()))
 
     def all(self) -> List[ResourcePolicy]:
         """Get all policies sorted by priority."""
@@ -142,6 +161,7 @@ class PolicyIndex:
         clone = PolicyIndex()
         clone._by_type = defaultdict(list, {rtype: list(items) for rtype, items in self._by_type.items()})
         clone._by_name = dict(self._by_name)
+        clone._all_by_name = defaultdict(list, {name: list(items) for name, items in self._all_by_name.items()})
         clone._enforcing = list(self._enforcing)
         clone._all_policies = list(self._all_policies)
         return clone

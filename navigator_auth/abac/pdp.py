@@ -197,9 +197,9 @@ class PDP:
     def _warn_registered_name_collisions(self, policies: list[ResourcePolicy], source: str) -> None:
         """Log a WARNING for each policy whose name is also a registered policy's name.
 
-        Both policies stay loaded and enforced (a DENY still wins); only lookups
-        by name, such as ``PolicyIndex.get_by_name`` used by the decorators,
-        return one of them.
+        Both policies stay loaded and enforced. By-name checks
+        (``check_access`` / ``policy_allows``) evaluate every policy with the
+        name and an applicable DENY wins.
 
         Args:
             policies: Policies about to be loaded from storage.
@@ -208,8 +208,38 @@ class PDP:
         registered_names = {policy.name for policy in self._registered}
         for name in sorted({policy.name for policy in policies} & registered_names):
             self.logger.warning(
-                "Policy name '%s' from %s is also a registered policy; both are enforced, "
-                "but lookups by name return only one of them. Rename one.",
+                "Policy name '%s' from %s is also a registered policy; both are enforced "
+                "and by-name checks combine them (an applicable DENY wins). Rename one.",
+                name,
+                source,
+            )
+
+    def _warn_duplicate_names(self, policies: list[ResourcePolicy], source: str, loaded: Iterable[str] = ()) -> None:
+        """Log a WARNING for each storage policy name that is not unique.
+
+        A name is reported when it appears more than once in ``policies`` or is
+        already in ``loaded``. Registered policies are left to
+        :meth:`_warn_registered_name_collisions`. All copies stay loaded; by-name
+        checks combine them and an applicable DENY wins.
+
+        Args:
+            policies: Policies about to be loaded.
+            source: Where they come from, for the log message.
+            loaded: Names of the storage policies already loaded.
+        """
+        registered = {policy.name for policy in self._registered}
+        seen: set[str] = set()
+        duplicated: set[str] = set()
+        for policy in policies:
+            if policy.name in seen:
+                duplicated.add(policy.name)
+            seen.add(policy.name)
+        duplicated |= seen & set(loaded)
+        for name in sorted(duplicated - registered):
+            self.logger.warning(
+                "Policy name '%s' is loaded more than once (%s); every copy is enforced and "
+                "by-name checks (check_access / policy_allows) combine them, an applicable "
+                "DENY wins. Rename one.",
                 name,
                 source,
             )
@@ -267,6 +297,9 @@ class PDP:
         for w in warnings:
             self.logger.warning("Policy adaptation warning: %s", w)
         self._warn_registered_name_collisions(resource_policies, source)
+        self._warn_duplicate_names(
+            resource_policies, source, loaded=(policy.name for policy in self._evaluator._index.all())
+        )
 
         # Load into evaluator (all or nothing).
         self._evaluator.load_policies(resource_policies)
@@ -462,6 +495,7 @@ class PDP:
 
         # Registered policies survive a reload (storage alone does not hold them).
         self._warn_registered_name_collisions(resource_policies, "storage reload")
+        self._warn_duplicate_names(resource_policies, "storage reload")
         resource_policies.extend(self._registered)
 
         # Build new index

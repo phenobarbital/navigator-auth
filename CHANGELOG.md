@@ -10,6 +10,22 @@
   test stubs modelled `policies` as a property, which hid the bug; they now
   match the real PDP.
 
+- **Fix — by-name ABAC checks skipped DENY policies.** `check_access(name)` /
+  `policy_allows(name)` evaluated a single policy: the last one loaded with
+  that name (`PolicyIndex` kept one per name). A YAML `allow` therefore
+  replaced a same-name DB `deny`, and the `<name>_negated` DENY that
+  `PolicyAdapter` builds from `!` resources was never consulted, so those
+  exclusions were not enforced by these checks. Now every policy with the
+  name is evaluated and an applicable DENY wins; `<name>_negated` vetoes
+  excluded resources (the `resource=` of the check, else the request path)
+  and never grants (`PolicyIndex.get_all_by_name`, `ResourcePolicy.decide` /
+  `applies_to`). Single-policy decisions are unchanged, `ResourcePolicy`
+  subclass overrides included. The PDP also warns when a name is loaded more
+  than once, and a failure building the evaluation context or reading a
+  policy response now denies instead of answering 500.
+  **Behaviour change:** `@check_access(name)` / `policy_allows(name)` without
+  `resource=` now deny on paths that the policy excludes with `!`.
+
 - **Startup warning for missing admin policies.** Handlers declare the ABAC
   policies they evaluate (`navigator_auth.abac.required_policies`), and
   `PDP.on_startup` logs a WARNING for each one that is not loaded, naming the
