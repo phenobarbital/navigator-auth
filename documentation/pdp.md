@@ -33,9 +33,8 @@ pdp.add_policy(policy)
 unchanged.)*
 
 `navigator_auth/abac/default_policies/auth_model_admin_access.yaml` ships three
-policies that govern the **admin path** of the generic model CRUD surfaces. It
-is a pack an operator copies into `POLICY_STORAGE_DIR`; nothing loads it
-automatically.
+policies that govern the **admin path** of the generic model CRUD surfaces.
+Nothing loads it automatically; see "Loading the admin policy packs" below.
 
 | Policy | Resource | Actions | Subjects |
 |---|---|---|---|
@@ -62,6 +61,67 @@ policy file cannot widen a handler.
 `policy_allows(policy, request, action=None, resource=None, resource_type=None,
 require_all=False) -> (allowed, reason, response)` is public and usable by any
 handler whose decision depends on request-time data (such as a row's owner).
+
+
+## Loading the admin policy packs
+
+The built-in admin handlers depend on three packs from
+`navigator_auth/abac/default_policies/`. None of them is loaded automatically:
+load the ones you need through the PDP's storage — the policy table of the DB
+storage, or YAML files read by a `YAMLStorage` the application passes in:
+
+```python
+from navigator_auth.conf import POLICY_STORAGE_DIR
+from navigator_auth.abac.storages.yaml_storage import YAMLStorage
+
+pdp = PDP(storage=storage, yaml_storage=YAMLStorage(directory=POLICY_STORAGE_DIR))
+```
+
+| Pack | Policies | Routes |
+|---|---|---|
+| `auth_crud_admin_access.yaml` | `users_admin_access`, `groups_admin_access`, `user_groups_admin_access`, `group_permissions_admin_access`, `permissions_admin_access`, `users_grant_role` | `/api/v1/users`, `/api/v1/users/{id}/role`, `/api/v1/groups`, `/api/v1/user_groups`, `/api/v1/usergroups`, `/api/v1/group_permissions`, `/api/v1/permissions` |
+| `auth_model_admin_access.yaml` | `user_identities_admin_access`, `user_accounts_admin_access`, `partner_keys_admin_access` | `/api/v1/user_identity`, `/api/v1/user_accounts`, `/api/v1/partner/tokens` |
+| `mfa_admin_access.yaml` | `mfa_admin_access` | `DELETE /auth/mfa/{user_id}` (only with `AUTH_BASIC_2FA_ENABLED`) |
+
+- **`POLICY_STORAGE_DIR` is only a setting.** It names a directory (default
+  `BASE_DIR/env/policies`); nothing reads it unless the application passes a
+  `YAMLStorage` over it, as above. Copying a pack there is not enough on its
+  own.
+- **A pre-loaded evaluator skips storage.** When the `PolicyEvaluator` given to
+  the PDP already holds policies loaded elsewhere (e.g. through
+  `PolicyLoader`), `PDP.on_startup` reads neither the DB nor the YAML storage;
+  load the packs through that same path instead.
+- **A name is a group of policies.** `policy_allows(name)` / `check_access(name)`
+  evaluate every policy called exactly `name`, from any source (DB, YAML,
+  registered). Access is granted when one of them allows the request and no
+  DENY of the group applies to it — an applicable DENY wins:
+  - a DENY `ResourcePolicy` vetoes only when it applies (resource, action,
+    subject and conditions all match); one that does not apply is ignored;
+  - `name_negated`, the DENY that `PolicyAdapter` derives from `!` resources,
+    vetoes when the resource is excluded — the `resource=` given to the check
+    or, without one, the request path. It never grants;
+  - legacy policies (`Policy`, `ObjectPolicy`, ...) and `ResourcePolicy`
+    subclasses that override `evaluate` / `is_allowed` decide through their
+    response, as before; in a group, a DENY-effect one that answers DENY
+    vetoes, since "not applicable" cannot be told apart (fail closed).
+
+  With a single policy the decision is unchanged. Before 0.29.3 only the last
+  policy loaded with the name was evaluated, so a YAML `allow` could replace a
+  same-name DB `deny`, and `!` exclusions were ignored by these checks.
+- **Keep names unique anyway.** The PDP logs a WARNING when the same name is
+  loaded more than once (`Policy name '…' is loaded more than once`).
+- **Missing policies are reported at startup.** `setup_handlers()` declares the
+  policy each admin route evaluates
+  (`navigator_auth.abac.required_policies.require_policy`), and
+  `PDP.on_startup` logs one WARNING per declared policy that is not loaded,
+  naming the routes that need it.
+- **A missing policy denies, it never errors.** Those requests answer 403 (or
+  404 where a row probe must not be confirmed). From 0.26.0 to 0.29.2 a
+  missing policy answered 500 instead (`'method' object is not iterable` in
+  the decorators' policy lookup).
+- `users_grant_role` is held by `security_admin`, not `superuser`: with the
+  pack loaded a plain superuser is still refused role changes and changes to
+  protected groups, by design.
 
 
 ## Unauthenticated requests and system paths

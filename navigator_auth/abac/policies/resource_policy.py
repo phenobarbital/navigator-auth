@@ -1,4 +1,4 @@
-from typing import List, Union, Dict, Set
+from typing import List, Optional, Union, Dict, Set, Tuple
 from navigator_auth.abac.policies.abstract import AbstractPolicy, PolicyEffect, PolicyResponse
 from navigator_auth.abac.context import EvalContext
 from navigator_auth.abac.policies.environment import Environment
@@ -150,15 +150,48 @@ class ResourcePolicy(AbstractPolicy):
 
         return True
 
-    def evaluate(self, ctx: EvalContext, environ: Environment) -> PolicyResponse:
-        """
-        Evaluate policy against context and environment.
+    def _out_of_scope(
+        self,
+        resource_type: ResourceType = None,
+        resource_name: str = None,
+        action: str = None,
+    ) -> Optional[PolicyResponse]:
+        """Return the DENY for a resource or action this policy does not cover.
 
-        Returns PolicyResponse with effect if all conditions match.
+        Args:
+            resource_type: Type of the resource, checked with ``resource_name``.
+            resource_name: Name of the resource.
+            action: Action being requested.
+
+        Returns:
+            The "not covered" response, or ``None`` when both are covered.
+        """
+        if resource_type and resource_name and not self.covers_resource(resource_type, resource_name):
+            return PolicyResponse(
+                effect=PolicyEffect.DENY,
+                response=f"Resource not covered by {self.name}",
+                rule=self.name,
+                actions=[]
+            )
+        if action and not self.covers_action(action):
+            return PolicyResponse(
+                effect=PolicyEffect.DENY,
+                response=f"Action not covered by {self.name}",
+                rule=self.name,
+                actions=[]
+            )
+        return None
+
+    def _match(self, ctx: EvalContext, environ: Environment) -> Tuple[bool, PolicyResponse]:
+        """Check subject and conditions.
+
+        Returns:
+            ``(applies, response)``; ``response`` carries ``self.effect`` when
+            ``applies`` is True, a "not matched" DENY otherwise.
         """
         # Check subject
         if not self.matches_subject(ctx):
-            return PolicyResponse(
+            return False, PolicyResponse(
                 effect=PolicyEffect.DENY,
                 response=f"Subject not matched by {self.name}",
                 rule=self.name,
@@ -167,7 +200,7 @@ class ResourcePolicy(AbstractPolicy):
 
         # Check conditions
         if not self.evaluate_conditions(ctx, environ):
-            return PolicyResponse(
+            return False, PolicyResponse(
                 effect=PolicyEffect.DENY,
                 response=f"Conditions not met for {self.name}",
                 rule=self.name,
@@ -175,12 +208,74 @@ class ResourcePolicy(AbstractPolicy):
             )
 
         # All checks passed
-        return PolicyResponse(
+        return True, PolicyResponse(
             effect=self.effect,
             response=f"Access {self.effect.name} by {self.name}",
             rule=self.name,
             actions=list(self._actions)
         )
+
+    def decide(
+        self,
+        ctx: EvalContext,
+        env: Environment,
+        resource_type: ResourceType = None,
+        resource_name: str = None,
+        action: str = None,
+    ) -> Tuple[bool, PolicyResponse]:
+        """Evaluate the policy once and tell whether it applied.
+
+        Same checks as :meth:`is_allowed`. A policy that does not apply answers
+        DENY, the effect a DENY policy answers when it applies; the flag tells
+        the two apart. A subclass that overrides :meth:`evaluate` or
+        :meth:`is_allowed` is not reflected here.
+
+        Args:
+            ctx: Evaluation context with user info.
+            env: Environment (time, etc.).
+            resource_type: Type of the resource, checked with ``resource_name``.
+            resource_name: Name of the resource.
+            action: Action being requested.
+
+        Returns:
+            ``(applies, response)``: ``applies`` is True when resource, action,
+            subject and conditions all match, and ``response`` then carries
+            ``self.effect``; otherwise it is a "not covered / not matched" DENY.
+        """
+        refused = self._out_of_scope(resource_type, resource_name, action)
+        if refused is not None:
+            return False, refused
+        return self._match(ctx, env)
+
+    def evaluate(self, ctx: EvalContext, environ: Environment) -> PolicyResponse:
+        """
+        Evaluate policy against context and environment.
+
+        Returns PolicyResponse with effect if all conditions match.
+        """
+        return self._match(ctx, environ)[1]
+
+    def applies_to(
+        self,
+        ctx: EvalContext,
+        env: Environment,
+        resource_type: ResourceType = None,
+        resource_name: str = None,
+        action: str = None,
+    ) -> bool:
+        """Tell whether this policy decides the request with its own effect.
+
+        Args:
+            ctx: Evaluation context with user info.
+            env: Environment (time, etc.).
+            resource_type: Type of the resource, checked with ``resource_name``.
+            resource_name: Name of the resource.
+            action: Action being requested.
+
+        Returns:
+            True when resource, action, subject and conditions all match.
+        """
+        return self.decide(ctx, env, resource_type, resource_name, action)[0]
 
     def is_allowed(
         self,
@@ -204,24 +299,8 @@ class ResourcePolicy(AbstractPolicy):
         Returns:
             PolicyResponse with effect and details
         """
-        # Check if policy covers this resource
-        if resource_type and resource_name:
-            if not self.covers_resource(resource_type, resource_name):
-                return PolicyResponse(
-                    effect=PolicyEffect.DENY,
-                    response=f"Resource not covered by {self.name}",
-                    rule=self.name,
-                    actions=[]
-                )
-
-        # Check if policy covers this action
-        if action and not self.covers_action(action):
-            return PolicyResponse(
-                effect=PolicyEffect.DENY,
-                response=f"Action not covered by {self.name}",
-                rule=self.name,
-                actions=[]
-            )
-
-        # Evaluate full policy
+        refused = self._out_of_scope(resource_type, resource_name, action)
+        if refused is not None:
+            return refused
+        # Evaluate full policy (a subclass may override evaluate)
         return self.evaluate(ctx, env)
